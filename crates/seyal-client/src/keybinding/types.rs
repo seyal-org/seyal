@@ -168,8 +168,8 @@ impl BindingContext {
 }
 
 /// Closed WorkspaceCommandId catalog currently admitted at load (SPEC-024 §5).
-/// Gated ids (`window.*`) stay out until their typed actions land (R5.0.1).
-/// K7 pane verbs (including equalize) and `goto.open` are admitted.
+/// K7 pane verbs (including equalize), `goto.open`, focus-history Back/Forward,
+/// and W4b window / hierarchical-close ids are admitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkspaceCommandId {
     CommandPaletteOpen,
@@ -212,6 +212,12 @@ pub enum WorkspaceCommandId {
     FocusHistoryBack,
     FocusHistoryForward,
     AppQuit,
+    AppCloseFocused,
+    WindowNew,
+    WindowClose,
+    WindowCycleNext,
+    WindowCyclePrevious,
+    WindowSelectOrdinal,
 }
 
 impl WorkspaceCommandId {
@@ -254,6 +260,12 @@ impl WorkspaceCommandId {
             Self::FocusHistoryBack => "focus_history.back",
             Self::FocusHistoryForward => "focus_history.forward",
             Self::AppQuit => "app.quit",
+            Self::AppCloseFocused => "app.close_focused",
+            Self::WindowNew => "window.new",
+            Self::WindowClose => "window.close",
+            Self::WindowCycleNext => "window.cycle_next",
+            Self::WindowCyclePrevious => "window.cycle_previous",
+            Self::WindowSelectOrdinal => "window.select_ordinal",
         }
     }
 
@@ -296,6 +308,12 @@ impl WorkspaceCommandId {
             "focus_history.back" => Self::FocusHistoryBack,
             "focus_history.forward" => Self::FocusHistoryForward,
             "app.quit" => Self::AppQuit,
+            "app.close_focused" => Self::AppCloseFocused,
+            "window.new" => Self::WindowNew,
+            "window.close" => Self::WindowClose,
+            "window.cycle_next" => Self::WindowCycleNext,
+            "window.cycle_previous" => Self::WindowCyclePrevious,
+            "window.select_ordinal" => Self::WindowSelectOrdinal,
             _ => return None,
         })
     }

@@ -1,4 +1,4 @@
-//! ADR-018 §2.2 / §6 window and tab actions (W2a: no close).
+//! ADR-018 §2.2 / §6 window and tab actions (W2a create/move/select).
 
 use seyal_core::{TabId, WindowId, WorkspaceId};
 
@@ -84,7 +84,7 @@ impl ShellState {
         None
     }
 
-    fn window_of_pane(&self, pane: seyal_core::PaneId) -> Option<WindowId> {
+    pub(super) fn window_of_pane(&self, pane: seyal_core::PaneId) -> Option<WindowId> {
         for workspace in &self.workspaces {
             for window in &workspace.windows {
                 if window.tabs.iter().any(|tab| tab.panes.contains_key(&pane)) {
@@ -160,6 +160,20 @@ impl ShellState {
 
     pub(super) fn select_window(&mut self, id: WindowId) -> Result<(), ShellError> {
         self.activate_window(id)
+    }
+
+    pub(super) fn native_window_became_key(&mut self, id: WindowId) -> Result<(), ShellError> {
+        let workspace_id = self
+            .find_window(id)
+            .map(|workspace| workspace.id)
+            .ok_or(ShellError::UnknownWindow)?;
+        let workspace = self.workspace_mut(workspace_id)?;
+        if workspace.window(id).is_none() {
+            return Err(ShellError::UnknownWindow);
+        }
+        workspace.active_window = Some(id);
+        self.last_active_workspace = workspace_id;
+        self.record_window_focus(id)
     }
 
     pub(super) fn select_tab_identity(&mut self, id: TabId) -> Result<(), ShellError> {
@@ -373,6 +387,7 @@ impl ShellState {
                 containment_generation,
             } => self.move_tab_to_new_window(tab, containment_generation),
             ShellAction::SelectWindow { id, .. } => self.select_window(id),
+            ShellAction::NativeWindowBecameKey { id, .. } => self.native_window_became_key(id),
             ShellAction::ObserveWindowBecameKey { id } => self.observe_window_became_key(id),
             ShellAction::SelectTab { id, .. } => self.select_tab_identity(id),
             ShellAction::CycleWindow { direction, .. } => self.cycle_window(direction),

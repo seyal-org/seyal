@@ -50,22 +50,26 @@ enum SeyalAppActionKind {
      * begins one C1 provisioning intent per new terminal leaf. CLOSE_TAB /
      * CLOSE_PANE detach presentation only (ADR-017 §6.1). SPLIT_FOCUSED
      * stays fail-closed until C3. CLOSE_TAB/CLOSE_PANE:
-     * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
+     * target_execution_lo/hi = TabId/PaneId; close actions carry the
+     * containment_generation observed in the shell snapshot in
+     * target_generation. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
      * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (ABI retained),
      * 34 = NoSplitDivider (MOVE_SPLIT_DIVIDER),
-     * 35 = ProvisioningRejected, 36 = ProvisioningCapacityExceeded.
+     * 35 = ProvisioningRejected, 36 = ProvisioningCapacityExceeded,
+     * 55 = UnknownWindow, 56 = WindowCreationUnavailable.
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
     SEYAL_APP_ACTION_SPLIT_FOCUSED = 25,
     SEYAL_APP_ACTION_CLOSE_PANE = 26,
+    /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
     /*
      * Composer history recall (#933).
      * SET_COMPOSER_HISTORY_FILTER: payload = UTF-8 query.
      * MOVE_COMPOSER_HISTORY_SELECTION: reserved = signed row delta (int32).
-     * SELECT_COMPOSER_HISTORY: target_pty_generation = composer epoch.
+     * SELECT_COMPOSER_HISTORY: target_generation = composer epoch.
      */
     SEYAL_APP_ACTION_OPEN_COMPOSER_HISTORY = 40,
     SEYAL_APP_ACTION_SET_COMPOSER_HISTORY_FILTER = 41,
@@ -150,7 +154,7 @@ enum SeyalAppActionKind {
      * reserved = SeyalAppGotoScope. Projects through seyal_app_palette with
      * SEYAL_APP_PALETTE_GOTO; SetPaletteQuery/Move/Run/Close route to goto
      * while open. Error codes 47-49.
-     */
+    */
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
     SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62,
     /**
@@ -174,7 +178,7 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 68,
     /*
      * PT5 pane-tree verbs. Hosts name identities only; Rust owns zoom/layout.
-     * Numbers follow the W4a window actions. ZOOM_PANE target is a PaneId.
+     * ZOOM_PANE target is a PaneId.
      * SWAP_PANES / MOVE_PANE_BESIDE use target_attachment_* for the second Pane.
      * MOVE_PANE_BESIDE and FOCUS_DIRECTION reserved: 0 Left, 1 Right, 2 Above/Up, 3 Below/Down.
      */
@@ -185,15 +189,17 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS_DIRECTION = 73,
     SEYAL_APP_ACTION_EQUALIZE_FOCUSED = 74,
     SEYAL_APP_ACTION_EQUALIZE_TAB = 75,
+    /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 76,
     /*
      * Block Rerun (#1010). target_execution_lo/hi = BlockId,
-     * target_pty_generation = composer epoch. Rust loads that focused-Pane
+     * target_generation = composer epoch. Rust loads that focused-Pane
      * Block's command as the composer draft only when the composer is
      * Available and the draft is empty; the host then submits through the
-     * ordinary composer path. Error 30 = UnknownBlock, 60 = BlockRunning,
-     * 61 = ComposerUnavailable, 62 = ComposerDraftOccupied.
+     * ordinary composer path. Error 30 = UnknownBlock, 63 = BlockRunning,
+     * 64 = ComposerUnavailable, 65 = ComposerDraftOccupied.
      */
-    SEYAL_APP_ACTION_RERUN_BLOCK = 76
+    SEYAL_APP_ACTION_RERUN_BLOCK = 77
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
@@ -206,6 +212,8 @@ enum SeyalAppActionKind {
 #define SEYAL_APP_WINDOW_EVENT_ENTERED_FULLSCREEN 7u
 #define SEYAL_APP_WINDOW_EVENT_EXITED_FULLSCREEN 8u
 #define SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED 9u
+/* Bit 8 of REPORT_WINDOW_EVENT reserved: Window is fully occluded. */
+#define SEYAL_APP_WINDOW_EVENT_OCCLUSION_HIDDEN 0x100u
 #define SEYAL_APP_WINDOW_EVENT_ACTIVATION_FAILED 10u
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
@@ -244,11 +252,11 @@ enum SeyalAppEligibility {
 
 /*
  * Recovery actions keep the 120-byte SeyalAppAction record.
- * BEGIN/FIRE: target_pty_generation = host clock milliseconds.
+ * BEGIN/FIRE: target_generation = host clock milliseconds.
  * COMPLETE: target_execution_lo = episode generation,
  *           reserved = outcome | (launch << 8),
  *           target_attachment_lo = opened handle,
- *           target_pty_generation = host clock milliseconds.
+ *           target_generation = host clock milliseconds.
  */
 enum SeyalAppRecoveryStage {
     SEYAL_APP_RECOVERY_DISCONNECTED = 0,
@@ -311,7 +319,8 @@ typedef struct SeyalAppAction {
     uint64_t target_execution_hi;
     uint64_t target_attachment_lo;
     uint64_t target_attachment_hi;
-    uint64_t target_pty_generation;
+    /* Kind-specific target generation (PTY, containment, composer epoch, etc.). */
+    uint64_t target_generation;
     const uint8_t *payload;
     uint32_t payload_len;
     uint32_t reserved;
@@ -393,9 +402,7 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_COPY_PALETTE_PLACEHOLDER 5u
 
 /*
- * seyal_app_block_row: title = command, detail = Rust status name for the
- * status icon ("Running", "Succeeded", "Failed", "Status unknown").
- * flags: state in the low three bits, plus
+ * seyal_app_block_row flags: state in the low three bits, plus
  * SEYAL_APP_BLOCK_SELECTED when that Block is bound to the inspector (#935).
  * Hosts must mask with SEYAL_APP_BLOCK_STATE_MASK before comparing states.
  */
@@ -406,26 +413,6 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_BLOCK_STATE_UNKNOWN 4u
 #define SEYAL_APP_BLOCK_STATE_MASK 7u
 #define SEYAL_APP_BLOCK_SELECTED 8u
-/*
- * Block quick actions (#1010), from seyal_app_block_action_row. Rust owns the
- * action set, order, labels (title), shortcut hints (detail, e.g. "cmd+c")
- * and availability; the host only draws them and routes `kind` back.
- * row.kind = SEYAL_APP_BLOCK_ACTION_*; row.flags = ENABLED bit plus placement
- * ((flags & PLACEMENT_MASK) >> PLACEMENT_SHIFT) = SEAM / COPY_MENU / MORE_MENU.
- */
-#define SEYAL_APP_BLOCK_ACTION_COPY_MENU 1u
-#define SEYAL_APP_BLOCK_ACTION_COPY_COMMAND 2u
-#define SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT 3u
-#define SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT 4u
-#define SEYAL_APP_BLOCK_ACTION_RERUN 5u
-#define SEYAL_APP_BLOCK_ACTION_MORE_MENU 6u
-#define SEYAL_APP_BLOCK_ACTION_INSPECT 7u
-#define SEYAL_APP_BLOCK_ACTION_ENABLED 1u
-#define SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT 4u
-#define SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK 0x30u
-#define SEYAL_APP_BLOCK_ACTION_SEAM 0u
-#define SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU 1u
-#define SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU 2u
 
 typedef struct SeyalAppComposer {
     uint16_t version;
@@ -494,18 +481,8 @@ typedef struct SeyalAppTheme {
     uint32_t text;
     uint32_t accent;
     uint16_t appearance;
-    /* SEYAL_APP_THEME_* flags (#1010). */
-    uint16_t flags;
-    /* Block Component roles (#1010), packed RGBA like the fields above. */
-    uint32_t block_focus;
-    uint32_t block_border_rest;
-    uint32_t block_border_hover;
-    uint32_t success;
-    uint32_t danger;
+    uint16_t reserved;
 } SeyalAppTheme;
-
-/* SeyalAppTheme.flags: Rust resolved allows_motion after accessibility. */
-#define SEYAL_APP_THEME_ALLOWS_MOTION 1u
 
 /*
  * SeyalAppShell.flags: whether CREATE_TAB/SPLIT_FOCUSED would currently be
@@ -980,13 +957,6 @@ typedef struct SeyalAppBlockSpan {
 } SeyalAppBlockSpan;
 
 SeyalAppBlockSpan seyal_app_block_span(uint64_t handle, uint32_t index);
-uint32_t seyal_app_block_action_count(uint64_t handle, uint32_t block_index);
-SeyalAppRow seyal_app_block_action_row(uint64_t handle, uint32_t block_index, uint32_t action_index);
-/* Rust-owned Block pasteboard copy (#1010). kind = COPY_COMMAND, COPY_OUTPUT
- * or COPY_COMMAND_AND_OUTPUT. Resolves span/command in Rust; final text
- * arrives via seyal_bridge_take_block_copy (at once for COPY_COMMAND, after
- * poll for output kinds). */
-int32_t seyal_app_request_block_copy(uint64_t handle, uint32_t block_index, uint16_t kind);
 
 /* #865 Flow output projection. Hosts must not invent start+511 ranges.
  * PRIMARY_CLIP: reserved0 = first prepared-frame row; reserved1 = row count.
@@ -1006,10 +976,7 @@ typedef struct SeyalAppBlockProjection {
 SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
-/* appearance: 0 dark / 1 light. accessibility_flags bit0 = reduce_motion,
- * bit1 = reduce_transparency, bit2 = increase_contrast. Host forwards OS
- * signals; Rust resolves motion/colors through process UI configuration. */
-SeyalAppTheme seyal_app_theme(uint16_t appearance, uint16_t accessibility_flags);
+SeyalAppTheme seyal_app_theme(uint16_t appearance);
 
 /*
  * Resolved visual snapshot from Rust cold TOML/theme authority (#993 / ADR-015).

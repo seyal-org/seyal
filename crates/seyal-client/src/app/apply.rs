@@ -146,10 +146,20 @@ impl ApplicationRoot {
                 }
                 self.create_tab()
             }
-            AppAction::CloseTab { id } => self.close_tab(id),
+            AppAction::CloseTab { .. }
+            | AppAction::CloseWindow { .. }
+            | AppAction::ClosePane { .. } => self.apply_close(action),
             AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
+            AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            #[cfg(test)]
+            AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
+            #[cfg(test)]
+            AppAction::RecordUnpresented {
+                execution,
+                workspace,
+            } => self.record_unpresented(execution, workspace),
+            AppAction::TerminateUnpresented { execution } => self.terminate_unpresented(execution),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
-            AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),
             AppAction::ZoomPane { id } => self.zoom_pane(id),
             AppAction::Unzoom => self.unzoom(),
@@ -206,14 +216,20 @@ impl ApplicationRoot {
             AppAction::SelectWindow { id } => self.select_window(id),
             AppAction::CycleWindow { direction } => self.cycle_window(direction),
             AppAction::CreateWindow => self.create_window(),
-            AppAction::ReportWindowEvent { window, event } => {
-                self.report_window_event(window, event)
-            }
+            AppAction::ReportWindowEvent {
+                window,
+                event,
+                occluded,
+            } => self.report_window_event(window, event, occluded),
         };
         match result {
             Ok(()) => {
                 self.last_error = None;
                 self.snapshot_generation = self.snapshot_generation.saturating_add(1);
+                #[cfg(target_os = "macos")]
+                if !self.sync_attachment_delivery() {
+                    self.last_error = Some(AppError::DeliveryControlFailed);
+                }
                 Ok(())
             }
             Err(error) => self.fail(error),

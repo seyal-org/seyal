@@ -30,6 +30,12 @@ pub enum ShellAction {
         id: WindowId,
         containment_generation: u64,
     },
+    /// Native realization already became key; commit Rust selection and
+    /// focus history without ordering the same NSWindow again.
+    NativeWindowBecameKey {
+        id: WindowId,
+        containment_generation: u64,
+    },
     /// AppKit observed this existing Window become key; update product focus
     /// without requesting a second native order-front transition.
     ObserveWindowBecameKey {
@@ -64,6 +70,10 @@ pub enum ShellAction {
     },
     MoveTabToNewWindow {
         tab: TabId,
+        containment_generation: u64,
+    },
+    CloseWindow {
+        id: WindowId,
         containment_generation: u64,
     },
     CloseTab {
@@ -117,6 +127,20 @@ pub enum ShellAction {
         containment_generation: u64,
     },
     BindExecution {
+        pane: PaneId,
+        execution: ExecutionId,
+    },
+    /// Record a live execution with no Pane binding (tests / Runtime sync).
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    /// Drop a previously recorded live-unpresented entry after Runtime retirement.
+    ForgetUnpresented {
+        execution: ExecutionId,
+    },
+    /// Rebind a live-unpresented execution into a Pane leaf.
+    AdoptExecution {
         pane: PaneId,
         execution: ExecutionId,
     },

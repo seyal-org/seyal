@@ -77,7 +77,7 @@ final class PaneRegionProjectionTests: XCTestCase {
         try assertRegions(view, count: 1)
         XCTAssertNil(paneChild(view, "seyal-pane-divider-0"), "no divider without a Split")
         let closePane = try XCTUnwrap(button(view, "seyal-close-pane"))
-        XCTAssertTrue(closePane.isHidden, "the last Pane offers no Close Pane control")
+        XCTAssertFalse(closePane.isHidden, "the surviving Pane still offers hierarchical Close Pane")
     }
 
     func testLastPaneAndStalePaneIdsFailClosed() throws {
@@ -85,13 +85,9 @@ final class PaneRegionProjectionTests: XCTestCase {
         let handle = view.pane.appHandle
         let sole = seyal_app_shell(handle)
         XCTAssertEqual(sole.pane_count, 1)
-        XCTAssertEqual(sole.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
-        XCTAssertNotEqual(
-            applyPane(handle, kind: SEYAL_APP_ACTION_CLOSE_PANE, lo: sole.focused_pane_lo, hi: sole.focused_pane_hi),
-            0,
-            "the last Pane cannot close"
-        )
-        XCTAssertEqual(seyal_app_shell(handle).pane_count, 1)
+        XCTAssertNotEqual(sole.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
+        let soleClose = try XCTUnwrap(button(view, "seyal-close-pane"))
+        XCTAssertFalse(soleClose.isHidden, "hierarchical close is offered for the sole Pane")
 
         try clickButton(view, "seyal-split-right")
         reconcile(view)

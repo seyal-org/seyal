@@ -2,9 +2,9 @@ import XCTest
 
 /// Issue #923 headed evidence: with production pane splitting (C3), Split
 /// Right/Down projects one region per Rust leaf, clicking a region focuses that
-/// Pane, closing a non-last Pane removes its region, the last Pane offers no
-/// close, and exactly one live terminal surface exists, inside the focused
-/// region. This file also covers #1219 zoom.
+/// Pane, closing a non-last Pane removes its region, the surviving Pane still
+/// offers hierarchical close, and exactly one live terminal surface exists,
+/// inside the focused region. This file also covers #1219 zoom.
 @MainActor
 final class SeyalPaneSplitUITests: XCTestCase {
     override func setUp() {
@@ -45,7 +45,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testCloseRemovesNonLastPaneAndLastPaneOffersNoClose() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        XCTAssertFalse(element(app, "seyal-close-pane").exists, "the sole Pane offers no Close Pane")
+        XCTAssertTrue(
+            element(app, "seyal-close-pane").waitForExistence(timeout: 5),
+            "the sole Pane offers hierarchical Close Pane"
+        )
 
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
@@ -59,7 +62,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertFalse(element(app, "seyal-pane-divider-0").exists, "no divider without a Split")
         XCTAssertEqual(try focusedRegionIndex(app, count: 1), 0)
-        XCTAssertFalse(element(app, "seyal-close-pane").exists, "the last Pane offers no Close Pane")
+        XCTAssertTrue(
+            element(app, "seyal-close-pane").waitForExistence(timeout: 5),
+            "the surviving Pane still offers hierarchical Close Pane"
+        )
         waitForUsablePty(in: app, timeout: 12)
         assertSingleLiveSurface(in: app, focusedRegion: 0)
     }

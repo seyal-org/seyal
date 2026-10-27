@@ -29,7 +29,7 @@ final class NavigationEvidenceAbiTests: XCTestCase {
         bind.target_execution_hi = tag
         bind.target_attachment_lo = tag &+ 1
         bind.target_attachment_hi = tag &+ 1
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
     }
 

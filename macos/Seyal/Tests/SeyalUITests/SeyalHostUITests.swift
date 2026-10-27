@@ -1820,22 +1820,79 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
     }
 
-    /// W4a: AppKit realizes the Rust snapshot; CreateWindow admission stays off.
-    func testNewWindowAdmissionStaysFailClosedOnW4aHost() throws {
+    /// W5: presentation-tier chrome keeps tab and window admission available.
+    func testPresentationTierChromeKeepsNewTabAndWindowAvailable() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+        let chrome = app.descendants(matching: .any)["seyal-product-chrome"].firstMatch
+        XCTAssertTrue(chrome.waitForExistence(timeout: 5))
+        let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
+        XCTAssertTrue(newTab.waitForExistence(timeout: 5), "C2b CreateTab chrome stays visible")
+        XCTAssertTrue(newTab.isHittable)
+        let newWindow = app.menuItems["New Window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5))
+        newWindow.click()
+        waitForWindowCount(app, 2, message: "W4b+ CreateWindow must realize a second window")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// W4b: production window admission + last-window-close stay-alive.
+    func testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         XCTAssertEqual(app.windows.count, 1, "bootstrap realizes exactly one headed window")
         let newWindow = app.menuItems["New Window"]
         XCTAssertTrue(newWindow.waitForExistence(timeout: 5), "File → New Window is installed")
+        XCTAssertTrue(newWindow.isEnabled, "W4b turns CreateWindow admission on")
         newWindow.click()
-        waitBriefly(0.4)
-        XCTAssertEqual(
-            app.windows.count,
-            1,
-            "W4a keeps CreateWindow fail-closed; the host must not locally spawn a second window"
+        waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
+        let fileMenu = app.menuBars.menuBarItems["File"]
+        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
+        fileMenu.click()
+        let close = app.menuItems["Close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.click()
+        waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
+        fileMenu.click()
+        close.click()
+        waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
+        RunLoop.current.run(until: Date().addingTimeInterval(2))
+        XCTAssertEqual(app.state, .runningForeground, "last-window close must not quit")
+        XCTAssertTrue(
+            newWindow.waitForExistence(timeout: 5),
+            "File → New Window stays available after the last window closes"
         )
-        XCTAssertEqual(app.state, .runningForeground)
-        let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
-        XCTAssertTrue(newTab.waitForExistence(timeout: 5), "C2b CreateTab chrome stays visible")
+        XCTAssertTrue(newWindow.isEnabled, "zero-window re-entry remains admitted")
+        fileMenu.click()
+        newWindow.click()
+        waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
+    }
+
+    func testTitleBarCloseForwardsThroughWindowCloseDelegate() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let newWindow = app.menuItems["New Window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5))
+        newWindow.click()
+        waitForWindowCount(app, 2, message: "New Window creates a second headed window")
+        let closeButton = app.buttons["seyal-window-close"].firstMatch
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 5), "window has its native close control")
+        closeButton.click()
+        waitForWindowCount(app, 1, message: "title-bar close forwards the typed CloseWindow action")
+        XCTAssertEqual(app.state, .runningForeground, "closing a non-final window must not quit")
+    }
+
+    private func waitForWindowCount(
+        _ app: XCUIApplication,
+        _ count: Int,
+        message: String,
+        timeout: TimeInterval = 5
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, app.windows.count != count {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertEqual(app.windows.count, count, message)
     }
 }

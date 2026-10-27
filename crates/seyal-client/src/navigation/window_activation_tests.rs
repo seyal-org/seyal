@@ -113,7 +113,7 @@ fn placement_map(shell: &ShellState) -> Vec<(WindowId, Vec<TabId>)> {
 fn navigate_other_window_emits_one_window_activation_without_reparenting() {
     let (mut shell, workspace, _, t2, _, p2, win1, win2) = seed_two_windows();
     let before_map = placement_map(&shell);
-    assert_eq!(shell.snapshot().active_window, win1);
+    assert_eq!(shell.snapshot().active_window, Some(win1));
     let _ = shell.take_effects();
 
     assert_eq!(
@@ -135,7 +135,7 @@ fn navigate_other_window_emits_one_window_activation_without_reparenting() {
         })
     );
     let after = shell.snapshot();
-    assert_eq!(after.active_window, win2);
+    assert_eq!(after.active_window, Some(win2));
     assert_eq!(after.active_tab, t2);
     assert_eq!(after.focused_pane, p2);
     let effects = shell.take_effects();
@@ -236,7 +236,7 @@ fn navigate_same_window_emits_no_window_activation() {
         shell.take_effects().is_empty(),
         "R5.2 emits WindowActivation only when the hosting window is not active"
     );
-    assert_eq!(shell.snapshot().active_window, win1);
+    assert_eq!(shell.snapshot().active_window, Some(win1));
     assert_eq!(shell.snapshot().focused_pane, p2);
 }
 
@@ -259,7 +259,7 @@ fn reported_activation_failure_keeps_committed_focus() {
     })
     .unwrap();
     let snap = root.snapshot();
-    assert_eq!(snap.shell.active_window, win2);
+    assert_eq!(snap.shell.active_window, Some(win2));
     assert_eq!(snap.shell.focused_pane, p2);
     let activations: Vec<_> = snap
         .pending_effects
@@ -276,12 +276,13 @@ fn reported_activation_failure_keeps_committed_focus() {
         root.apply(AppAction::ReportWindowEvent {
             window: win2,
             event: WindowNativeEvent::ActivationFailed,
+            occluded: false,
         }),
         Err(AppError::WindowActivationFailed)
     );
     let after = root.snapshot();
     assert_eq!(after.last_error, Some(AppError::WindowActivationFailed));
-    assert_eq!(after.shell.active_window, win2);
+    assert_eq!(after.shell.active_window, Some(win2));
     assert_eq!(after.shell.focused_pane, p2);
     assert_eq!(after.shell.active_tab, t2);
 }

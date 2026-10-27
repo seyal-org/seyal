@@ -146,7 +146,7 @@ extension ProductChromeHostView {
             rerun.applySnapshotFence(snapshot)
             rerun.target_execution_lo = idLo
             rerun.target_execution_hi = idHi
-            rerun.target_pty_generation = seyal_app_composer(pane.appHandle).epoch
+            rerun.target_generation = seyal_app_composer(pane.appHandle).epoch
             guard seyal_app_apply(pane.appHandle, &rerun) == 0 else { return }
             composer.submitRustDraft()
         case SEYAL_APP_BLOCK_ACTION_INSPECT:

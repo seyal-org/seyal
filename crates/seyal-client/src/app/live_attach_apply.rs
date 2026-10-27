@@ -18,63 +18,11 @@ use crate::provisioning::{ConnectionOwner, ProvisioningEffect, ProvisioningFailu
 pub(super) struct PendingLiveAttach {
     pub owner: ConnectionOwner,
     pub request_id: u64,
-    pub pane: PaneId,
+    pub pane: Option<PaneId>,
     pub rx: mpsc::Receiver<Result<LocalDisplayClient, ClientError>>,
 }
 
 impl ApplicationRoot {
-    /// Test-only: fail the next `n` live second-Controller connects (ADR-017 §6.3).
-    #[doc(hidden)]
-    pub fn inject_live_attach_failures(&mut self, n: u32) {
-        self.inject_live_attach_failures = n;
-    }
-
-    /// Hold the next live second-Controller connect until `tx.send(())`.
-    #[doc(hidden)]
-    pub fn gate_next_live_attach(&mut self, rx: std::sync::mpsc::Receiver<()>) {
-        self.live_attach_gate = Some(rx);
-    }
-
-    /// Extra per-pane Controller registry entries (second+ tabs).
-    #[doc(hidden)]
-    pub fn extra_pane_client_count(&self) -> usize {
-        self.extra_pane_clients.len()
-    }
-
-    /// Queued `AttachController` work waiting for the in-flight worker.
-    #[doc(hidden)]
-    pub fn queued_live_attach_count(&self) -> usize {
-        self.queued_live_attaches.len()
-    }
-
-    /// True when the production poll path must run [`Self::poll_client`] for
-    /// create/attach/terminate progress (not every Candidate-D frame).
-    pub(crate) fn needs_provisioning_drive(&self) -> bool {
-        if self.live_client_handle_for_test().is_none() && self.wire_client.is_none() {
-            return false;
-        }
-        self.pending_live_attach.is_some()
-            || !self.queued_live_attaches.is_empty()
-            || self.provisioning.has_outstanding_intent()
-            || !self.pending_wire_effects.is_empty()
-    }
-
-    /// Registry handle for a pane's Controller, if attached.
-    #[doc(hidden)]
-    pub fn pane_client_raw(&self, pane: PaneId) -> Option<u64> {
-        self.pane_client_raws.get(&pane).copied()
-    }
-
-    /// Whether the pane's Controller still accepts a nonblocking poll (unrelated
-    /// work continues during CreateTab attach).
-    #[doc(hidden)]
-    pub fn pane_client_poll_ok(&self, pane: PaneId) -> bool {
-        let Some(raw) = self.pane_client_raws.get(&pane).copied() else {
-            return false;
-        };
-        crate::ffi::with_client_mut(raw, |client| client.poll_prepare().is_ok()).unwrap_or(false)
-    }
-
     /// True when the create-admitting client is an in-process probe that must
     /// not call `connect_execution` (unit tests use
     /// [`Self::complete_create_attach_and_bind`] instead).
@@ -100,7 +48,9 @@ impl ApplicationRoot {
         owner: ConnectionOwner,
         execution: ExecutionId,
     ) -> Result<(), AppError> {
-        if self.create_client_is_harness_probe() {
+        if self.create_client_is_harness_probe()
+            || (self.wire_client.is_none() && self.client_handle.is_none())
+        {
             self.pending_wire_effects
                 .push(ProvisioningEffect::AttachController { owner, execution });
             return Ok(());
@@ -111,8 +61,7 @@ impl ApplicationRoot {
             .ok_or(AppError::ProvisioningRejected)?;
         let pane = self
             .provisioning
-            .pending_intent_for_request(request_id)
-            .map(|intent| intent.pane)
+            .pending_attach_pane_by_request_id(request_id)
             .ok_or(AppError::ProvisioningRejected)?;
 
         if self.inject_live_attach_failures > 0 {
@@ -187,7 +136,15 @@ impl ApplicationRoot {
         let pending = self.pending_live_attach.take().expect("pending attach");
         let completed = match result {
             Ok(client) => {
-                self.complete_live_controller_attach(pending.pane, pending.request_id, client)
+                if let Some(pane) = pending.pane {
+                    self.complete_live_controller_attach(pane, pending.request_id, client)
+                } else {
+                    self.complete_dispose_controller_attach(
+                        pending.owner,
+                        pending.request_id,
+                        client,
+                    )
+                }
             }
             Err(error) => self.fail_live_controller_attach(
                 pending.owner,
@@ -275,7 +232,7 @@ impl ApplicationRoot {
         &mut self,
         owner: crate::provisioning::ConnectionOwner,
         request_id: u64,
-        pane: PaneId,
+        pane: Option<PaneId>,
         error: ClientError,
     ) -> Result<(), AppError> {
         let failure = match error {
@@ -287,11 +244,47 @@ impl ApplicationRoot {
             .provisioning
             .apply_attach_failure(owner, request_id, still_listed);
         if effects.is_empty() {
-            self.provisioning.note_rejected_without_retry(pane, failure);
+            if let Some(pane) = pane {
+                self.provisioning.note_rejected_without_retry(pane, failure);
+            }
         } else {
             self.dispatch_live_provisioning_effects(effects)?;
         }
         Err(map_client_error(error))
+    }
+
+    fn complete_dispose_controller_attach(
+        &mut self,
+        owner: ConnectionOwner,
+        request_id: u64,
+        client: LocalDisplayClient,
+    ) -> Result<(), AppError> {
+        if client.role() != Role::Controller {
+            return self.fail_live_controller_attach(
+                owner,
+                request_id,
+                None,
+                ClientError::UnsupportedInteractiveCapability,
+            );
+        }
+        let attachment = client.attachment_id();
+        self.dispose_clients.insert(owner, client);
+        let effects = self
+            .provisioning
+            .apply_attach_success(owner, request_id, attachment);
+        self.dispatch_live_provisioning_effects(effects)
+    }
+
+    pub(super) fn poll_dispose_clients(&mut self) {
+        let lost: Vec<_> = self
+            .dispose_clients
+            .iter_mut()
+            .filter_map(|(owner, client)| client.poll_prepare().is_err().then_some(*owner))
+            .collect();
+        for owner in lost {
+            self.dispose_clients.remove(&owner);
+            self.provisioning.on_connection_lost(owner, None);
+        }
     }
 
     /// Install or replace per-pane Controller authority; activate when focused.
@@ -386,6 +379,52 @@ impl ApplicationRoot {
         if let Some(handle) = self.extra_pane_clients.remove(&pane) {
             let _ = crate::ffi::unregister_client(handle.raw());
         }
+    }
+
+    /// Presentation close releases the closed execution's Controller (ADR-018
+    /// §3.2) and keeps a remaining pane's socket for create admission.
+    pub(super) fn release_presentation_controller(
+        &mut self,
+        pane: PaneId,
+        execution: Option<ExecutionId>,
+    ) {
+        if let Some(raw) = self.pane_client_raws.get(&pane).copied() {
+            let primary = self
+                .client_handle
+                .as_ref()
+                .is_some_and(|handle| handle.raw() == raw);
+            if let Some(mut client) = crate::ffi::unregister_client(raw) {
+                client.request_bounded_detach();
+            }
+            self.pane_client_raws.remove(&pane);
+            if primary {
+                self.client_handle = None;
+                if let Some(sibling) = self.extra_pane_clients.keys().next().copied()
+                    && let Some(handle) = self.extra_pane_clients.remove(&sibling)
+                {
+                    self.client_handle = Some(handle);
+                }
+            } else {
+                self.extra_pane_clients.remove(&pane);
+            }
+        }
+        if let Some(execution) = execution
+            && !self.execution_is_presented(execution)
+            && let Some(client) = self.wire_client.as_mut()
+            && client.execution_id() == execution
+        {
+            client.release_controller_keep_connection();
+        }
+    }
+
+    fn execution_is_presented(&self, execution: ExecutionId) -> bool {
+        self.shell.snapshot().windows.iter().any(|window| {
+            window.tabs.iter().any(|tab| {
+                tab.panes
+                    .iter()
+                    .any(|pane| pane.execution == Some(execution))
+            })
+        })
     }
 }
 

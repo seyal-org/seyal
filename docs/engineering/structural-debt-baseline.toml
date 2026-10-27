@@ -24,9 +24,9 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 881
-issue = 1010
-reason = "CAMetalLayer surface and terminal-bridge forwarding stay one thin host type after recovery-state, display-link and Rust-recovery host extraction; #1065 deleted the Swift recovery coordinator. #1010 adds only the onHistoryCopy forwarding of the Rust-built Block copy text."
+acknowledged_loc = 877
+issue = 1065
+reason = "CAMetalLayer surface and terminal-bridge forwarding stay one thin host type after recovery-state, display-link and Rust-recovery host extraction; #1065 deleted the Swift recovery coordinator so the file only ratchets down."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -41,20 +41,14 @@ issue = 1117
 reason = "SPEC-022 §6 focus history store and its state-transition proofs stay together as one cohesive reducer. #1117 adds generated navigation and destruction sequences checked after every operation against an independent reference model; further splitting would separate invariants from the behavior they verify."
 
 [[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 871
-issue = 1219
-reason = "ApplicationRoot types and snapshot stay one product-state façade; #1219 moves apply dispatch to app/apply.rs and pane-tree verbs to pane_tree_apply.rs so PT5 zoom/move/equalize does not keep a second action table in this file."
-
-[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/pane_layout.rs"
-acknowledged_loc = 774
+acknowledged_loc = 784
 issue = 1219
-reason = "Host Pane region/divider projection stays one layout module; #1219 adds zoom overlay host projection beside #923/#928 geometry without a second layout engine."
+reason = "Host Pane region/divider projection stays one layout module; #1219 adds zoom overlay host projection beside #923/#928 geometry without a second layout engine. The window-stack merge keeps both projections in this module."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 808
+acknowledged_loc = 856
 issue = 1175
 reason = "Portable provisioning reducer stays one cold-path authority; #1175 adds pending_attach_by_request_id so dispose-attach after Created can correlate without fabricating AttachmentId."
 
@@ -66,21 +60,21 @@ reason = "The existing create/close/terminate/split adapter now also binds per-P
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
-acknowledged_loc = 813
+acknowledged_loc = 816
 issue = 1149
 reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning, plus #1149 connection-scoped request_id and bootstrap floor seeding coverage; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1095
+ceiling_loc = 1058
 issue = 1123
 responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, and #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1082
+ceiling_loc = 1076
 issue = 1123
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, and #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs. #1010 adds only the block_actions module declaration/re-exports and one BlockActionRows field."
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, and #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -130,9 +124,9 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 944
-issue = 1010
-reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1175's harness probe and #936's initial layout-metric state remain with attach lifecycle construction. #1010 adds only the three Block-copy field initializers to the attached-client constructor."
+acknowledged_loc = 941
+issue = 936
+reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1175's harness probe and #936's initial layout-metric state remain with attach lifecycle construction."
 
 # #1179 AB-1.3: per-connection handshake and session serve moved to
 # daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
@@ -221,13 +215,13 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1155
+ceiling_loc = 1154
 issue = 1122
 responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads containment_generation through Split/Close, W2a adds Window-aware fixtures, #1117 records history policy and integration tests, and #1123 adds W4a fixture admission coverage."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 880
+acknowledged_loc = 905
 issue = 1092
 reason = "Command palette query, frozen rows, and run dispatch stay one reducer; #1092 carries containment generation through window-aware actions, #1175 adds the P4 Terminate Execution verb, and #1123 keeps W4a fixture admission policy in the Rust shell."
 
@@ -239,25 +233,38 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 784
-issue = 1010
-reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and #1218 reconnects Rust recovery presentation when the composer becomes focus-eligible without moving draft/admission policy into Swift. #1010 adds only the design-doc Block spacing/inset values and the Rust-built Block copy pasteboard callback wiring."
+acknowledged_loc = 780
+issue = 1218
+reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and #1218 reconnects Rust recovery presentation when the composer becomes focus-eligible without moving draft/admission policy into Swift."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/keybinding/tests.rs"
-acknowledged_loc = 724
+acknowledged_loc = 725
 issue = 1263
 reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional focus, and #1263 pane-equalize binding proofs stay one keybinding table-load test module beside the builtins they assert; keep under one authority rather than inventing partN splits."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 799
+acknowledged_loc = 821
 issue = 1010
-reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, #1144 adds the ActivationFailed event, and #1219 adds PT5 zoom/swap/move/directional/equalize kinds after those codes without splitting the ABI table. #1010 adds only the RerunBlock (76) decode arm after the PT5 kinds."
+reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, #1144 adds the ActivationFailed event, #1219 adds PT5 kinds, the window-stack merge places CLOSE_WINDOW (76), and #1010 adds only the RerunBlock (77) decode arm without splitting the ABI table."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"
+acknowledged_loc = 833
+issue = 1220
+reason = "The existing connection writer remains the single owner of bounded control enqueue, display supersession, and legacy flush ordering; #1220 adds negotiated attachment-scoped metadata and separate optional type-35 accounting without introducing another writer authority."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/MultiWindowHostController.swift"
+acknowledged_loc = 769
+issue = 1158
+reason = "The macOS host stays one AppKit adapter. #1158 adds CloseWindow forwarding, deferred AppKit destruction, Dock reopen, and hierarchical close on the activation and resize host already owned here. The W5 occlusion-hidden forwarding was restored by this landing."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 746
+acknowledged_loc = 495
 issue = 1010
-reason = "LocalDisplayClient stays one attach/poll client; #1123 adds bounded detach and a fallible probe client for ADR-018 §4 quit fixtures without waiting on Detached. #1010 adds the Block-copy state fields, the history_range_text accessor and the post-read advance_block_copy call; copy accumulation lives in local/block_copy.rs and text building in history_text.rs."
+reason = "LocalDisplayClient stays one attach/poll client; #1123 adds bounded detach; #1220 delivery fields; #1010 adds Block-copy state fields, history_range_text, and post-read advance_block_copy. Copy accumulation lives in local/block_copy.rs and text building in history_text.rs."
+

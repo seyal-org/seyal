@@ -11,6 +11,7 @@ use std::{
     os::unix::net::UnixStream,
     path::PathBuf,
     process::{Child, Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -22,16 +23,23 @@ use seyal_runtime::{
     Runtime, RuntimeConfig,
 };
 
+static NEXT_TEMP_DIR_ID: AtomicU64 = AtomicU64::new(0);
+
 fn unique_dir(tag: &str) -> PathBuf {
     PathBuf::from(format!(
-        "/tmp/s1093{tag}{}{:x}",
+        "/tmp/s1093{tag}{}{:x}{:x}",
         std::process::id() % 100_000,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
-            % 0xFFFF
+            .as_nanos(),
+        NEXT_TEMP_DIR_ID.fetch_add(1, Ordering::Relaxed)
     ))
+}
+
+#[test]
+fn unique_runtime_dirs_do_not_collide_with_parallel_helpers() {
+    assert_ne!(unique_dir("bin"), unique_dir("bin"));
 }
 
 fn isolated_config(tag: &str) -> RuntimeConfig {
@@ -171,13 +179,21 @@ struct HelperChild {
 
 impl HelperChild {
     fn spawn(args: &[&str]) -> Self {
+        Self::spawn_with_args(|_| {
+            args.iter()
+                .map(|argument| (*argument).to_string())
+                .collect()
+        })
+    }
+
+    fn spawn_with_args(args: impl FnOnce(&PathBuf) -> Vec<String>) -> Self {
         // Do not pre-create `dir`: Runtime owns verified directory creation
         // (mode/ownership). A plain create_dir_all fails closed at bind time.
         let dir = unique_dir("bin");
         let mut command = Command::new(env!("CARGO_BIN_EXE_seyal-runtime"));
         command
             .args(["--runtime-dir", dir.to_str().expect("utf8")])
-            .args(args)
+            .args(args(&dir))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
@@ -189,19 +205,55 @@ impl HelperChild {
         self.dir.join("control.sock")
     }
 
-    fn wait_for_socket(&mut self) {
+    fn wait_for_socket(&mut self) -> UnixStream {
         let deadline = Instant::now() + Duration::from_secs(3);
-        while !self.socket().exists() {
-            if let Some(status) = self.child.try_wait().expect("try_wait") {
-                let mut stderr = String::new();
-                if let Some(mut pipe) = self.child.stderr.take() {
-                    let _ = pipe.read_to_string(&mut stderr);
+        loop {
+            match UnixStream::connect(self.socket()) {
+                Ok(stream) => return stream,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    if let Some(status) = self.child.try_wait().expect("try_wait") {
+                        panic!(
+                            "helper exited before accepting connections: {status}; stderr={}",
+                            self.stderr_after_exit()
+                        );
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "helper did not accept connections before the deadline"
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
                 }
-                panic!("helper exited before binding control socket: {status}; stderr={stderr}");
+                Err(error) => panic!("helper socket connection failed: {error}"),
+            }
+        }
+    }
+
+    fn stderr_after_exit(&mut self) -> String {
+        let mut stderr = String::new();
+        if let Some(mut pipe) = self.child.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        stderr
+    }
+
+    fn wait_for_successful_exit(&mut self, deadline: Instant) {
+        loop {
+            if let Some(status) = self.child.try_wait().expect("try_wait") {
+                assert!(
+                    status.success(),
+                    "helper exited unsuccessfully: {status}; stderr={}",
+                    self.stderr_after_exit()
+                );
+                return;
             }
             assert!(
                 Instant::now() < deadline,
-                "helper did not bind control socket"
+                "helper did not exit before the deadline"
             );
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -312,14 +364,15 @@ fn helper_empty_argv_stays_resident_with_zero_executions() {
     // C1 / SPEC-003 §4.1: an empty client-launched helper creates no startup
     // execution and remains resident until controlled shutdown or OS signal.
     let mut helper = HelperChild::spawn(&[]);
-    helper.wait_for_socket();
+    let mut stream = helper.wait_for_socket();
     std::thread::sleep(Duration::from_millis(200));
-    assert!(
-        helper.child.try_wait().expect("try_wait").is_none(),
-        "zero-execution helper must remain resident"
-    );
+    if let Some(status) = helper.child.try_wait().expect("try_wait") {
+        panic!(
+            "zero-execution helper must remain resident; exited {status}; stderr={}",
+            helper.stderr_after_exit()
+        );
+    }
 
-    let mut stream = UnixStream::connect(helper.socket()).expect("connect helper");
     stream.set_nonblocking(false).expect("blocking client");
     stream
         .write_all(&encode_frame(
@@ -348,10 +401,17 @@ fn helper_empty_argv_stays_resident_with_zero_executions() {
 }
 #[test]
 fn helper_explicit_command_creates_one_execution_and_exits_at_zero() {
-    let mut helper = HelperChild::spawn(&["/bin/sh", "-c", "sleep 30"]);
-    helper.wait_for_socket();
-
-    let mut stream = UnixStream::connect(helper.socket()).expect("connect helper");
+    let mut helper = HelperChild::spawn_with_args(|runtime_dir| {
+        vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "while [ ! -e \"$1\" ]; do /bin/sleep 0.05; done".to_string(),
+            "runtime-lifetime-test".to_string(),
+            runtime_dir.join("finish").to_string_lossy().into_owned(),
+        ]
+    });
+    let marker = helper.dir.join("finish");
+    let mut stream = helper.wait_for_socket();
     stream.set_nonblocking(false).expect("blocking client");
     stream
         .write_all(&encode_frame(
@@ -383,26 +443,16 @@ fn helper_explicit_command_creates_one_execution_and_exits_at_zero() {
         "explicit command must create exactly one execution"
     );
 
+    // Allow the primary child to exit naturally so the helper finalizes it and
+    // exercises the documented exit-at-zero path without leaking a PTY child.
+    std::fs::write(marker, b"finish").expect("finish marker");
+    helper.wait_for_successful_exit(Instant::now() + Duration::from_secs(5));
+
     // Explicit-command developer/test mode exits at zero after its requested
-    // execution finalizes. Do not require the control socket — a fast-exiting child can race past
-    // bind before the test observes the path.
-    drop(helper);
+    // execution finalizes. Do not require the control socket for a fast exit.
     let mut helper = HelperChild::spawn(&["/bin/sh", "-c", "exit 0"]);
     let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(status) = helper.child.try_wait().expect("try_wait") {
-            assert!(
-                status.success() || status.code().is_some(),
-                "helper exited: {status}"
-            );
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "explicit-command helper must exit-at-zero after its execution finalizes"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    helper.wait_for_successful_exit(deadline);
 }
 
 fn read_frame(

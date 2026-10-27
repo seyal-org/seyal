@@ -50,9 +50,15 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationToggleTui
         | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
+        WorkspaceCommandId::AppCloseFocused
+        | WorkspaceCommandId::WindowNew
+        | WorkspaceCommandId::WindowClose
+        | WorkspaceCommandId::WindowCycleNext
+        | WorkspaceCommandId::WindowCyclePrevious => command.ordinal.is_none(),
         // Ordinal tabs are key-only; not separate menu rows in M003.
         // Focus-history is key-only in M003 (K8); not a K5 menu row.
         WorkspaceCommandId::TabSelectOrdinal
+        | WorkspaceCommandId::WindowSelectOrdinal
         | WorkspaceCommandId::CommandPaletteClose
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
@@ -95,6 +101,11 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
         WorkspaceCommandId::GotoOpen => "Go to…",
+        WorkspaceCommandId::AppCloseFocused => "Close",
+        WorkspaceCommandId::WindowNew => "New Window",
+        WorkspaceCommandId::WindowClose => "Close Window",
+        WorkspaceCommandId::WindowCycleNext => "Next Window",
+        WorkspaceCommandId::WindowCyclePrevious => "Previous Window",
         // Focus-history remains key-only in M003 (K8); not a K5 menu title.
         other => other.as_str(),
     }
@@ -113,6 +124,11 @@ fn menu_visible_commands() -> impl Iterator<Item = WorkspaceCommand> {
         WorkspaceCommandId::PresentationToggleRaw,
         WorkspaceCommandId::PresentationToggleTui,
         WorkspaceCommandId::GotoOpen,
+        WorkspaceCommandId::AppCloseFocused,
+        WorkspaceCommandId::WindowNew,
+        WorkspaceCommandId::WindowClose,
+        WorkspaceCommandId::WindowCycleNext,
+        WorkspaceCommandId::WindowCyclePrevious,
     ]
     .into_iter()
     .map(|id| WorkspaceCommand { id, ordinal: None })
@@ -268,6 +284,12 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::PaneFocusDown => 34,
         WorkspaceCommandId::PaneEqualizeFocused => 35,
         WorkspaceCommandId::PaneEqualizeTab => 36,
+        WorkspaceCommandId::AppCloseFocused => 37,
+        WorkspaceCommandId::WindowNew => 38,
+        WorkspaceCommandId::WindowClose => 39,
+        WorkspaceCommandId::WindowCycleNext => 40,
+        WorkspaceCommandId::WindowCyclePrevious => 41,
+        WorkspaceCommandId::WindowSelectOrdinal => 42,
     }
 }
 
@@ -310,6 +332,12 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         34 => WorkspaceCommandId::PaneFocusDown,
         35 => WorkspaceCommandId::PaneEqualizeFocused,
         36 => WorkspaceCommandId::PaneEqualizeTab,
+        37 => WorkspaceCommandId::AppCloseFocused,
+        38 => WorkspaceCommandId::WindowNew,
+        39 => WorkspaceCommandId::WindowClose,
+        40 => WorkspaceCommandId::WindowCycleNext,
+        41 => WorkspaceCommandId::WindowCyclePrevious,
+        42 => WorkspaceCommandId::WindowSelectOrdinal,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {
@@ -318,6 +346,9 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         super::types::Ordinal1To9::new(ordinal)
     };
     if id == WorkspaceCommandId::TabSelectOrdinal && ordinal.is_none() {
+        return None;
+    }
+    if id == WorkspaceCommandId::WindowSelectOrdinal && ordinal.is_none() {
         return None;
     }
     Some(WorkspaceCommand { id, ordinal })

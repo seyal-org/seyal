@@ -46,6 +46,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var presentationRetryTimer: Timer?
   var presentationRetryGeneration: UInt64 = 0
   var renderable = false
+  /// Rust-authored ADR-018 §5 Hidden/Unpresented for this surface's Pane.
+  var productTierHidesGpu = false
   var metalDisplayLinkLease: MetalDisplayLinkLease?
   /// Identity for CAMetalDisplayLink hops without capturing `@MainActor self`
   /// in a way that inserts `assumeIsolated` under Xcode 16.4.
@@ -403,9 +405,16 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   var shouldRender: Bool {
+    guard !productTierHidesGpu else { return false }
     guard shouldAttachRuntime else { return false }
     guard let window else { return false }
     return window.occlusionState.contains(.visible)
+  }
+
+  func applyProductPresentationTier(_ tier: UInt16) {
+    productTierHidesGpu =
+      tier == SEYAL_APP_TIER_HIDDEN || tier == SEYAL_APP_TIER_UNPRESENTED
+    updateVisibility()
   }
 
   /// Runtime attachment is a lifecycle concern, not a Metal presentation
@@ -639,6 +648,14 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   var terminalBridgeIsConnected: Bool {
     bridge?.isConnected == true
+  }
+
+  /// Point bridge reads at this surface's client before Bind samples execution
+  /// identity. `seyal_bridge_execution_id_*` follows the active handle, which
+  /// another test can leave on a different client.
+  @discardableResult
+  func selectTerminalBridge() -> Bool {
+    bridge?.selectClient() ?? false
   }
 
   @discardableResult

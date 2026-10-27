@@ -8,6 +8,7 @@ mod envelope;
 mod execution;
 mod message;
 mod payload;
+mod presentation;
 
 #[cfg(test)]
 mod tests;
@@ -25,9 +26,9 @@ pub use crate::pass7::{
 };
 
 pub use envelope::{
-    ErrorCode, FrameHeader, FramingError, CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS,
-    CAP_GRAPHEME_DISPLAY, CAP_OBSERVER, CAP_VIEWPORT_LINE_IDS, HEADER_LEN, MAGIC, MAJOR,
-    MAX_EXECUTION_LIST_ENTRIES, MAX_FRAME_PAYLOAD, MAX_INPUT_BYTES, MINOR,
+    ErrorCode, FrameHeader, FramingError, CAP_ATTACHMENT_DELIVERY_CONTROL, CAP_BINARY_DISPLAY,
+    CAP_COMMAND_BLOCKS, CAP_GRAPHEME_DISPLAY, CAP_OBSERVER, CAP_VIEWPORT_LINE_IDS, HEADER_LEN,
+    MAGIC, MAJOR, MAX_EXECUTION_LIST_ENTRIES, MAX_FRAME_PAYLOAD, MAX_INPUT_BYTES, MINOR,
 };
 
 pub use execution::{
@@ -42,4 +43,9 @@ pub use payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList,
     ExecutionListEntry, HostSearch, HostSelection, HostSelectionAction, InputRef, Lifecycle,
     LifecycleMessage, Resize, Resync, Role, ServerHello, TerminalMouse, TerminalMouseKind,
+};
+
+pub use presentation::{
+    decode_presentation_envelope, envelope_presentation_frame, PresentationEnvelope,
+    ResumeDelivery, SuspendDelivery,
 };

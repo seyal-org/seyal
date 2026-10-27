@@ -65,9 +65,12 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::InvalidMoveTarget => 57,
         AppError::NoDirectionalNeighbor => 58,
         AppError::StaleContainment => 59,
-        // #1010 Block Rerun.
-        AppError::BlockRunning => 60,
-        AppError::ComposerUnavailable => 61,
-        AppError::ComposerDraftOccupied => 62,
+        AppError::CrossWorkspaceAdopt => 60,
+        AppError::ExecutionNotUnpresented => 61,
+        AppError::DeliveryControlFailed => 62,
+        // #1010 Block Rerun (after window-stack delivery errors).
+        AppError::BlockRunning => 63,
+        AppError::ComposerUnavailable => 64,
+        AppError::ComposerDraftOccupied => 65,
     }
 }

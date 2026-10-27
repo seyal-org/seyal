@@ -49,7 +49,7 @@ fn two_pane_root() -> (ApplicationRoot, WorkspaceId, TabId, PaneId, PaneId) {
         w1,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -177,7 +177,11 @@ fn close_focused_pane_purges_then_commits_successor() {
     })
     .unwrap();
     // Close focused p2: R6.7a purge → reposition → successor commit (p1).
-    root.apply(AppAction::ClosePane { id: p2 }).unwrap();
+    root.apply(AppAction::ClosePane {
+        id: p2,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
     assert_eq!(root.snapshot().shell.focused_pane, p1);
     // Destroyed p2 is gone before any Back; Back from sole surviving entry is unavailable.
     let seq = root
@@ -351,7 +355,7 @@ fn open_attention_cross_window_drains_the_window_raise_effect() {
         workspace,
         true,
         true,
-        false,
+        true,
     )
     .unwrap();
     let mut root = ApplicationRoot::with_shell(shell);
@@ -383,7 +387,7 @@ fn open_attention_cross_window_drains_the_window_raise_effect() {
     })
     .unwrap();
 
-    assert_eq!(root.snapshot().shell.active_window, target_window);
+    assert_eq!(root.snapshot().shell.active_window, Some(target_window));
     assert!(root
         .snapshot()
         .pending_effects
@@ -458,7 +462,7 @@ fn two_tab_bound_root() -> (
         w1,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -624,7 +628,7 @@ fn history_traverses_unbound_pane_without_mutating_sibling_binding() {
         w1,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -829,7 +833,11 @@ fn closing_unbound_focused_pane_restores_retained_sibling_authority() {
     let unbound = root.snapshot().shell.focused_pane;
     assert!(root.snapshot().execution.is_none());
 
-    root.apply(AppAction::ClosePane { id: unbound }).unwrap();
+    root.apply(AppAction::ClosePane {
+        id: unbound,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
 
     assert_eq!(root.snapshot().shell.focused_pane, p1);
     assert_eq!(root.snapshot().execution, Some(sibling_execution));
@@ -868,7 +876,11 @@ fn closing_active_tab_restores_successor_pane_authority() {
     let (mut root, t1, t2, _p1, p2, _exec1, exec2) = two_tab_bound_root();
     assert_eq!(root.snapshot().shell.active_tab, t1);
 
-    root.apply(AppAction::CloseTab { id: t1 }).unwrap();
+    root.apply(AppAction::CloseTab {
+        id: t1,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
 
     assert_eq!(root.snapshot().shell.active_tab, t2);
     assert_eq!(root.snapshot().shell.focused_pane, p2);

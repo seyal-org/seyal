@@ -4,6 +4,7 @@
 //! `DisplayCache` type and apply/decode live here; `seyal-client` owns the instance
 //! and lifetime. Runtime may re-export the type for encode/publish — no second cache.
 
+mod chunk_decode;
 mod v1;
 mod v2;
 
@@ -11,6 +12,7 @@ use std::sync::Arc;
 
 use crate::framing::{FrameHeader, MessageType, HEADER_LEN};
 
+pub use chunk_decode::decode_chunk_payload;
 pub use v1::decode_payload_v1;
 pub use v2::{
     decode_payload_v2, encode_color, encode_v2_cell_meta, validate_v2_span, DisplayCellRole,
@@ -303,14 +305,7 @@ pub fn decode_chunk(frame: &[u8]) -> Result<DecodedDisplayChunk, DisplayError> {
     if frame.len() != expected {
         return Err(DisplayError::InvalidLength);
     }
-    let message_type =
-        MessageType::from_u16(header.message_type).ok_or(DisplayError::WrongMessageType)?;
-    let (kind, schema) = DisplayKind::from_message_type(message_type)?;
-    if schema == DISPLAY_SCHEMA_V2 {
-        decode_payload_v2(kind, &frame[HEADER_LEN..])
-    } else {
-        decode_payload_v1(kind, &frame[HEADER_LEN..])
-    }
+    decode_chunk_payload(header.message_type, &frame[HEADER_LEN..])
 }
 
 impl DisplayCache {

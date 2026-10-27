@@ -277,8 +277,12 @@ fn split_live_resize_targets_each_execution_and_rejects_stale_pane() {
         root.propose_pane_geometry(second_pane, f64::NAN, 799.0, 0.0, 0.0, 10.0, 20.0),
         Err(AppError::InvalidPayload)
     );
-    root.apply(AppAction::ClosePane { id: second_pane })
-        .expect("close second Pane");
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::ClosePane {
+        id: second_pane,
+        containment_generation: generation,
+    })
+    .expect("close second Pane");
     assert_eq!(
         root.propose_pane_geometry(second_pane, 509.0, 799.0, 0.0, 0.0, 10.0, 20.0),
         Err(AppError::UnknownPane)
@@ -322,8 +326,12 @@ fn split_live_close_pane_detaches_only_and_leaves_siblings() {
         .recorded_execution(third)
         .expect("third bound");
 
-    root.apply(AppAction::ClosePane { id: third })
-        .expect("close split leaf");
+    let containment_generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::ClosePane {
+        id: third,
+        containment_generation,
+    })
+    .expect("close split leaf");
     assert!(root.provisioning().is_unreferenced(third_execution));
     assert_eq!(
         root.provisioning().recorded_execution(second),

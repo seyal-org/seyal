@@ -7,13 +7,12 @@ use std::{
 
 use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
-    display::{decode_chunk, empty_cache, DisplayKind},
+    display::{empty_cache, DisplayKind},
     local_ipc::framing::{
         Attach, Attached, BlockTimeline, CreateExecutionRequest, CreateExecutionResult,
         CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader, MessageType, Resync,
         Role, TerminateExecutionRequest, TerminateExecutionResult, CAP_COMMAND_BLOCKS, HEADER_LEN,
     },
-    pass8::BLOCK_STATE_MESSAGE_TYPE,
     AttachmentId, ExecutionId,
 };
 
@@ -44,7 +43,12 @@ impl FinishAttachError {
     }
 }
 
+use super::delivery_wire::delivery_control_negotiated;
 use super::provisioning_wire::provisioning_negotiated;
+mod presentation;
+use presentation::{
+    decode_initial_display_chunk, display_chunk_remainder_hint, read_resync_snapshot_start_until,
+};
 
 use crate::block_cache::{is_epoch_quarantined, BlockCache};
 
@@ -69,10 +73,6 @@ fn attach_server_error(code: u16) -> ClientError {
     }
 }
 
-const DISPLAY_CHUNK_INDEX_OFFSET: usize = 32;
-const DISPLAY_CHUNK_COUNT_OFFSET: usize = 34;
-const DISPLAY_CHUNK_SEQUENCE_END: usize = 36;
-
 thread_local! {
     static FORCE_BOOTSTRAP_ATTACH_FAILURE: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
@@ -82,128 +82,6 @@ thread_local! {
 /// closed so `connect_first_running` exercises ADR-017 §6.3 dispose.
 pub fn force_bootstrap_attach_failure_for_test(force: bool) {
     FORCE_BOOTSTRAP_ATTACH_FAILURE.with(|flag| flag.set(force));
-}
-
-fn display_chunk_remainder_hint(frame: &[u8]) -> Option<usize> {
-    let header = FrameHeader::decode(frame).ok()?;
-    let message_type = MessageType::from_u16(header.message_type)?;
-    if !matches!(
-        message_type,
-        MessageType::DisplaySnapshot
-            | MessageType::DisplayDelta
-            | MessageType::DisplaySnapshotV2
-            | MessageType::DisplayDeltaV2
-    ) {
-        return None;
-    }
-    let payload = frame.get(HEADER_LEN..)?;
-    let chunk_index = u16::from_le_bytes(
-        payload
-            .get(DISPLAY_CHUNK_INDEX_OFFSET..DISPLAY_CHUNK_COUNT_OFFSET)?
-            .try_into()
-            .ok()?,
-    );
-    let chunk_count = u16::from_le_bytes(
-        payload
-            .get(DISPLAY_CHUNK_COUNT_OFFSET..DISPLAY_CHUNK_SEQUENCE_END)?
-            .try_into()
-            .ok()?,
-    );
-    (chunk_count > chunk_index).then(|| usize::from(chunk_count - chunk_index - 1))
-}
-
-enum ResyncScanFrame {
-    SnapshotStart,
-    DisplayRemainder,
-    DeferredControl,
-}
-
-fn classify_resync_scan_frame(frame: &[u8]) -> Result<ResyncScanFrame, ClientError> {
-    let header = FrameHeader::decode(frame).map_err(|_| ClientError::Protocol)?;
-    if header.message_type == BLOCK_STATE_MESSAGE_TYPE {
-        return Ok(ResyncScanFrame::DeferredControl);
-    }
-    let message_type = MessageType::from_u16(header.message_type).ok_or(ClientError::Protocol)?;
-    if message_type == MessageType::Error {
-        let error = ErrorMessage::decode(frame.get(HEADER_LEN..).ok_or(ClientError::Protocol)?)
-            .map_err(|_| ClientError::Protocol)?;
-        return Err(server_error(error.error_code));
-    }
-    match message_type {
-        MessageType::DisplaySnapshot | MessageType::DisplaySnapshotV2 => {
-            let payload = frame.get(HEADER_LEN..).ok_or(ClientError::Protocol)?;
-            let Some(index_bytes) =
-                payload.get(DISPLAY_CHUNK_INDEX_OFFSET..DISPLAY_CHUNK_COUNT_OFFSET)
-            else {
-                return Ok(ResyncScanFrame::DisplayRemainder);
-            };
-            if u16::from_le_bytes(index_bytes.try_into().map_err(|_| ClientError::Protocol)?) == 0 {
-                Ok(ResyncScanFrame::SnapshotStart)
-            } else {
-                Ok(ResyncScanFrame::DisplayRemainder)
-            }
-        }
-        MessageType::DisplayDelta | MessageType::DisplayDeltaV2 => {
-            Ok(ResyncScanFrame::DisplayRemainder)
-        }
-        MessageType::BlockTimeline
-        | MessageType::Lifecycle
-        | MessageType::CopiedText
-        | MessageType::ViewportLineIds => Ok(ResyncScanFrame::DeferredControl),
-        _ => Err(ClientError::Protocol),
-    }
-}
-
-fn read_resync_snapshot_start_until(
-    stream: &mut UnixStream,
-    deadline: Instant,
-    stale_remainder_hint: Option<usize>,
-    deferred_control: &mut Vec<u8>,
-) -> Result<Vec<u8>, ClientError> {
-    // A decoded header bounds the exact old logical remainder plus the next
-    // authoritative boundary. If corruption prevents that hint, use the same
-    // finite frame-work bound as a normal poll. Every read also shares the
-    // caller's original absolute startup deadline.
-    let scan_limit = stale_remainder_hint
-        .map(|remaining| {
-            remaining
-                .saturating_add(MAX_FRAMES_PER_POLL)
-                .saturating_add(1)
-        })
-        .unwrap_or(MAX_FRAMES_PER_POLL);
-    let mut display_remainder = stale_remainder_hint;
-    let mut deferred_frames = 0usize;
-    for _ in 0..scan_limit {
-        let frame = read_blocking_raw_frame_until(stream, deadline)?;
-        match classify_resync_scan_frame(&frame)? {
-            ResyncScanFrame::SnapshotStart => return Ok(frame),
-            ResyncScanFrame::DisplayRemainder => {
-                if let Some(remaining) = display_remainder.as_mut() {
-                    if *remaining == 0 {
-                        return Err(ClientError::Protocol);
-                    }
-                    *remaining -= 1;
-                }
-            }
-            ResyncScanFrame::DeferredControl => {
-                deferred_frames = deferred_frames
-                    .checked_add(1)
-                    .ok_or(ClientError::Capacity)?;
-                if deferred_frames > MAX_FRAMES_PER_POLL {
-                    return Err(ClientError::Capacity);
-                }
-                let retained_len = deferred_control
-                    .len()
-                    .checked_add(frame.len())
-                    .ok_or(ClientError::Capacity)?;
-                if retained_len > MAX_BUFFERED_BYTES {
-                    return Err(ClientError::Capacity);
-                }
-                deferred_control.extend_from_slice(&frame);
-            }
-        }
-    }
-    Err(ClientError::Protocol)
 }
 
 /// Pass 9 owns one wall-clock second for discovery, handshake, attach and the
@@ -455,7 +333,7 @@ impl LocalDisplayClient {
             server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
                 && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
         let dispose_request_id = if created_bootstrap { 2 } else { 1 };
-        let mut client = match Self::finish_attach_with_deadline(
+        let mut client = match Self::finish_attach_with_capability_deadline(
             stream,
             execution_id,
             role,
@@ -464,6 +342,7 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             block_metadata_negotiated,
             provisioning_negotiated(server_hello.server_capabilities),
+            delivery_control_negotiated(server_hello.server_capabilities),
             // §6.3 dispose only for Created never-bound bootstrap orphans — not
             // adopt/reconnect of a live survivor (connect_first with existing id).
             created_bootstrap,
@@ -539,7 +418,7 @@ impl LocalDisplayClient {
         let block_metadata_negotiated =
             server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
                 && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
-        Self::finish_attach_with_deadline(
+        let client = Self::finish_attach_with_capability_deadline(
             stream,
             execution_id,
             role,
@@ -548,11 +427,13 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             block_metadata_negotiated,
             provisioning_negotiated(server_hello.server_capabilities),
+            delivery_control_negotiated(server_hello.server_capabilities),
             false,
             1,
             deadline,
         )
-        .map_err(|failure| failure.error)
+        .map_err(|failure| failure.error)?;
+        Ok(client)
     }
 
     /// Benchmark-only control connection that preserves the exact Pass 7
@@ -574,7 +455,7 @@ impl LocalDisplayClient {
             false,
             deadline,
         )?;
-        Self::finish_attach_with_deadline(
+        let client = Self::finish_attach_with_capability_deadline(
             stream,
             execution_id,
             role,
@@ -583,11 +464,13 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             false,
             provisioning_negotiated(server_hello.server_capabilities),
+            delivery_control_negotiated(server_hello.server_capabilities),
             false,
             1,
             deadline,
         )
-        .map_err(|failure| failure.error)
+        .map_err(|failure| failure.error)?;
+        Ok(client)
     }
 
     #[cfg(test)]
@@ -617,7 +500,38 @@ impl LocalDisplayClient {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
     pub(crate) fn finish_attach_with_deadline(
+        stream: UnixStream,
+        execution_id: ExecutionId,
+        role: Role,
+        command_blocks_supported: bool,
+        extended_terminal_key_supported: bool,
+        runtime_id: u128,
+        block_metadata_negotiated: bool,
+        execution_provisioning_negotiated: bool,
+        dispose_never_bound_orphan: bool,
+        dispose_request_id: u64,
+        deadline: Instant,
+    ) -> Result<Self, FinishAttachError> {
+        Self::finish_attach_with_capability_deadline(
+            stream,
+            execution_id,
+            role,
+            command_blocks_supported,
+            extended_terminal_key_supported,
+            runtime_id,
+            block_metadata_negotiated,
+            execution_provisioning_negotiated,
+            false,
+            dispose_never_bound_orphan,
+            dispose_request_id,
+            deadline,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn finish_attach_with_capability_deadline(
         mut stream: UnixStream,
         execution_id: ExecutionId,
         role: Role,
@@ -626,6 +540,7 @@ impl LocalDisplayClient {
         runtime_id: u128,
         block_metadata_negotiated: bool,
         execution_provisioning_negotiated: bool,
+        delivery_control_negotiated: bool,
         // When true, this attach is disposing a Created never-bound orphan
         // (bootstrap intent). Snapshot/identity failure then applies ADR-017
         // §6.3 row 2. Adopt/reconnect of a live survivor must pass false so a
@@ -693,11 +608,18 @@ impl LocalDisplayClient {
                         deadline,
                         remainder,
                         &mut deferred_control,
+                        attached.attachment_id,
+                        delivery_control_negotiated,
                     )?,
                     None => read_blocking_raw_frame_until(&mut stream, deadline)?,
                 };
-                stale_remainder_hint = display_chunk_remainder_hint(&first_frame);
-                let first = decode_chunk(&first_frame).map_err(|_| ClientError::Display)?;
+                stale_remainder_hint =
+                    display_chunk_remainder_hint(&first_frame, delivery_control_negotiated);
+                let first = decode_initial_display_chunk(
+                    &first_frame,
+                    attached.attachment_id,
+                    delivery_control_negotiated,
+                )?;
                 if first.kind != DisplayKind::Snapshot || first.chunk_index != 0 {
                     return Err(ClientError::Protocol);
                 }
@@ -706,9 +628,13 @@ impl LocalDisplayClient {
                 let mut complete = batch.push(first)?;
                 for _ in 1..chunk_count {
                     let frame = read_blocking_raw_frame_until(&mut stream, deadline)?;
-                    stale_remainder_hint = display_chunk_remainder_hint(&frame);
-                    complete =
-                        batch.push(decode_chunk(&frame).map_err(|_| ClientError::Display)?)?;
+                    stale_remainder_hint =
+                        display_chunk_remainder_hint(&frame, delivery_control_negotiated);
+                    complete = batch.push(decode_initial_display_chunk(
+                        &frame,
+                        attached.attachment_id,
+                        delivery_control_negotiated,
+                    )?)?;
                 }
                 if !complete {
                     return Err(ClientError::Protocol);
@@ -877,6 +803,10 @@ impl LocalDisplayClient {
             highest_v2_error_id: 0,
             last_admitted_mouse_action_id: 0,
             execution_provisioning_negotiated,
+            delivery_control_negotiated,
+            delivery_suspended: false,
+            resume_sequence: 0,
+            resume_fenced: false,
             next_provisioning_request_id: 1,
             harness_probe: false,
             pending_create_requests: std::collections::HashSet::new(),
@@ -889,16 +819,6 @@ impl LocalDisplayClient {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn read_blocking_frame(
-    stream: &mut UnixStream,
-) -> Result<(MessageType, Vec<u8>), ClientError> {
-    let frame = read_blocking_raw_frame(stream)?;
-    let header = FrameHeader::decode(&frame[..HEADER_LEN]).map_err(|_| ClientError::Protocol)?;
-    let message_type = MessageType::from_u16(header.message_type).ok_or(ClientError::Protocol)?;
-    Ok((message_type, frame[HEADER_LEN..].to_vec()))
-}
-
 pub(crate) fn read_blocking_frame_until(
     stream: &mut UnixStream,
     deadline: Instant,
@@ -907,23 +827,6 @@ pub(crate) fn read_blocking_frame_until(
     let header = FrameHeader::decode(&frame[..HEADER_LEN]).map_err(|_| ClientError::Protocol)?;
     let message_type = MessageType::from_u16(header.message_type).ok_or(ClientError::Protocol)?;
     Ok((message_type, frame[HEADER_LEN..].to_vec()))
-}
-
-#[cfg(test)]
-fn read_blocking_raw_frame(stream: &mut UnixStream) -> Result<Vec<u8>, ClientError> {
-    use std::io::Read;
-    let mut header_bytes = [0u8; HEADER_LEN];
-    stream
-        .read_exact(&mut header_bytes)
-        .map_err(|_| ClientError::Io)?;
-    let header = FrameHeader::decode(&header_bytes).map_err(|_| ClientError::Protocol)?;
-    let mut frame = Vec::with_capacity(HEADER_LEN + header.payload_len as usize);
-    frame.extend_from_slice(&header_bytes);
-    frame.resize(HEADER_LEN + header.payload_len as usize, 0);
-    stream
-        .read_exact(&mut frame[HEADER_LEN..])
-        .map_err(|_| ClientError::Io)?;
-    Ok(frame)
 }
 
 pub(crate) fn read_blocking_raw_frame_until(
@@ -940,5 +843,8 @@ pub(crate) fn read_blocking_raw_frame_until(
     Ok(frame)
 }
 
+mod execution_inventory;
+#[cfg(test)]
+mod execution_inventory_tests;
 #[cfg(test)]
 mod tests;

@@ -48,7 +48,7 @@ int main(void) {
     REQUIRE(SEYAL_APP_ACTION_HISTORY_FORWARD == 64);
     REQUIRE(SEYAL_APP_ACTION_ZOOM_PANE == 69);
     REQUIRE(SEYAL_APP_ACTION_EQUALIZE_TAB == 75);
-    REQUIRE(SEYAL_APP_ACTION_RERUN_BLOCK == 76);
+    REQUIRE(SEYAL_APP_ACTION_RERUN_BLOCK == 77);
     REQUIRE(sizeof(SeyalAppShortcutItem) == 64);
     REQUIRE(offsetof(SeyalAppShortcutItem, key_base) == 12);
     REQUIRE(sizeof(SeyalAppPaneRegion) == 40);

@@ -10,6 +10,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Derived realization map keyed by WindowId; order follows the snapshot.
     private var realizations: [WindowKey: NSWindow] = [:]
+    /// Close requests whose `windowShouldClose` veto is still on the stack.
+    private var appKitCloseRequestsInFlight: Set<WindowKey> = []
     /// Snapshot order of realized WindowIds (AppKit z-order is not authority).
     private(set) var orderedKeys: [WindowKey] = []
 
@@ -167,12 +169,28 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
                 installLiveHost(in: hostWindow, key: next)
             }
         }
-        window.delegate = nil
         window.contentView = nil
-        // orderOut (not close): XCTest hosts may lack AppDelegate, and closing
-        // the last NSWindow would terminate the test process. Production quit
-        // still proceeds via reply(toApplicationShouldTerminate:).
-        window.orderOut(nil)
+        // `windowShouldClose` vetoes AppKit's synchronous user request.
+        // Defer `close()` until that call returns, or the veto swallows it.
+        if appKitCloseRequestsInFlight.contains(key) {
+            DispatchQueue.main.async { [window] in
+                Self.finishAppKitClose(window)
+            }
+        } else {
+            Self.finishAppKitClose(window)
+        }
+    }
+
+    /// Drop the native realization from AppKit's window list.
+    ///
+    /// `isReleasedWhenClosed = false` orders the window out but leaves it in
+    /// `NSApp.windows`. Releasing on close removes it. The extra retain
+    /// balances AppKit's release so ARC stays the owner.
+    private static func finishAppKitClose(_ window: NSWindow) {
+        window.delegate = nil
+        window.isReleasedWhenClosed = true
+        _ = Unmanaged.passRetained(window)
+        window.close()
     }
 
     private func orderFrontMakeKey(_ key: WindowKey) {
@@ -374,8 +392,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)
+        window.standardWindowButton(.closeButton)?
+            .setAccessibilityIdentifier("seyal-window-close")
         #if DEBUG
         // A restored frame wider than the display puts the resize corner
         // off-screen, so the hosted two-pane resize drag never starts.
@@ -486,6 +507,48 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         applyPendingEffectsAndReconcile()
     }
 
+    /// Dock reopen: forward ActivateWorkspace for the last active workspace.
+    func handleDockReopen() {
+        let shell = seyal_app_shell(appHandle)
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
+        action.target_execution_lo = shell.last_active_workspace_lo
+        action.target_execution_hi = shell.last_active_workspace_hi
+        _ = seyal_app_apply(appHandle, &action)
+        applyPendingEffectsAndReconcile()
+    }
+
+    /// ⌘W hierarchical close: ClosePane on the focused Pane. Rust peels
+    /// Pane → Tab → Window.
+    @objc func hierarchicalClose(_: Any?) {
+        let shell = seyal_app_shell(appHandle)
+        guard shell.window_count > 0 else { return }
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+        action.target_execution_lo = shell.focused_pane_lo
+        action.target_execution_hi = shell.focused_pane_hi
+        action.target_generation = shell.containment_generation
+        _ = seyal_app_apply(appHandle, &action)
+        applyPendingEffectsAndReconcile()
+    }
+
+    /// Title-bar close: forward CloseWindow. Destruction comes from Rust.
+    func forwardCloseWindow(_ key: WindowKey) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_WINDOW.rawValue)
+        action.target_execution_lo = key.lo
+        action.target_execution_hi = key.hi
+        action.target_generation = seyal_app_shell(appHandle).containment_generation
+        _ = seyal_app_apply(appHandle, &action)
+        applyPendingEffectsAndReconcile()
+    }
+
     @objc func cycleWindowNext(_: Any?) {
         cycleWindow(previous: false)
     }
@@ -539,8 +602,12 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     // MARK: - NSWindowDelegate (forward only; no product decisions)
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // W4b owns CloseWindow. Refuse local destroy.
-        false
+        if let key = key(for: sender) {
+            appKitCloseRequestsInFlight.insert(key)
+            defer { appKitCloseRequestsInFlight.remove(key) }
+            forwardCloseWindow(key)
+        }
+        return false
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
@@ -571,7 +638,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     func windowDidChangeOcclusionState(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED)
+        var event = SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED
+        if !window.occlusionState.contains(.visible) {
+            event |= SEYAL_APP_WINDOW_EVENT_OCCLUSION_HIDDEN
+        }
+        reportWindowEvent(window: window, event: event)
     }
 
     func windowDidMiniaturize(_ notification: Notification) {

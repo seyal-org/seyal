@@ -7,9 +7,12 @@
 //! the native composer editor; this crate owns draft/submit/Block projection.
 
 mod accessibility;
+mod action_types;
 mod apply;
 mod chrome_apply;
+mod close_apply;
 mod composer_apply;
+mod errors;
 mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
@@ -24,16 +27,20 @@ mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
+mod unpresented_apply;
 
 #[cfg(target_os = "macos")]
 pub(crate) use pane_recovery::PaneRecoveryTarget;
 
 use accessibility::accessibility_nodes;
+use errors::{
+    chrome_error, close_pane_error, close_tab_error, close_window_error, composer_error,
+    palette_error,
+};
 
-pub use native_effect::NativeEffect;
+pub use action_types::{AppAction, WindowNativeEvent};
+pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
-#[cfg(test)]
-mod block_rerun_tests;
 #[cfg(test)]
 mod focus_history_tests;
 #[cfg(test)]
@@ -42,12 +49,18 @@ mod keybinding_apply_tests;
 mod pane_provisioning_tests;
 #[cfg(test)]
 mod presentation_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod quit_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod tab_provisioning_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unpresented_tests;
+#[cfg(test)]
+mod block_rerun_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
@@ -76,7 +89,7 @@ use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
 };
-use crate::shell::{FocusDirection, MoveSide, ShellAction, ShellSnapshot, ShellState, SplitAxis};
+use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
 use crate::local::LocalDisplayClient;
@@ -121,12 +134,6 @@ pub enum AppError {
     CannotCloseLastTab,
     CannotCloseLastPane,
     UnknownBlock,
-    /// Rerun refused: the Block's command is still running.
-    BlockRunning,
-    /// Rerun refused: composer is not Available (same gate as block_actions).
-    ComposerUnavailable,
-    /// Rerun refused: a non-empty draft would be overwritten.
-    ComposerDraftOccupied,
     CannotCloseBoundPane,
     NoSplitDivider,
     ProvisioningRejected,
@@ -146,12 +153,12 @@ pub enum AppError {
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
-    /// Unknown WindowId for select/cycle/report (W4a). ABI 54.
-    UnknownWindow,
-    /// Extra Window create rejected until close exists (W4a). ABI 55.
-    WindowCreationUnavailable,
     /// Native WindowActivation failed after bounded retry. ABI 53.
     WindowActivationFailed,
+    /// Unknown WindowId for select/cycle/report/close. ABI 54.
+    UnknownWindow,
+    /// New Window rejected because admission is disabled. ABI 55.
+    WindowCreationUnavailable,
     /// `Unzoom` while the active Tab has no zoom overlay. ABI 56.
     NotZoomed,
     /// Swap/move target is the same leaf or not a same-Tab leaf. ABI 57.
@@ -160,6 +167,18 @@ pub enum AppError {
     NoDirectionalNeighbor,
     /// Structural pane action carried a stale ADR-018 `containment_generation`. ABI 59.
     StaleContainment,
+    /// Adopt naming an execution owned by a different Workspace (ADR-017). ABI 60.
+    CrossWorkspaceAdopt,
+    /// Adopt/terminate of an id that is not live-unpresented in this session. ABI 61.
+    ExecutionNotUnpresented,
+    /// Attachment delivery suspend/resume failed. ABI 62.
+    DeliveryControlFailed,
+    /// Block Rerun while the Block is still running. ABI 63.
+    BlockRunning,
+    /// Block Rerun while the composer is not Available. ABI 64.
+    ComposerUnavailable,
+    /// Block Rerun while the composer draft is non-empty. ABI 65.
+    ComposerDraftOccupied,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,292 +205,6 @@ pub struct BindingEvidence {
     pub controller: bool,
     pub pty_generation: u64,
     pub alternate_screen: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AppAction {
-    Focus {
-        fence: AppFence,
-    },
-    Bind {
-        fence: AppFence,
-        evidence: BindingEvidence,
-    },
-    Refresh {
-        fence: AppFence,
-        alternate_screen: bool,
-    },
-    SubmitInput {
-        fence: AppFence,
-        text: String,
-    },
-    Quit,
-    AckEffect,
-    BeginRecovery {
-        now: Duration,
-    },
-    CompleteRecovery {
-        generation: u64,
-        outcome: AttemptOutcome,
-        now: Duration,
-        launch: Option<LaunchResult>,
-    },
-    FireScheduledRecovery {
-        generation: u64,
-        now: Duration,
-    },
-    AckRecoveryEffect,
-    CancelRecovery,
-    /// Host presentation progress after connect (`RestoringInteraction` / `Usable`).
-    AdvanceRecoveryStage {
-        stage: RecoveryStage,
-    },
-    /// Begin a continuity-identity commit attempt (pins retained across episodes).
-    BeginReconstructionAttempt,
-    /// Commit Runtime/execution continuity and a fresh attachment. Rust is the
-    /// sole fencing authority (ADR-015 / #1065).
-    CommitReconstruction {
-        runtime: ContinuityIdentity,
-        execution: ContinuityIdentity,
-        attachment: ContinuityIdentity,
-        controller_authority_committed: bool,
-        authoritative_snapshot_committed: bool,
-    },
-    /// Mark reconstruction disconnected after the host drops the live client.
-    DisconnectReconstruction,
-    SetComposerDraft {
-        fence: AppFence,
-        text: String,
-        composer_epoch: u64,
-    },
-    SubmitComposer {
-        fence: AppFence,
-        composer_epoch: u64,
-    },
-    ApplyComposerResult {
-        fence: AppFence,
-        request_id: u64,
-        accepted: bool,
-    },
-    ApplyRuntimeBlocks {
-        fence: AppFence,
-        records: Vec<RuntimeBlockRecord>,
-    },
-    /// Relay the attached client's Runtime-published composer eligibility
-    /// (ADR-009 invariant 7). `None` clears it when the transport is lost.
-    ApplyRuntimeComposerStatus {
-        fence: AppFence,
-        eligibility: Option<RuntimeComposerEligibility>,
-        revision: u64,
-    },
-    /// User choice of the non-TUI presentation (#867).
-    /// `raw` keeps Raw across TUI entry and exit. Clearing it follows
-    /// structured eligibility again.
-    SelectRestingPresentation {
-        fence: AppFence,
-        raw: bool,
-    },
-    SetLeftPanel {
-        mode: LeftPanelMode,
-    },
-    SetInspectorMode {
-        mode: InspectorMode,
-    },
-    SelectAgent {
-        fence: AppFence,
-        id: AgentId,
-    },
-    OpenAttention {
-        fence: AppFence,
-        id: AttentionId,
-    },
-    ReplaceChrome {
-        fence: AppFence,
-        agents: Vec<crate::chrome::AgentRecord>,
-        attention: Vec<crate::chrome::AttentionItem>,
-    },
-    SelectWorkspace {
-        id: WorkspaceId,
-    },
-    SelectTab {
-        id: TabId,
-    },
-    CreateTab,
-    CloseTab {
-        id: TabId,
-    },
-    TerminateExecution {
-        fence: AppFence,
-    },
-    SplitFocused {
-        axis: SplitAxis,
-    },
-    ClosePane {
-        id: PaneId,
-    },
-    FocusPane {
-        id: PaneId,
-    },
-    /// Tab-scoped zoom overlay; does not destroy other leaves (PT1 / PT5).
-    ZoomPane {
-        id: PaneId,
-    },
-    Unzoom,
-    SwapPanes {
-        a: PaneId,
-        b: PaneId,
-    },
-    MovePaneBeside {
-        pane: PaneId,
-        neighbor: PaneId,
-        side: MoveSide,
-    },
-    FocusDirection {
-        direction: FocusDirection,
-    },
-    EqualizeFocused,
-    EqualizeTab,
-    /// Drag the divider that `pane` leads to a pointer position (#928).
-    MoveSplitDivider {
-        pane: PaneId,
-        position: SplitPosition,
-    },
-    SetShellVisibility {
-        left: bool,
-        inspector: bool,
-        tab_strip: bool,
-    },
-    OpenComposerHistory {
-        fence: AppFence,
-    },
-    SetComposerHistoryFilter {
-        fence: AppFence,
-        query: String,
-    },
-    MoveComposerHistorySelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    SelectComposerHistory {
-        fence: AppFence,
-        composer_epoch: u64,
-    },
-    CloseComposerHistory {
-        fence: AppFence,
-    },
-    /// Global keyboard-first command palette (#932). Rows/selection are
-    /// derived fresh from Shell/Chrome; no command is ever fabricated.
-    OpenPalette {
-        fence: AppFence,
-    },
-    SetPaletteQuery {
-        fence: AppFence,
-        query: String,
-    },
-    MovePaletteSelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    /// Run the selected palette row. When `address` is `Some`, Navigate that
-    /// host-echoed address (SPEC-022 R7.2). When `None`, run the frozen
-    /// selected verb/chrome command. Never re-resolves by ordinal.
-    RunPalette {
-        fence: AppFence,
-        address: Option<ResourceAddress>,
-    },
-    /// Atomic Navigate(address) commit (SPEC-022 §4).
-    Navigate {
-        fence: AppFence,
-        address: ResourceAddress,
-    },
-    /// Focus-history Back (SPEC-022 §6 / N3). `observed` must match cursor.
-    HistoryBack {
-        fence: AppFence,
-        observed: FocusSeq,
-    },
-    /// Focus-history Forward (SPEC-022 §6 / N3). `observed` must match cursor.
-    HistoryForward {
-        fence: AppFence,
-        observed: FocusSeq,
-    },
-    ClosePalette {
-        fence: AppFence,
-    },
-    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
-    OpenGoto {
-        fence: AppFence,
-        scope: GotoScope,
-    },
-    SetGotoScope {
-        fence: AppFence,
-        scope: GotoScope,
-    },
-    CycleGotoScope {
-        fence: AppFence,
-    },
-    SetGotoQuery {
-        fence: AppFence,
-        query: String,
-    },
-    MoveGotoSelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    /// Run the selected goto row by stored/host-echoed address.
-    RunGoto {
-        fence: AppFence,
-        address: Option<ResourceAddress>,
-    },
-    CloseGoto {
-        fence: AppFence,
-    },
-    /// Bind the inspector to one Block of the focused Pane (#935).
-    SelectBlock {
-        fence: AppFence,
-        id: BlockId,
-    },
-    ClearBlockSelection {
-        fence: AppFence,
-    },
-    /// Load a focused-Pane Block's command as the composer draft so the host
-    /// submits it through the ordinary composer path (#1010 Rerun).
-    RerunBlock {
-        fence: AppFence,
-        id: BlockId,
-        composer_epoch: u64,
-    },
-    /// ADR-018 §2.2 window selection (W4a).
-    SelectWindow {
-        id: WindowId,
-    },
-    CycleWindow {
-        direction: crate::shell::CycleDirection,
-    },
-    /// Target-free New Window (ADR-018 §2.2 / §3.3a): Rust resolves Workspace.
-    CreateWindow,
-    /// Forwarded native window presentation input; host derives no product state.
-    ReportWindowEvent {
-        window: WindowId,
-        event: WindowNativeEvent,
-    },
-}
-
-/// Typed native window inputs (ADR-018 §2.3). Recorded; no product mutation in W4a.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u16)]
-pub enum WindowNativeEvent {
-    BecameKey = 0,
-    ResignedKey = 1,
-    BecameMain = 2,
-    ResignedMain = 3,
-    OcclusionChanged = 4,
-    Miniaturized = 5,
-    Deminiaturized = 6,
-    EnteredFullscreen = 7,
-    ExitedFullscreen = 8,
-    ScreenOrScaleChanged = 9,
-    /// Host exhausted bounded WindowActivation retries (SPEC-022 R5.4).
-    ActivationFailed = 10,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -584,6 +317,10 @@ pub struct ApplicationRoot {
     /// Never duplicates [`Self::client_handle`].
     #[cfg(target_os = "macos")]
     extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Dispose-only Controller clients, keyed by synthetic owner and never
+    /// associated with a shell Pane or display handle.
+    #[cfg(target_os = "macos")]
+    dispose_clients: HashMap<crate::provisioning::ConnectionOwner, LocalDisplayClient>,
     /// Pane → registry raw for display/terminate (includes first pane).
     #[cfg(target_os = "macos")]
     pane_client_raws: HashMap<PaneId, u64>,
@@ -593,13 +330,17 @@ pub struct ApplicationRoot {
     /// In-flight second-Controller connect (off the host poll thread).
     #[cfg(target_os = "macos")]
     pending_live_attach: Option<live_attach_apply::PendingLiveAttach>,
+    /// In-flight cold Runtime inventory request, separate from per-Pane attach.
+    #[cfg(target_os = "macos")]
+    pending_unpresented_inventory:
+        Option<std::sync::mpsc::Receiver<Result<Vec<ExecutionId>, crate::local::ClientError>>>,
     /// Created executions waiting for a free live-attach worker (ADR-017 §6.3).
     #[cfg(target_os = "macos")]
     queued_live_attaches: VecDeque<(crate::provisioning::ConnectionOwner, ExecutionId)>,
     /// Test gate: worker waits before `connect_execution_id`.
     #[cfg(target_os = "macos")]
     live_attach_gate: Option<std::sync::mpsc::Receiver<()>>,
-    /// Last forwarded window presentation event (not product state).
+    /// Last forwarded native window event; BecameKey also commits product selection.
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
     /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
     quit_deadline: Option<std::time::Instant>,
@@ -642,10 +383,8 @@ impl ApplicationRoot {
         for window in &snap.windows {
             pending_effects.push(NativeEffect::RealizeWindow { window: window.id });
         }
-        if !snap.windows.is_empty() {
-            pending_effects.push(NativeEffect::OrderFrontMakeKey {
-                window: snap.active_window,
-            });
+        if let Some(window) = snap.active_window {
+            pending_effects.push(NativeEffect::OrderFrontMakeKey { window });
         }
         let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
@@ -681,11 +420,15 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             extra_pane_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
+            dispose_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pane_client_raws: HashMap::new(),
             #[cfg(target_os = "macos")]
             inject_live_attach_failures: 0,
             #[cfg(target_os = "macos")]
             pending_live_attach: None,
+            #[cfg(target_os = "macos")]
+            pending_unpresented_inventory: None,
             #[cfg(target_os = "macos")]
             queued_live_attaches: VecDeque::new(),
             #[cfg(target_os = "macos")]
@@ -695,6 +438,72 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             live_attachments: Vec::new(),
         }
+    }
+
+    /// Test-only: fail the next `n` live second-Controller connects (ADR-017 §6.3).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn inject_live_attach_failures(&mut self, n: u32) {
+        self.inject_live_attach_failures = n;
+    }
+
+    /// Hold the next live second-Controller connect until `tx.send(())`.
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn gate_next_live_attach(&mut self, rx: std::sync::mpsc::Receiver<()>) {
+        self.live_attach_gate = Some(rx);
+    }
+
+    /// Extra per-pane Controller registry entries (second+ tabs).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn extra_pane_client_count(&self) -> usize {
+        self.extra_pane_clients.len()
+    }
+
+    /// Queued `AttachController` work waiting for the in-flight worker.
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn queued_live_attach_count(&self) -> usize {
+        self.queued_live_attaches.len()
+    }
+
+    /// True when the production poll path must run [`Self::poll_client`] for
+    /// create/attach/terminate progress (not every Candidate-D frame).
+    #[cfg(target_os = "macos")]
+    pub(crate) fn needs_provisioning_drive(&self) -> bool {
+        if self.live_client_handle_for_test().is_none()
+            && self.wire_client.is_none()
+            && self.dispose_clients.is_empty()
+        {
+            return false;
+        }
+        self.pending_live_attach.is_some()
+            || !self.queued_live_attaches.is_empty()
+            || self.provisioning.has_outstanding_intent()
+            || !self.pending_wire_effects.is_empty()
+    }
+
+    /// Registry handle for a pane's Controller, if attached.
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn pane_client_raw(&self, pane: PaneId) -> Option<u64> {
+        self.pane_client_raws.get(&pane).copied()
+    }
+
+    /// Whether the pane's Controller still accepts a nonblocking poll (unrelated
+    /// work continues during CreateTab attach).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn pane_client_poll_ok(&self, pane: PaneId) -> bool {
+        let Some(raw) = self.pane_client_raws.get(&pane).copied() else {
+            return false;
+        };
+        crate::ffi::with_client_mut(raw, |client| client.poll_prepare().is_ok()).unwrap_or(false)
+    }
+
+    pub fn snapshot_generation(&self) -> u64 {
+        self.snapshot_generation
     }
 
     /// R8.4: clear chord prefix without dispatch and without PTY bytes.
@@ -710,12 +519,6 @@ impl ApplicationRoot {
 
     pub fn provisioning_mut(&mut self) -> &mut ProvisioningSession {
         &mut self.provisioning
-    }
-
-    /// Monotonic product-state generation; every successful transition bumps
-    /// it. FFI encoders use it to skip re-projecting unchanged state.
-    pub fn snapshot_generation(&self) -> u64 {
-        self.snapshot_generation
     }
 
     pub fn fence(&self) -> AppFence {
@@ -827,7 +630,3 @@ impl ApplicationRoot {
         Err(error)
     }
 }
-
-pub(super) use chrome_apply::{
-    chrome_error, close_pane_error, close_tab_error, composer_error, palette_error,
-};

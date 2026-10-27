@@ -208,6 +208,7 @@ int32_t seyal_bridge_wants_write_for(uint64_t handle);
 int32_t seyal_bridge_flush_writable(void);
 int32_t seyal_bridge_flush_writable_for(uint64_t handle);
 int32_t seyal_bridge_submit_utf8(const uint8_t *bytes, uint32_t len);
+int32_t seyal_bridge_submit_utf8_for(uint64_t handle, const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_submit_paste(const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_submit_host_selection(
     uint8_t action,

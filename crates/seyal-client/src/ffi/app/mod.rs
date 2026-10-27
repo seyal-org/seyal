@@ -90,7 +90,7 @@ pub struct SeyalAppAction {
     pub target_execution_hi: u64,
     pub target_attachment_lo: u64,
     pub target_attachment_hi: u64,
-    pub target_pty_generation: u64,
+    pub target_generation: u64,
     pub payload: *const u8,
     pub payload_len: u32,
     pub reserved: u32,
@@ -554,21 +554,15 @@ pub unsafe extern "C" fn seyal_app_apply(handle: u64, action: *const SeyalAppAct
         let Some(state) = apps.get_mut(&handle) else {
             return -1;
         };
-        match state.root.apply(decoded) {
-            Ok(()) => {
-                if let Some((fence, execution)) = bind_adopt {
-                    let live = crate::ffi::active_handle();
-                    // Only the Controller for this Bind's ExecutionId — never a
-                    // leftover ACTIVE_HANDLE from another XCTest / pane.
-                    let matches = live != 0
-                        && crate::ffi::with_client(live, |client| client.execution_id())
-                            == Some(execution);
-                    if matches {
-                        let _ = state.root.adopt_bridge_handle(fence, live);
-                    }
-                }
-                0
-            }
+        let applied = state.root.apply(decoded);
+        let refresh = matches!(applied, Ok(()) | Err(crate::app::AppError::AlreadyBound));
+        let refreshed = refresh
+            && bind_adopt.is_some_and(|(fence, execution)| {
+                super::session::adopt_focused_bridge(&mut state.root, fence, execution)
+            });
+        match applied {
+            Ok(()) => 0,
+            Err(crate::app::AppError::AlreadyBound) if refreshed => 0,
             Err(_) => -4,
         }
     })

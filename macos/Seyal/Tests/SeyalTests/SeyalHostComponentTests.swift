@@ -134,7 +134,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
@@ -194,7 +194,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(
             seyal_app_snapshot(handle).eligibility,
@@ -229,7 +229,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
@@ -265,7 +265,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(
             relayComposerStatus(
@@ -282,7 +282,7 @@ final class SeyalHostComponentTests: XCTestCase {
         setDraft.size = bind.size
         setDraft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         setDraft.applySnapshotFence(seyal_app_snapshot(handle))
-        setDraft.target_pty_generation = seyal_app_composer(handle).epoch
+        setDraft.target_generation = seyal_app_composer(handle).epoch
         draft.withUnsafeBufferPointer { buffer in
             setDraft.payload = buffer.baseAddress
             setDraft.payload_len = UInt32(buffer.count)
@@ -293,7 +293,7 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(seyal_app_snapshot(handle))
-        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        submit.target_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         let requestID = seyal_app_composer(handle).request_id
         XCTAssertNotEqual(requestID, 0)
@@ -385,27 +385,59 @@ final class SeyalHostComponentTests: XCTestCase {
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // C2b/C3 enable production tab creation and pane splitting. With a sole
-        // Tab/Pane, close controls remain omitted.
+        // W2b enables hierarchical close, including the final Tab/Pane that
+        // collapses the containing Window. These capabilities remain Rust-owned.
         let shell = seyal_app_shell(view.pane.appHandle)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
-        for bit in [
-            SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE,
-            SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE,
-        ] {
-            XCTAssertEqual(shell.flags & UInt16(bit), 0)
-        }
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE), 0)
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
         let newTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-new-tab"))
         XCTAssertFalse(newTab.isHidden, "seyal-new-tab is shown when Rust allows CreateTab")
         for identifier in ["seyal-split-right", "seyal-split-down"] {
             let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
             XCTAssertFalse(control.isHidden, "\(identifier) is shown when Rust allows SplitFocused")
         }
-        for identifier in ["seyal-close-tab", "seyal-close-pane"] {
-            let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
-            XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
-        }
+        let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
+        let closePane = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-pane"))
+        XCTAssertFalse(closeTab.isHidden, "Rust permits hierarchical tab close")
+        XCTAssertFalse(closePane.isHidden, "Rust permits hierarchical pane close")
+        XCTAssertEqual(view.closeTabButton.containmentGeneration, shell.containment_generation)
+        XCTAssertEqual(view.closePaneButton.containmentGeneration, shell.containment_generation)
+    }
+
+    @MainActor
+    func testCloseTabUsesSnapshotContainmentFence() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), 0)
+        view.reconcileChrome()
+
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.tab_count, 2)
+        let currentGeneration = shell.containment_generation
+        XCTAssertEqual(view.closeTabButton.containmentGeneration, currentGeneration)
+
+        view.closeTabButton.containmentGeneration = currentGeneration &- 1
+        view.closeActiveTab(view.closeTabButton)
+        XCTAssertEqual(
+            seyal_app_shell(handle).tab_count,
+            2,
+            "a stale close control must not remove the current Tab"
+        )
+
+        view.closeTabButton.containmentGeneration = currentGeneration
+        view.closeActiveTab(view.closeTabButton)
+        XCTAssertEqual(
+            seyal_app_shell(handle).tab_count,
+            1,
+            "a current close control carries the exact Rust containment fence"
+        )
     }
 
     @MainActor
@@ -492,7 +524,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 0x1111_1111_1111_1111
         bind.target_attachment_lo = 0x2222_2222_2222_2222
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         var split = SeyalAppAction()
@@ -756,7 +788,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -798,7 +830,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
@@ -809,7 +841,7 @@ final class SeyalHostComponentTests: XCTestCase {
         begin.version = bind.version
         begin.size = bind.size
         begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
-        begin.target_pty_generation = 0
+        begin.target_generation = 0
         XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
         let generation = seyal_app_snapshot(handle).recovery_generation
 
@@ -818,7 +850,7 @@ final class SeyalHostComponentTests: XCTestCase {
         ended.size = bind.size
         ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
         ended.target_execution_lo = generation
-        ended.target_pty_generation = 1
+        ended.target_generation = 1
         ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
         XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
 
@@ -1448,6 +1480,93 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
     }
 
+    @MainActor
+    func testHiddenProductTierReleasesDedicatedGpu() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 40, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
+        // Drive one visible-frame update through the production renderer. The
+        // component harness does not own a desktop occlusion surface, so it
+        // explicitly models the focused renderer visibility transition.
+        view.renderer.setVisible(true)
+
+        var cell = SeyalPreparedCell()
+        cell.scalar = UInt32(ascii: "A")
+        cell.foreground = 0xffff_ffff
+        cell.background = 0xff10_0d0b
+        var damage = DamageMask()
+        damage.markAll(rows: 1)
+        XCTAssertEqual(
+            try [cell].withUnsafeBufferPointer { cells in
+                try view.renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: cells,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        damage: damage
+                    ),
+                    backingScale: 1,
+                    forceFullRebuild: true
+                )
+            },
+            .updated
+        )
+        XCTAssertTrue(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertGreaterThan(view.renderer.estimatedDedicatedGPUBytes, 0)
+
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_HIDDEN))
+        XCTAssertFalse(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertEqual(view.renderer.estimatedDedicatedGPUBytes, 0)
+        XCTAssertFalse(view.shouldRender)
+
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
+        view.renderer.setVisible(true)
+        XCTAssertEqual(
+            try [cell].withUnsafeBufferPointer { cells in
+                try view.renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: cells,
+                        generation: 2,
+                        rows: 1,
+                        columns: 1,
+                        damage: damage
+                    ),
+                    backingScale: 1,
+                    forceFullRebuild: true
+                )
+            },
+            .updated
+        )
+        XCTAssertTrue(view.renderer.hasDedicatedSurfaceResources)
+
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_UNPRESENTED))
+        XCTAssertFalse(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertEqual(view.renderer.estimatedDedicatedGPUBytes, 0)
+        XCTAssertFalse(view.shouldRender)
+    }
+
     /// Steady-state Candidate-D frames must not call `seyal_app_snapshot`
     /// once recovery presentation is no longer pending (#1065).
     ///
@@ -1854,7 +1973,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
@@ -1909,7 +2028,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
 
@@ -2117,7 +2236,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         for command in commands {
@@ -2128,7 +2247,7 @@ final class SeyalHostComponentTests: XCTestCase {
             draft.size = bind.size
             draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
             draft.applySnapshotFence(bound)
-            draft.target_pty_generation = composer.epoch
+            draft.target_generation = composer.epoch
             let utf8 = Array(command.utf8)
             utf8.withUnsafeBufferPointer { buffer in
                 draft.payload = buffer.baseAddress
@@ -2140,7 +2259,7 @@ final class SeyalHostComponentTests: XCTestCase {
             submit.size = bind.size
             submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
             submit.applySnapshotFence(bound)
-            submit.target_pty_generation = composer.epoch
+            submit.target_generation = composer.epoch
             XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
             var result = SeyalAppAction()
             result.version = bind.version
@@ -2188,7 +2307,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         var composer = seyal_app_composer(handle)
@@ -2257,7 +2376,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
@@ -2276,7 +2395,7 @@ final class SeyalHostComponentTests: XCTestCase {
         draft.size = bind.size
         draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         draft.applySnapshotFence(bound)
-        draft.target_pty_generation = seyal_app_composer(handle).epoch
+        draft.target_generation = seyal_app_composer(handle).epoch
         let draftBytes = Array("sleep 2".utf8)
         draftBytes.withUnsafeBufferPointer { buffer in
             draft.payload = buffer.baseAddress
@@ -2291,7 +2410,7 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(bound)
-        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        submit.target_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         // Runtime's Busy flip arrives before the correlated result.
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
@@ -2330,7 +2449,7 @@ final class SeyalHostComponentTests: XCTestCase {
         action.kind = kind
         action.applySnapshotFence(snap)
         action.reserved = reserved
-        action.target_pty_generation = seyal_app_composer(handle).epoch
+        action.target_generation = seyal_app_composer(handle).epoch
         let utf8 = Array((payload ?? "").utf8)
         return utf8.withUnsafeBufferPointer { buffer in
             action.payload = payload == nil ? nil : buffer.baseAddress
@@ -2484,7 +2603,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(seyal_app_composer(handle).block_count, 0, "no Runtime timeline in a unit test")
@@ -3136,7 +3255,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()

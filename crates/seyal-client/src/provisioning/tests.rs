@@ -1,6 +1,9 @@
 //! ADR-017 §6.3/§7 and Issue #1136 acceptance coverage for portable provisioning.
 
 use seyal_core::{AttachmentId, ExecutionId, PaneId};
+
+#[path = "tests/unpresented.rs"]
+mod unpresented;
 use seyal_protocol::framing::ErrorCode;
 
 use super::{

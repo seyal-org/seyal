@@ -18,12 +18,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use seyal_exec::{ProjectionColor, TerminalProjectionSnapshot, TerminalProjectionUpdate};
 
 pub use seyal_protocol::display::{
-    decode_chunk, empty_cache, encode_color, encode_v2_cell_meta, DecodedDisplayChunk,
-    DisplayAttributes, DisplayCache, DisplayCell, DisplayCellRole, DisplayColor, DisplayError,
-    DisplayKind, EncodedDisplayBatch, DISPLAY_CELL_LEN, DISPLAY_CHUNK_HEADER_LEN,
-    DISPLAY_CHUNK_HEADER_V2_LEN, DISPLAY_SCHEMA_V2, MAX_DISPLAY_BATCH_BYTES, MAX_DISPLAY_CELLS,
-    MAX_DISPLAY_COLUMNS, MAX_DISPLAY_ROWS, MAX_GRAPHEME_SIDECAR_BYTES, MAX_GRAPHEME_UTF8_BYTES,
-    MAX_LOGICAL_DISPLAY_BYTES,
+    decode_chunk, decode_chunk_payload, empty_cache, encode_color, encode_v2_cell_meta,
+    DecodedDisplayChunk, DisplayAttributes, DisplayCache, DisplayCell, DisplayCellRole,
+    DisplayColor, DisplayError, DisplayKind, EncodedDisplayBatch, DISPLAY_CELL_LEN,
+    DISPLAY_CHUNK_HEADER_LEN, DISPLAY_CHUNK_HEADER_V2_LEN, DISPLAY_SCHEMA_V2,
+    MAX_DISPLAY_BATCH_BYTES, MAX_DISPLAY_CELLS, MAX_DISPLAY_COLUMNS, MAX_DISPLAY_ROWS,
+    MAX_GRAPHEME_SIDECAR_BYTES, MAX_GRAPHEME_UTF8_BYTES, MAX_LOGICAL_DISPLAY_BYTES,
 };
 
 pub use encode_v1::{encode_delta, encode_snapshot};
