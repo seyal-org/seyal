@@ -2829,6 +2829,88 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(editor.string, "")
     }
 
+    /// Busy Flow Composer must forward Ctrl+C/D/Z/L to the PTY. Available must
+    /// not — those keys stay with the native editor / product keybinding path.
+    @MainActor
+    func testBusyComposerForwardsControlASCIIToTerminal() throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        let composer = ComposerBridgeView(appHandle: handle)
+        var forwarded: [UInt32] = []
+        composer.onForwardTerminalControl = { scalar in
+            forwarded.append(scalar)
+            return 0
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = composer
+        defer {
+            composer.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        composer.reconcile()
+        let editor = try XCTUnwrap(
+            accessibilityChild(composer, identifier: "seyal-composer-editor") as? NSTextView)
+
+        func keyDown(_ character: String, keyCode: UInt16) throws {
+            let event = try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: .control,
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: character,
+                charactersIgnoringModifiers: character,
+                isARepeat: false,
+                keyCode: keyCode
+            ))
+            editor.keyDown(with: event)
+        }
+
+        // Available: control scalars must not hit the PTY forward path.
+        try keyDown("c", keyCode: 8)
+        try keyDown("d", keyCode: 2)
+        XCTAssertTrue(forwarded.isEmpty, "Available composer must not forward Ctrl+C/D to the PTY")
+
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
+        composer.reconcile()
+        XCTAssertEqual(composer.accessibilityValue() as? String, "busy")
+        XCTAssertFalse(editor.isEditable)
+
+        try keyDown("c", keyCode: 8)
+        try keyDown("d", keyCode: 2)
+        try keyDown("z", keyCode: 6)
+        try keyDown("l", keyCode: 37)
+        XCTAssertEqual(
+            forwarded,
+            [0x43, 0x44, 0x5a, 0x4c],
+            "Busy composer must forward Ctrl+C/D/Z/L as control-ASCII scalars"
+        )
+    }
+
     private func applyHistory(_ handle: UInt64, kind: UInt16, payload: String? = nil, reserved: UInt32 = 0) -> Int32 {
         let snap = seyal_app_snapshot(handle)
         var action = SeyalAppAction()

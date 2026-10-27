@@ -341,8 +341,10 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     }
 
     /// While Composer is Busy (running Block / awaiting prompt), control
-    /// scalars such as Ctrl+C must reach the PTY. The NSTextView is not
-    /// editable in this mode, so without this forward the interrupt is lost.
+    /// scalars must reach the PTY. The NSTextView is not editable in this
+    /// mode, so without this forward interrupts and job-control keys are lost.
+    /// Covers Ctrl+C (interrupt), Ctrl+D (EOF), Ctrl+Z (suspend), Ctrl+L
+    /// (form-feed / redraw) and the rest of the SPEC-006 control-ASCII set.
     private func forwardBusyTerminalControlIfNeeded(_ event: NSEvent) -> Bool {
         let composer = readComposer()
         guard composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue) else {

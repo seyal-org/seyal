@@ -560,16 +560,40 @@ fn raw_clear_rearms_composer_prompt_gate() {
         runtime.entries[&id].integration == IntegrationState::Running { block: None }
     });
     h.wait_at_prompt();
-    assert!(
-        h.records().is_empty(),
-        "raw clear must not invent Blocks"
-    );
+    assert!(h.records().is_empty(), "raw clear must not invent Blocks");
     assert!(
         matches!(h.submit("pwd"), ComposerAdmission::Accepted(_)),
         "composer must accept after clear returns to prompt"
     );
     assert_eq!(
         h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+}
+
+#[test]
+fn composer_clear_rearms_prompt_gate() {
+    // Flow composer `clear` must complete its Block and return to AtPrompt /
+    // Available so the next submission is not stranded on Busy.
+    let mut h = spawn("flow-clear", PLAIN_RC, None);
+    h.wait_at_prompt();
+    assert!(matches!(h.submit("clear"), ComposerAdmission::Accepted(_)));
+    assert_eq!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+    h.wait_at_prompt();
+    assert_eq!(h.published().0, Some(ComposerEligibility::Available));
+    assert!(
+        matches!(h.submit("pwd"), ComposerAdmission::Accepted(_)),
+        "composer must accept after Flow clear returns to prompt"
+    );
+    assert_eq!(
+        h.wait_block_completed(1),
         CommandBlockLifecycle::Completed {
             exit_status: Some(0)
         }

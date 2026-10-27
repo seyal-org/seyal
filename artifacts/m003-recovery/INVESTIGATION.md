@@ -28,14 +28,17 @@ Composer → PTY → Block status (Succeeded):
 ### `clear` / Composer Busy (reproduced)
 
 - Runtime live test `raw_clear_rearms_composer_prompt_gate` proves Raw `clear\r` returns to `AtPrompt` and accepts the next composer submit (must wait for `Running` first — pre-clear `AtPrompt` is a race).
+- Runtime live test `composer_clear_rearms_prompt_gate` proves Flow composer `clear` completes its Block, republishes **Available**, and admits the next submit.
 - Headed: after Raw `clear` then Toggle Raw→Flow, composer can stick on **Busy / "Waiting for prompt..."** until a later Enter re-arms markers or eligibility is re-sampled. Mitigation: re-publish composer status when returning to Flow transcript presentation.
+- Headed (2026-10-27 20:10): after Flow `clear` / `ls`, Composer shows **Type a command...** (Available) with editable caret — not permanently Busy. Transient **Waiting for prompt...** between Block `D` and the next trusted `A` remains correct ADR-009 Busy.
 - Flow Blocks intentionally retain history across `clear` (VT clear ≠ Block timeline clear).
 
 ### Ctrl+C while Block Running (fixed)
 
 - Headed: Flow Composer Busy + `sleep 120` → Ctrl+C now yields Block **Failed** and composer **available** (`1369d438`: forward control scalars from Busy composer to PTY).
+- Host unit: Busy also forwards Ctrl+D/Z/L (`testBusyComposerForwardsControlASCIIToTerminal`); Available must not.
 
-Still to verify interactively: history/Tab completion, Ctrl+D/L, vim/nvim alternate-screen path (automation Toggle Raw flaky), SSH, tmux, high-volume scroll.
+Still to verify interactively: Tab/shell-completion adapter, vim/nvim alternate-screen path (automation Toggle Raw flaky), SSH, tmux, high-volume scroll.
 
 ## Experiential gaps vs cmux (UX benchmark)
 
