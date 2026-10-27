@@ -33,15 +33,20 @@ extension ProductChromeHostView {
             self.reconcilePaneHosts(paneCount: Int(seyal_app_shell(self.pane.appHandle).pane_count))
         }
         centerColumn.reconcileSecondaryLiveHosts(bindings: bindings)
-        wireRegistryFrameRouting()
+        let focusedDisplayHandle =
+            bindings.first { $0.focused && $0.displayHandle != 0 }?.displayHandle ?? 0
+        wireRegistryFrameRouting(focusedDisplayHandle: focusedDisplayHandle)
     }
 
     /// Primary bridge polls every Controller; secondary hosts present via
     /// `seyal_bridge_frame_for` without stealing keyboard focus.
-    func wireRegistryFrameRouting() {
+    func wireRegistryFrameRouting(focusedDisplayHandle: UInt64) {
         guard let bridge = pane.inputSurface.bridge else { return }
         bridge.onRegistryHandlePolled = { [weak self] displayHandle in
             self?.centerColumn.secondaryHost(displayHandle: displayHandle)?.noteRegistryPolled()
         }
+        guard bridge.windowFocusedDisplayHandle != focusedDisplayHandle else { return }
+        bridge.windowFocusedDisplayHandle = focusedDisplayHandle
+        bridge.publishCurrentFrame()
     }
 }

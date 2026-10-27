@@ -1,7 +1,7 @@
 //! ApplicationRoot create/close/terminate coordination with portable provisioning
 //! and the existing LocalDisplayClient create/terminate wire helpers.
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId};
 use seyal_protocol::framing::ErrorCode;
 #[cfg(target_os = "macos")]
 use seyal_protocol::local_ipc::framing::{
@@ -11,7 +11,7 @@ use seyal_protocol::local_ipc::framing::{
 
 #[cfg(all(test, target_os = "macos"))]
 use super::BindingEvidence;
-use super::{close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot};
+use super::{AppError, AppFence, ApplicationRoot};
 use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
 #[cfg(target_os = "macos")]
@@ -46,6 +46,7 @@ impl ApplicationRoot {
         self.shell
             .apply_product_create_tab()
             .map_err(|_| AppError::TabCreationUnavailable)?;
+        self.drain_shell_effects();
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
         let tab = snap.active_tab;
@@ -160,99 +161,6 @@ impl ApplicationRoot {
             // successor in this same rollback transition.
             self.record_destroyed_pane_focus(pane, true);
         }
-    }
-
-    /// Remove a Tab's chrome. Bound panes detach only; executions stay live
-    /// and enumerable. Outstanding create intents are marked dead for §6.3.
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        let focus_before = self.shell.focus_checkpoint();
-        let was_active = focus_before.active_tab == id;
-        self.shell
-            .apply(ShellAction::CloseTab {
-                id,
-                containment_generation: self.shell.containment_generation(),
-            })
-            .map_err(close_tab_error)?;
-        let removed = self.shell.take_removed_tab_panes();
-        let mut effects = Vec::new();
-        for pane in removed {
-            let pane_effects = self.provisioning.on_bound_pane_closed(pane);
-            debug_assert!(
-                !pane_effects
-                    .iter()
-                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                "removing a tab must not terminate a bound execution"
-            );
-            effects.extend(pane_effects);
-            self.clear_authority_for_pane(pane);
-        }
-        let _ = self.dispatch_wire_effects(
-            effects,
-            WireDispatchContext {
-                workspace_id: 0,
-                launch_profile: 0,
-            },
-        );
-        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a): one call on the
-        // product close path — surfaces do not scan history themselves.
-        self.record_destroyed_tab_focus(id, was_active);
-        if was_active {
-            self.activate_focused_pane_authority();
-        }
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
-    /// Close a Pane. A previously bound execution is released as an
-    /// unreferenced live record (ADR-017 §6.1 detach-only); it is never
-    /// terminated as a side effect of presentation close.
-    pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
-        let focus_before = self.shell.focus_checkpoint();
-        let was_focused = focus_before.focused_pane == id;
-        self.shell
-            .apply(ShellAction::ClosePane {
-                id,
-                containment_generation: self.shell.containment_generation(),
-            })
-            .map_err(close_pane_error)?;
-        if let Some((pane, execution)) = self.shell.take_released_execution() {
-            let effects = self.provisioning.on_bound_pane_closed(pane);
-            debug_assert!(
-                self.provisioning.is_unreferenced(execution),
-                "bound close must retain an unreferenced live record"
-            );
-            debug_assert!(
-                !effects
-                    .iter()
-                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                "closing a pane must not terminate a bound execution"
-            );
-            self.clear_authority_for_pane(pane);
-            let _ = self.dispatch_wire_effects(
-                effects,
-                WireDispatchContext {
-                    workspace_id: 0,
-                    launch_profile: 0,
-                },
-            );
-        } else {
-            // Outstanding create for this pane: keep the request until the
-            // result arrives, then §6.3 disposition.
-            self.provisioning.mark_intent_dead(id);
-        }
-        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a).
-        self.record_destroyed_pane_focus(id, was_focused);
-        if was_focused {
-            // Closing an unbound in-flight leaf changes focus too. Restore any
-            // retained authority for the shell-selected successor immediately.
-            self.activate_focused_pane_authority();
-        }
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
     }
 
     /// Explicit terminate of the fenced Controller execution (P4). Distinct
@@ -481,6 +389,14 @@ impl ApplicationRoot {
             return Ok(Some(()));
         };
         let pane = intent.pane;
+        let disposed_execution = match intent.phase {
+            crate::provisioning::IntentPhase::Disposing { execution, .. }
+            | crate::provisioning::IntentPhase::Created { execution }
+            | crate::provisioning::IntentPhase::Attaching { execution }
+            | crate::provisioning::IntentPhase::Attached { execution, .. }
+            | crate::provisioning::IntentPhase::Bound { execution } => Some(execution),
+            crate::provisioning::IntentPhase::AwaitingCreate => None,
+        };
         let outcome = match result.result_code {
             TerminateExecutionResultCode::TerminationRequested => {
                 TerminateOutcome::TerminationRequested
@@ -496,8 +412,19 @@ impl ApplicationRoot {
         for effect in effects {
             match effect {
                 ProvisioningEffect::Detach { .. } => {
-                    let _ = self.shell.release_execution(pane);
-                    self.clear_authority_for_pane(pane);
+                    if let Some(pane) = pane {
+                        let _ = self.shell.release_execution(pane);
+                        self.clear_authority_for_pane(pane);
+                    } else {
+                        #[cfg(target_os = "macos")]
+                        self.dispose_clients.remove(&intent.owner);
+                    }
+                    if matches!(outcome, TerminateOutcome::TerminationRequested)
+                        && let Some(execution) = disposed_execution
+                        && pane.is_none()
+                    {
+                        let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
+                    }
                 }
                 other => {
                     self.dispatch_wire_effects(
@@ -518,8 +445,15 @@ impl ApplicationRoot {
 
     #[cfg(target_os = "macos")]
     fn take_wire_terminate_result(&mut self) -> Result<Option<TerminateExecutionResult>, AppError> {
-        if let Some(client) = self.wire_client.as_mut() {
-            return Ok(client.take_terminate_result());
+        if let Some(client) = self.wire_client.as_mut()
+            && let Some(result) = client.take_terminate_result()
+        {
+            return Ok(Some(result));
+        }
+        for client in self.dispose_clients.values_mut() {
+            if let Some(result) = client.take_terminate_result() {
+                return Ok(Some(result));
+            }
         }
         // Prefer the focused/authority pane client (may be a second Controller).
         if let Some(pane) = self.authority.map(|authority| authority.pane)
@@ -587,7 +521,20 @@ impl ApplicationRoot {
         )
     }
 
-    fn dispatch_wire_effects(
+    pub(crate) fn dispatch_provisioning_effects(
+        &mut self,
+        effects: Vec<ProvisioningEffect>,
+    ) -> Result<(), AppError> {
+        self.dispatch_wire_effects(
+            effects,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        )
+    }
+
+    pub(super) fn dispatch_wire_effects(
         &mut self,
         effects: Vec<ProvisioningEffect>,
         ctx: WireDispatchContext,
@@ -611,9 +558,9 @@ impl ApplicationRoot {
                     self.admit_terminate(effect, request_id, execution, attachment)?;
                 }
                 ProvisioningEffect::Detach { .. } => {
-                    // Detach-only (ADR-017 §6.1): never terminate. Observed so
-                    // tab/pane close cannot drop SendTerminate; the shared
-                    // LocalDisplayClient stays for other panes' create/terminate.
+                    // Detach-only (ADR-017 §6.1): never terminate. The Controller
+                    // lease is released in `release_presentation_controller`
+                    // before this dispatch; this arm must not become SendTerminate.
                 }
                 ProvisioningEffect::BindPane { pane, execution } => {
                     self.shell
@@ -718,6 +665,13 @@ impl ApplicationRoot {
         execution: ExecutionId,
         attachment: AttachmentId,
     ) -> Result<(), AppError> {
+        if let ProvisioningEffect::SendTerminate { owner, .. } = effect
+            && let Some(client) = self.dispose_clients.get_mut(&owner)
+        {
+            return client
+                .submit_terminate_execution_with_id(request_id, execution, attachment)
+                .map_err(client_error);
+        }
         if !self.has_wire_client() {
             let _ = effect;
             return Err(AppError::NoLiveClient);
@@ -805,9 +759,9 @@ impl ApplicationRoot {
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-struct WireDispatchContext {
-    workspace_id: u128,
-    launch_profile: u16,
+pub(super) struct WireDispatchContext {
+    pub(super) workspace_id: u128,
+    pub(super) launch_profile: u16,
 }
 
 fn provisioning_app_error(failure: ProvisioningFailure) -> AppError {

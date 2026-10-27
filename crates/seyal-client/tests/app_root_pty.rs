@@ -10,14 +10,24 @@ use std::{
     time::{Duration, Instant},
 };
 
-use seyal_client::app::{ApplicationRoot, PresentationEligibility};
+use seyal_client::app::{AppAction, ApplicationRoot, PresentationEligibility};
 use seyal_client::LocalDisplayClient;
 use seyal_exec::{CommandSpec, WindowSize};
-use seyal_runtime::{local_ipc::framing::Role, ExecutionId, LocalIpcMode, Runtime, RuntimeConfig};
+use seyal_runtime::{
+    local_ipc::framing::{Role, TerminateExecutionResultCode},
+    ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
+};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn start_runtime(command: &str) -> (PathBuf, ExecutionId, thread::JoinHandle<()>) {
+    start_runtime_for(command, Duration::from_secs(5))
+}
+
+fn start_runtime_for(
+    command: &str,
+    poll_for: Duration,
+) -> (PathBuf, ExecutionId, thread::JoinHandle<()>) {
     let command = command.to_owned();
     let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
     let (ready_tx, ready_rx) = mpsc::channel();
@@ -46,7 +56,7 @@ fn start_runtime(command: &str) -> (PathBuf, ExecutionId, thread::JoinHandle<()>
             .send((socket_path, execution_id))
             .expect("test receiver");
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + poll_for;
         while runtime.execution_count() != 0 && Instant::now() < deadline {
             runtime
                 .poll_once(Some(Duration::from_millis(5)))
@@ -254,5 +264,65 @@ fn bridge_disconnect_clears_stale_root_handle() {
         root.snapshot().last_error,
         Some(seyal_client::app::AppError::NoLiveClient)
     );
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn last_window_close_releases_controller_for_readopt_and_terminate() {
+    let (socket_path, execution_id, runtime) =
+        start_runtime_for("sleep 30", Duration::from_secs(20));
+    let client =
+        LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Controller)
+            .expect("initial Controller");
+    let mut root = ApplicationRoot::new();
+    root.attach_client(root.fence(), client)
+        .expect("bind initial Controller");
+    let window = root.snapshot().shell.active_window.expect("product window");
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::CloseWindow {
+        id: window,
+        containment_generation: generation,
+    })
+    .expect("last-window close");
+    assert!(root.snapshot().shell.windows.is_empty());
+    assert_eq!(
+        root.live_client_handle_for_test(),
+        None,
+        "last-window close must drop the Controller registry entry"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut readopted = None;
+    while Instant::now() < deadline {
+        match LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Controller) {
+            Ok(client) => {
+                readopted = Some(client);
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    let mut client = readopted.expect("unpresented execution accepts a new Controller");
+    client
+        .submit_terminate_execution(execution_id)
+        .expect("new Controller admits terminate");
+    let result_deadline = Instant::now() + Duration::from_secs(3);
+    let mut result = None;
+    while Instant::now() < result_deadline {
+        match client.poll_prepare() {
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        if let Some(found) = client.take_terminate_result() {
+            result = Some(found);
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let result = result.expect("terminate result");
+    assert!(matches!(
+        result.result_code,
+        TerminateExecutionResultCode::TerminationRequested
+    ));
     runtime.join().expect("Runtime thread");
 }

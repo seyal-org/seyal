@@ -65,5 +65,8 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::InvalidMoveTarget => 57,
         AppError::NoDirectionalNeighbor => 58,
         AppError::StaleContainment => 59,
+        AppError::CrossWorkspaceAdopt => 60,
+        AppError::ExecutionNotUnpresented => 61,
+        AppError::DeliveryControlFailed => 62,
     }
 }

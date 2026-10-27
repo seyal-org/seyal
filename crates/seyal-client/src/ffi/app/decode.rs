@@ -79,7 +79,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                     action.target_attachment_hi,
                 )?),
                 controller: action.flags & FLAG_TARGET_CONTROLLER != 0,
-                pty_generation: action.target_pty_generation,
+                pty_generation: action.target_generation,
                 alternate_screen: action.flags & FLAG_ALTERNATE_SCREEN != 0,
             },
         }),
@@ -94,27 +94,27 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         4 => Ok(AppAction::Quit),
         5 => Ok(AppAction::AckEffect),
         6 => Ok(AppAction::BeginRecovery {
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
         }),
         7 => Ok(AppAction::CompleteRecovery {
             generation: action.target_execution_lo,
             outcome: decode_outcome(action.reserved, action.target_attachment_lo)?,
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
             launch: decode_launch(action.reserved),
         }),
         8 => Ok(AppAction::FireScheduledRecovery {
             generation: action.target_execution_lo,
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
         }),
         9 => Ok(AppAction::AckRecoveryEffect),
         10 => Ok(AppAction::SetComposerDraft {
             fence,
             text: read_payload(action.payload, action.payload_len)?,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         11 => Ok(AppAction::SubmitComposer {
             fence,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         12 => Ok(AppAction::ApplyComposerResult {
             fence,
@@ -183,6 +183,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         25 => Ok(AppAction::SplitFocused {
             axis: if action.reserved == 1 {
@@ -196,6 +197,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         40 => Ok(AppAction::OpenComposerHistory { fence }),
         41 => Ok(AppAction::SetComposerHistoryFilter {
@@ -208,7 +210,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         }),
         43 => Ok(AppAction::SelectComposerHistory {
             fence,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         44 => Ok(AppAction::CloseComposerHistory { fence }),
         45 => Ok(AppAction::SelectBlock {
@@ -347,13 +349,26 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             },
         }),
         67 => Ok(AppAction::CreateWindow),
-        68 => Ok(AppAction::ReportWindowEvent {
-            window: WindowId::from_bytes(id16(
-                action.target_execution_lo,
-                action.target_execution_hi,
-            )?),
-            event: decode_window_event(action.reserved)?,
-        }),
+        68 => {
+            const OCCLUSION_HIDDEN: u32 = 0x100;
+            const WINDOW_EVENT_MASK: u32 = 0xff;
+            if action.reserved & !(WINDOW_EVENT_MASK | OCCLUSION_HIDDEN) != 0 {
+                return Err(-6);
+            }
+            let event = decode_window_event(action.reserved & WINDOW_EVENT_MASK)?;
+            let occluded = action.reserved & OCCLUSION_HIDDEN != 0;
+            if occluded && event != crate::app::WindowNativeEvent::OcclusionChanged {
+                return Err(-6);
+            }
+            Ok(AppAction::ReportWindowEvent {
+                window: WindowId::from_bytes(id16(
+                    action.target_execution_lo,
+                    action.target_execution_hi,
+                )?),
+                event,
+                occluded,
+            })
+        }
         // PT5 pane-tree verbs. Numbers follow the window host actions.
         69 => Ok(AppAction::ZoomPane {
             id: PaneId::from_bytes(id16(
@@ -388,6 +403,13 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         }),
         74 => Ok(AppAction::EqualizeFocused),
         75 => Ok(AppAction::EqualizeTab),
+        76 => Ok(AppAction::CloseWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            containment_generation: action.target_generation,
+        }),
         _ => Err(-6),
     }
 }
@@ -627,7 +649,7 @@ mod reconstruction_facts_tests {
             target_execution_hi: execution.high,
             target_attachment_lo: attachment.low,
             target_attachment_hi: attachment.high,
-            target_pty_generation: 0,
+            target_generation: 0,
             payload: std::ptr::null(),
             payload_len: 0,
             reserved,

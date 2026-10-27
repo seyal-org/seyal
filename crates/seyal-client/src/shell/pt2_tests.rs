@@ -68,7 +68,7 @@ fn seed_two_workspaces() -> ShellState {
         first,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture")
 }
@@ -321,7 +321,7 @@ fn spec025_8_move_neighbor_in_another_tab_is_invalid_target() {
         workspace,
         true,
         true,
-        false,
+        true,
     )
     .expect("two-tab fixture");
     let before = shell.clone();

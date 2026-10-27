@@ -386,6 +386,22 @@ pub extern "C" fn seyal_bridge_adopt_handle(handle: u64) -> i32 {
     0
 }
 
+/// Name `handle` as the focused display client when it is the Controller for
+/// `execution`. A leftover active handle from another pane does not match.
+pub(crate) fn adopt_focused_bridge(
+    root: &mut crate::app::ApplicationRoot,
+    fence: crate::app::AppFence,
+    execution: ExecutionId,
+) -> bool {
+    let live = active_handle();
+    let matches =
+        live != 0 && super::with_client(live, |client| client.execution_id()) == Some(execution);
+    if matches {
+        let _ = root.adopt_bridge_handle(fence, live);
+    }
+    matches
+}
+
 /// Selects the client used by readiness-driven poll/flush for `handle`'s fd.
 /// Does not redirect onto the focused display client: a first-connect
 /// DispatchSource must drain its own socket (AGENTS.md level-trigger rule).

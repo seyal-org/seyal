@@ -1,7 +1,8 @@
 import XCTest
 
-/// Issue #1175 / M003 C2b headed evidence: live CreateTab, detach-only Close Tab,
-/// and explicit P4 Terminate Execution. Does not enable pane splitting.
+/// Issue #1175 / M003 C2b headed evidence: live CreateTab, generation-fenced
+/// detach-only Close Tab, and explicit P4 Terminate Execution. Does not enable
+/// pane splitting.
 @MainActor
 final class SeyalC2bCreateTabUITests: XCTestCase {
     override func setUp() {
@@ -37,10 +38,19 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 12))
         let closeTab = app.descendants(matching: .any)["seyal-close-tab"].firstMatch
         XCTAssertTrue(closeTab.waitForExistence(timeout: 8))
+        XCTAssertTrue(closeTab.isHittable, "Rust-enabled close control must be actionable")
         closeTab.click()
-        waitForRunLoop(2)
         XCTAssertEqual(app.state, .runningForeground)
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 3))
+        let removedTab = app.descendants(matching: .any)["seyal-tab-1"].firstMatch
+        let removed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: removedTab
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [removed], timeout: 5),
+            .completed,
+            "a current containment fence closes the intended Tab"
+        )
         waitForUsablePty(in: app, timeout: 12)
     }
 

@@ -146,7 +146,7 @@ extension MetalSurfaceView {
     guard recoveryAppHandle != 0 else { return }
     let now = runtimeRecoveryNowMillis()
     _ = applyRuntimeRecoveryAction(recoveryAppHandle, kind: SEYAL_APP_ACTION_BEGIN_RECOVERY) {
-      $0.target_pty_generation = now
+      $0.target_generation = now
     }
     onRecoveryEffectsPending?()
   }

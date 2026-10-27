@@ -8,6 +8,7 @@ final class ThinPaneHostView: NSView {
     let appHandle: UInt64
     var onProductChanged: (() -> Void)?
     private var lastBoundExecution = (low: UInt64(0), high: UInt64(0))
+    private var lastBoundAttachment = (low: UInt64(0), high: UInt64(0))
 
     override init(frame frameRect: NSRect) {
         appHandle = seyal_app_create()
@@ -39,7 +40,7 @@ final class ThinPaneHostView: NSView {
             self?.onProductChanged?()
         }
         inputSurface.onBridgeBecameUsable = { [weak self] in
-            self?.bindFromBridgeIfNeeded()
+            self?.bindFromBridgeIfNeeded(force: true)
             self?.onProductChanged?()
         }
     }
@@ -68,7 +69,7 @@ final class ThinPaneHostView: NSView {
 
     func activateAfterWindowPresentation() {
         inputSurface.activateRuntimeAfterWindowPresentation()
-        bindFromBridgeIfNeeded()
+        bindFromBridgeIfNeeded(force: true)
         announceAccessibility()
     }
 
@@ -92,14 +93,21 @@ final class ThinPaneHostView: NSView {
         inputSurface.detachRuntimeConnectionForApplicationTermination()
     }
 
-    private func bindFromBridgeIfNeeded() {
+    private func bindFromBridgeIfNeeded(force: Bool = false) {
         guard inputSurface.terminalBridgeIsConnected else { return }
+        // Bind samples the client whose frame this window is showing.
+        guard let bridge = inputSurface.bridge, bridge.selectPresentedClient() else { return }
+        defer { _ = bridge.selectClient() }
         let executionLow = seyal_bridge_execution_id_low()
         let executionHigh = seyal_bridge_execution_id_high()
         let attachmentLow = seyal_bridge_attachment_id_low()
         let attachmentHigh = seyal_bridge_attachment_id_high()
         guard executionLow != 0 || executionHigh != 0 else { return }
-        if lastBoundExecution == (executionLow, executionHigh) { return }
+        let execution = (low: executionLow, high: executionHigh)
+        let attachment = (low: attachmentLow, high: attachmentHigh)
+        if !force, lastBoundExecution == execution, lastBoundAttachment == attachment {
+            return
+        }
 
         let snapshot = seyal_app_snapshot(appHandle)
         var action = SeyalAppAction()
@@ -117,9 +125,10 @@ final class ThinPaneHostView: NSView {
         action.target_execution_hi = executionHigh
         action.target_attachment_lo = attachmentLow
         action.target_attachment_hi = attachmentHigh
-        action.target_pty_generation = 1
+        action.target_generation = 1
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
-        lastBoundExecution = (executionLow, executionHigh)
+        lastBoundExecution = execution
+        lastBoundAttachment = attachment
         announceAccessibility()
     }
 

@@ -83,6 +83,10 @@ final class RustDisplayBridge {
   let handleBox = RustBridgeHandleBox()
   var teardown: RustBridgeTeardownCoordinator!
   var clientHandle: UInt64 = 0
+  /// This window's focused Pane registry handle. The primary surface publishes
+  /// that prepared frame. Zero keeps `clientHandle`, so a background window
+  /// does not adopt another window's focus.
+  var windowFocusedDisplayHandle: UInt64 = 0
   var isConnected = false
   var lastRecoveryResult = RecoveryResult.current()
   /// The last bundled-helper failure is retained for the recovery coordinator
@@ -407,6 +411,15 @@ final class RustDisplayBridge {
   func selectClient() -> Bool {
     guard clientHandle != 0 else { return false }
     return seyal_bridge_select(clientHandle) == 0
+  }
+
+  /// Identity reads for the frame this window is showing. Restores the
+  /// readiness client afterward so poll stays on this bridge's own fd.
+  @discardableResult
+  func selectPresentedClient() -> Bool {
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    guard isConnected, handle != 0 else { return false }
+    return seyal_bridge_select(handle) == 0
   }
 
   /// One DispatchSourceRead per live Controller fd. CreateTab's second

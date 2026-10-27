@@ -626,7 +626,26 @@ fn section_18_5_outcome_table_duplicate_draining_and_post_release() {
         .create_execution(
             CommandSpec::new("/usr/bin/perl").args([
                 "-e",
-                r#"my $pid = fork(); die unless defined $pid; if ($pid == 0) { $SIG{HUP}="IGNORE"; $SIG{TERM}="IGNORE"; sleep 30; exit 0; } select(undef,undef,undef,1.0); exit 0;"#,
+                r#"
+                    pipe(my $ready_r, my $ready_w) or die;
+                    my $pid = fork();
+                    die unless defined $pid;
+                    if ($pid == 0) {
+                        close $ready_r;
+                        $SIG{HUP} = "IGNORE";
+                        $SIG{TERM} = "IGNORE";
+                        $| = 1;
+                        print "drain-child-ready\n";
+                        syswrite($ready_w, "ready\n") == 6 or die;
+                        close $ready_w;
+                        sleep 30;
+                        exit 0;
+                    }
+                    close $ready_w;
+                    <$ready_r> // die;
+                    select(undef, undef, undef, 1.0);
+                    exit 0;
+                "#,
             ]),
             WindowSize::cells(80, 24).expect("size"),
         )
@@ -636,6 +655,7 @@ fn section_18_5_outcome_table_duplicate_draining_and_post_release() {
         h.runtime.lookup(draining).unwrap().lifecycle,
         ExecutionLifecycle::Running
     );
+    h.wait_row_contains(draining, "drain-child-ready");
     std::thread::sleep(Duration::from_millis(1200));
     assert_eq!(
         h.runtime.lookup(draining).unwrap().lifecycle,

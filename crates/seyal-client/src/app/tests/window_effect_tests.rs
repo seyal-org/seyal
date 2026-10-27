@@ -80,11 +80,11 @@ fn native_became_key_updates_rust_active_window_without_ordering_loop() {
         root.apply(AppAction::AckEffect).unwrap();
     }
 
-    root.report_window_event(second, crate::app::WindowNativeEvent::BecameKey)
+    root.report_window_event(second, crate::app::WindowNativeEvent::BecameKey, false)
         .unwrap();
 
     let snapshot = root.snapshot();
-    assert_eq!(snapshot.shell.active_window, second);
+    assert_eq!(snapshot.shell.active_window, Some(second));
     assert!(
         !snapshot
             .pending_effects

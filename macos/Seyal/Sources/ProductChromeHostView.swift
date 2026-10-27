@@ -483,6 +483,7 @@ final class ProductChromeHostView: NSView {
             routeFocus()
         }
         applyTheme()
+        applyPresentationTierFromSnapshot()
     }
 
     /// Global keyboard-first command palette (#932): the menu action target.
@@ -491,17 +492,6 @@ final class ProductChromeHostView: NSView {
         commandPalette.requestOpen()
     }
 
-
-    /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
-    /// WorkspaceCommand. Rust re-validates against the current route context.
-    @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {
-        guard let commandId = sender.representedObject as? UInt16 else { return }
-        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, 0, 0)
-        if code == 0 {
-            reconcileChrome()
-            routeFocus()
-        }
-    }
 
     /// R6.2.1: route Command through Rust before AppKit menu key-equivalents.
     /// Matched / cross-context projected steals consume; §6.2 step 2c miss and
@@ -609,11 +599,8 @@ final class ProductChromeHostView: NSView {
         splitRightButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) == 0
         splitDownButton.isHidden = splitRightButton.isHidden
         closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
-        closeTabButton.idLo = shell.active_tab_lo
-        closeTabButton.idHi = shell.active_tab_hi
         closePaneButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) == 0
-        closePaneButton.idLo = shell.focused_pane_lo
-        closePaneButton.idHi = shell.focused_pane_hi
+        configureCloseButtons(shell: shell)
     }
 
     func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {

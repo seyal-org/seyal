@@ -346,7 +346,7 @@ fn inactive_window_commits_target_activation_failure_does_not_retarget() {
     let (shell, win_a, win_b, _tab_a, tab_b, _pane_a, pane_b) = matrix_shell(None);
     let mut root = ApplicationRoot::with_shell(shell);
     drain_bootstrap(&mut root);
-    assert_eq!(root.snapshot().shell.active_window, win_a);
+    assert_eq!(root.snapshot().shell.active_window, Some(win_a));
 
     root.apply(AppAction::Navigate {
         fence: root.fence(),
@@ -358,7 +358,7 @@ fn inactive_window_commits_target_activation_failure_does_not_retarget() {
     })
     .expect("cross-window navigate");
     assert_eq!(root.snapshot().shell.focused_pane, pane_b);
-    assert_eq!(root.snapshot().shell.active_window, win_b);
+    assert_eq!(root.snapshot().shell.active_window, Some(win_b));
     assert_eq!(
         root.snapshot().pending_effects.last().copied(),
         Some(NativeEffect::WindowActivation { window: win_b })
@@ -368,11 +368,12 @@ fn inactive_window_commits_target_activation_failure_does_not_retarget() {
         root.apply(AppAction::ReportWindowEvent {
             window: win_b,
             event: WindowNativeEvent::ActivationFailed,
+            occluded: false,
         }),
         Err(crate::app::AppError::WindowActivationFailed)
     );
     assert_eq!(root.snapshot().shell.focused_pane, pane_b);
-    assert_eq!(root.snapshot().shell.active_window, win_b);
+    assert_eq!(root.snapshot().shell.active_window, Some(win_b));
 }
 
 /// Repeated ActivationFailed stays an error report; Rust does not enqueue more
@@ -406,12 +407,13 @@ fn repeated_activation_failure_stays_bounded_committed_focus_survives() {
             root.apply(AppAction::ReportWindowEvent {
                 window: win_b,
                 event: WindowNativeEvent::ActivationFailed,
+                occluded: false,
             }),
             Err(crate::app::AppError::WindowActivationFailed)
         );
         assert_eq!(root.snapshot().pending_effects, pending_after_navigate);
         assert_eq!(root.snapshot().shell.focused_pane, pane_b);
-        assert_eq!(root.snapshot().shell.active_window, win_b);
+        assert_eq!(root.snapshot().shell.active_window, Some(win_b));
     }
 }
 
@@ -472,8 +474,12 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         root.snapshot().pending_effects.last().copied(),
         Some(NativeEffect::WindowActivation { window: win_b })
     );
-    root.apply(AppAction::ClosePane { id: pane_b })
-        .expect("destroy during pending activation");
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::ClosePane {
+        id: pane_b,
+        containment_generation: generation,
+    })
+    .expect("destroy during pending activation");
     let after = root.snapshot();
     assert_eq!(after.shell.focused_pane, pane_b2);
     assert_eq!(
@@ -484,6 +490,7 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         root.apply(AppAction::ReportWindowEvent {
             window: win_b,
             event: WindowNativeEvent::ActivationFailed,
+            occluded: false,
         }),
         Err(crate::app::AppError::WindowActivationFailed)
     );
@@ -558,7 +565,7 @@ fn orthogonal_matrix_sample_cells_fail_closed_independently() {
     let live = ExecutionId::from_bytes([0xf1; 16]);
     let exited = ExecutionId::from_bytes([0xf2; 16]);
     let (mut shell, win_a, win_b, tab_a, tab_b, pane_a, pane_b) = matrix_shell(Some(live));
-    assert_eq!(shell.snapshot().active_window, win_a);
+    assert_eq!(shell.snapshot().active_window, Some(win_a));
 
     navigate(
         ResourceAddress::Pane {
@@ -573,7 +580,7 @@ fn orthogonal_matrix_sample_cells_fail_closed_independently() {
     )
     .expect("inactive window target");
     assert_eq!(shell.snapshot().focused_pane, pane_b);
-    assert_eq!(shell.snapshot().active_window, win_b);
+    assert_eq!(shell.snapshot().active_window, Some(win_b));
     assert_eq!(shell.pane_execution(pane_a).unwrap(), Some(live));
 
     let focus = shell.snapshot().focused_pane;

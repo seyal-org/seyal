@@ -339,7 +339,7 @@ fn initial_zero_window_reentry_workspace_is_first_workspace() {
         second,
         false,
         true,
-        false,
+        true,
     )
     .expect("zero-window shell");
 
@@ -529,7 +529,7 @@ fn moving_last_tab_preserves_recency_for_its_live_panes() {
         workspace,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture");
     let first_pane = shell.snapshot().focused_pane;
@@ -799,7 +799,7 @@ fn generated_reorder_and_window_move_sequences_preserve_structure_and_bindings()
             workspace,
             false,
             true,
-            false,
+            true,
         )
         .expect("fixture")
     };
@@ -916,7 +916,7 @@ fn composed_reorder_and_move_sequence_fences_stale_action_atomically() {
         workspace,
         false,
         true,
-        false,
+        true,
     )
     .expect("two-window fixture");
 

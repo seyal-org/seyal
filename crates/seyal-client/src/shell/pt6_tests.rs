@@ -414,24 +414,20 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
         StreamKind::Close => {
             let id = *rng.pick(&ids);
             let before_state = shell.clone();
-            let leaf_count = ids.len();
             match shell.apply(ShellAction::ClosePane {
                 id,
                 containment_generation: shell.containment_generation(),
             }) {
                 Ok(()) => {
-                    assert!(!shell.snapshot().panes.is_empty(), "P6: never zero leaves");
-                    assert!(shell.snapshot().panes.len() < leaf_count);
-                    let _ = shell.take_released_execution();
-                    assert_tab_invariants(&shell.snapshot());
-                }
-                Err(ShellError::CannotCloseLastPane) => {
-                    assert_eq!(leaf_count, 1);
-                    assert_rejection_byte_identical(
-                        &before_state,
-                        shell,
-                        ShellError::CannotCloseLastPane,
+                    let after = shell.snapshot();
+                    assert!(
+                        after.panes.iter().all(|pane| pane.id != id),
+                        "a successful close removes that Pane"
                     );
+                    let _ = shell.take_released_execution();
+                    if !after.panes.is_empty() {
+                        assert_tab_invariants(&after);
+                    }
                 }
                 Err(err) => assert_rejection_byte_identical(&before_state, shell, err),
             }
@@ -467,13 +463,9 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
                 ),
             };
             let err = shell.apply(action).expect_err("stale id must reject");
-            // Close checks last-pane after the generation fence, so a stale
-            // close on a single-leaf Tab yields CannotCloseLastPane.
-            let expected = if expect_last_pane_gate && ids.len() == 1 {
-                ShellError::CannotCloseLastPane
-            } else {
-                ShellError::UnknownPane
-            };
+            // Unknown ids fail closed before the hierarchical last-pane close.
+            let _ = expect_last_pane_gate;
+            let expected = ShellError::UnknownPane;
             assert_eq!(err, expected);
             assert_rejection_byte_identical(&before_state, shell, expected);
         }
@@ -756,52 +748,44 @@ fn spec025_p5_successful_transitions_preserve_tab_invariants() {
 }
 
 #[test]
-fn spec025_p6_close_never_yields_zero_leaves() {
+fn spec025_p6_last_pane_close_removes_the_window() {
     for seed in 1u64..=16 {
         let mut rng = Lcg::from_seed(seed.wrapping_add(400));
         let mut shell = seed_splittable();
         grow_small_tree(&mut shell, &mut rng, 2 + (seed as usize % 3));
 
-        loop {
+        for _ in 0..64 {
+            if shell.snapshot().windows.is_empty() {
+                break;
+            }
             let ids: Vec<_> = shell.snapshot().panes.iter().map(|p| p.id).collect();
             let id = *rng.pick(&ids);
-            let before = shell.clone();
             let count = shell.snapshot().panes.len();
             match shell.apply(ShellAction::ClosePane {
                 id,
                 containment_generation: shell.containment_generation(),
             }) {
                 Ok(()) => {
-                    assert!(!shell.snapshot().panes.is_empty());
-                    assert_eq!(shell.snapshot().panes.len(), count - 1);
-                    let _ = shell.take_released_execution();
-                    assert_tab_invariants(&shell.snapshot());
-                }
-                Err(ShellError::CannotCloseLastPane) => {
-                    assert_eq!(count, 1);
-                    assert_rejection_byte_identical(
-                        &before,
-                        &shell,
-                        ShellError::CannotCloseLastPane,
+                    let after = shell.snapshot();
+                    assert!(
+                        after.panes.iter().all(|pane| pane.id != id),
+                        "a successful close removes that Pane"
                     );
-                    break;
+                    if count > 1 {
+                        assert_eq!(after.panes.len(), count - 1);
+                    }
+                    let _ = shell.take_released_execution();
+                    if !after.windows.is_empty() {
+                        assert_tab_invariants(&after);
+                    }
                 }
                 Err(err) => panic!("unexpected close error: {err:?}"),
             }
-            if shell.snapshot().panes.len() == 1 {
-                let only = shell.snapshot().focused_pane;
-                let before = shell.clone();
-                assert_eq!(
-                    shell.apply(ShellAction::ClosePane {
-                        id: only,
-                        containment_generation: shell.containment_generation()
-                    }),
-                    Err(ShellError::CannotCloseLastPane)
-                );
-                assert_rejection_byte_identical(&before, &shell, ShellError::CannotCloseLastPane);
-                break;
-            }
         }
+        assert!(
+            shell.snapshot().windows.is_empty(),
+            "hierarchical close removes every Window"
+        );
     }
 }
 
@@ -909,8 +893,12 @@ fn spec025_p9_random_small_tree_sequences_preserve_p1_through_p8() {
         for _ in 0..20 {
             let kind = *rng.pick(STREAM_KINDS);
             apply_stream_step(&mut shell, &mut rng, kind);
-            assert_tab_invariants(&shell.snapshot());
-            assert!(!shell.snapshot().panes.is_empty(), "P6 via P9");
+            let snap = shell.snapshot();
+            if snap.windows.is_empty() {
+                assert!(snap.panes.is_empty(), "zero-window re-entry has no leaves");
+                break;
+            }
+            assert_tab_invariants(&snap);
         }
     }
 }

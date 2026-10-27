@@ -49,16 +49,64 @@ impl ShellState {
         let workspace = self
             .workspace(active_workspace)
             .expect("active Workspace must exist");
-        let window = workspace
-            .window(product_window.unwrap_or_else(|| {
+        let active = product_window.and_then(|id| {
+            let window = workspace.window(id)?;
+            let tab = workspace.tab(window.active_tab)?;
+            Some((window, tab))
+        });
+        let nil_tab = TabId::from_bytes([0; 16]);
+        let nil_pane = PaneId::from_bytes([0; 16]);
+        let (
+            tabs,
+            active_tab,
+            focused_pane,
+            panes,
+            tree,
+            layout,
+            allows_tab_close,
+            allows_pane_close,
+        ) = if let Some((window, tab)) = active {
+            (
                 workspace
-                    .active_window
-                    .expect("retained Workspace must have an active Window")
-            }))
-            .expect("product-active Window must exist for snapshot");
-        let tab = workspace
-            .tab(window.active_tab)
-            .expect("active Tab must exist");
+                    .tabs()
+                    .map(|item| TabSnapshot {
+                        id: item.id,
+                        title: item.title.clone(),
+                        attention: item.attention,
+                        pane_count: item.panes.len(),
+                    })
+                    .collect(),
+                window.active_tab,
+                tab.focused,
+                tab.root
+                    .pane_ids()
+                    .into_iter()
+                    .filter_map(|id| {
+                        tab.panes.get(&id).map(|pane| super::PaneSnapshot {
+                            id: pane.id,
+                            title: pane.title.clone(),
+                            execution: pane.execution,
+                            allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
+                        })
+                    })
+                    .collect(),
+                tab.root.clone(),
+                tab.root.layout_description(),
+                true,
+                true,
+            )
+        } else {
+            (
+                Vec::new(),
+                nil_tab,
+                nil_pane,
+                Vec::new(),
+                PaneTree::Leaf(nil_pane),
+                super::tree::LayoutDescription::Single,
+                false,
+                false,
+            )
+        };
         ShellSnapshot {
             workspaces: self
                 .workspaces
@@ -71,48 +119,28 @@ impl ShellState {
                     tab_count: item.tab_count(),
                 })
                 .collect(),
-            windows: self.ordered_window_snapshots(window.id),
+            windows: self.ordered_window_snapshots(product_window),
             active_workspace,
             last_active_workspace: self.last_active_workspace,
-            active_window: window.id,
+            active_window: product_window,
             containment_generation: self.containment_generation,
-            tabs: workspace
-                .tabs()
-                .map(|item| TabSnapshot {
-                    id: item.id,
-                    title: item.title.clone(),
-                    attention: item.attention,
-                    pane_count: item.panes.len(),
-                })
-                .collect(),
-            active_tab: window.active_tab,
-            focused_pane: tab.focused,
-            zoomed: tab.zoomed,
-            panes: tab
-                .root
-                .pane_ids()
-                .into_iter()
-                .filter_map(|id| {
-                    tab.panes.get(&id).map(|pane| super::PaneSnapshot {
-                        id: pane.id,
-                        title: pane.title.clone(),
-                        execution: pane.execution,
-                        allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
-                    })
-                })
-                .collect(),
-            tree: tab.root.clone(),
-            layout: tab.root.layout_description(),
+            tabs,
+            active_tab,
+            focused_pane,
+            zoomed: active.map(|(_, tab)| tab.zoomed).unwrap_or(None),
+            panes,
+            tree,
+            layout,
             last_error: self.last_error,
             allows_tab_creation: self.allows_tab_creation,
             allows_window_creation: self.allows_window_creation,
             allows_pane_splitting: self.allows_pane_splitting,
-            allows_tab_close: workspace.allows_tab_close(),
-            allows_pane_close: tab.allows_focused_pane_close(),
+            allows_tab_close,
+            allows_pane_close,
         }
     }
 
-    fn ordered_window_snapshots(&self, product_window: WindowId) -> Vec<WindowSnapshot> {
+    fn ordered_window_snapshots(&self, product_window: Option<WindowId>) -> Vec<WindowSnapshot> {
         let mut windows = Vec::new();
         for workspace in &self.workspaces {
             for window in &workspace.windows {
@@ -126,7 +154,7 @@ impl ShellState {
 fn window_snapshot(
     workspace: &Workspace,
     window: &Window,
-    product_window: WindowId,
+    product_window: Option<WindowId>,
 ) -> WindowSnapshot {
     let active_tab = window
         .tabs
@@ -148,7 +176,7 @@ fn window_snapshot(
     }
 }
 
-fn tab_snapshot(tab: &Tab, window: &Window, product_window: WindowId) -> WindowTabSnapshot {
+fn tab_snapshot(tab: &Tab, window: &Window, product_window: Option<WindowId>) -> WindowTabSnapshot {
     WindowTabSnapshot {
         id: tab.id,
         title: tab.title.clone(),
@@ -173,7 +201,7 @@ fn leaf_snapshot(
     pane: &Pane,
     tab: &Tab,
     window: &Window,
-    product_window: WindowId,
+    product_window: Option<WindowId>,
 ) -> PaneLeafSnapshot {
     PaneLeafSnapshot {
         id: pane.id,
@@ -185,17 +213,18 @@ fn leaf_snapshot(
     }
 }
 
-/// Product-derivable ADR-018 §5 tier (occlusion stays host input until W4a/W5).
+/// ADR-018 §5 product-derivable tier. Occlusion/miniaturize are host *inputs*;
+/// the host never invents the tier itself.
 fn tier_for_leaf(
     pane: PaneId,
     tab: &Tab,
     window: &Window,
-    product_window: WindowId,
+    product_window: Option<WindowId>,
 ) -> PresentationTier {
-    if tab.id != window.active_tab {
+    if window.occluded || window.miniaturized || tab.id != window.active_tab {
         return PresentationTier::Hidden;
     }
-    if window.id == product_window && pane == tab.focused {
+    if Some(window.id) == product_window && pane == tab.focused {
         PresentationTier::Focused
     } else {
         PresentationTier::Visible
@@ -226,7 +255,40 @@ impl ShellError {
             Self::NotZoomed => 18,
             Self::InvalidMoveTarget => 19,
             Self::NoDirectionalNeighbor => 20,
-            Self::WindowCreationUnavailable => 21,
+            Self::CrossWorkspaceAdopt => 21,
+            Self::ExecutionNotUnpresented => 22,
+            Self::WindowCreationUnavailable => 23,
         }
+    }
+}
+
+impl ShellState {
+    /// Record host-forwarded occlusion. Does not bump containment generation.
+    pub(crate) fn set_window_occluded(
+        &mut self,
+        id: WindowId,
+        occluded: bool,
+    ) -> Result<(), ShellError> {
+        self.window_mut(id)?.occluded = occluded;
+        Ok(())
+    }
+
+    /// Record host-forwarded miniaturize. Does not bump containment generation.
+    pub(crate) fn set_window_miniaturized(
+        &mut self,
+        id: WindowId,
+        miniaturized: bool,
+    ) -> Result<(), ShellError> {
+        self.window_mut(id)?.miniaturized = miniaturized;
+        Ok(())
+    }
+
+    fn window_mut(&mut self, id: WindowId) -> Result<&mut Window, ShellError> {
+        for workspace in &mut self.workspaces {
+            if let Some(window) = workspace.window_mut(id) {
+                return Ok(window);
+            }
+        }
+        Err(ShellError::UnknownWindow)
     }
 }
