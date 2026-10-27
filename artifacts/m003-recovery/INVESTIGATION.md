@@ -6,12 +6,7 @@ Owning Issue: #1375 (VF consolidation). Full DoD below exceeds VF scope; out-of-
 
 ## Evidence captured
 
-| Artifact | Path |
-|---|---|
-| Seyal current | `artifacts/m003-recovery/01-seyal-current.png` |
-| cmux benchmark | `artifacts/m003-recovery/02-cmux-current.webp` (+ `.png`) |
-| Seyal after smoke | `artifacts/m003-recovery/03-seyal-after-smoke.png` |
-| Geometry truth | `artifacts/m003-recovery/geometry-truth.txt` |
+Screenshots are kept **local only** (not committed to GitHub). Geometry notes: `geometry-truth.txt`.
 
 ## Terminal gate (headed, live PTY)
 
