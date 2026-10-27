@@ -39,3 +39,14 @@ fn task_input_debug_does_not_disclose_user_text() {
     assert!(!rendered.contains(secret));
     assert!(rendered.contains("REDACTED"));
 }
+
+#[test]
+fn task_input_size_error_does_not_disclose_user_text() {
+    let secret = "sensitive".repeat(PROVISIONAL_MAX_TASK_INPUT_BYTES / 9 + 1);
+    let error = TaskInput::new(&secret).unwrap_err();
+    let rendered = format!("{error}; {error:?}");
+
+    assert!(matches!(error, TaskInputError::TooLarge { .. }));
+    assert!(!rendered.contains(&secret));
+    assert!(rendered.contains("UTF-8 bytes"));
+}
