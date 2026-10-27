@@ -13,12 +13,18 @@ pub(super) fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvi
 }
 
 /// Runtime published `Available` for the bound attachment: the only way
-/// the composer becomes submittable.
+/// the composer becomes submittable. Clears the Phase-2 Raw recovery latch
+/// so Flow tests can exercise the composer.
 pub(super) fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
     root.apply(AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Available),
         revision,
+    })
+    .unwrap();
+    root.apply(AppAction::SelectRestingPresentation {
+        fence: root.fence(),
+        raw: false,
     })
     .unwrap();
 }
@@ -34,8 +40,10 @@ fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
     })
     .unwrap();
     let bound = root.snapshot().composer.unwrap();
-    assert!(matches!(bound.mode, ComposerMode::Busy { .. }));
+    // Unproven resting Raw hides the composer; submit stays disabled.
+    assert_eq!(bound.mode, ComposerMode::Hidden);
     assert!(!bound.can_submit);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
     root.apply(AppAction::SetComposerDraft {
         fence: root.fence(),
         text: "echo hi".into(),
@@ -138,7 +146,7 @@ fn unbound_cannot_authorize_flow_or_composer() {
         .any(|node| node.role == AccessibilityRole::Composer));
     assert_eq!(
         root.presentation.snapshot().input_route,
-        InputRoute::Composer
+        InputRoute::DirectTerminal
     );
     assert_ne!(snap.eligibility, PresentationEligibility::Flow);
 }
@@ -155,8 +163,9 @@ fn bind_then_focus_keeps_one_execution() {
     .unwrap();
     let snap = root.snapshot();
     assert_eq!(snap.execution, Some(bound.execution));
-    assert_eq!(snap.eligibility, PresentationEligibility::Flow);
-    assert!(snap.composer_eligible);
+    // Unproven integration rests on Raw until the first trusted Available.
+    assert_eq!(snap.eligibility, PresentationEligibility::Raw);
+    assert!(!snap.composer_eligible);
     let focused = snap.pane;
     root.apply(AppAction::Focus {
         fence: root.fence(),
@@ -192,6 +201,9 @@ fn refresh_alternate_screen_takeover_is_not_latched_at_bind() {
         evidence: evidence(2, true, false),
     })
     .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert!(!root.snapshot().composer_eligible);
+    runtime_available(&mut root, 1);
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
     assert!(root.snapshot().composer_eligible);
     root.apply(AppAction::Refresh {
@@ -295,12 +307,14 @@ fn observer_and_flow_cannot_submit_direct_input() {
             evidence: evidence(5, true, false),
         })
         .unwrap();
+    // Unproven Raw authorizes direct terminal input; without a live client the
+    // submit fails closed on transport rather than Flow's DirectInputUnauthorized.
     assert_eq!(
         controller.apply(AppAction::SubmitInput {
             fence: controller.fence(),
             text: "x".into(),
         }),
-        Err(AppError::DirectInputUnauthorized)
+        Err(AppError::NoLiveClient)
     );
 }
 

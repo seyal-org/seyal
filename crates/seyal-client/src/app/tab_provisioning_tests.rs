@@ -774,7 +774,8 @@ fn newly_bound_pane_keeps_spec_008_presentation_fence() {
         alternate_screen: false,
     })
     .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+    // Newly bound panes rest on Raw until Runtime proves a trusted prompt.
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
 
     root.apply(AppAction::Refresh {
         fence: root.fence(),

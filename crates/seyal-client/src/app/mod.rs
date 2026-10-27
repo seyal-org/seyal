@@ -310,6 +310,11 @@ pub struct ApplicationRoot {
     /// Runtime reported unsupported shell integration. SPEC-008 requires
     /// full-Pane Raw until a later status says otherwise.
     integration_unsupported: bool,
+    /// True until Runtime publishes the first trusted `Available` prompt.
+    /// ADR-009 §6 / SPEC-008 §3.2: while structured eligibility is unproven,
+    /// resting presentation is full-Pane Raw so the PTY stays usable instead
+    /// of stranding Flow on "Waiting for prompt...".
+    awaits_first_trusted_prompt: bool,
     /// Create-admitting Controller connection (first pane / session create).
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
@@ -375,7 +380,7 @@ impl ApplicationRoot {
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
         let _ = composer.apply(ComposerAction::ApplyPresentation {
             pane,
-            mode: PresentationMode::Flow,
+            mode: PresentationMode::Raw,
             input_route: InputRoute::Frozen,
         });
         // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
@@ -388,7 +393,7 @@ impl ApplicationRoot {
         }
         let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
-            presentation: PresentationSession::new(None, PresentationMode::Flow),
+            presentation: PresentationSession::new(None, PresentationMode::Raw),
             shell,
             authority: None,
             pane_authorities: HashMap::new(),
@@ -412,9 +417,13 @@ impl ApplicationRoot {
             goto: GotoState::new(),
             focus_history: FocusHistory::new(),
             alternate_screen: false,
-            resting: PresentationMode::Flow,
-            explicit_raw: false,
+            resting: PresentationMode::Raw,
+            // Phase-2 terminal recovery (#1375): start on explicit Raw so the
+            // live PTY/grid stays usable. Flow is opt-in via "Return to Flow"
+            // after the first trusted prompt (SPEC-008 §3.2 / ADR-009 §6).
+            explicit_raw: true,
             integration_unsupported: false,
+            awaits_first_trusted_prompt: true,
             #[cfg(target_os = "macos")]
             client_handle: None,
             #[cfg(target_os = "macos")]

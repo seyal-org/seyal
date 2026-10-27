@@ -49,6 +49,17 @@ fn make_primary_usable(root: &mut ApplicationRoot) {
         authoritative_snapshot_committed: true,
     })
     .unwrap();
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(crate::composer::RuntimeComposerEligibility::Available),
+        revision: 1,
+    })
+    .unwrap();
+    root.apply(AppAction::SelectRestingPresentation {
+        fence: root.fence(),
+        raw: false,
+    })
+    .unwrap();
     assert!(
         root.snapshot().composer_eligible,
         "focused primary Pane must be healthy"

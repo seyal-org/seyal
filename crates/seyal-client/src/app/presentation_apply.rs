@@ -42,7 +42,13 @@ impl ApplicationRoot {
     }
 
     pub(super) fn recompute_resting(&mut self) {
-        self.resting = if self.explicit_raw || self.integration_unsupported {
+        // Explicit Raw, unsupported shells, and unproven integration all rest
+        // on full-Pane Raw. Flow is only resting once a trusted prompt proved
+        // structured eligibility (or the user returns from explicit Raw).
+        self.resting = if self.explicit_raw
+            || self.integration_unsupported
+            || self.awaits_first_trusted_prompt
+        {
             PresentationMode::Raw
         } else {
             PresentationMode::Flow

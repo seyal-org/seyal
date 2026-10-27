@@ -211,6 +211,12 @@ mod tests {
                         revision: 1,
                     })
                     .unwrap();
+                    let fence = root.fence();
+                    root.apply(AppAction::SelectRestingPresentation {
+                        fence,
+                        raw: false,
+                    })
+                    .unwrap();
                 }
             });
         };

@@ -48,10 +48,67 @@ fn run_palette(root: &mut ApplicationRoot, query: &str) {
     .unwrap();
 }
 
+/// Publish the first trusted Available prompt and clear the recovery Raw latch
+/// so resting presentation may enter Flow (tests that assert Flow).
+fn prove_trusted_prompt(root: &mut ApplicationRoot, revision: u64) {
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Available),
+        revision,
+    })
+    .unwrap();
+    root.apply(AppAction::SelectRestingPresentation {
+        fence: root.fence(),
+        raw: false,
+    })
+    .unwrap();
+}
+
+#[test]
+fn unproven_busy_keeps_full_pane_raw_until_first_available() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert!(!root.snapshot().composer_eligible);
+
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Busy),
+        revision: 1,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert!(!root.snapshot().composer_eligible);
+
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Available),
+        revision: 2,
+    })
+    .unwrap();
+    // Explicit Raw latch survives the first Available (recovery default).
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert!(!root.snapshot().composer_eligible);
+
+    run_palette(&mut root, "return to flow");
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+    assert!(root.snapshot().composer_eligible);
+
+    // Transient Busy after the first trusted prompt stays on Flow (D→A window).
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Busy),
+        revision: 3,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+}
+
 #[test]
 fn explicit_raw_replaces_flow_and_tui_exit_returns_to_it() {
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);
+    prove_trusted_prompt(&mut root, 1);
     let execution = root.snapshot().execution;
     let attachment = root.snapshot().attachment;
     assert_eq!(
@@ -187,6 +244,9 @@ fn reconnect_refresh_restores_one_presentation_and_rejects_a_second_bind() {
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Tui);
 
     refresh(&mut root, false);
+    // Still unproven → Raw resting (not Flow).
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    prove_trusted_prompt(&mut root, 1);
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
     root.apply(AppAction::SelectRestingPresentation {
         fence: root.fence(),
@@ -234,6 +294,7 @@ fn view_toggle_raw_latches_explicit_raw_across_composer_status() {
 
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);
+    prove_trusted_prompt(&mut root, 1);
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
 
     let route = root.keybinding_route_context(false);

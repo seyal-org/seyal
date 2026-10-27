@@ -227,11 +227,28 @@ mod tests {
             reserved: 0,
         };
         assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
-        assert_eq!(seyal_app_snapshot(handle).eligibility, 1, "Flow");
+        assert_eq!(seyal_app_snapshot(handle).eligibility, 2, "Raw until trusted prompt");
 
         APPS.with(|apps| {
             let mut apps = apps.borrow_mut();
             let state = apps.get_mut(&handle).unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeComposerStatus {
+                    fence,
+                    eligibility: Some(crate::composer::RuntimeComposerEligibility::Available),
+                    revision: 1,
+                })
+                .expect("Available");
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::SelectRestingPresentation {
+                    fence,
+                    raw: false,
+                })
+                .expect("return to Flow");
             let fence = state.root.fence();
             state
                 .root

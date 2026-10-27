@@ -191,6 +191,19 @@ impl ApplicationRoot {
             .map_err(composer_error)?;
         if let Some(eligibility) = eligibility {
             self.integration_unsupported = eligibility == RuntimeComposerEligibility::Unsupported;
+            match eligibility {
+                RuntimeComposerEligibility::Available => {
+                    self.awaits_first_trusted_prompt = false;
+                }
+                RuntimeComposerEligibility::Unsupported => {
+                    // Unsupported never proves structured Flow; keep Raw resting.
+                    self.awaits_first_trusted_prompt = true;
+                }
+                RuntimeComposerEligibility::Busy => {
+                    // Transient Busy after the first Available stays on Flow.
+                    // Busy before any Available keeps awaits_first (Raw).
+                }
+            }
             self.recompute_resting();
             self.derive_presentation(self.alternate_screen)?;
         }

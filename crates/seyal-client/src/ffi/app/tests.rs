@@ -144,6 +144,7 @@ fn bound_handle() -> (u64, SeyalAppSnapshot) {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
     relay_composer_status(handle, 1, 1);
+    clear_recovery_raw_latch(handle);
     let bound = seyal_app_snapshot(handle);
     (handle, bound)
 }
@@ -156,6 +157,22 @@ fn relay_composer_status(handle: u64, eligibility: u32, revision: u64) -> i32 {
     status.reserved = eligibility;
     status.target_execution_lo = revision;
     unsafe { seyal_app_apply(handle, &status) }
+}
+
+/// Clear the Phase-2 Raw recovery latch so Flow/composer tests can proceed.
+fn clear_recovery_raw_latch(handle: u64) {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        let fence = state.root.fence();
+        state
+            .root
+            .apply(crate::app::AppAction::SelectRestingPresentation {
+                fence,
+                raw: false,
+            })
+            .expect("return to Flow");
+    });
 }
 
 #[test]
@@ -184,19 +201,16 @@ fn composer_status_relay_gates_availability_and_rejects_bad_codes() {
         reserved: 0,
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
-    // Bound but Runtime has published nothing: busy, not submittable,
-    // and the placeholder says so.
+    // Bound but unproven: full-Pane Raw, composer hidden (not stranded Busy).
+    assert_eq!(seyal_app_snapshot(handle).eligibility, 2);
     let composer = seyal_app_composer(handle);
-    assert_eq!(composer.mode, 2);
+    assert_eq!(composer.mode, 0);
     assert_eq!(composer.flags & 1, 0);
-    assert_eq!(
-        copy_text(seyal_app_copy(handle, 0)),
-        "Waiting for prompt..."
-    );
     // An unknown eligibility code is a malformed action, not a guess.
     assert_eq!(relay_composer_status(handle, 9, 1), -6);
-    assert_eq!(seyal_app_composer(handle).mode, 2);
+    assert_eq!(seyal_app_composer(handle).mode, 0);
     assert_eq!(relay_composer_status(handle, 1, 1), 0);
+    clear_recovery_raw_latch(handle);
     assert_eq!(seyal_app_composer(handle).mode, 1);
     assert_eq!(copy_text(seyal_app_copy(handle, 0)), "Type a command...");
     // Busy at a newer revision disables; a stale Available cannot undo it.
@@ -204,7 +218,7 @@ fn composer_status_relay_gates_availability_and_rejects_bad_codes() {
     assert_eq!(seyal_app_composer(handle).mode, 2);
     assert_eq!(relay_composer_status(handle, 1, 2), 0);
     assert_eq!(seyal_app_composer(handle).mode, 2);
-    // Transport lost: cleared, still busy; the next attachment restarts.
+    // Transport lost: cleared, still busy on Flow; Unsupported returns to Raw.
     assert_eq!(relay_composer_status(handle, 0, 0), 0);
     assert_eq!(seyal_app_composer(handle).mode, 2);
     assert_eq!(relay_composer_status(handle, 3, 1), 0);
@@ -427,8 +441,9 @@ fn bind_through_explicit_handle_does_not_use_implicit_select() {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &action) }, 0);
     let bound = seyal_app_snapshot(handle);
-    assert_eq!(bound.eligibility, 1);
-    assert_eq!(bound.flags & SNAP_COMPOSER, SNAP_COMPOSER);
+    // Unproven → Raw (2); composer bit clears until trusted Available.
+    assert_eq!(bound.eligibility, 2);
+    assert_eq!(bound.flags & SNAP_COMPOSER, 0);
     assert_eq!(bound.flags & SNAP_HAS_EXECUTION, SNAP_HAS_EXECUTION);
     action.kind = 0;
     assert_eq!(unsafe { seyal_app_apply(handle, &action) }, -4);
@@ -733,7 +748,7 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
     let bound = seyal_app_snapshot(handle);
-    assert_eq!(bound.eligibility, 1);
+    assert_eq!(bound.eligibility, 2);
     let mut refresh = identity_fence(2, &bound);
     refresh.flags |= FLAG_ALTERNATE_SCREEN;
     assert_eq!(unsafe { seyal_app_apply(handle, &refresh) }, 0);
@@ -744,7 +759,8 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
     refresh.flags &= !FLAG_ALTERNATE_SCREEN;
     refresh.fence_epoch = tui.epoch;
     assert_eq!(unsafe { seyal_app_apply(handle, &refresh) }, 0);
-    assert_eq!(seyal_app_snapshot(handle).eligibility, 1);
+    // Still unproven → Raw resting after TUI exit.
+    assert_eq!(seyal_app_snapshot(handle).eligibility, 2);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 

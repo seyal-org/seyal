@@ -111,7 +111,8 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
 
     let snapshot = root.snapshot();
     assert_eq!(snapshot.recovery_stage, RecoveryStage::ExecutionEnded);
-    assert_eq!(snapshot.eligibility, PresentationEligibility::Flow);
+    // Unproven resting Raw survives ExecutionEnded; composer stays hidden.
+    assert_eq!(snapshot.eligibility, PresentationEligibility::Raw);
     assert!(!snapshot.composer_eligible);
     assert_eq!(
         snapshot.composer.unwrap().mode,
