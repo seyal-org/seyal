@@ -1837,7 +1837,7 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// W4b: production window admission + last-window-close stay-alive.
+    /// W4b / W7: production window admission + last-window-close stay-alive.
     func testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)

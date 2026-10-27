@@ -59,6 +59,8 @@ mod tab_provisioning_tests;
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
+#[cfg(test)]
+mod w7_adversarial_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]

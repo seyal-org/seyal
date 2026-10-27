@@ -47,6 +47,12 @@ issue = 1219
 reason = "Host Pane region/divider projection stays one layout module; #1219 adds zoom overlay host projection beside #923/#928 geometry without a second layout engine. The window-stack merge keeps both projections in this module."
 
 [[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/app/session.rs"
+acknowledged_loc = 710
+issue = 1221
+reason = "ApplicationRoot attach/poll session stays one cold-path driver; #1221 polls attach-for-dispose clients that are not the displayed authority so Hidden→Unpresented termination still progresses without inventing a second session loop."
+
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
 acknowledged_loc = 856
 issue = 1175
