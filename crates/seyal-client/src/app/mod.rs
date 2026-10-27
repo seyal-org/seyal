@@ -42,6 +42,8 @@ pub use action_types::{AppAction, WindowNativeEvent};
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
 #[cfg(test)]
+mod block_rerun_tests;
+#[cfg(test)]
 mod focus_history_tests;
 #[cfg(test)]
 mod keybinding_apply_tests;
@@ -59,8 +61,6 @@ mod tab_provisioning_tests;
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
-#[cfg(test)]
-mod block_rerun_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
