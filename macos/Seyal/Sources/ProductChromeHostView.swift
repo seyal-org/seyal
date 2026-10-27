@@ -137,7 +137,7 @@ final class ProductChromeHostView: NSView {
         left.wantsLayer = true
         left.addSubview(leftSeam)
         leftItems.orientation = .vertical
-        leftItems.alignment = .leading
+        leftItems.alignment = .width
         leftItems.spacing = 2
         leftItems.translatesAutoresizingMaskIntoConstraints = false
         left.addSubview(workspacesButton)
