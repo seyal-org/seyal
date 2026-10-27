@@ -424,8 +424,18 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(view.left.frame.minY, view.bounds.minY)
         XCTAssertEqual(
             view.tabScroll.frame.minX,
-            12,
-            "scrollable chip row uses a small content inset inside the strip (not the former 236 rail offset)"
+            8,
+            "scrollable chip row uses a compact content inset inside the strip (not the former 236 rail offset)"
+        )
+        XCTAssertEqual(
+            view.tabStrip.frame.height,
+            ProductChromeAdaptiveDepth.tabStripHeight,
+            "C05 strip is compact (cmux density)"
+        )
+        XCTAssertEqual(
+            view.left.frame.width,
+            ProductChromeAdaptiveDepth.leftPanelWidth,
+            "C03 left panel width matches Adaptive Depth compact band"
         )
         XCTAssertLessThan(
             view.tabScroll.frame.maxX,
@@ -762,6 +772,28 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testSolePaneCollapsesSurfaceChromeAndOmitsLeftNavigator() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let handle = view.pane.appHandle
+        XCTAssertEqual(seyal_app_shell(handle).pane_count, 1)
+        XCTAssertTrue(
+            view.focusedPaneChrome.isHidden,
+            "sole Pane collapses redundant surface strip (C05 already names the Tab)"
+        )
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-pane-0"),
+            "Multipane §10: no left Pane navigator for a sole leaf"
+        )
+        let workspace = try XCTUnwrap(view.leftItems.arrangedSubviews.first as? ChromeContextRowView)
+        XCTAssertTrue(workspace.showsStatusDot, "C04 rows project a status dot")
+        XCTAssertTrue(workspace.showsSelectionAccent)
+        let menu = view.focusedPaneChrome.makeContextMenu()
+        XCTAssertFalse(menu.items.isEmpty, "pane chrome still exposes split/close menu when expanded")
+    }
+
+    @MainActor
     func testSplitProjectsInTabPerPaneChromeWithoutNewTab() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         view.reconcileChrome()
@@ -769,13 +801,9 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_shell(handle).tab_count, 1)
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tab-strip-tab-0"))
         XCTAssertNil(accessibilityChild(view, identifier: "seyal-tab-strip-tab-1"))
-        XCTAssertNotNil(
-            accessibilityChild(view, identifier: "seyal-pane-chrome"),
-            "focused Pane always projects cmux-like surface strip"
-        )
-        XCTAssertNotNil(
-            accessibilityChild(view, identifier: "seyal-pane-surface-chip"),
-            "pane chrome leads with a surface chip (Rust pane title)"
+        XCTAssertTrue(
+            view.focusedPaneChrome.isHidden,
+            "sole Pane keeps surface strip collapsed until Split"
         )
 
         // Secondary live hosts (and their chrome) require a bound sibling leaf.

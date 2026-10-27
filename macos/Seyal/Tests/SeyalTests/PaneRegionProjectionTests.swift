@@ -196,8 +196,8 @@ final class PaneRegionProjectionTests: XCTestCase {
         )
     }
 
-    /// The left panel's Pane rows follow Rust selection: exactly the focused
-    /// PaneId's row is selected.
+    /// The left panel's Pane rows follow Rust selection when Multipane §10
+    /// complexity requires a navigator (`pane_count > 1`). Sole leaves omit it.
     private func assertChromeSelectsFocusedPane(
         _ view: ProductChromeHostView,
         file: StaticString = #filePath,
@@ -205,6 +205,15 @@ final class PaneRegionProjectionTests: XCTestCase {
     ) {
         let handle = view.pane.appHandle
         let shell = seyal_app_shell(handle)
+        if shell.pane_count <= 1 {
+            XCTAssertNil(
+                button(view, "seyal-pane-0"),
+                "sole Pane omits left navigator",
+                file: file,
+                line: line
+            )
+            return
+        }
         for index in 0..<Int(shell.pane_count) {
             let row = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
             let isFocused = row.id_lo == shell.focused_pane_lo && row.id_hi == shell.focused_pane_hi

@@ -172,6 +172,24 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
     let snap = state.root.snapshot();
     for (index, workspace) in snap.shell.workspaces.iter().enumerate() {
         let selected = workspace.id == snap.shell.active_workspace;
+        // Prefer authored detail (path/label); otherwise compact tab activity from
+        // the existing WorkspaceSnapshot contract — never invent cwd/git here.
+        let detail = workspace
+            .detail
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_owned())
+            .unwrap_or_else(|| {
+                format!(
+                    "{} {}",
+                    workspace.tab_count,
+                    if workspace.tab_count == 1 {
+                        "tab"
+                    } else {
+                        "tabs"
+                    }
+                )
+            });
         push_row(
             &mut state.shell_rows,
             &mut state.shell_text,
@@ -179,9 +197,9 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 kind: 0,
                 index: index as u32,
                 id: workspace.id.to_bytes(),
-                flags: u16::from(selected),
+                flags: u16::from(selected) | (u16::from(workspace.attention) << 1),
                 title: &workspace.name,
-                detail: workspace.detail.as_deref().unwrap_or(""),
+                detail: &detail,
                 address: None,
             },
         );

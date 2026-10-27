@@ -15,6 +15,8 @@ import AppKit
 @MainActor
 final class PaneChromeBarView: NSView {
     var onClose: (() -> Void)?
+    var onSplitRight: (() -> Void)?
+    var onSplitDown: (() -> Void)?
 
     /// Leading selected-surface chip (title + Close Pane).
     private let surfaceChip = NSView()
@@ -23,6 +25,9 @@ final class PaneChromeBarView: NSView {
     private let chipUnderline = NSView()
     private let bottomSeam = NSView()
     private var chipUnderlineHeight: NSLayoutConstraint?
+    private var heightConstraint: NSLayoutConstraint!
+    private var surfaceChipTop: NSLayoutConstraint!
+    private var surfaceChipBottom: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -41,7 +46,7 @@ final class PaneChromeBarView: NSView {
         surfaceChip.setAccessibilityRole(.group)
         surfaceChip.setAccessibilityIdentifier("seyal-pane-surface-chip")
 
-        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
@@ -51,7 +56,7 @@ final class PaneChromeBarView: NSView {
         closeButton.bezelStyle = .inline
         closeButton.isBordered = false
         closeButton.setButtonType(.momentaryChange)
-        closeButton.font = .systemFont(ofSize: 12, weight: .medium)
+        closeButton.font = .systemFont(ofSize: 11, weight: .medium)
         closeButton.toolTip = "Close Pane"
         closeButton.setAccessibilityLabel("Close Pane")
         closeButton.setAccessibilityIdentifier("seyal-pane-chrome-close")
@@ -78,23 +83,28 @@ final class PaneChromeBarView: NSView {
             equalToConstant: ProductChromeAdaptiveDepth.tabUnderlineHeight
         )
         chipUnderlineHeight = underlineHeight
+        heightConstraint = heightAnchor.constraint(
+            equalToConstant: ProductChromeAdaptiveDepth.tabChipHeight
+        )
+        surfaceChipTop = surfaceChip.topAnchor.constraint(equalTo: topAnchor, constant: 1)
+        surfaceChipBottom = surfaceChip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1)
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: ProductChromeAdaptiveDepth.tabChipHeight),
+            heightConstraint,
 
-            surfaceChip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            surfaceChip.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            surfaceChip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
-            surfaceChip.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            surfaceChip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            surfaceChipTop,
+            surfaceChipBottom,
+            surfaceChip.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
 
-            titleLabel.leadingAnchor.constraint(equalTo: surfaceChip.leadingAnchor, constant: 8),
+            titleLabel.leadingAnchor.constraint(equalTo: surfaceChip.leadingAnchor, constant: 6),
             titleLabel.centerYAnchor.constraint(equalTo: surfaceChip.centerYAnchor, constant: -1),
             titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
 
-            closeButton.trailingAnchor.constraint(equalTo: surfaceChip.trailingAnchor, constant: -4),
+            closeButton.trailingAnchor.constraint(equalTo: surfaceChip.trailingAnchor, constant: -2),
             closeButton.centerYAnchor.constraint(equalTo: surfaceChip.centerYAnchor, constant: -1),
-            closeButton.widthAnchor.constraint(equalToConstant: 18),
-            closeButton.heightAnchor.constraint(equalToConstant: 18),
+            closeButton.widthAnchor.constraint(equalToConstant: 16),
+            closeButton.heightAnchor.constraint(equalToConstant: 16),
 
             chipUnderline.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             chipUnderline.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
@@ -113,6 +123,19 @@ final class PaneChromeBarView: NSView {
         fatalError("PaneChromeBarView is programmatic")
     }
 
+    /// Sole-pane Tabs already identify the surface on C05 — collapse this strip
+    /// to reclaim vertical chrome (Multipane §4 compact; cmux density target).
+    func setCollapsed(_ collapsed: Bool) {
+        isHidden = collapsed
+        heightConstraint.constant = collapsed ? 0 : ProductChromeAdaptiveDepth.tabChipHeight
+        // Chip top/bottom insets require height ≥ 2; deactivate them at 0 height.
+        surfaceChipTop.isActive = !collapsed
+        surfaceChipBottom.isActive = !collapsed
+        surfaceChip.isHidden = collapsed
+        bottomSeam.isHidden = collapsed
+        setAccessibilityElement(!collapsed)
+    }
+
     /// Title is Rust-owned pane title only — never invent cwd/path strings here.
     func apply(title: String, theme: NativeTheme?, focused: Bool = false) {
         titleLabel.stringValue = title
@@ -123,13 +146,13 @@ final class PaneChromeBarView: NSView {
         // VF-4 / Adaptive Depth: focused = typography + underline; no heavy card.
         let titleColor = focused ? theme.text : theme.muted
         let titleFont = NSFont.systemFont(
-            ofSize: max(theme.uiFontSize - 1, 11),
+            ofSize: max(theme.uiFontSize - 2, 10),
             weight: focused ? .semibold : .regular
         )
         titleLabel.font = titleFont
         titleLabel.textColor = titleColor
         closeButton.contentTintColor = theme.muted
-        closeButton.font = .systemFont(ofSize: max(theme.uiFontSize - 1, 11), weight: .medium)
+        closeButton.font = .systemFont(ofSize: max(theme.uiFontSize - 2, 10), weight: .medium)
 
         layer?.backgroundColor = theme.canvas.cgColor
         surfaceChip.layer?.backgroundColor = NSColor.clear.cgColor
@@ -143,7 +166,54 @@ final class PaneChromeBarView: NSView {
         closeButton.isHidden = !visible
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        makeContextMenu()
+    }
+
+    /// Split / close actions for the Pane leaf (layout chrome also lives on C05).
+    func makeContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if onSplitRight != nil {
+            let item = NSMenuItem(
+                title: "Split Right",
+                action: #selector(splitRightClicked),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
+        if onSplitDown != nil {
+            let item = NSMenuItem(
+                title: "Split Down",
+                action: #selector(splitDownClicked),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
+        if onClose != nil, !closeButton.isHidden {
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
+            let item = NSMenuItem(
+                title: "Close Pane",
+                action: #selector(closeClicked),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu
+    }
+
     @objc private func closeClicked() {
         onClose?()
+    }
+
+    @objc private func splitRightClicked() {
+        onSplitRight?()
+    }
+
+    @objc private func splitDownClicked() {
+        onSplitDown?()
     }
 }

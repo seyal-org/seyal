@@ -88,6 +88,8 @@ final class ProductChromeHostView: NSView {
     var centerLeadingLeft: NSLayoutConstraint!
     var centerTrailingInspector: NSLayoutConstraint!
     var centerTopTab: NSLayoutConstraint!
+    /// Gap under focused pane surface strip; 0 when the strip collapses (sole Pane).
+    var transcriptBelowPaneChrome: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         pane = ThinPaneHostView(frame: frameRect)
@@ -240,6 +242,12 @@ final class ProductChromeHostView: NSView {
             guard let self else { return }
             self.closeFocusedPane(self.closePaneButton)
         }
+        focusedPaneChrome.onSplitRight = { [weak self] in
+            self?.splitFocusedRight()
+        }
+        focusedPaneChrome.onSplitDown = { [weak self] in
+            self?.splitFocusedDown()
+        }
         // Transcript/Metal/composer first; pane chrome last so × stays hittable.
         liveContent.addSubview(transcript)
         liveContent.addSubview(pane)
@@ -299,45 +307,57 @@ final class ProductChromeHostView: NSView {
             tabStrip.leadingAnchor.constraint(equalTo: centerColumn.leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: centerColumn.trailingAnchor),
             tabStrip.topAnchor.constraint(equalTo: topAnchor),
-            tabStrip.heightAnchor.constraint(equalToConstant: 40),
+            tabStrip.heightAnchor.constraint(
+                equalToConstant: ProductChromeAdaptiveDepth.tabStripHeight
+            ),
             // Scrollable chip row; trailing + / layout cluster stays fixed (VF-4).
-            tabScroll.leadingAnchor.constraint(equalTo: tabStrip.leadingAnchor, constant: 12),
+            tabScroll.leadingAnchor.constraint(equalTo: tabStrip.leadingAnchor, constant: 8),
             tabScroll.trailingAnchor.constraint(
                 equalTo: tabTrailingCluster.leadingAnchor,
-                constant: -12
+                constant: -8
             ),
             tabScroll.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            tabScroll.heightAnchor.constraint(equalToConstant: 30),
+            tabScroll.heightAnchor.constraint(
+                equalToConstant: ProductChromeAdaptiveDepth.tabChipHeight + 2
+            ),
             tabButtons.leadingAnchor.constraint(equalTo: tabScrollContent.leadingAnchor),
             tabButtons.trailingAnchor.constraint(equalTo: tabScrollContent.trailingAnchor),
             tabButtons.topAnchor.constraint(equalTo: tabScrollContent.topAnchor),
-            tabButtons.heightAnchor.constraint(equalToConstant: 28),
-            tabScrollContent.heightAnchor.constraint(equalToConstant: 30),
+            tabButtons.heightAnchor.constraint(
+                equalToConstant: ProductChromeAdaptiveDepth.tabChipHeight
+            ),
+            tabScrollContent.heightAnchor.constraint(
+                equalToConstant: ProductChromeAdaptiveDepth.tabChipHeight + 2
+            ),
             tabUnderline.heightAnchor.constraint(equalToConstant: 2),
             tabUnderline.bottomAnchor.constraint(equalTo: tabScrollContent.bottomAnchor),
             tabTrailingCluster.trailingAnchor.constraint(
                 equalTo: tabStrip.trailingAnchor,
-                constant: -12
+                constant: -8
             ),
             tabTrailingCluster.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            tabTrailingCluster.heightAnchor.constraint(equalToConstant: 28),
+            tabTrailingCluster.heightAnchor.constraint(
+                equalToConstant: ProductChromeAdaptiveDepth.tabChipHeight
+            ),
 
             left.leadingAnchor.constraint(equalTo: leadingAnchor),
             left.topAnchor.constraint(equalTo: topAnchor),
             left.bottomAnchor.constraint(equalTo: bottomAnchor),
-            left.widthAnchor.constraint(equalToConstant: 220),
+            left.widthAnchor.constraint(
+                equalToConstant: ProductChromeAdaptiveDepth.leftPanelWidth
+            ),
 
             leftSeam.trailingAnchor.constraint(equalTo: left.trailingAnchor),
             leftSeam.topAnchor.constraint(equalTo: left.topAnchor),
             leftSeam.bottomAnchor.constraint(equalTo: left.bottomAnchor),
-            workspacesButton.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
-            workspacesButton.topAnchor.constraint(equalTo: left.topAnchor, constant: 10),
+            workspacesButton.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 8),
+            workspacesButton.topAnchor.constraint(equalTo: left.topAnchor, constant: 8),
             tabsButton.leadingAnchor.constraint(equalTo: workspacesButton.trailingAnchor, constant: 8),
             tabsButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
-            leftItems.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
-            leftItems.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -10),
-            leftItems.topAnchor.constraint(equalTo: workspacesButton.bottomAnchor, constant: 12),
-            leftItems.bottomAnchor.constraint(lessThanOrEqualTo: left.bottomAnchor, constant: -10),
+            leftItems.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 6),
+            leftItems.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -6),
+            leftItems.topAnchor.constraint(equalTo: workspacesButton.bottomAnchor, constant: 8),
+            leftItems.bottomAnchor.constraint(lessThanOrEqualTo: left.bottomAnchor, constant: -8),
 
             inspectorColumn.trailingAnchor.constraint(equalTo: trailingAnchor),
             inspectorColumn.topAnchor.constraint(equalTo: topAnchor),
@@ -362,14 +382,13 @@ final class ProductChromeHostView: NSView {
             focusedPaneChrome.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor),
             focusedPaneChrome.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor),
             focusedPaneChrome.topAnchor.constraint(equalTo: liveContent.topAnchor),
-            transcript.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 20),
-            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20),
-            transcript.topAnchor.constraint(equalTo: focusedPaneChrome.bottomAnchor, constant: 8),
+            transcript.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 12),
+            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -12),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
-            composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
-            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
-            composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
-            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
+            composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 16),
+            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -16),
+            composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 8),
+            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -12),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
             historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
@@ -385,6 +404,11 @@ final class ProductChromeHostView: NSView {
             equalTo: inspectorColumn.leadingAnchor
         )
         centerTopTab = centerColumn.topAnchor.constraint(equalTo: tabStrip.bottomAnchor)
+        transcriptBelowPaneChrome = transcript.topAnchor.constraint(
+            equalTo: focusedPaneChrome.bottomAnchor,
+            constant: 0
+        )
+        transcriptBelowPaneChrome.isActive = true
         paneFollowsTranscript = [
             pane.leadingAnchor.constraint(equalTo: transcript.leadingAnchor),
             pane.trailingAnchor.constraint(equalTo: transcript.trailingAnchor),
@@ -695,8 +719,15 @@ final class ProductChromeHostView: NSView {
         let title = focused?.title.isEmpty == false ? focused!.title : "Pane"
         let theme = NativeThemeRealization.theme(for: effectiveAppearance)
         let allowsClose = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) != 0
+        // Multipane §4 / density: sole Pane is already named on C05 — collapse the
+        // redundant surface strip. After Split, every live leaf keeps its chip.
+        let multipane = shell.pane_count > 1
+        focusedPaneChrome.setCollapsed(!multipane)
         focusedPaneChrome.apply(title: title, theme: theme, focused: true)
         focusedPaneChrome.setCloseVisible(allowsClose)
+        if transcriptBelowPaneChrome != nil {
+            transcriptBelowPaneChrome.constant = multipane ? 4 : 0
+        }
         // Non-live split leaves keep B.1 surface chrome in the region frame.
         centerColumn.updatePlaceholderChrome(allowsClose: allowsClose, theme: theme)
         // Per-pane × is the primary close; strip Close Pane stays as a compact fallback.
@@ -713,6 +744,18 @@ final class ProductChromeHostView: NSView {
             host.onClosePane = { [weak self] in
                 self?.closePaneIdentity(lo: host.paneLo, hi: host.paneHi)
             }
+            host.setSplitHandlers(
+                onSplitRight: { [weak self, weak host] in
+                    guard let self, let host else { return }
+                    self.focusPaneRegion(lo: host.paneLo, hi: host.paneHi)
+                    self.splitFocusedRight()
+                },
+                onSplitDown: { [weak self, weak host] in
+                    guard let self, let host else { return }
+                    self.focusPaneRegion(lo: host.paneLo, hi: host.paneHi)
+                    self.splitFocusedDown()
+                }
+            )
         }
     }
 
@@ -829,6 +872,8 @@ final class ProductChromeHostView: NSView {
 
     func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {
         leftItems.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        // Shell row attention uses bit 1 (same encoding as tab attention in FFI).
+        let attentionFlag: UInt16 = 2
         if leftPanel == 0 {
             for index in 0..<Int(shell.workspace_count) {
                 let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_WORKSPACE), UInt32(index))
@@ -838,6 +883,7 @@ final class ProductChromeHostView: NSView {
                         detail: productChromeCopyUTF8(row.detail, row.detail_len),
                         identifier: "seyal-workspace-\(index)",
                         selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                        attention: row.flags & attentionFlag != 0,
                         action: #selector(selectWorkspace(_:)),
                         kind: UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue),
                         idLo: row.id_lo,
@@ -848,12 +894,14 @@ final class ProductChromeHostView: NSView {
         } else {
             for index in 0..<Int(shell.tab_count) {
                 let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), UInt32(index))
+                let rawDetail = productChromeCopyUTF8(row.detail, row.detail_len)
                 leftItems.addArrangedSubview(
                     rowButton(
                         title: productChromeCopyUTF8(row.title, row.title_len) ?? "Tab",
-                        detail: productChromeCopyUTF8(row.detail, row.detail_len),
+                        detail: Self.formatTabPaneCountDetail(rawDetail),
                         identifier: "seyal-tab-\(index)",
                         selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                        attention: row.flags & attentionFlag != 0,
                         action: #selector(selectTab(_:)),
                         kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
                         idLo: row.id_lo,
@@ -862,6 +910,9 @@ final class ProductChromeHostView: NSView {
                 )
             }
         }
+        // Multipane §10: do not render a Pane navigator for the sole leaf; expose
+        // it only when Split complexity requires focus switching from the left.
+        guard shell.pane_count > 1 else { return }
         for index in 0..<Int(shell.pane_count) {
             let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
             leftItems.addArrangedSubview(
@@ -878,6 +929,15 @@ final class ProductChromeHostView: NSView {
                 )
             )
         }
+    }
+
+    /// Rust tab `detail` is the pane_count integer; present it as readable status.
+    static func formatTabPaneCountDetail(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let count = Int(raw) {
+            return count == 1 ? "1 pane" : "\(count) panes"
+        }
+        return raw
     }
 
     func rebuildInspector(_ chrome: SeyalAppChrome) {

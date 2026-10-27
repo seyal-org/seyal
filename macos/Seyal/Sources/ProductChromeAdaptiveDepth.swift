@@ -7,10 +7,17 @@ enum ProductChromeAdaptiveDepth {
     static let regionSeamWidth: CGFloat = 1
     static let tabUnderlineHeight: CGFloat = 2
     static let tabChipCornerRadius: CGFloat = 6
-    static let tabChipHeight: CGFloat = 28
+    /// Compact C05 chip height (cmux-density target; VF underline still 2 pt).
+    static let tabChipHeight: CGFloat = 24
+    /// Full C05 strip band including chip vertical inset.
+    static let tabStripHeight: CGFloat = 32
     static let composerCornerRadius: CGFloat = 8
     static let contextAccentWidth: CGFloat = 2
-    static let contextRowMinHeight: CGFloat = 36
+    /// C04 row pitch — dense enough for 15" power-user lists (Multipane §10).
+    static let contextRowMinHeight: CGFloat = 30
+    static let contextStatusDotSize: CGFloat = 8
+    /// C03 content column (reference ~143–236; keep reviewable without starving C06).
+    static let leftPanelWidth: CGFloat = 200
 }
 
 /// Compact C05 tab chip: title + Close Tab × (ADR-018 hierarchical close).
@@ -43,7 +50,7 @@ final class TabChipView: NSStackView {
         orientation = .horizontal
         alignment = .centerY
         spacing = 2
-        edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 4)
+        edgeInsets = NSEdgeInsets(top: 1, left: 6, bottom: 1, right: 2)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.cornerRadius = ProductChromeAdaptiveDepth.tabChipCornerRadius
@@ -173,15 +180,18 @@ final class TabChipView: NSStackView {
     }
 }
 
-/// Leading accent + two-line C04 context row. Selection fill is restrained tint.
+/// Leading accent + status dot + two-line C04 context row. Selection fill is restrained tint.
 @MainActor
 final class ChromeContextRowView: NSView {
     let button: IdentityButton
     private let accent = NSView()
+    private let statusDot = NSView()
     private let titleField = NSTextField(labelWithString: "")
     private let detailField = NSTextField(labelWithString: "")
     private let labels = NSStackView()
     private var selected = false
+    private var attention = false
+    private var showsAccent = true
     private var theme: NativeTheme?
 
     init(
@@ -189,6 +199,7 @@ final class ChromeContextRowView: NSView {
         detail: String?,
         identifier: String,
         selected: Bool,
+        attention: Bool = false,
         showsAccent: Bool = true,
         target: AnyObject?,
         action: Selector,
@@ -201,6 +212,8 @@ final class ChromeContextRowView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         self.selected = selected
+        self.attention = attention
+        self.showsAccent = showsAccent
 
         button.idLo = idLo
         button.idHi = idHi
@@ -210,9 +223,11 @@ final class ChromeContextRowView: NSView {
         button.setButtonType(.momentaryChange)
         button.title = ""
         button.setAccessibilityIdentifier(identifier)
-        button.setAccessibilityLabel(
-            detail.flatMap { $0.isEmpty ? nil : $0 }.map { "\(title), \($0)" } ?? title
-        )
+        let detailPart = detail.flatMap { $0.isEmpty ? nil : $0 }
+        var a11y = title
+        if let detailPart { a11y += ", \(detailPart)" }
+        if attention { a11y += ", attention" }
+        button.setAccessibilityLabel(a11y)
         // Never use NSButton.state/.on — AppKit paints system selection blue over Adaptive Depth.
         button.setAccessibilityValue(selected ? "selected" : "")
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -221,13 +236,21 @@ final class ChromeContextRowView: NSView {
         accent.translatesAutoresizingMaskIntoConstraints = false
         accent.isHidden = !(selected && showsAccent)
 
+        statusDot.wantsLayer = true
+        statusDot.translatesAutoresizingMaskIntoConstraints = false
+        statusDot.layer?.cornerRadius = ProductChromeAdaptiveDepth.contextStatusDotSize / 2
+        statusDot.setAccessibilityElement(true)
+        statusDot.setAccessibilityRole(.image)
+        statusDot.setAccessibilityIdentifier("\(identifier)-status")
+        statusDot.setAccessibilityLabel(attention ? "Attention" : (selected ? "Active" : "Idle"))
+
         titleField.stringValue = title
         titleField.font = .systemFont(ofSize: 12, weight: selected ? .semibold : .regular)
         titleField.lineBreakMode = .byTruncatingTail
         titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleField.setAccessibilityElement(false)
 
-        let detailText = detail.flatMap { $0.isEmpty ? nil : $0 }
+        let detailText = detailPart
         detailField.stringValue = detailText ?? ""
         detailField.isHidden = detailText == nil
         detailField.font = .systemFont(ofSize: 10, weight: .regular)
@@ -236,22 +259,28 @@ final class ChromeContextRowView: NSView {
 
         labels.orientation = .vertical
         labels.alignment = .leading
-        labels.spacing = 1
+        labels.spacing = 0
         labels.translatesAutoresizingMaskIntoConstraints = false
         labels.addArrangedSubview(titleField)
         labels.addArrangedSubview(detailField)
 
         addSubview(accent)
+        addSubview(statusDot)
         addSubview(labels)
         addSubview(button)
+        let dot = ProductChromeAdaptiveDepth.contextStatusDotSize
         NSLayoutConstraint.activate([
             heightAnchor.constraint(greaterThanOrEqualToConstant: ProductChromeAdaptiveDepth.contextRowMinHeight),
             accent.leadingAnchor.constraint(equalTo: leadingAnchor),
-            accent.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            accent.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            accent.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            accent.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
             accent.widthAnchor.constraint(equalToConstant: ProductChromeAdaptiveDepth.contextAccentWidth),
-            labels.leadingAnchor.constraint(equalTo: accent.trailingAnchor, constant: 8),
-            labels.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            statusDot.leadingAnchor.constraint(equalTo: accent.trailingAnchor, constant: 6),
+            statusDot.centerYAnchor.constraint(equalTo: titleField.centerYAnchor),
+            statusDot.widthAnchor.constraint(equalToConstant: dot),
+            statusDot.heightAnchor.constraint(equalToConstant: dot),
+            labels.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 6),
+            labels.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             labels.centerYAnchor.constraint(equalTo: centerYAnchor),
             button.leadingAnchor.constraint(equalTo: leadingAnchor),
             button.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -266,6 +295,7 @@ final class ChromeContextRowView: NSView {
     }
 
     var showsSelectionAccent: Bool { !accent.isHidden }
+    var showsStatusDot: Bool { !statusDot.isHidden }
 
     func apply(theme: NativeTheme) {
         self.theme = theme
@@ -277,8 +307,20 @@ final class ChromeContextRowView: NSView {
         )
         detailField.font = .systemFont(ofSize: max(theme.uiFontSize - 3, 10), weight: .regular)
         // VF §2.4: selected fill is a near-panel lift (UtilityElevated), not ColorRole::Selection.
-        accent.layer?.backgroundColor = theme.blockFocus.cgColor
+        accent.isHidden = !(selected && showsAccent)
+        accent.layer?.backgroundColor = (attention ? theme.warning : theme.blockFocus).cgColor
         layer?.backgroundColor = selected ? theme.elevated.cgColor : NSColor.clear.cgColor
+        // C04-DOT: attention amber, selected healthy green, idle muted (non-colour cue via a11y label).
+        let dotColor: NSColor
+        if attention {
+            dotColor = theme.warning
+        } else if selected {
+            dotColor = theme.success
+        } else {
+            dotColor = theme.muted.withAlphaComponent(0.55)
+        }
+        statusDot.layer?.backgroundColor = dotColor.cgColor
+        statusDot.setAccessibilityLabel(attention ? "Attention" : (selected ? "Active" : "Idle"))
     }
 }
 

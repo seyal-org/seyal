@@ -207,6 +207,11 @@ final class SecondaryLivePaneHost: NSView {
         chromeBar.setCloseVisible(allowsClose)
     }
 
+    func setSplitHandlers(onSplitRight: (() -> Void)?, onSplitDown: (() -> Void)?) {
+        chromeBar.onSplitRight = onSplitRight
+        chromeBar.onSplitDown = onSplitDown
+    }
+
     func apply(theme: NativeTheme) {
         composer.apply(theme: theme)
         chromeBar.apply(title: chromeTitle, theme: theme, focused: false)
