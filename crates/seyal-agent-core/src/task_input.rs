@@ -41,16 +41,16 @@ pub struct TaskInput(String);
 impl TaskInput {
     pub fn new(text: impl AsRef<str>) -> Result<Self, TaskInputError> {
         let text = text.as_ref();
-        if text.trim().is_empty() {
-            return Err(TaskInputError::Empty);
-        }
-
         let len_bytes = text.len();
         if len_bytes > PROVISIONAL_MAX_TASK_INPUT_BYTES {
             return Err(TaskInputError::TooLarge {
                 actual_bytes: len_bytes,
                 max_bytes: PROVISIONAL_MAX_TASK_INPUT_BYTES,
             });
+        }
+
+        if text.trim().is_empty() {
+            return Err(TaskInputError::Empty);
         }
 
         Ok(Self(text.to_owned()))

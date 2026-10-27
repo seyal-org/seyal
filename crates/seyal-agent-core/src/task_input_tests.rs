@@ -7,6 +7,19 @@ fn task_input_rejects_empty_and_whitespace_only_text() {
 }
 
 #[test]
+fn task_input_rejects_oversized_whitespace_before_empty_validation() {
+    let oversized_whitespace = " ".repeat(PROVISIONAL_MAX_TASK_INPUT_BYTES + 1);
+
+    assert_eq!(
+        TaskInput::new(&oversized_whitespace),
+        Err(TaskInputError::TooLarge {
+            actual_bytes: PROVISIONAL_MAX_TASK_INPUT_BYTES + 1,
+            max_bytes: PROVISIONAL_MAX_TASK_INPUT_BYTES,
+        })
+    );
+}
+
+#[test]
 fn task_input_counts_utf8_bytes_and_preserves_unicode() {
     let text = "e\u{301} 🧪";
     let input = TaskInput::new(text).expect("non-empty task input");
