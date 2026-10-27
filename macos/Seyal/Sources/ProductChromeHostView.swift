@@ -10,6 +10,13 @@ final class ProductChromeHostView: NSView {
     let coldVisualProbe = NSView()
     let tabStrip = NSView()
     let tabTitle = NSTextField(labelWithString: "Terminal")
+    /// Adaptive Depth C05: typography-led tabs with underline for the active Tab.
+    let tabButtons = NSStackView()
+    let tabUnderline = NSView()
+    var tabUnderlineLeading: NSLayoutConstraint?
+    var tabUnderlineTrailing: NSLayoutConstraint?
+    let leftSeam = ChromeRegionSeamView()
+    let inspectorSeam = ChromeRegionSeamView()
     /// Layout-chrome cluster (#922): apply to the active Tab/focused Pane,
     /// never duplicated per-Pane (M001-CORE-TERMINAL-REFERENCE-SCREEN.md §4.3).
     let newTabButton = NSButton(title: "+", target: nil, action: nil)
@@ -106,6 +113,17 @@ final class ProductChromeHostView: NSView {
         tabStrip.setAccessibilityIdentifier("seyal-tab-strip")
         tabTitle.font = .systemFont(ofSize: 13, weight: .semibold)
         tabTitle.translatesAutoresizingMaskIntoConstraints = false
+        tabTitle.isHidden = true
+        tabButtons.orientation = .horizontal
+        tabButtons.alignment = .centerY
+        tabButtons.spacing = 4
+        tabButtons.translatesAutoresizingMaskIntoConstraints = false
+        tabButtons.setAccessibilityElement(false)
+        tabUnderline.translatesAutoresizingMaskIntoConstraints = false
+        tabUnderline.wantsLayer = true
+        tabUnderline.isHidden = true
+        tabStrip.addSubview(tabButtons)
+        tabStrip.addSubview(tabUnderline)
         tabStrip.addSubview(tabTitle)
         for button in [newTabButton, closeTabButton, splitRightButton, splitDownButton, closePaneButton] {
             button.translatesAutoresizingMaskIntoConstraints = false
@@ -117,6 +135,7 @@ final class ProductChromeHostView: NSView {
 
         left.translatesAutoresizingMaskIntoConstraints = false
         left.wantsLayer = true
+        left.addSubview(leftSeam)
         leftItems.orientation = .vertical
         leftItems.alignment = .leading
         leftItems.spacing = 2
@@ -134,6 +153,7 @@ final class ProductChromeHostView: NSView {
         expose(inspector, identifier: "seyal-inspector")
         attention.orientation = .vertical
         attention.alignment = .leading
+        attention.translatesAutoresizingMaskIntoConstraints = false
         expose(attention, identifier: "seyal-attention")
         recoveryLabel.font = .systemFont(ofSize: 11, weight: .regular)
         recoveryLabel.tag = 2
@@ -144,6 +164,7 @@ final class ProductChromeHostView: NSView {
 
         inspectorColumn.translatesAutoresizingMaskIntoConstraints = false
         inspectorColumn.wantsLayer = true
+        inspectorColumn.addSubview(inspectorSeam)
         inspectorColumn.addSubview(inspector)
         inspectorColumn.addSubview(attention)
 
@@ -231,10 +252,13 @@ final class ProductChromeHostView: NSView {
             tabStrip.trailingAnchor.constraint(equalTo: trailingAnchor),
             tabStrip.topAnchor.constraint(equalTo: topAnchor),
             tabStrip.heightAnchor.constraint(equalToConstant: 48),
-            tabTitle.leadingAnchor.constraint(equalTo: tabStrip.leadingAnchor, constant: 236),
-            tabTitle.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
+            tabButtons.leadingAnchor.constraint(equalTo: tabStrip.leadingAnchor, constant: 236),
+            tabButtons.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
+            tabButtons.heightAnchor.constraint(equalToConstant: 28),
+            tabUnderline.heightAnchor.constraint(equalToConstant: 2),
+            tabUnderline.bottomAnchor.constraint(equalTo: tabStrip.bottomAnchor),
 
-            newTabButton.leadingAnchor.constraint(equalTo: tabTitle.trailingAnchor, constant: 12),
+            newTabButton.leadingAnchor.constraint(equalTo: tabButtons.trailingAnchor, constant: 12),
             newTabButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
             closeTabButton.leadingAnchor.constraint(equalTo: newTabButton.trailingAnchor, constant: 8),
             closeTabButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
@@ -249,6 +273,10 @@ final class ProductChromeHostView: NSView {
             left.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             left.bottomAnchor.constraint(equalTo: bottomAnchor),
             left.widthAnchor.constraint(equalToConstant: 220),
+
+            leftSeam.trailingAnchor.constraint(equalTo: left.trailingAnchor),
+            leftSeam.topAnchor.constraint(equalTo: left.topAnchor),
+            leftSeam.bottomAnchor.constraint(equalTo: left.bottomAnchor),
             workspacesButton.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
             workspacesButton.topAnchor.constraint(equalTo: left.topAnchor, constant: 10),
             tabsButton.leadingAnchor.constraint(equalTo: workspacesButton.trailingAnchor, constant: 8),
@@ -262,6 +290,10 @@ final class ProductChromeHostView: NSView {
             inspectorColumn.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             inspectorColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
             inspectorColumn.widthAnchor.constraint(equalToConstant: 248),
+
+            inspectorSeam.leadingAnchor.constraint(equalTo: inspectorColumn.leadingAnchor),
+            inspectorSeam.topAnchor.constraint(equalTo: inspectorColumn.topAnchor),
+            inspectorSeam.bottomAnchor.constraint(equalTo: inspectorColumn.bottomAnchor),
             inspector.leadingAnchor.constraint(equalTo: inspectorColumn.leadingAnchor, constant: 10),
             inspector.trailingAnchor.constraint(equalTo: inspectorColumn.trailingAnchor, constant: -10),
             inspector.topAnchor.constraint(equalTo: inspectorColumn.topAnchor, constant: 10),
@@ -592,9 +624,36 @@ final class ProductChromeHostView: NSView {
     }
 
     func rebuildTabStrip(shell: SeyalAppShell) {
-        if shell.tab_count > 0 {
-            let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), 0)
-            tabTitle.stringValue = productChromeCopyUTF8(row.title, row.title_len) ?? "Terminal"
+        tabButtons.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        tabUnderline.isHidden = true
+        var selectedButton: NSView?
+        for index in 0..<Int(shell.tab_count) {
+            let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), UInt32(index))
+            let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Tab"
+            let selected = row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0
+            let button = IdentityButton(title: title, target: self, action: #selector(selectTab(_:)))
+            button.idLo = row.id_lo
+            button.idHi = row.id_hi
+            button.kind = UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue)
+            button.bezelStyle = .inline
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .regular)
+            button.setAccessibilityIdentifier("seyal-tab-strip-tab-\(index)")
+            button.state = selected ? .on : .off
+            tabButtons.addArrangedSubview(button)
+            if selected { selectedButton = button }
+        }
+        tabUnderlineLeading?.isActive = false
+        tabUnderlineTrailing?.isActive = false
+        tabUnderlineLeading = nil
+        tabUnderlineTrailing = nil
+        if let selectedButton {
+            tabUnderline.isHidden = false
+            let leading = tabUnderline.leadingAnchor.constraint(equalTo: selectedButton.leadingAnchor)
+            let trailing = tabUnderline.trailingAnchor.constraint(equalTo: selectedButton.trailingAnchor)
+            tabUnderlineLeading = leading
+            tabUnderlineTrailing = trailing
+            NSLayoutConstraint.activate([leading, trailing])
         }
         // Omit rather than disable (mirrors the command palette's own
         // omission of "New Tab"/"Split" when the M001 shell policy
@@ -662,18 +721,60 @@ final class ProductChromeHostView: NSView {
     func rebuildInspector(_ chrome: SeyalAppChrome) {
         inspector.arrangedSubviews.forEach { $0.removeFromSuperview() }
         attention.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        var lastSection: String?
         for index in 0..<Int(chrome.inspector_row_count) {
             let row = seyal_app_chrome_row(pane.appHandle, UInt16(SEYAL_APP_ROW_INSPECTOR), UInt32(index))
-            let title = productChromeCopyUTF8(row.title, row.title_len) ?? ""
+            let joined = productChromeCopyUTF8(row.title, row.title_len) ?? ""
             let value = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
-            let caption = NSTextField(labelWithString: title)
-            caption.font = .systemFont(ofSize: 10, weight: .medium)
+            let parts = joined.split(separator: "·", maxSplits: 1, omittingEmptySubsequences: false)
+            let section: String
+            let label: String
+            if parts.count == 2 {
+                section = parts[0].trimmingCharacters(in: .whitespaces)
+                label = parts[1].trimmingCharacters(in: .whitespaces)
+            } else {
+                section = ""
+                label = joined
+            }
+            if section != lastSection {
+                if lastSection != nil {
+                    let seam = NSView()
+                    seam.translatesAutoresizingMaskIntoConstraints = false
+                    seam.wantsLayer = true
+                    seam.identifier = NSUserInterfaceItemIdentifier("seyal-inspector-section-seam")
+                    seam.heightAnchor.constraint(equalToConstant: 1).isActive = true
+                    inspector.addArrangedSubview(seam)
+                    inspector.setCustomSpacing(14, after: seam)
+                }
+                if !section.isEmpty {
+                    let header = NSTextField(labelWithString: section.uppercased())
+                    header.font = .systemFont(ofSize: 10, weight: .semibold)
+                    header.tag = 3
+                    header.setAccessibilityIdentifier("seyal-inspector-section-\(section)")
+                    inspector.addArrangedSubview(header)
+                    inspector.setCustomSpacing(8, after: header)
+                }
+                lastSection = section
+            }
+            let rowStack = NSStackView()
+            rowStack.orientation = .horizontal
+            rowStack.alignment = .firstBaseline
+            rowStack.distribution = .fill
+            rowStack.spacing = 8
+            rowStack.translatesAutoresizingMaskIntoConstraints = false
+            let caption = NSTextField(labelWithString: label)
+            caption.font = .systemFont(ofSize: 11, weight: .regular)
             caption.tag = 2
+            caption.setContentHuggingPriority(.defaultLow, for: .horizontal)
             let body = NSTextField(labelWithString: value)
-            body.font = .systemFont(ofSize: 12, weight: .regular)
+            body.font = .systemFont(ofSize: 11, weight: .regular)
+            body.alignment = .right
             body.maximumNumberOfLines = 2
-            inspector.addArrangedSubview(caption)
-            inspector.addArrangedSubview(body)
+            body.setContentHuggingPriority(.required, for: .horizontal)
+            body.tag = 4
+            rowStack.addArrangedSubview(caption)
+            rowStack.addArrangedSubview(body)
+            inspector.addArrangedSubview(rowStack)
         }
         for index in 0..<Int(chrome.attention_count) {
             let row = seyal_app_chrome_row(pane.appHandle, UInt16(SEYAL_APP_ROW_ATTENTION), UInt32(index))
@@ -736,6 +837,44 @@ final class ProductChromeHostView: NSView {
         centerColumn.apply(theme: theme)
         transcript.backgroundColor = .clear
         left.layer?.borderWidth = 0
+        inspectorColumn.layer?.borderWidth = 0
+        leftSeam.apply(color: theme.seam)
+        inspectorSeam.apply(color: theme.seam)
+        tabUnderline.layer?.backgroundColor = theme.blockFocus.cgColor
+        for case let button as NSButton in tabButtons.arrangedSubviews {
+            button.contentTintColor = button.state == .on ? theme.text : theme.muted
+            button.font = .systemFont(
+                ofSize: theme.uiFontSize,
+                weight: button.state == .on ? .semibold : .regular
+            )
+        }
+        for case let row as ChromeContextRowView in leftItems.arrangedSubviews {
+            row.apply(theme: theme)
+        }
+        for view in inspector.arrangedSubviews {
+            if let field = view as? NSTextField {
+                if field.tag == 3 {
+                    field.textColor = theme.secondary
+                    field.font = .systemFont(ofSize: max(theme.uiFontSize - 3, 10), weight: .semibold)
+                } else if field.tag == 2 {
+                    field.textColor = theme.muted
+                } else if field.tag == 4 {
+                    field.textColor = theme.text
+                }
+            } else if let stack = view as? NSStackView {
+                for case let field as NSTextField in stack.arrangedSubviews {
+                    if field.tag == 2 {
+                        field.textColor = theme.muted
+                        field.font = .systemFont(ofSize: max(theme.uiFontSize - 2, 10), weight: .regular)
+                    } else if field.tag == 4 {
+                        field.textColor = theme.text
+                        field.font = .systemFont(ofSize: max(theme.uiFontSize - 2, 10), weight: .regular)
+                    }
+                }
+            } else if view.identifier?.rawValue == "seyal-inspector-section-seam" {
+                view.layer?.backgroundColor = theme.seam.cgColor
+            }
+        }
         tabTitle.font = .systemFont(ofSize: theme.uiFontSize, weight: .semibold)
         recoveryLabel.font = .systemFont(ofSize: max(theme.uiFontSize - 1, 10), weight: .regular)
         blocks.edgeInsets = NSEdgeInsets(

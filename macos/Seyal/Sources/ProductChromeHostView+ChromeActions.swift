@@ -271,19 +271,21 @@ extension ProductChromeHostView {
         kind: UInt16,
         idLo: UInt64,
         idHi: UInt64
-    ) -> IdentityButton {
-        let label = detail.flatMap { $0.isEmpty ? nil : $0 }.map { "\(title)  \($0)" } ?? title
-        let button = IdentityButton(title: label, target: self, action: action)
-        button.idLo = idLo
-        button.idHi = idHi
-        button.kind = kind
-        button.bezelStyle = .inline
-        button.isBordered = false
-        button.font = .systemFont(ofSize: 12, weight: selected ? .semibold : .regular)
-        button.alignment = .left
-        button.setAccessibilityIdentifier(identifier)
-        button.state = selected ? .on : .off
-        return button
+    ) -> ChromeContextRowView {
+        let row = ChromeContextRowView(
+            title: title,
+            detail: detail,
+            identifier: identifier,
+            selected: selected,
+            target: self,
+            action: action,
+            kind: kind,
+            idLo: idLo,
+            idHi: idHi
+        )
+        let theme = NativeThemeRealization.theme(for: effectiveAppearance)
+        row.apply(theme: theme)
+        return row
     }
 
     func expose(_ view: NSView, identifier: String) {

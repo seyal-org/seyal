@@ -31,6 +31,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     private let placeholder = NSTextField(labelWithString: "")
     private let execute = NSButton(title: "", target: nil, action: nil)
     private let history = NSButton(title: "", target: nil, action: nil)
+    /// C09 leading chevron is decorative; draft authority remains Rust-owned.
+    private let chevron = NSTextField(labelWithString: "›")
     private var heightConstraint: NSLayoutConstraint!
     private var lastEpoch: UInt64 = 0
     private var focusEligibilityGeneration: UInt64 = 0
@@ -47,7 +49,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        layer?.cornerRadius = 10
+        // VF §5 / C-7: composer_corner_radius = 8 (intentional min height stays 52).
+        layer?.cornerRadius = ProductChromeAdaptiveDepth.composerCornerRadius
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
         focusRingType = .none
@@ -102,6 +105,11 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         textView.setAccessibilityElement(true)
         textView.setAccessibilityIdentifier("seyal-composer-editor")
 
+        chevron.font = .systemFont(ofSize: 14, weight: .medium)
+        chevron.setAccessibilityElement(false)
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(chevron)
         addSubview(textView)
         addSubview(placeholder)
         addSubview(history)
@@ -109,10 +117,13 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         placeholder.translatesAutoresizingMaskIntoConstraints = false
         history.translatesAutoresizingMaskIntoConstraints = false
         execute.translatesAutoresizingMaskIntoConstraints = false
-        heightConstraint = heightAnchor.constraint(equalToConstant: 40)
+        heightConstraint = heightAnchor.constraint(equalToConstant: 52)
+        heightConstraint.priority = .defaultHigh
         NSLayoutConstraint.activate([
             heightConstraint,
-            textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+            textView.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: 8),
             textView.trailingAnchor.constraint(equalTo: history.leadingAnchor, constant: -8),
             history.trailingAnchor.constraint(equalTo: execute.leadingAnchor, constant: -4),
             history.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -320,10 +331,12 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     private func paintChrome() {
         guard let theme else { return }
         layer?.backgroundColor = theme.elevated.cgColor
+        layer?.cornerRadius = ProductChromeAdaptiveDepth.composerCornerRadius
         layer?.borderWidth = 1
         layer?.borderColor = editing
-            ? theme.accent.withAlphaComponent(0.45).cgColor
+            ? theme.blockFocus.cgColor
             : theme.seam.cgColor
+        chevron.textColor = editing ? theme.blockFocus : theme.muted
         execute.contentTintColor = theme.muted
         execute.attributedTitle = NSAttributedString(
             string: execute.title,
@@ -347,7 +360,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         else { return }
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container).height
-        heightConstraint.constant = min(max(40, used + 16), 120)
+        heightConstraint.constant = min(max(52, used + 16), 120)
     }
 
     private func copyString(_ kind: UInt16) -> String {

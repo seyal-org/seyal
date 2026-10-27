@@ -479,6 +479,34 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testAdaptiveDepthChromeProjectsTabsRowsComposerAndInspector() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-tab-strip-tab-0"),
+            "C05 projects the active tab chip"
+        )
+        XCTAssertFalse(view.tabUnderline.isHidden)
+        XCTAssertEqual(
+            view.composer.layer?.cornerRadius,
+            ProductChromeAdaptiveDepth.composerCornerRadius
+        )
+        let row = try XCTUnwrap(view.leftItems.arrangedSubviews.first as? ChromeContextRowView)
+        XCTAssertTrue(row.showsSelectionAccent)
+        let headers = view.inspector.arrangedSubviews.compactMap { $0 as? NSTextField }
+            .filter { $0.tag == 3 }
+        XCTAssertFalse(headers.isEmpty, "inspector uses section grammar headers")
+
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(view.pane.appHandle, &create), 0)
+        view.reconcileChrome()
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tab-strip-tab-1"))
+    }
+
+    @MainActor
     func testProductionPaneTreeProjectsOneLiveFocusedRegion() throws {
         XCTAssertEqual(MemoryLayout<SeyalAppPaneRegion>.size, 40)
         XCTAssertEqual(MemoryLayout<SeyalAppPaneBinding>.size, 48)
