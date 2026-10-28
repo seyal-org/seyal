@@ -47,7 +47,27 @@ final class SeyalHostWorkloadUITests: XCTestCase {
     func testPrimaryShellExitIsReportedAndKeepsFlowHistoryVisible() {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        submitComposerCommand(app, "printf 'seyal-1171-exit-before\\n'; exit 7")
+        // Establish a completed Block before exit. A single `printf…; exit`
+        // can race OSC-133 `C` against primary-child death and leave zero
+        // Block cards even when retain-on-disconnect is correct (#1379/#1171).
+        submitComposerCommand(app, "printf 'seyal-1171-exit-before\\n'")
+        let historyBlock = app.descendants(matching: .any)["seyal-block-0"]
+        XCTAssertTrue(
+            historyBlock.waitForExistence(timeout: 8),
+            "pre-exit Flow command must publish a Block card"
+        )
+        let beforeExit = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "seyal-1171-exit-before"),
+            evaluatedWith: historyBlock.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [beforeExit], timeout: 5),
+            .completed,
+            "pre-exit Block must show the completed command label"
+        )
+
+        submitComposerCommand(app, "exit 7")
 
         let recovery = app.descendants(matching: .any)["seyal-recovery"]
         let ended = expectation(
@@ -64,14 +84,13 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertFalse(composer.firstMatch.isHittable, "an ended shell must not accept Flow commands")
         // #1379: an empty `seyal-blocks` container is still hittable — require the
         // command Block that ran before exit, not merely the transcript host.
-        let exitBlock = app.descendants(matching: .any)["seyal-block-0"]
         XCTAssertTrue(
-            exitBlock.waitForExistence(timeout: 5),
+            historyBlock.waitForExistence(timeout: 5),
             "completed Flow history must keep at least one Block card after shell exit"
         )
         let exitCommandVisible = expectation(
             for: NSPredicate(format: "label CONTAINS %@", "seyal-1171-exit-before"),
-            evaluatedWith: exitBlock.firstMatch,
+            evaluatedWith: historyBlock.firstMatch,
             handler: nil
         )
         XCTAssertEqual(
