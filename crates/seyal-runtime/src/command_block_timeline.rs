@@ -132,10 +132,10 @@ impl CommandBlockTimeline {
         if record.lifecycle != CommandBlockLifecycle::Running {
             return Err(CommandBlockTimelineError::InvalidCompletion);
         }
-        if let Some(start) = start_line {
-            if start > record.start_line {
-                record.start_line = start;
-            }
+        if let Some(start) = start_line
+            && start > record.start_line
+        {
+            record.start_line = start;
         }
         record.end_line = Some(end_line.max(record.start_line));
         record.lifecycle = CommandBlockLifecycle::Completed { exit_status };
