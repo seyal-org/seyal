@@ -156,7 +156,10 @@ fn execution_ended_does_not_poison_create_tab_pane_latch() {
     })
     .unwrap();
     assert!(root.composer.execution_ended(ended_pane));
-    assert_eq!(root.snapshot().recovery_stage, RecoveryStage::ExecutionEnded);
+    assert_eq!(
+        root.snapshot().recovery_stage,
+        RecoveryStage::ExecutionEnded
+    );
     assert!(
         root.authority.is_none(),
         "ended Pane must release authority so New shell can Bind"

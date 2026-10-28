@@ -40,19 +40,17 @@ impl ApplicationRoot {
     pub(super) fn latch_execution_ended_on_focused_pane(&mut self) {
         let pane = self.shell.snapshot().focused_pane;
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
-        let _ = self.composer.apply(ComposerAction::SetExecutionEnded {
-            pane,
-            ended: true,
-        });
+        let _ = self
+            .composer
+            .apply(ComposerAction::SetExecutionEnded { pane, ended: true });
     }
 
     /// Clear the shell-exit latch after a Pane binds a live execution again.
     pub(super) fn clear_execution_ended_for_pane(&mut self, pane: seyal_core::PaneId) {
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
-        let _ = self.composer.apply(ComposerAction::SetExecutionEnded {
-            pane,
-            ended: false,
-        });
+        let _ = self
+            .composer
+            .apply(ComposerAction::SetExecutionEnded { pane, ended: false });
     }
 
     pub(super) fn set_composer_draft(
