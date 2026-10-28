@@ -125,8 +125,12 @@ extension ProductChromeHostView {
             || stage == UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue)
             || pane.inputSurface.preferFreshExecutionBootstrap
         newShellButton.isHidden = !show
-        // Hide the Flow composer while the recovery action owns that slot.
-        composer.isHidden = show
+        // Only force-hide the Flow composer while New shell owns that slot.
+        // Never force-show here: TUI/Raw/eligibility reconcile must keep the
+        // composer hidden when the terminal owns input (alt-screen/XCUI).
+        if show {
+            composer.isHidden = true
+        }
     }
 
     /// Explicit New shell after `exit` — bootstrap a fresh execution without
@@ -293,20 +297,10 @@ extension ProductChromeHostView {
     }
 
     private static func logNewShellFailure(_ detail: String) {
-        let line = "seyal: New shell open_first failed (\(detail)); leaving New shell armed\n"
-        NSLog("%@", line)
-        if let data = line.data(using: .utf8) {
-            let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
-            if FileManager.default.fileExists(atPath: url.path) {
-                if let handle = try? FileHandle(forWritingTo: url) {
-                    defer { try? handle.close() }
-                    _ = try? handle.seekToEnd()
-                    try? handle.write(contentsOf: data)
-                }
-            } else {
-                try? data.write(to: url)
-            }
-        }
+        NSLog(
+            "seyal: New shell open_first failed (%@); leaving New shell armed",
+            detail as NSString
+        )
     }
 
     func driveRecovery() {

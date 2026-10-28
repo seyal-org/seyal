@@ -855,12 +855,20 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
 
         let snapshot = seyal_app_snapshot(handle)
-        XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
+        // ExecutionEnded releases shell authority so New shell can Bind a
+        // fresh execution; presentation drops to Unbound while recovery stage
+        // stays ExecutionEnded for chrome ("shell exited" + New shell).
+        XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_UNBOUND.rawValue))
+        XCTAssertEqual(snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION), 0)
         XCTAssertEqual(snapshot.recovery_stage, UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue))
         XCTAssertEqual(view.recoveryText(snapshot), "shell exited")
         view.reconcileChrome()
         XCTAssertTrue(composer.isHidden, "an ended shell cannot accept Flow commands")
         XCTAssertEqual(seyal_app_composer(handle).mode, UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue))
+        XCTAssertFalse(
+            accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
+            "New shell must appear after primary exit"
+        )
     }
 
     func testBundledRuntimeLauncherUsesFixedHelperPath() {

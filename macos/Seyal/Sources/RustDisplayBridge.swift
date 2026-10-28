@@ -184,45 +184,19 @@ final class RustDisplayBridge {
   func adoptRecoveredHandle(_ opened: RuntimeRecoveryOpenedHandle) -> Bool {
     let handle = opened.handle
     if isConnected || teardown.disconnectPending {
-      let line = String(
-        format: "seyal: adopt rejected fence isConnected=%d disconnectPending=%d clientHandle=%llu\n",
+      NSLog(
+        "seyal: adopt rejected fence isConnected=%d disconnectPending=%d clientHandle=%llu",
         isConnected ? 1 : 0,
         teardown.disconnectPending ? 1 : 0,
         clientHandle
       )
-      NSLog("%@", line)
-      if let data = line.data(using: .utf8) {
-        let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
-        if FileManager.default.fileExists(atPath: url.path),
-          let file = try? FileHandle(forWritingTo: url)
-        {
-          defer { try? file.close() }
-          _ = try? file.seekToEnd()
-          try? file.write(contentsOf: data)
-        } else {
-          try? data.write(to: url)
-        }
-      }
       // Do not disconnect here — caller may clear the fence and retry adopt
       // with the same pending handle.
       return false
     }
     lastLaunchError = nil
     guard seyal_bridge_adopt_handle(handle) == 0 else {
-      let line = "seyal: adopt rejected seyal_bridge_adopt_handle\n"
-      NSLog("%@", line)
-      if let data = line.data(using: .utf8) {
-        let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
-        if FileManager.default.fileExists(atPath: url.path),
-          let file = try? FileHandle(forWritingTo: url)
-        {
-          defer { try? file.close() }
-          _ = try? file.seekToEnd()
-          try? file.write(contentsOf: data)
-        } else {
-          try? data.write(to: url)
-        }
-      }
+      NSLog("seyal: adopt rejected seyal_bridge_adopt_handle")
       // Pending handle was not taken; caller may disconnect.
       onError(-1)
       onStatusChanged()
@@ -232,20 +206,7 @@ final class RustDisplayBridge {
     lastRecoveryResult = recoveryResult
     let finished = finishAdoptedHandle(handle, recoveryResult: recoveryResult)
     if !finished {
-      let line = "seyal: adopt rejected finishAdoptedHandle (fd/reconstruction)\n"
-      NSLog("%@", line)
-      if let data = line.data(using: .utf8) {
-        let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
-        if FileManager.default.fileExists(atPath: url.path),
-          let file = try? FileHandle(forWritingTo: url)
-        {
-          defer { try? file.close() }
-          _ = try? file.seekToEnd()
-          try? file.write(contentsOf: data)
-        } else {
-          try? data.write(to: url)
-        }
-      }
+      NSLog("seyal: adopt rejected finishAdoptedHandle (fd/reconstruction)")
     }
     return finished
   }

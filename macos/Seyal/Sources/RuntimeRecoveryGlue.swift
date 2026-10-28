@@ -70,25 +70,12 @@ func openRuntimeRecoveryHandle(
     default:
       outcome = .blocked
     }
-    let line = String(
-      format: "seyal: open_first fail class=%u retryable=%u → %@\n",
+    NSLog(
+      "seyal: open_first fail class=%u retryable=%u → %@",
       result.failure_class,
       result.retryable,
-      String(describing: outcome)
+      String(describing: outcome) as NSString
     )
-    NSLog("%@", line)
-    if let data = line.data(using: .utf8) {
-      let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
-      if FileManager.default.fileExists(atPath: url.path),
-        let handle = try? FileHandle(forWritingTo: url)
-      {
-        defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: data)
-      } else {
-        try? data.write(to: url)
-      }
-    }
     return outcome
   }
   // `LAST_RECOVERY_RESULT` is executor-local in the Rust bridge. Capture the
