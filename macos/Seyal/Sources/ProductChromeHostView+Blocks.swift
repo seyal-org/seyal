@@ -89,7 +89,7 @@ extension ProductChromeHostView {
             }
         }
         pane.inputSurface.discardHistoryRequests(except: retained)
-        layoutSubtreeIfNeeded()
+        syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         publishLiveTailBlocks()
         if count > lastBlockCount, followingLiveEnd {
@@ -134,7 +134,7 @@ extension ProductChromeHostView {
             else { continue }
             card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
         }
-        layoutSubtreeIfNeeded()
+        syncTranscriptDocumentSize()
         publishBlockOutputFrame()
     }
 
@@ -185,13 +185,27 @@ extension ProductChromeHostView {
         if let card = blockCards[range.blockID] {
             card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
         }
-        layoutSubtreeIfNeeded()
+        syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         // History replies arrive after the initial live-end scroll and can grow
         // earlier cards. Keep following only when the user was already at the
         // live end so the newly submitted Block stays hittable.
         if followingLiveEnd {
             scrollTranscriptToLiveEnd()
+        }
+    }
+
+    /// AppKit scrolls with `documentView.frame`, while Auto Layout growth often
+    /// only updates `fittingSize`. Sync after Block body height changes so
+    /// long Flow output (`ls -la`, `seq`) is actually scrollable (#1379).
+    func syncTranscriptDocumentSize() {
+        layoutSubtreeIfNeeded()
+        let fitted = blocks.fittingSize
+        let width = max(fitted.width, transcript.contentView.bounds.width)
+        let height = max(fitted.height, 1)
+        if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - height) > 0.5 {
+            blocks.setFrameSize(NSSize(width: width, height: height))
+            transcript.reflectScrolledClipView(transcript.contentView)
         }
     }
 

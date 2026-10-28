@@ -1423,6 +1423,34 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(text.contains("ComposerRequestCorrelation"))
     }
 
+    /// #1379: Block cards must own clicks for selection but forward wheel
+    /// events to the transcript NSScrollView so long Flow output can scroll.
+    @MainActor
+    func testCommandBlockForwardsScrollWheelToTranscript() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let blocks = sourceRoot.appendingPathComponent("ProductChromeBlockViews.swift")
+        let text = (try? String(contentsOf: blocks, encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.isEmpty, "ProductChromeBlockViews.swift must be readable")
+        XCTAssertTrue(
+            text.contains("override func scrollWheel(with event: NSEvent)"),
+            "CommandBlockView must override scrollWheel"
+        )
+        XCTAssertTrue(
+            text.contains("enclosingScrollView"),
+            "Block scrollWheel must forward to the transcript NSScrollView"
+        )
+        let host = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
+        let hostText = (try? String(contentsOf: host, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            hostText.contains("syncTranscriptDocumentSize"),
+            "Flow transcript must sync document frame after Block body growth"
+        )
+    }
+
     /// #1379 / #1171: after Finalized/NoRunningExecution a failed poll may have
     /// already unregistered the client. Projecting BlockTimeline after that
     /// wipe empties Flow history; fail closed before metadata publish.

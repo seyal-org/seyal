@@ -127,6 +127,17 @@ final class CommandBlockView: NSView {
         super.hitTest(point) == nil ? nil : self
     }
 
+    /// `hitTest` returns `self` for selection, which would otherwise swallow
+    /// trackpad/mouse wheel over Block bodies. Flow scrolling is Pane-owned by
+    /// the transcript `NSScrollView` (#1379 Gate 1).
+    override func scrollWheel(with event: NSEvent) {
+        if let scroll = enclosingScrollView {
+            scroll.scrollWheel(with: event)
+            return
+        }
+        super.scrollWheel(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
         onSelect?(isSelected)
     }
