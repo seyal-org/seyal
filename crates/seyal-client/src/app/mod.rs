@@ -336,6 +336,8 @@ pub struct ApplicationRoot {
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
     /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
     quit_deadline: Option<std::time::Instant>,
+    /// Ended Pane waiting for SPEC-004 §18 Create+Bind (New shell). Not focused-sibling.
+    replacement_bootstrap: Option<seyal_core::PaneId>,
     /// Extra live display attachments and probe peers owned through quit cleanup.
     #[cfg(target_os = "macos")]
     live_attachments: Vec<session::QuitProbeAttachment>,
@@ -426,6 +428,7 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             live_attach_gate: None,
             last_window_event: None,
+            replacement_bootstrap: None,
             quit_deadline: None,
             #[cfg(target_os = "macos")]
             live_attachments: Vec::new(),

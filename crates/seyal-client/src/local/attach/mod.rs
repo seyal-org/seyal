@@ -273,9 +273,23 @@ impl LocalDisplayClient {
     /// role to its single running execution. Controller remains the permanent
     /// native-pane default; read-only native qualification may use Observer
     /// without borrowing controller authority from the app it will launch.
+    /// SPEC-004 §18: always `CreateExecution` then attach that id.
+    /// Does not adopt an already-running execution (would steal a sibling).
+    pub fn connect_created_execution_until(deadline: Instant) -> Result<Self, ClientError> {
+        Self::connect_role_until(Role::Controller, deadline, true)
+    }
+
     pub fn connect_first_running_as_until(
         role: Role,
         deadline: Instant,
+    ) -> Result<Self, ClientError> {
+        Self::connect_role_until(role, deadline, false)
+    }
+
+    fn connect_role_until(
+        role: Role,
+        deadline: Instant,
+        always_create: bool,
     ) -> Result<Self, ClientError> {
         let socket_path = canonical_control_socket_path()?;
 
@@ -287,28 +301,36 @@ impl LocalDisplayClient {
             true,
             deadline,
         )?;
-        send_control_until(&mut stream, MessageType::ListExecutions, &[], deadline)?;
-        let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)?;
-        if kind != MessageType::ExecutionList {
-            return Err(ClientError::Protocol);
-        }
-        let list = ExecutionList::decode(&payload).map_err(|_| ClientError::Protocol)?;
-        // P1 leaves the production Runtime resident with zero executions.
-        // A Controller opening the implicit bootstrap (headed recovery) creates
-        // profile 0 on this Ready connection, then attaches. Observer stays
-        // fail-closed so a read-only probe cannot spawn a shell.
-        // SPEC-009 §8.2.1: >1 survivors also provision new (leave survivors).
-        let mut created_bootstrap = false;
-        let execution_id = match resolve_single_running_execution(&list) {
-            Ok(execution_id) => execution_id,
-            Err(ClientError::NoRunningExecution | ClientError::AmbiguousExecutions)
-                if role == Role::Controller
-                    && provisioning_negotiated(server_hello.server_capabilities) =>
+        // New shell always CreateExecution then attaches that id. Listing and
+        // attaching "first" would steal a live sibling (SPEC-009 §8.2.1).
+        let (created_bootstrap, execution_id) = if always_create {
+            if role != Role::Controller
+                || !provisioning_negotiated(server_hello.server_capabilities)
             {
-                created_bootstrap = true;
-                create_profile_zero_execution(&mut stream, deadline)?
+                return Err(ClientError::UnsupportedInteractiveCapability);
             }
-            Err(error) => return Err(error),
+            (true, create_profile_zero_execution(&mut stream, deadline)?)
+        } else {
+            send_control_until(&mut stream, MessageType::ListExecutions, &[], deadline)?;
+            let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)?;
+            if kind != MessageType::ExecutionList {
+                return Err(ClientError::Protocol);
+            }
+            let list = ExecutionList::decode(&payload).map_err(|_| ClientError::Protocol)?;
+            // P1 leaves the production Runtime resident with zero executions.
+            // A Controller opening the implicit bootstrap creates profile 0 on
+            // this Ready connection, then attaches. Observer stays fail-closed.
+            // SPEC-009 §8.2.1: >1 survivors also provision new (leave survivors).
+            match resolve_single_running_execution(&list) {
+                Ok(execution_id) => (false, execution_id),
+                Err(ClientError::NoRunningExecution | ClientError::AmbiguousExecutions)
+                    if role == Role::Controller
+                        && provisioning_negotiated(server_hello.server_capabilities) =>
+                {
+                    (true, create_profile_zero_execution(&mut stream, deadline)?)
+                }
+                Err(error) => return Err(error),
+            }
         };
 
         #[cfg(target_os = "macos")]

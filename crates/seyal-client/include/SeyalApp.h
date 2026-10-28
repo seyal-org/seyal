@@ -195,7 +195,14 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_EQUALIZE_FOCUSED = 74,
     SEYAL_APP_ACTION_EQUALIZE_TAB = 75,
     /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
-    SEYAL_APP_ACTION_CLOSE_WINDOW = 76
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 76,
+    /*
+     * New shell after an ended Pane (SPEC-004 §18). reserved must be 0.
+     * Without FLAG_HAS_EXECUTION: prepare the ended Pane.
+     * With FLAG_HAS_EXECUTION and FLAG_HAS_ATTACHMENT: bind target_* onto
+     * that Pane. Never selects a sibling by list order.
+     */
+    SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION = 77
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
@@ -971,6 +978,9 @@ typedef struct SeyalAppBlockProjection {
 
 SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
+
+/** 1 when New shell has prepared an ended Pane and is waiting for Create+Bind. */
+uint8_t seyal_app_replacement_bootstrap_pending(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);
 

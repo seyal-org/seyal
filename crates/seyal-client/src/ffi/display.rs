@@ -249,7 +249,11 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
         Err(error) => {
             let code = error_code(error);
             if is_terminal_client_loss(&error) && handle != 0 {
-                super::app::note_application_roots_client_loss(handle);
+                if matches!(error, ClientError::NoRunningExecution) {
+                    super::app::note_application_roots_execution_ended(handle);
+                } else {
+                    super::app::note_application_roots_client_loss(handle);
+                }
                 let _ = super::unregister_client(handle);
             }
             code
@@ -280,7 +284,11 @@ pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
         Err(error) => {
             let code = error_code(error);
             if is_terminal_client_loss(&error) {
-                super::app::note_application_roots_client_loss(handle);
+                if matches!(error, ClientError::NoRunningExecution) {
+                    super::app::note_application_roots_execution_ended(handle);
+                } else {
+                    super::app::note_application_roots_client_loss(handle);
+                }
                 let _ = super::unregister_client(handle);
             }
             code

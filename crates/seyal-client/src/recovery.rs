@@ -254,6 +254,27 @@ impl RecoveryCoordinator {
         self.perform_attempt(self.state.generation, now)
     }
 
+    /// Replacement shell is bound. Leave ExecutionEnded so Flow composer returns.
+    pub fn mark_usable(&mut self) {
+        self.scheduled = false;
+        self.deadline = None;
+        self.launch_claimed = false;
+        self.attempt_outstanding = false;
+        self.claimed_remaining = None;
+        self.state.stage = RecoveryStage::Usable;
+    }
+
+    /// Primary execution ended outside an attach episode (poll saw
+    /// `NoRunningExecution`). Stop automatic reconnect without opening another.
+    pub fn mark_execution_ended(&mut self) {
+        self.scheduled = false;
+        self.deadline = None;
+        self.launch_claimed = false;
+        self.attempt_outstanding = false;
+        self.claimed_remaining = None;
+        self.state.stage = RecoveryStage::ExecutionEnded;
+    }
+
     pub fn cancel(&mut self) {
         self.scheduled = false;
         self.deadline = None;

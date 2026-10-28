@@ -30,10 +30,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// An adopted handle still has to report SPEC-009 §10 Restoring/Usable
   /// presentation progress to Rust.
   var recoveryPresentationPending = false
-  /// #1379 Defect B: after shell exit, the next explicit recovery episode must
-  /// bootstrap a fresh execution (`open_first`) instead of re-pinning the dead
-  /// `lastRecoveryResult` identity. Cleared once Usable is reached.
-  var preferFreshExecutionBootstrap = false
   /// When true, the surface still supports first-responder / AX / IME restore
   /// (SPEC §10) but does not begin automatic Runtime recovery. Used by the
   /// Pass 9 native_ready probe so it does not open a second client alongside
@@ -604,6 +600,11 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     preparationState.resetForLifecycleRecovery()
   }
 
+  /// Keep Flow history rows across shell-exit poll losses (-6, -10, -3).
+  static func retainsFlowHistoryPaint(afterBridgeError code: Int32?) -> Bool {
+    code == -6 || code == -10 || code == -3
+  }
+
   func terminalBridgeDidFail(_ code: Int32) {
     _ = code
   }
@@ -620,10 +621,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     }
     lastProposedGeometry = .null
     recoveryPresentationPending = false
-    // History/composer/display correlations are disposable connection state;
-    // logical pane and Block identity remain owned by Runtime and are not
-    // cleared here.
-    historyRanges.removeAll(keepingCapacity: false)
+    // Shell-exit losses keep Flow history. Other disconnects drop connection paint.
+    if !Self.retainsFlowHistoryPaint(afterBridgeError: lastBridgeError) {
+      historyRanges.removeAll(keepingCapacity: false)
+    }
     invalidatePreparedPresentation()
     startAutomaticBridgeRecoveryIfNeeded()
   }
@@ -701,6 +702,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func retainHistoryRange(_ range: NativeHistoryRange) {
     historyRanges[PaneBlockKey(paneID: paneID, blockID: range.blockID)] = range
+  }
+
+  func retainedHistoryRange(blockID: UInt64) -> NativeHistoryRange? {
+    historyRanges[PaneBlockKey(paneID: paneID, blockID: blockID)]
   }
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {

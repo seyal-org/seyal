@@ -55,14 +55,9 @@ extension MetalSurfaceView {
   /// Recovery remains pinned to the accepted execution after its transport
   /// disconnects. An implicit first attach is only a bootstrap; its accepted
   /// identity must not be forgotten and replaced with whichever execution is
-  /// running later.
-  ///
-  /// #1379 Defect B: after primary shell exit, explicit New shell / Retry sets
-  /// `preferFreshExecutionBootstrap` so the episode uses `open_first` (nil
-  /// identity) rather than reopening the dead `lastRecoveryResult` pin —
-  /// including after BeginRecovery advances the stage past ExecutionEnded.
+  /// running later. Shell exit does not clear this pin: New shell is
+  /// SPEC-004 §18 Create+Bind, not `open_first`.
   var recoveryExecutionIdentity: String? {
-    if preferFreshExecutionBootstrap { return nil }
     if let requestedExecutionIdentity { return requestedExecutionIdentity }
     guard let bridge else { return nil }
     return Self.identityString((
@@ -115,9 +110,9 @@ extension MetalSurfaceView {
   /// Explicit user retry starts a new bounded foreground recovery episode.
   /// Automatic exhaustion never invokes this method recursively.
   ///
-  /// #1379 Defect B: shell exit is an explicit recoverable state — Retry / New
-  /// shell may begin a fresh episode (identity cleared above). Automatic
-  /// reconnect remains suppressed in `startAutomaticBridgeRecoveryIfNeeded`.
+  /// Shell exit stays on New shell (Create+Bind). Exhausted or blocked
+  /// startup may begin another episode. Automatic reconnect stays suppressed
+  /// while the stage is ExecutionEnded.
   @discardableResult
   func retryRuntimeConnection() -> Bool {
     guard shouldAttachRuntime,
@@ -129,12 +124,9 @@ extension MetalSurfaceView {
       bridge?.completeEagerClientDisconnect()
       isDetachingRuntimeConnection = false
     }
-    let stage = runtimeRecoveryStage
-    if stage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
-      || stage == UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
-      || stage == UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue)
-    {
-      preferFreshExecutionBootstrap = true
+    if runtimeRecoveryStage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue) {
+      // New shell owns Create+Bind. Reopening the dead id is not a retry.
+      return false
     }
     beginRustRecoveryEpisode()
     return bridge?.isConnected == true
@@ -151,11 +143,9 @@ extension MetalSurfaceView {
       recoveryAppHandle != 0
     else { return false }
     if !isRustRecoveryEpisodeActive,
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue),
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
     {
-      if runtimeRecoveryStage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue) {
-        preferFreshExecutionBootstrap = true
-      }
       beginRustRecoveryEpisode()
     }
     return false
@@ -227,7 +217,6 @@ extension MetalSurfaceView {
       $0.reserved = UInt32(SEYAL_APP_RECOVERY_USABLE.rawValue)
     }
     recoveryPresentationPending = false
-    preferFreshExecutionBootstrap = false
     (self as? InteractiveMetalSurfaceView)?.resetComposerRecoveryFocusRetries()
     refreshRecoveryAccessibilityValue()
     onRecoveryEffectsPending?()

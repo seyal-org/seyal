@@ -96,6 +96,28 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
         },
     })
     .unwrap();
+    root.apply(AppAction::ApplyRuntimeBlocks {
+        fence: root.fence(),
+        records: Some(vec![
+            crate::composer::RuntimeBlockRecord {
+                id: seyal_core::BlockId::from_bytes([0x11; 16]),
+                command: "printf".into(),
+                start_line: 1,
+                end_line: Some(2),
+                running: false,
+                exit_status: Some(0),
+            },
+            crate::composer::RuntimeBlockRecord {
+                id: seyal_core::BlockId::from_bytes([0x22; 16]),
+                command: "exit 7".into(),
+                start_line: 3,
+                end_line: Some(3),
+                running: true,
+                exit_status: None,
+            },
+        ]),
+    })
+    .unwrap();
     root.apply(AppAction::BeginRecovery {
         now: Duration::ZERO,
     })
@@ -110,12 +132,21 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
     .unwrap();
 
     let snapshot = root.snapshot();
+    let blocks = snapshot.composer.as_ref().unwrap().blocks.clone();
+    assert_eq!(
+        blocks[0].state,
+        crate::composer::BlockPresentationState::Completed
+    );
+    assert_eq!(
+        blocks[1].state,
+        crate::composer::BlockPresentationState::Unknown,
+        "an exit block still marked running must not stay / running after the shell ends"
+    );
     assert_eq!(snapshot.recovery_stage, RecoveryStage::ExecutionEnded);
-    // Authority/shell bind are released so New shell can Bind a fresh
-    // ExecutionId; transcript retention is owned by APPLY_RUNTIME_BLOCKS
-    // retain-on-None, not by keeping the dead presentation identity.
-    assert_eq!(snapshot.eligibility, PresentationEligibility::Unbound);
-    assert!(root.authority.is_none());
+    // Keep Flow authority and the shell bind. Unbinding here fail-closes
+    // Block projection and blanks retained bodies. New shell releases later.
+    assert_eq!(snapshot.eligibility, PresentationEligibility::Flow);
+    assert!(root.authority.is_some());
     assert!(!snapshot.composer_eligible);
     assert_eq!(
         snapshot.composer.unwrap().mode,
@@ -161,8 +192,8 @@ fn execution_ended_does_not_poison_create_tab_pane_latch() {
         RecoveryStage::ExecutionEnded
     );
     assert!(
-        root.authority.is_none(),
-        "ended Pane must release authority so New shell can Bind"
+        root.authority.is_some(),
+        "shell exit keeps Flow authority so completed Blocks still project"
     );
 
     root.apply(AppAction::CreateTab)
@@ -213,22 +244,142 @@ fn execution_ended_pane_can_rebind_fresh_execution_and_clear_latch() {
     .unwrap();
     assert!(root.composer.execution_ended(pane));
 
+    root.apply(AppAction::CreateReplacementExecution {
+        execution: None,
+        attachment: None,
+        pty_generation: 0,
+    })
+    .expect("New shell prepares the ended Pane");
+    assert!(root.replacement_bootstrap_pending());
+    assert!(
+        root.apply(AppAction::Bind {
+            fence: root.fence(),
+            evidence: BindingEvidence {
+                execution: ExecutionId::from_bytes([0x61; 16]),
+                attachment: AttachmentId::from_bytes([0x62; 16]),
+                controller: true,
+                pty_generation: 2,
+                alternate_screen: false,
+            },
+        })
+        .is_err(),
+        "generic Bind must not steal the focused Pane during New shell"
+    );
+    let fresh = seyal_core::PaneId::new();
+    root.provisioning
+        .begin_intent(fresh, None)
+        .expect("a new split leaf is not blocked by the released dead binding");
+    root.apply(AppAction::CreateReplacementExecution {
+        execution: Some(ExecutionId::from_bytes([0x61; 16])),
+        attachment: Some(AttachmentId::from_bytes([0x62; 16])),
+        pty_generation: 1,
+    })
+    .expect("New shell binds the created ExecutionId");
+    assert!(!root.replacement_bootstrap_pending());
+    assert!(
+        !root.composer.execution_ended(pane),
+        "successful Create+Bind must clear the shell-exit latch"
+    );
+    assert!(root.snapshot().composer_eligible);
+    assert_eq!(
+        root.shell.pane_execution(pane).unwrap(),
+        Some(ExecutionId::from_bytes([0x61; 16]))
+    );
+}
+
+/// SPEC-009 §8.2.2: primary shell exit while a sibling is focused latches the
+/// primary Pane only. New shell must not release the focused sibling.
+#[test]
+fn primary_exit_while_sibling_focused_latches_primary_only() {
+    use crate::shell::ShellAction;
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let primary_execution = ExecutionId::from_bytes([0x11; 16]);
+    let sibling_execution = ExecutionId::from_bytes([0x21; 16]);
     root.apply(AppAction::Bind {
         fence: root.fence(),
         evidence: BindingEvidence {
-            execution: ExecutionId::from_bytes([0x61; 16]),
-            attachment: AttachmentId::from_bytes([0x62; 16]),
+            execution: primary_execution,
+            attachment: AttachmentId::from_bytes([0x12; 16]),
             controller: true,
-            pty_generation: 2,
+            pty_generation: 1,
             alternate_screen: false,
         },
     })
-    .expect("New shell Bind after exit must succeed");
-    assert!(
-        !root.composer.execution_ended(pane),
-        "successful Bind must clear the shell-exit latch"
+    .unwrap();
+    let primary = root.snapshot().shell.focused_pane;
+    root.shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: root.shell.containment_generation(),
+        })
+        .expect("split");
+    let sibling = root.snapshot().shell.focused_pane;
+    assert_ne!(sibling, primary);
+    root.shell
+        .apply(ShellAction::BindExecution {
+            pane: sibling,
+            execution: sibling_execution,
+        })
+        .unwrap();
+    root.provisioning
+        .record_adopted_binding(sibling, sibling_execution);
+    root.install_pane_authority(
+        sibling,
+        BindingEvidence {
+            execution: sibling_execution,
+            attachment: AttachmentId::from_bytes([0x22; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    )
+    .unwrap();
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::ExecutionEnded,
+        now: Duration::from_millis(1),
+        launch: None,
+    })
+    .unwrap();
+
+    assert!(root.composer.execution_ended(primary));
+    assert!(!root.composer.execution_ended(sibling));
+    assert_eq!(
+        root.authority.map(|authority| authority.pane),
+        Some(sibling)
     );
-    assert!(root.snapshot().composer_eligible);
+    assert_eq!(
+        root.shell.pane_execution(primary).unwrap(),
+        Some(primary_execution)
+    );
+    assert_eq!(
+        root.shell.pane_execution(sibling).unwrap(),
+        Some(sibling_execution)
+    );
+    assert!(
+        root.apply(AppAction::CreateReplacementExecution {
+            execution: None,
+            attachment: None,
+            pty_generation: 0,
+        })
+        .is_err(),
+        "New shell must not prepare a focused healthy sibling"
+    );
+    assert_eq!(
+        root.shell.pane_execution(sibling).unwrap(),
+        Some(sibling_execution)
+    );
+    assert_eq!(
+        root.shell.pane_execution(primary).unwrap(),
+        Some(primary_execution)
+    );
 }
 
 /// #1379 / #1171: when the display client is gone, APPLY_RUNTIME_BLOCKS must

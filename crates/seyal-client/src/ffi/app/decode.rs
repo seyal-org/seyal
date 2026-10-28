@@ -31,7 +31,7 @@ fn runtime_blocks_from_active_client() -> Option<Vec<RuntimeBlockRecord>> {
     })
 }
 
-pub(super) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockRecord {
+pub(crate) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockRecord {
     let mut bytes = [0u8; 16];
     bytes[..8].copy_from_slice(&record.id.to_le_bytes());
     RuntimeBlockRecord {
@@ -282,10 +282,35 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 authoritative_snapshot_committed,
             })
         }
-        // reserved != 0: clear continuity pins for a fresh ExecutionId bootstrap
-        // (New shell after exit). reserved == 0: same-execution disconnect fence.
-        57 if action.reserved != 0 => Ok(AppAction::ClearReconstructionContinuity),
         57 => Ok(AppAction::DisconnectReconstruction),
+        // New shell: no `reserved` overload. Absent execution prepares the
+        // ended Pane; present target_* binds that exact created ExecutionId.
+        77 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            if action.flags & FLAG_HAS_EXECUTION == 0 {
+                return Ok(AppAction::CreateReplacementExecution {
+                    execution: None,
+                    attachment: None,
+                    pty_generation: 0,
+                });
+            }
+            if action.flags & FLAG_HAS_ATTACHMENT == 0 || action.target_generation == 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::CreateReplacementExecution {
+                execution: Some(ExecutionId::from_bytes(id16(
+                    action.target_execution_lo,
+                    action.target_execution_hi,
+                )?)),
+                attachment: Some(AttachmentId::from_bytes(id16(
+                    action.target_attachment_lo,
+                    action.target_attachment_hi,
+                )?)),
+                pty_generation: action.target_generation,
+            })
+        }
         58 => Ok(AppAction::MoveSplitDivider {
             pane: PaneId::from_bytes(id16(
                 action.target_execution_lo,

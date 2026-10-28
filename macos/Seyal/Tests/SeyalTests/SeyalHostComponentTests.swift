@@ -855,11 +855,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
 
         let snapshot = seyal_app_snapshot(handle)
-        // ExecutionEnded releases shell authority so New shell can Bind a
-        // fresh execution; presentation drops to Unbound while recovery stage
-        // stays ExecutionEnded for chrome ("shell exited" + New shell).
-        XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_UNBOUND.rawValue))
-        XCTAssertEqual(snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION), 0)
+        // Shell exit keeps Flow and the execution so completed Block bodies
+        // still project. The composer hides and New shell is the create path.
+        XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
+        XCTAssertNotEqual(snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION), 0)
         XCTAssertEqual(snapshot.recovery_stage, UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue))
         XCTAssertEqual(view.recoveryText(snapshot), "shell exited")
         view.reconcileChrome()
@@ -869,6 +868,28 @@ final class SeyalHostComponentTests: XCTestCase {
             accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
             "New shell must appear after primary exit"
         )
+
+        var prepare = SeyalAppAction()
+        prepare.version = bind.version
+        prepare.size = bind.size
+        prepare.kind = UInt16(SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &prepare), 0)
+        XCTAssertEqual(seyal_app_replacement_bootstrap_pending(handle), 1)
+        var created = prepare
+        created.flags = UInt16(SEYAL_APP_FLAG_HAS_EXECUTION)
+            | UInt16(SEYAL_APP_FLAG_HAS_ATTACHMENT)
+            | UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        created.target_execution_lo = 9
+        created.target_attachment_lo = 8
+        created.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &created), 0)
+        XCTAssertEqual(seyal_app_replacement_bootstrap_pending(handle), 0)
+        let rebound = seyal_app_snapshot(handle)
+        XCTAssertEqual(rebound.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
+        XCTAssertNotEqual(rebound.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION), 0)
+        XCTAssertEqual(rebound.recovery_stage, UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue))
+        view.reconcileChrome()
+        XCTAssertFalse(composer.isHidden, "a bound replacement shell shows the Flow composer")
     }
 
     func testBundledRuntimeLauncherUsesFixedHelperPath() {
@@ -1469,51 +1490,13 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
-    /// #1379 / #1171: after Finalized/NoRunningExecution a failed poll may have
-    /// already unregistered the client. Projecting BlockTimeline after that
-    /// wipe empties Flow history; fail closed before metadata publish.
     @MainActor
-    func testFailedPollReturnsBeforeBlockTimelineProjection() {
-        let sourceRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources", isDirectory: true)
-        let input = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
-        let text = (try? String(contentsOf: input, encoding: .utf8)) ?? ""
-        XCTAssertFalse(text.isEmpty, "RustDisplayBridge+Input.swift must be readable")
-        guard let drainRange = text.range(of: "func drainReadyDisplayWork()") else {
-            XCTFail("drainReadyDisplayWork must exist on the Input bridge")
-            return
-        }
-        let afterDrain = text[drainRange.lowerBound...]
-        guard let pollCall = afterDrain.range(of: "seyal_bridge_poll()") else {
-            XCTFail("drainReadyDisplayWork must poll the bridge")
-            return
-        }
-        let afterPoll = afterDrain[pollCall.upperBound...]
-        guard let failGuard = afterPoll.range(of: "if result < 0") else {
-            XCTFail("failed poll must return before timeline projection")
-            return
-        }
-        let metadata = afterPoll.range(of: "currentBlockMetadata()")
-        let revision = afterPoll.range(of: "seyal_bridge_block_timeline_revision()")
-        XCTAssertNotNil(metadata, "drainReadyDisplayWork still publishes block metadata on success")
-        XCTAssertNotNil(revision, "drainReadyDisplayWork still observes timeline revision on success")
-        XCTAssertLessThan(
-            failGuard.lowerBound,
-            metadata!.lowerBound,
-            "poll failure must stop before currentBlockMetadata"
-        )
-        XCTAssertLessThan(
-            failGuard.lowerBound,
-            revision!.lowerBound,
-            "poll failure must stop before block_timeline_revision"
-        )
-        XCTAssertTrue(
-            afterPoll[failGuard.upperBound...].contains("return"),
-            "poll failure path must return without projecting an empty timeline"
-        )
+    func testShellExitRetainsFlowHistoryPaint() {
+        XCTAssertTrue(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: -6))
+        XCTAssertTrue(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: -10))
+        XCTAssertTrue(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: -3))
+        XCTAssertFalse(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: -1))
+        XCTAssertFalse(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: nil))
     }
 
     /// #1250: Runtime revisions are execution-scoped; equal revisions from

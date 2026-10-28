@@ -56,6 +56,14 @@ pub enum AppAction {
     /// Drop continuity pins so a fresh ExecutionId (New shell after exit) can
     /// commit. Same-execution reconnect must keep using DisconnectReconstruction.
     ClearReconstructionContinuity,
+    /// Explicit New shell after an ended Pane (SPEC-004 §18 Create+Bind).
+    /// `None` prepares that Pane. `Some` binds the created ExecutionId onto it,
+    /// never onto a focused sibling.
+    CreateReplacementExecution {
+        execution: Option<ExecutionId>,
+        attachment: Option<AttachmentId>,
+        pty_generation: u64,
+    },
     SetComposerDraft {
         fence: AppFence,
         text: String,

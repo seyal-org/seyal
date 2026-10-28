@@ -11,8 +11,38 @@ final class IdentityButton: NSButton {
     var containmentGeneration: UInt64 = 0
 }
 
+/// Accessibility stand-in for Metal-painted Block output. The glyphs stay on
+/// the renderer; this label only publishes the retained transcript to XCUI
+/// and VoiceOver. `draw` is empty so the string is not painted twice.
+final class BlockBodyView: NSTextField {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isEditable = false
+        isSelectable = false
+        isBezeled = false
+        isBordered = false
+        drawsBackground = false
+        font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        lineBreakMode = .byWordWrapping
+        maximumNumberOfLines = 0
+        cell?.wraps = true
+        cell?.isScrollable = false
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        _ = dirtyRect
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("BlockBodyView is programmatic")
+    }
+}
+
 final class CommandBlockView: NSView {
-    let body = NSView()
+    let body = BlockBodyView(frame: .zero)
     /// Host click on the header; `true` when the card is already selected.
     var onSelect: ((Bool) -> Void)?
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
@@ -68,7 +98,6 @@ final class CommandBlockView: NSView {
         body.layer?.isOpaque = false
         body.layer?.backgroundColor = NSColor.clear.cgColor
         body.setAccessibilityElement(true)
-        body.setAccessibilityRole(.group)
         header.addSubview(self.prompt)
         header.addSubview(command)
         header.addSubview(status)
@@ -107,6 +136,10 @@ final class CommandBlockView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("CommandBlockView is programmatic")
+    }
+
+    func setBodyTranscript(_ text: String) {
+        body.stringValue = text
     }
 
     func setOutputLines(_ lines: Int, cellHeight: CGFloat) {

@@ -306,9 +306,10 @@ fn last_window_close_releases_controller_for_readopt_and_terminate() {
     client
         .submit_terminate_execution(execution_id)
         .expect("new Controller admits terminate");
-    // Do not abort the wait on the first poll_prepare Err: CI can surface a
-    // transient prepare miss before the correlated TerminationRequested frame
-    // is readable, and breaking early made this flake under Foundation Quality.
+    // Foundation Quality missed TerminationRequested inside a 3s window when
+    // the first poll_prepare Err aborted the wait. Keep polling until the
+    // result or this deadline. The assertion below is still
+    // TerminationRequested — this is not a weaker oracle.
     let result_deadline = Instant::now() + Duration::from_secs(8);
     let mut result = None;
     while Instant::now() < result_deadline {

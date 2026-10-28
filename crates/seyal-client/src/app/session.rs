@@ -314,7 +314,10 @@ impl ApplicationRoot {
             // XCTest/Seyal.app retry the same fd. Unregister only on terminal
             // socket loss (same set as `seyal_bridge_poll_for`).
             Err(error) if is_terminal_registry_loss(&error) => {
-                self.note_registry_client_loss(handle);
+                self.note_terminal_client_loss(
+                    handle,
+                    matches!(error, crate::local::ClientError::NoRunningExecution),
+                );
                 let _ = crate::ffi::unregister_client(handle);
                 return self.fail(AppError::NoLiveClient);
             }
@@ -371,8 +374,8 @@ impl ApplicationRoot {
 
     /// Drain unfocused second-tab Controllers so type-39/control frames do not
     /// stall until the tab is focused again. Display output stays focused-pane.
-    /// Terminal poll errors clear that pane's authority (same loss path as
-    /// `seyal_bridge_poll_for`) so a dead fd cannot spin forever.
+    /// Terminal poll errors disarm that fd (same loss path as
+    /// `seyal_bridge_poll_for`). Shell exit keeps Flow authority.
     #[cfg(target_os = "macos")]
     fn poll_unfocused_pane_clients(&mut self) {
         let focused = self.shell.snapshot().focused_pane;
@@ -383,8 +386,8 @@ impl ApplicationRoot {
             .map(|(pane, raw)| (*pane, *raw))
             .collect();
         for (_pane, raw) in handles {
-            if registry_client_is_gone(raw) {
-                self.note_registry_client_loss(raw);
+            if let Some(ended) = registry_client_terminal_loss(raw) {
+                self.note_terminal_client_loss(raw, ended);
                 let _ = crate::ffi::unregister_client(raw);
             }
         }
@@ -406,10 +409,18 @@ fn is_terminal_registry_loss(error: &crate::local::ClientError) -> bool {
 
 #[cfg(target_os = "macos")]
 fn registry_client_is_gone(handle: u64) -> bool {
+    registry_client_terminal_loss(handle).is_some()
+}
+
+/// `Some(true)` when the loss is shell exit (`NoRunningExecution`).
+fn registry_client_terminal_loss(handle: u64) -> Option<bool> {
     match crate::ffi::with_client_mut(handle, LocalDisplayClient::poll_prepare) {
-        None => true,
-        Some(Err(error)) => is_terminal_registry_loss(&error),
-        Some(Ok(_)) => false,
+        None => Some(false),
+        Some(Err(error)) if is_terminal_registry_loss(&error) => Some(matches!(
+            error,
+            crate::local::ClientError::NoRunningExecution
+        )),
+        Some(Err(_) | Ok(_)) => None,
     }
 }
 
@@ -428,6 +439,12 @@ impl ApplicationRoot {
         fence: AppFence,
         evidence: BindingEvidence,
     ) -> Result<(), AppError> {
+        // New shell binds through CreateReplacementExecution onto the ended
+        // Pane. A generic Bind here would attach the created id to whoever
+        // is focused and can steal a sibling.
+        if self.replacement_bootstrap.is_some() {
+            return Err(AppError::StalePane);
+        }
         self.require_fence(fence)?;
         if self.authority.is_some() {
             return Err(AppError::AlreadyBound);

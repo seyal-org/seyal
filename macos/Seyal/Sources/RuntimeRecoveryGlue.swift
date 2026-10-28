@@ -94,6 +94,38 @@ func openRuntimeRecoveryHandle(
   ))
 }
 
+/// SPEC-004 §18 New shell. Rust owns the budget and always creates a new
+/// execution. This never lists and attaches an existing survivor.
+func openCreatedExecutionHandle() -> RuntimeRecoveryAttemptOutcome {
+  let handle = seyal_bridge_open_created_execution()
+  guard handle != 0 else {
+    let result = seyal_bridge_last_recovery_result()
+    let classified = seyal_bridge_classify_open_result(result.failure_class, result.retryable)
+    switch classified {
+    case UInt32(SEYAL_APP_RECOVERY_ENDPOINT_MISSING.rawValue):
+      return .endpointMissing
+    case UInt32(SEYAL_APP_RECOVERY_CONTROLLER_BUSY.rawValue):
+      return .controllerBusy
+    case UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue):
+      return .executionEnded
+    case UInt32(SEYAL_APP_RECOVERY_RETRYABLE.rawValue):
+      return .retryable
+    default:
+      return .blocked
+    }
+  }
+  let result = seyal_bridge_last_recovery_result()
+  return .opened(RuntimeRecoveryOpenedHandle(
+    handle: handle,
+    runtimeIDLow: result.runtime_id_low,
+    runtimeIDHigh: result.runtime_id_high,
+    executionIDLow: result.execution_id_low,
+    executionIDHigh: result.execution_id_high,
+    attachmentIDLow: result.attachment_id_low,
+    attachmentIDHigh: result.attachment_id_high
+  ))
+}
+
 /// Asks Rust `ReconstructionState` to fence continuity identity. Returns true
 /// only when the commit succeeds. Controller authority and the authoritative
 /// snapshot are taken from the live `CLIENTS` entry matching these pins;

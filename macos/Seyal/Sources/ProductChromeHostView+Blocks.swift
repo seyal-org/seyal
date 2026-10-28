@@ -75,6 +75,9 @@ extension ProductChromeHostView {
             )
             card.setAccessibilityIdentifier("seyal-block-\(index)")
             card.body.setAccessibilityIdentifier("seyal-block-\(index)-body")
+            if blockID != 0, let retainedRange = pane.inputSurface.retainedHistoryRange(blockID: blockID) {
+                card.setBodyTranscript(retainedRange.transcriptText)
+            }
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
             let idHi = row.id_hi
@@ -187,6 +190,7 @@ extension ProductChromeHostView {
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
             card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
+            card.setBodyTranscript(range.transcriptText)
         }
         // Paint with Auto Layout sizes first, then expand the document frame.
         // setFrameSize-before-publish can yield zero-height clips that wipe Metal

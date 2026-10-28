@@ -58,6 +58,11 @@ impl ApplicationRoot {
             ),
             AppAction::DisconnectReconstruction => self.disconnect_reconstruction(),
             AppAction::ClearReconstructionContinuity => self.clear_reconstruction_continuity(),
+            AppAction::CreateReplacementExecution {
+                execution,
+                attachment,
+                pty_generation,
+            } => self.create_replacement_execution(execution, attachment, pty_generation),
             AppAction::SetComposerDraft {
                 fence,
                 text,

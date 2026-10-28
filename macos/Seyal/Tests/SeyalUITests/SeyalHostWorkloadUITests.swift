@@ -98,8 +98,26 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             .completed,
             "Flow Block content from before exit must remain visible; empty chrome is not enough"
         )
-        let terminal = app.descendants(matching: .any)["terminal-input"]
-        XCTAssertTrue((terminal.value as? String ?? "").contains("execution=none"))
+        let body = app.descendants(matching: .any)["seyal-block-0-body"]
+        let bodyText = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1171-exit-before",
+                "seyal-1171-exit-before"
+            ),
+            evaluatedWith: body.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [bodyText], timeout: 8),
+            .completed,
+            "completed Block body must keep the pre-exit transcript, not an empty title card"
+        )
+        XCTAssertGreaterThan(
+            body.firstMatch.frame.height,
+            8,
+            "completed Block body must reserve Metal output height after shell exit"
+        )
         XCTAssertEqual(app.state, .runningForeground)
         attachScreenshot(app, name: "1171-primary-shell-exit")
     }

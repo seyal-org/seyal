@@ -736,6 +736,15 @@ impl ProvisioningSession {
         // automatic_retries stays zero by construction.
     }
 
+    /// Drop a Pane binding whose execution has already ended.
+    /// Does not enqueue terminate: continuity is not claimed (SPEC-009 §8.2).
+    pub fn release_dead_binding(&mut self, pane: PaneId) {
+        self.recorded_bindings.remove(&pane);
+        self.bound_owners.remove(&pane);
+        self.awaiting_bootstrap_resize.remove(&pane);
+        self.pane_pending.remove(&pane);
+    }
+
     /// Record a binding obtained outside create (single-survivor adopt / reconnect).
     /// Hosts still cannot invent ids for create; this only stores a Runtime-proven id.
     pub fn record_adopted_binding(&mut self, pane: PaneId, execution: ExecutionId) {

@@ -36,9 +36,48 @@ impl ApplicationRoot {
         // ended, and cleared when that pane binds a live execution again.
     }
 
-    /// Latch shell-exit on the Pane that owned the ended primary episode.
-    pub(super) fn latch_execution_ended_on_focused_pane(&mut self) {
-        let pane = self.shell.snapshot().focused_pane;
+    /// An ended execution is not still running a Block. Keep an observed exit
+    /// status; a block the timeline left `Running` becomes Unknown (ADR-009
+    /// mechanism 5) instead of `/ running`.
+    pub(super) fn settle_running_blocks_after_exit(&mut self, pane: seyal_core::PaneId) {
+        let Ok(snapshot) = self.composer.snapshot(pane) else {
+            return;
+        };
+        if !snapshot
+            .blocks
+            .iter()
+            .any(|block| block.state == crate::composer::BlockPresentationState::Running)
+        {
+            return;
+        }
+        let records = snapshot
+            .blocks
+            .into_iter()
+            .map(|block| {
+                let ended_without_status =
+                    block.state == crate::composer::BlockPresentationState::Running;
+                RuntimeBlockRecord {
+                    id: block.id,
+                    command: block.command,
+                    start_line: block.start_line,
+                    end_line: block.end_line,
+                    running: false,
+                    exit_status: if ended_without_status {
+                        None
+                    } else {
+                        block.exit_status
+                    },
+                }
+            })
+            .collect();
+        let _ = self
+            .composer
+            .apply(ComposerAction::ApplyRuntimeBlocks { pane, records });
+    }
+
+    /// Latch shell-exit on one Pane. Callers pass the ended Pane, never the
+    /// focused sibling (SPEC-009 §8.2.2).
+    pub(super) fn latch_execution_ended_on_pane(&mut self, pane: seyal_core::PaneId) {
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
         let _ = self
             .composer

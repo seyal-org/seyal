@@ -11,9 +11,45 @@ use seyal_core::{ExecutionId, PaneId};
 use seyal_runtime::local_ipc::framing::Role;
 
 use super::{AppError, ApplicationRoot, BindingEvidence, PaneAuthority};
+use crate::composer::ComposerAction;
 use crate::local::{ClientError, LocalDisplayClient};
 use crate::presentation::{PresentationAction, PresentationIdentity};
 use crate::provisioning::{ConnectionOwner, ProvisioningEffect, ProvisioningFailure};
+
+fn runtime_block_from_timeline(
+    record: &seyal_protocol::framing::CommandBlock,
+) -> crate::composer::RuntimeBlockRecord {
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&record.id.to_le_bytes());
+    crate::composer::RuntimeBlockRecord {
+        id: seyal_core::BlockId::from_bytes(bytes),
+        command: record.command.clone(),
+        start_line: record.start_line,
+        end_line: record.end_line,
+        running: matches!(
+            record.state,
+            seyal_protocol::framing::CommandBlockState::Running
+        ),
+        exit_status: match record.state {
+            seyal_protocol::framing::CommandBlockState::Running => None,
+            seyal_protocol::framing::CommandBlockState::Completed { exit_status } => exit_status,
+        },
+    }
+}
+
+/// Shell exit has already happened. A block the timeline still marks running
+/// has no observed exit status (ADR-009 mechanism 5): present Unknown, not
+/// `/ running`, and keep a completed exit status when Runtime published one.
+fn runtime_block_from_ended_timeline(
+    record: &seyal_protocol::framing::CommandBlock,
+) -> crate::composer::RuntimeBlockRecord {
+    let mut mapped = runtime_block_from_timeline(record);
+    if mapped.running {
+        mapped.running = false;
+        mapped.exit_status = None;
+    }
+    mapped
+}
 
 pub(super) struct PendingLiveAttach {
     pub owner: ConnectionOwner,
@@ -330,6 +366,76 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// Terminal poll loss. `execution_ended` keeps Flow authority and copies the
+    /// final Block timeline before the client is unregistered (#1379).
+    pub(crate) fn note_terminal_client_loss(&mut self, handle: u64, execution_ended: bool) {
+        if execution_ended {
+            self.note_ended_execution_client_loss(handle);
+        } else {
+            self.note_registry_client_loss(handle);
+        }
+    }
+
+    /// Shell exit: retain Block history and latch the Pane that owned `handle`.
+    /// Do not clear focused-sibling authority or presentation (SPEC-009 §8.2.2).
+    pub(crate) fn note_ended_execution_client_loss(&mut self, handle: u64) {
+        self.retain_client_block_timeline(handle);
+        let panes: Vec<PaneId> = self
+            .pane_client_raws
+            .iter()
+            .filter(|(_, raw)| **raw == handle)
+            .map(|(pane, _)| *pane)
+            .collect();
+        for pane in panes {
+            self.latch_execution_ended_on_pane(pane);
+            self.settle_running_blocks_after_exit(pane);
+            self.note_pane_attachment_loss(pane, handle);
+            self.unregister_extra_pane_client(pane);
+            if self
+                .client_handle
+                .as_ref()
+                .is_some_and(|owned| owned.raw() == handle)
+            {
+                self.client_handle = None;
+                self.pane_client_raws.remove(&pane);
+            }
+            if self.pane_recovery.primary_pane == Some(pane)
+                || self.pane_recovery.primary_pane.is_none()
+            {
+                self.recovery.mark_execution_ended();
+            }
+        }
+        self.sync_composer_presentation();
+    }
+
+    fn retain_client_block_timeline(&mut self, handle: u64) {
+        let Some(records) = crate::ffi::with_client(handle, |client| {
+            client
+                .block_timeline()
+                .records
+                .iter()
+                .map(runtime_block_from_ended_timeline)
+                .collect::<Vec<_>>()
+        }) else {
+            return;
+        };
+        if records.is_empty() {
+            return;
+        }
+        let panes: Vec<PaneId> = self
+            .pane_client_raws
+            .iter()
+            .filter(|(_, raw)| **raw == handle)
+            .map(|(pane, _)| *pane)
+            .collect();
+        for pane in panes {
+            let _ = self.composer.apply(ComposerAction::ApplyRuntimeBlocks {
+                pane,
+                records: records.clone(),
+            });
+        }
+    }
+
     /// Drop a lost registry client without unbinding the pane.
     /// Socket EOF is not CloseTab: keep shell/provisioning identity so terminate
     /// can retry after reconnect. Fail-closed input uses a zero display handle
@@ -433,5 +539,39 @@ fn map_client_error(error: ClientError) -> AppError {
         ClientError::UnsupportedInteractiveCapability => AppError::ProvisioningRejected,
         ClientError::LostController => AppError::NotController,
         _ => AppError::ProvisioningRejected,
+    }
+}
+
+#[cfg(test)]
+mod ended_timeline_tests {
+    use super::runtime_block_from_ended_timeline;
+    use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+
+    #[test]
+    fn ended_timeline_stops_presenting_a_still_running_block() {
+        let running = CommandBlock {
+            id: 7,
+            command: "exit 7".to_owned(),
+            start_line: 4,
+            end_line: Some(4),
+            state: CommandBlockState::Running,
+        };
+        let mapped = runtime_block_from_ended_timeline(&running);
+        assert!(!mapped.running);
+        assert_eq!(mapped.exit_status, None);
+        assert_eq!(mapped.command, "exit 7");
+
+        let completed = CommandBlock {
+            id: 3,
+            command: "printf".to_owned(),
+            start_line: 1,
+            end_line: Some(2),
+            state: CommandBlockState::Completed {
+                exit_status: Some(0),
+            },
+        };
+        let kept = runtime_block_from_ended_timeline(&completed);
+        assert!(!kept.running);
+        assert_eq!(kept.exit_status, Some(0));
     }
 }

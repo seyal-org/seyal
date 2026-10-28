@@ -173,6 +173,8 @@ int32_t seyal_bridge_connect_first(void);
 /// test host selected the directory; environment variables are ignored.
 int32_t seyal_bridge_set_runtime_dir(const char *path);
 uint64_t seyal_bridge_open_first(void);
+/** SPEC-004 §18: create one execution and attach that id. Never list-order attach. */
+uint64_t seyal_bridge_open_created_execution(void);
 uint64_t seyal_bridge_open_first_until(uint64_t budget_micros);
 uint64_t seyal_bridge_open_first_observer_until(uint64_t budget_micros);
 uint64_t seyal_bridge_open_execution(uint64_t execution_low, uint64_t execution_high);
