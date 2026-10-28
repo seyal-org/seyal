@@ -16,7 +16,10 @@ extension MetalSurfaceView {
       return
     }
     let regionIDs = Set(frame.regionIDs)
-    historyRanges = historyRanges.filter { regionIDs.contains($0.key.blockID) }
+    // Do not drop `historyRanges` here when a body clip is briefly omitted —
+    // that erased AX transcript + Metal source data after clear→exit while
+    // cards still existed. Lifetime stays with removeTranscriptRegions /
+    // disconnect retain policy.
     renderer.removeHistoryRegions(except: regionIDs)
     renderer.setHistoryRegionOrder(frame.regionIDs)
     renderer.setTranscriptRegions(liveTailPixelRegions(in: frame))
