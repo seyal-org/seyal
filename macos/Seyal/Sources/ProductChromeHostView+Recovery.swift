@@ -115,15 +115,12 @@ extension ProductChromeHostView {
         return "\(stage) · attempts \(snapshot.recovery_attempts)"
     }
 
-    /// #1379 Defect B: show one clear recovery action only when Rust has
-    /// latched primary shell exit on this Pane (composer hidden). Do not offer
-    /// New shell for Blocked/Exhausted without that latch — Rust rejects those
-    /// creates (`InvalidPayload`), which would leave a dead button (ADR-015).
+    /// #1379 Defect B: show New shell only when Rust admits it for the focused
+    /// Pane (`seyal_app_new_shell_available`). Do not re-derive from the
+    /// app-wide recovery stage (ADR-015).
     func updateNewShellRecoveryAction(_ snapshot: SeyalAppSnapshot) {
-        let stage = snapshot.recovery_stage
-        let composerSnap = seyal_app_composer(pane.appHandle)
-        let show = stage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
-            && composerSnap.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+        _ = snapshot
+        let show = seyal_app_new_shell_available(pane.appHandle) != 0
         newShellButton.isHidden = !show
         // Hide the composer only when Rust already hid it for this Pane.
         // A focused sibling stays eligible and must not lose its composer.
@@ -137,6 +134,12 @@ extension ProductChromeHostView {
     /// the pending display handle.
     @objc func requestNewShellAfterExit() {
         guard recoveryAttemptInFlight == nil else { return }
+        // Admit before tearing down the bridge so a dead button cannot drop
+        // a focused sibling's display connection (ADR-015 / #1379).
+        guard seyal_app_new_shell_available(pane.appHandle) != 0 else {
+            reconcileChrome()
+            return
+        }
         pane.inputSurface.suppressesAutomaticBridgeRecovery = true
         if pane.inputSurface.bridge?.clientHandle != 0
             || pane.inputSurface.bridge?.isConnected == true

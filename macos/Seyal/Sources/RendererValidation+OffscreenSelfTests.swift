@@ -359,7 +359,8 @@ extension RendererValidation {
 
             let paint = renderer.inspectFlowPaint()
             return paint.isClean
-                && paint.historyInstanceCount == 4
+                && paint.historyInstanceCount == 0
+                && paint.liveTailInstanceCount == 4
                 && paint.instancesOutsideClips == 0
         } catch {
             return false

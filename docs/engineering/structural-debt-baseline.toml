@@ -30,9 +30,9 @@ reason = "Flow history retention across shell-exit poll loss stays on the Metal 
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
-acknowledged_loc = 870
+acknowledged_loc = 873
 issue = 1379
-reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and strengthens Flow paint inspection so clear→exit cannot leave a stale live-tail drawable."
+reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and splits live-tail vs history Flow paint counts so clear→exit ink stays history-only."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"

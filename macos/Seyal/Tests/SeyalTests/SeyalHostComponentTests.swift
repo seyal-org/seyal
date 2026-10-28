@@ -869,6 +869,12 @@ final class SeyalHostComponentTests: XCTestCase {
             accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
             "New shell must appear after primary exit"
         )
+        XCTAssertEqual(
+            seyal_app_new_shell_available(handle),
+            1,
+            "focused ended Pane must admit New shell"
+        )
+        // ADR-015: "+" still CreateTabs — must not flip into replacement bootstrap.
         view.createTab()
         view.reconcileChrome()
         XCTAssertEqual(
@@ -876,10 +882,54 @@ final class SeyalHostComponentTests: XCTestCase {
             0,
             "CreateTab after exit must not silently become New shell (ADR-015)"
         )
-        XCTAssertFalse(
-            accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
-            "New shell remains the explicit recovery path after CreateTab"
+        XCTAssertEqual(
+            seyal_app_new_shell_available(handle),
+            0,
+            "CreateTab focus leaves a latch-free Pane; New shell must not stay admitted"
         )
+        XCTAssertTrue(
+            accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
+            "New shell must not stay visible on a tab Rust will refuse"
+        )
+    }
+
+    func testShellExitNewShellRebindsFreshExecution() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let handle = view.pane.appHandle
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        view.reconcileChrome()
+
+        var begin = SeyalAppAction()
+        begin.version = bind.version
+        begin.size = bind.size
+        begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
+        begin.target_generation = 0
+        XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
+        let generation = seyal_app_snapshot(handle).recovery_generation
+
+        var ended = SeyalAppAction()
+        ended.version = bind.version
+        ended.size = bind.size
+        ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
+        ended.target_execution_lo = generation
+        ended.target_generation = 1
+        ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
+        view.reconcileChrome()
+        XCTAssertEqual(seyal_app_new_shell_available(handle), 1)
 
         var prepare = SeyalAppAction()
         prepare.version = bind.version
@@ -901,7 +951,9 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotEqual(rebound.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION), 0)
         XCTAssertEqual(rebound.recovery_stage, UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue))
         view.reconcileChrome()
+        let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
         XCTAssertFalse(composer.isHidden, "a bound replacement shell shows the Flow composer")
+        XCTAssertEqual(seyal_app_new_shell_available(handle), 0)
     }
 
     func testBundledRuntimeLauncherUsesFixedHelperPath() {
@@ -2970,7 +3022,8 @@ final class SeyalHostComponentTests: XCTestCase {
 
         let paint = renderer.inspectFlowPaint()
         XCTAssertTrue(paint.isClean, "Flow must not submit Pane-wide live grid")
-        XCTAssertEqual(paint.historyInstanceCount, 4)
+        XCTAssertEqual(paint.historyInstanceCount, 0, "running live-tail is not history paint")
+        XCTAssertEqual(paint.liveTailInstanceCount, 4)
         XCTAssertEqual(paint.instancesOutsideClips, 0)
 
         // Damage-free update must reuse the live-tail clip without allocating

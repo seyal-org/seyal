@@ -45,6 +45,9 @@ struct FlowPaintInspection: Equatable, Sendable {
     var liveGridSubmitted: Bool
     var fullGridBackgroundSubmitted: Bool
     var historyInstanceCount: Int
+    /// Painted glyph instances in live-tail Block buffers (running command).
+    /// Kept separate from history so clear→exit ink checks stay history-only.
+    var liveTailInstanceCount: Int
     /// History Block buffers that still have at least one drawable glyph.
     /// clear→exit false-green: total instances can be >0 while later cards
     /// were culled to empty after a clip collapse (#1379).

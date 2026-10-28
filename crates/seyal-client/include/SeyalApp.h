@@ -983,6 +983,8 @@ uint64_t seyal_app_recovery_param(uint64_t handle);
 uint8_t seyal_app_replacement_bootstrap_pending(uint64_t handle);
 /** 1 when an ended execution must keep Flow history paint. Not a poll-code check. */
 uint8_t seyal_app_retains_flow_history(uint64_t handle);
+/** 1 when focused-Pane New shell would be admitted (shell-exit latch). ADR-015. */
+uint8_t seyal_app_new_shell_available(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);
 

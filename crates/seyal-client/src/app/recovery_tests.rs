@@ -208,6 +208,10 @@ fn execution_ended_does_not_poison_create_tab_pane_latch() {
         !root.composer.execution_ended(new_pane),
         "new CreateTab leaf must not inherit ExecutionEnded"
     );
+    assert!(
+        !root.new_shell_available(),
+        "CreateTab focus must not leave New shell admitted on a latch-free Pane"
+    );
 }
 
 /// #1379 Defect B: after shell exit, the same Pane can Bind a fresh
@@ -246,6 +250,10 @@ fn execution_ended_pane_can_rebind_fresh_execution_and_clear_latch() {
     assert!(
         root.retains_flow_history(),
         "shell exit retains Flow history without a host poll-code check"
+    );
+    assert!(
+        root.new_shell_available(),
+        "focused ended Pane admits New shell"
     );
     root.composer
         .apply(crate::composer::ComposerAction::SetBusy {

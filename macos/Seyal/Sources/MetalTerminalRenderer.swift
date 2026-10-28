@@ -563,6 +563,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     func inspectFlowPaint(from texture: MTLTexture? = nil) -> FlowPaintInspection {
         var instancesOutsideClips = 0
         var historyInstanceCount = 0
+        var liveTailInstanceCount = 0
         var paintedHistoryRegionCount = 0
         let historyOnly = historyRegionOrder.compactMap { historyRegions[$0] }
         for region in historyOnly {
@@ -590,13 +591,14 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 paintedHistoryRegionCount += 1
             }
         }
-        // Live-tail instances also count toward out-of-clip leakage.
+        // Live-tail instances count separately and toward out-of-clip leakage.
         for region in orderedLiveTailRegions {
             let pointer = region.buffer.contents().bindMemory(
                 to: TerminalInstance.self,
                 capacity: region.instanceCount
             )
             for index in 0..<region.instanceCount where pointer[index].size.x > 0 && pointer[index].size.y > 0 {
+                liveTailInstanceCount += 1
                 let origin = pointer[index].origin
                 let size = pointer[index].size
                 let painted = CGRect(
@@ -641,6 +643,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             liveGridSubmitted: presentationPlan.drawsLiveGrid,
             fullGridBackgroundSubmitted: presentationPlan.drawsFullGridBackground,
             historyInstanceCount: historyInstanceCount,
+            liveTailInstanceCount: liveTailInstanceCount,
             paintedHistoryRegionCount: paintedHistoryRegionCount,
             historyClipsDistinct: historyClipsDistinct,
             instancesOutsideClips: instancesOutsideClips,

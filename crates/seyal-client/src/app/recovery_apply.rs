@@ -174,6 +174,15 @@ impl ApplicationRoot {
             || self.composer.any_execution_ended()
     }
 
+    /// 1 when New shell would be admitted for the focused Pane (shell-exit
+    /// latch). Hosts must project this fact rather than re-deriving it from
+    /// the app-wide recovery stage (ADR-015 / #1379).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn new_shell_available(&self) -> bool {
+        let focused = self.shell.snapshot().focused_pane;
+        self.composer.execution_ended(focused)
+    }
+
     /// A terminal display loss (shell exit, disconnect, or IO) keeps Flow
     /// history. The host must not re-derive that from poll codes.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

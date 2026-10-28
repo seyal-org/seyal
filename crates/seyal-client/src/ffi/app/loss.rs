@@ -28,6 +28,21 @@ pub extern "C" fn seyal_app_retains_flow_history(handle: u64) -> u8 {
     })
 }
 
+/// 1 when focused-Pane New shell would be admitted (shell-exit latch). Hosts
+/// must not invent this from the app-wide recovery stage alone (ADR-015).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_new_shell_available(handle: u64) -> u8 {
+    if handle == 0 {
+        return 0;
+    }
+    super::APPS.with(|apps| {
+        apps.borrow()
+            .get(&handle)
+            .map(|state| u8::from(state.root.new_shell_available()))
+            .unwrap_or(0)
+    })
+}
+
 pub(crate) fn note_application_roots_client_loss(handle: u64) {
     note_application_roots_client_loss_kind(handle, false);
 }
