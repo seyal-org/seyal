@@ -230,18 +230,19 @@ final class SeyalHostWorkloadUITests: XCTestCase {
     /// regression stays on `testClearThenExitKeepsPaintedBlockBodies`.
     ///
     /// Enable with either:
-    /// - `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test` (script forwards
-    ///   `TEST_RUNNER_…` into the XCUI runner), or
-    /// - `TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1` on a raw `xcodebuild
-    ///   test` (xcodebuild only injects `TEST_RUNNER_`-prefixed vars; a bare
-    ///   `SEYAL_UI_TEST_…=1` silently skips and still reports suite PASS).
+    /// - `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test` (`test-macos-ui.sh`
+    ///   exports `TEST_RUNNER_…` into xcodebuild's environment), or
+    /// - `env TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 xcodebuild …`
+    ///   (must be an env var, not a CLI build setting; xcodebuild strips the
+    ///   prefix before the runner sees `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1`).
+    /// A bare `SEYAL_UI_TEST_…=1` on raw xcodebuild silently skips and still
+    /// reports suite PASS.
     func testClearThenExitPaintStableAcrossTenCycles() throws {
-        let env = ProcessInfo.processInfo.environment
-        let stressEnabled = env["SEYAL_UI_TEST_CLEAR_EXIT_STRESS"] == "1"
-            || env["TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS"] == "1"
-        guard stressEnabled else {
+        // Runner sees the name with TEST_RUNNER_ already stripped.
+        guard ProcessInfo.processInfo.environment["SEYAL_UI_TEST_CLEAR_EXIT_STRESS"] == "1"
+        else {
             throw XCTSkip(
-                "enable Gate 1 10-cycle clear→exit stress via SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test (or TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 on xcodebuild); default make test keeps the single-cycle paint case"
+                "enable Gate 1 10-cycle clear→exit stress via SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test (or env TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 xcodebuild …); default make test keeps the single-cycle paint case"
             )
         }
         let app = hostedApp()
