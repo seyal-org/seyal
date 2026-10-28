@@ -519,8 +519,15 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertTrue(blocks.waitForExistence(timeout: 5), "XCUI must keep seyal-blocks")
         XCTAssertTrue(transcript.waitForExistence(timeout: 5), "XCUI must keep the transcript")
         XCTAssertGreaterThan(transcript.firstMatch.frame.height, 120, "transcript must remain a full Flow surface")
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
+        let leftPanel = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        let leftVisible = expectation(
+            for: NSPredicate(format: "exists == YES AND isHittable == YES"),
+            evaluatedWith: leftPanel,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [leftVisible], timeout: 5),
+            .completed,
             "Core Terminal left panel stays visible alongside Flow composer/Blocks (#922)"
         )
     }
