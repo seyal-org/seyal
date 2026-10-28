@@ -115,6 +115,200 @@ extension ProductChromeHostView {
         return "\(stage) · attempts \(snapshot.recovery_attempts)"
     }
 
+    /// #1379 Defect B: show one clear recovery action after primary shell exit
+    /// and while a follow-on bootstrap attempt is blocked/exhausted so the user
+    /// can retry without relaunching the app.
+    func updateNewShellRecoveryAction(_ snapshot: SeyalAppSnapshot) {
+        let stage = snapshot.recovery_stage
+        let show = stage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
+            || stage == UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
+            || stage == UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue)
+            || pane.inputSurface.preferFreshExecutionBootstrap
+        newShellButton.isHidden = !show
+        // Hide the Flow composer while the recovery action owns that slot.
+        composer.isHidden = show
+    }
+
+    /// Explicit New shell after `exit` — bootstrap a fresh execution without
+    /// re-pinning the dead identity (MetalSurfaceView+Recovery).
+    ///
+    /// Uses a direct `open_first` with a create-capable budget instead of the
+    /// 1s reconnect episode: after shell exit the Runtime may need to retire a
+    /// Controller lease and provision profile 0, which does not fit SPEC-009's
+    /// short reconnect window.
+    @objc func requestNewShellAfterExit() {
+        pane.inputSurface.preferFreshExecutionBootstrap = true
+        // CancelRecovery drops ExecutionEnded → Disconnected, which would let
+        // startAutomaticBridgeRecoveryIfNeeded race a second 1s open against
+        // this create-capable bootstrap (ControllerBusy / OPENED_REJECTED →
+        // Blocked). Hold automatic recovery until adopt finishes.
+        pane.inputSurface.suppressesAutomaticBridgeRecovery = true
+        // stop() no-ops when already disconnected; shell-exit often leaves a
+        // half-torn bridge (isConnected=false, clientHandle≠0, or
+        // disconnectPending). Force the Controller lease drop before open.
+        if pane.inputSurface.bridge?.clientHandle != 0
+            || pane.inputSurface.bridge?.isConnected == true
+        {
+            pane.inputSurface.bridge?.completeEagerClientDisconnect()
+            pane.inputSurface.bridge?.stop()
+        } else {
+            pane.inputSurface.bridge?.completeEagerClientDisconnect()
+        }
+        pane.inputSurface.isDetachingRuntimeConnection = false
+        if pane.inputSurface.recoveryAppHandle != 0 {
+            applyRuntimeRecoveryAction(
+                pane.appHandle,
+                kind: SEYAL_APP_ACTION_CANCEL_RECOVERY
+            )
+        }
+        let identity = RecoveryAttemptIdentity.primary(
+            seyal_app_snapshot(pane.appHandle).recovery_generation &+ 1
+        )
+        guard recoveryAttemptInFlight != identity else { return }
+        recoveryAttemptInFlight = identity
+        let issuedAt = ProcessInfo.processInfo.systemUptime
+        recoveryLifecycleQueue.async { [weak self] in
+            let outcome = openRuntimeRecoveryHandle(
+                executionIdentity: nil,
+                allowsImplicitExecutionBootstrap: true,
+                remainingBudget: 15
+            )
+            DispatchQueue.main.async { [weak self] in
+                seyalRunAsMainActorFromMainQueue {
+                    guard let self else {
+                        if case let .opened(opened) = outcome {
+                            seyal_bridge_disconnect_handle(opened.handle)
+                        }
+                        return
+                    }
+                    self.finishDirectNewShellBootstrap(
+                        outcome,
+                        issuedAt: issuedAt,
+                        identity: identity
+                    )
+                }
+            }
+        }
+        reconcileChrome()
+    }
+
+    private func finishDirectNewShellBootstrap(
+        _ outcome: RuntimeRecoveryAttemptOutcome,
+        issuedAt: TimeInterval,
+        identity: RecoveryAttemptIdentity
+    ) {
+        defer {
+            if recoveryAttemptInFlight == identity {
+                recoveryAttemptInFlight = nil
+            }
+        }
+        let _ = issuedAt
+        switch outcome {
+        case let .opened(opened):
+            // Drop any residual teardown fence that would reject adopt after
+            // shell-exit disconnect (isConnected/disconnectPending).
+            pane.inputSurface.bridge?.stop()
+            pane.inputSurface.isDetachingRuntimeConnection = false
+            // New shell is a fresh ExecutionId — clear the dead continuity pin
+            // so commitRuntimeReconstruction does not fail closed as mismatch.
+            applyRuntimeRecoveryAction(
+                pane.appHandle,
+                kind: SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION
+            ) {
+                $0.reserved = 1
+            }
+            // Arm a fresh Rust episode, claim its PerformAttempt, then complete
+            // with the handle we already opened (do not start a second open).
+            let now = runtimeRecoveryNowMillis()
+            applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_BEGIN_RECOVERY) {
+                $0.target_generation = now
+            }
+            let generation = seyal_app_snapshot(pane.appHandle).recovery_generation
+            if seyal_app_snapshot(pane.appHandle).recovery_effect
+                == UInt32(SEYAL_APP_RECOVERY_EFFECT_PERFORM_ATTEMPT.rawValue)
+            {
+                ackRecovery()
+            }
+            var adopted = pane.inputSurface.adoptRecoveredHandle(opened)
+            if !adopted {
+                // One teardown retry: stop() may have raced a DispatchSource
+                // cancel that re-armed disconnectPending after the first clear.
+                pane.inputSurface.bridge?.completeEagerClientDisconnect()
+                adopted = pane.inputSurface.adoptRecoveredHandle(opened)
+            }
+            if adopted {
+                let result = completeRecovery(
+                    generation: generation,
+                    outcome: SEYAL_APP_RECOVERY_OPENED_ADOPTED,
+                    handle: opened.handle
+                )
+                if result == 0 {
+                    pane.inputSurface.preferFreshExecutionBootstrap = false
+                    pane.inputSurface.suppressesAutomaticBridgeRecovery = false
+                    pane.inputSurface.advanceRecoveryPresentationIfReady()
+                } else {
+                    seyal_bridge_disconnect_handle(opened.handle)
+                    pane.inputSurface.preferFreshExecutionBootstrap = true
+                    Self.logNewShellFailure("completeRecovery after adopt failed (\(result))")
+                }
+            } else {
+                // Do NOT complete as RETRYABLE/OPENED_REJECTED: that burns the
+                // 1s episode to Exhausted/Blocked while the Created shell may
+                // already be Running. Cancel the episode and leave New shell
+                // armed so the user can reattach without relaunching.
+                seyal_bridge_disconnect_handle(opened.handle)
+                applyRuntimeRecoveryAction(
+                    pane.appHandle,
+                    kind: SEYAL_APP_ACTION_CANCEL_RECOVERY
+                )
+                pane.inputSurface.preferFreshExecutionBootstrap = true
+                Self.logNewShellFailure("adopt-rejected after open (episode cancelled)")
+            }
+        case .endpointMissing:
+            // Missing Runtime: enter the launch-helper path, then let
+            // driveRecovery open again after the helper binds.
+            let now = runtimeRecoveryNowMillis()
+            applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_BEGIN_RECOVERY) {
+                $0.target_generation = now
+            }
+            let generation = seyal_app_snapshot(pane.appHandle).recovery_generation
+            if seyal_app_snapshot(pane.appHandle).recovery_effect
+                == UInt32(SEYAL_APP_RECOVERY_EFFECT_PERFORM_ATTEMPT.rawValue)
+            {
+                ackRecovery()
+            }
+            _ = completeRecovery(
+                generation: generation,
+                outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING
+            )
+            pane.inputSurface.preferFreshExecutionBootstrap = true
+        case .retryable, .controllerBusy, .executionEnded, .blocked:
+            // Do not fold a failed create into the 1s reconnect episode — that
+            // exhausts immediately and hides the real New shell failure mode.
+            // Keep the explicit recovery action armed for another user click.
+            Self.logNewShellFailure(String(describing: outcome))
+            pane.inputSurface.preferFreshExecutionBootstrap = true
+        }
+        reconcileChrome()
+    }
+
+    private static func logNewShellFailure(_ detail: String) {
+        let line = "seyal: New shell open_first failed (\(detail)); leaving New shell armed\n"
+        NSLog("%@", line)
+        if let data = line.data(using: .utf8) {
+            let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
+            if FileManager.default.fileExists(atPath: url.path) {
+                if let handle = try? FileHandle(forWritingTo: url) {
+                    defer { try? handle.close() }
+                    _ = try? handle.seekToEnd()
+                    try? handle.write(contentsOf: data)
+                }
+            } else {
+                try? data.write(to: url)
+            }
+        }
+    }
+
     func driveRecovery() {
         // A detached projection host has no window and must not open or launch
         // a Runtime. In-process tests construct those hosts beside the live window.
@@ -219,13 +413,19 @@ extension ProductChromeHostView {
         let issuedAt = ProcessInfo.processInfo.systemUptime
         let executionIdentity = pane.inputSurface.recoveryExecutionIdentity
         let allowsImplicit = pane.inputSurface.allowsImplicitExecutionBootstrap
+        // #1379 Defect B: explicit New shell after exit needs a create+attach
+        // budget larger than the 1s reconnect episode — open_first may need to
+        // dispose a tombstoned Controller lease and provision profile 0.
+        let openBudgetMs = pane.inputSurface.preferFreshExecutionBootstrap
+            ? max(remainingMs, 15_000)
+            : remainingMs
         recoveryLifecycleQueue.async { [weak self] in
             // Queue delay consumes the Rust-issued budget rather than resetting it.
             let elapsed = ProcessInfo.processInfo.systemUptime - issuedAt
             let outcome = openRuntimeRecoveryHandle(
                 executionIdentity: executionIdentity,
                 allowsImplicitExecutionBootstrap: allowsImplicit,
-                remainingBudget: TimeInterval(remainingMs) / 1000 - elapsed
+                remainingBudget: TimeInterval(openBudgetMs) / 1000 - elapsed
             )
             DispatchQueue.main.async { [weak self] in
                 // Lifecycle work returns on the GCD main queue without a Swift
@@ -369,13 +569,24 @@ extension ProductChromeHostView {
             // A superseded generation never adopts; Rust answers the stale
             // completion with DisposeHandle.
             adopted = current && pane.inputSurface.adoptRecoveredHandle(opened)
-            result = completeRecovery(
-                generation: generation,
-                outcome: adopted
-                    ? SEYAL_APP_RECOVERY_OPENED_ADOPTED
-                    : SEYAL_APP_RECOVERY_OPENED_REJECTED,
-                handle: opened.handle
-            )
+            if !adopted, current, pane.inputSurface.preferFreshExecutionBootstrap {
+                // #1379: teardown races after shell exit must not permanently
+                // Block New shell — dispose and retry within the episode.
+                seyal_bridge_disconnect_handle(opened.handle)
+                result = completeRecovery(
+                    generation: generation,
+                    outcome: SEYAL_APP_RECOVERY_RETRYABLE,
+                    handle: 0
+                )
+            } else {
+                result = completeRecovery(
+                    generation: generation,
+                    outcome: adopted
+                        ? SEYAL_APP_RECOVERY_OPENED_ADOPTED
+                        : SEYAL_APP_RECOVERY_OPENED_REJECTED,
+                    handle: opened.handle
+                )
+            }
         case .endpointMissing:
             result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING)
         case .retryable:

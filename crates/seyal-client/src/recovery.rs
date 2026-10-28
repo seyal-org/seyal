@@ -99,6 +99,17 @@ impl ReconstructionState {
         self.stage = ReconstructionStage::Disconnected;
     }
 
+    /// Drop Runtime/execution/attachment pins after an execution ends or the
+    /// user explicitly bootstraps a fresh shell. Same-execution reconnect must
+    /// keep using [`disconnect`] so the fence still requires the prior
+    /// `ExecutionId` and a fresh `AttachmentId` (SPEC-009).
+    pub fn clear_continuity_pins(&mut self) {
+        self.expected_runtime = None;
+        self.expected_execution = None;
+        self.last_attachment = None;
+        self.stage = ReconstructionStage::Disconnected;
+    }
+
     pub fn commit(
         &mut self,
         runtime: ContinuityIdentity,

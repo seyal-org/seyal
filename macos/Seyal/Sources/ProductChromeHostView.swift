@@ -30,6 +30,8 @@ final class ProductChromeHostView: NSView {
     let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
     let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
     let recoveryLabel = NSTextField(labelWithString: "")
+    /// #1379 Defect B: single clear recovery action after primary shell exit.
+    let newShellButton = NSButton(title: "New shell", target: nil, action: nil)
     let leftItems = NSStackView()
     let inspectorColumn = NSView()
     /// Rust-projected Pane regions (#923); the live surface sits in
@@ -141,6 +143,13 @@ final class ProductChromeHostView: NSView {
         recoveryLabel.setAccessibilityIdentifier("seyal-recovery")
         recoveryLabel.stringValue = "disconnected"
         recoveryLabel.translatesAutoresizingMaskIntoConstraints = false
+        newShellButton.translatesAutoresizingMaskIntoConstraints = false
+        newShellButton.bezelStyle = .rounded
+        newShellButton.font = .systemFont(ofSize: 13, weight: .medium)
+        newShellButton.setAccessibilityIdentifier("seyal-new-shell")
+        newShellButton.target = self
+        newShellButton.action = #selector(requestNewShellAfterExit)
+        newShellButton.isHidden = true
 
         inspectorColumn.translatesAutoresizingMaskIntoConstraints = false
         inspectorColumn.wantsLayer = true
@@ -179,6 +188,7 @@ final class ProductChromeHostView: NSView {
         liveContent.addSubview(transcript)
         liveContent.addSubview(pane)
         liveContent.addSubview(composer)
+        liveContent.addSubview(newShellButton)
         liveContent.addSubview(historyOverlay)
         centerColumn.onFocusPane = { [weak self] lo, hi in
             self?.focusPaneRegion(lo: lo, hi: hi)
@@ -281,6 +291,9 @@ final class ProductChromeHostView: NSView {
             composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
             composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
             composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
+            newShellButton.centerXAnchor.constraint(equalTo: composer.centerXAnchor),
+            newShellButton.centerYAnchor.constraint(equalTo: composer.centerYAnchor),
+            newShellButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
             historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
@@ -449,7 +462,9 @@ final class ProductChromeHostView: NSView {
             historyOverlay.reconcile()
             commandPalette.reconcile()
             driveRecovery()
-            recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
+            let recoverySnap = seyal_app_snapshot(pane.appHandle)
+            recoveryLabel.stringValue = recoveryText(recoverySnap)
+            updateNewShellRecoveryAction(recoverySnap)
             return
         }
         lastSnapshotGeneration = snapshot.generation
@@ -478,7 +493,9 @@ final class ProductChromeHostView: NSView {
         historyOverlay.reconcile()
         commandPalette.reconcile()
         driveRecovery()
-        recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
+        let recoverySnap = seyal_app_snapshot(pane.appHandle)
+        recoveryLabel.stringValue = recoveryText(recoverySnap)
+        updateNewShellRecoveryAction(recoverySnap)
         if eligibilityChanged {
             routeFocus()
         }

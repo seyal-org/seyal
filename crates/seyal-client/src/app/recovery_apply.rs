@@ -37,6 +37,18 @@ impl ApplicationRoot {
             return Ok(());
         }
         if outcome == AttemptOutcome::ExecutionEnded && self.pane_recovery.active().is_none() {
+            // Sticky on the Pane that ended — never poison later CreateTab/Split
+            // leaves via a global stage rebroadcast (#1379 Defect B).
+            let ended_pane = self.shell.snapshot().focused_pane;
+            self.latch_execution_ended_on_focused_pane();
+            // Continuity is not claimed for an ended execution (SPEC-009 §8.2).
+            // Clear pins so New shell can commit a fresh ExecutionId; keeping
+            // the dead pin makes adopt fail closed as identity mismatch.
+            self.reconstruction.clear_continuity_pins();
+            // Release the dead shell bind + authority so a later Bind of a
+            // fresh ExecutionId is not rejected as AlreadyBound (New shell).
+            let _ = self.shell.release_execution(ended_pane);
+            self.clear_authority_for_pane(ended_pane);
             self.sync_composer_presentation();
         }
         self.pending_recovery = effects;
@@ -129,6 +141,11 @@ impl ApplicationRoot {
 
     pub(super) fn disconnect_reconstruction(&mut self) -> Result<(), AppError> {
         self.reconstruction.disconnect();
+        Ok(())
+    }
+
+    pub(super) fn clear_reconstruction_continuity(&mut self) -> Result<(), AppError> {
+        self.reconstruction.clear_continuity_pins();
         Ok(())
     }
 }

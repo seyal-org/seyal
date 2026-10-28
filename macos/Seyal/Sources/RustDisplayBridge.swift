@@ -183,20 +183,71 @@ final class RustDisplayBridge {
   @discardableResult
   func adoptRecoveredHandle(_ opened: RuntimeRecoveryOpenedHandle) -> Bool {
     let handle = opened.handle
-    guard !isConnected, !teardown.disconnectPending else {
-      seyal_bridge_disconnect_handle(handle)
+    if isConnected || teardown.disconnectPending {
+      let line = String(
+        format: "seyal: adopt rejected fence isConnected=%d disconnectPending=%d clientHandle=%llu\n",
+        isConnected ? 1 : 0,
+        teardown.disconnectPending ? 1 : 0,
+        clientHandle
+      )
+      NSLog("%@", line)
+      if let data = line.data(using: .utf8) {
+        let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
+        if FileManager.default.fileExists(atPath: url.path),
+          let file = try? FileHandle(forWritingTo: url)
+        {
+          defer { try? file.close() }
+          _ = try? file.seekToEnd()
+          try? file.write(contentsOf: data)
+        } else {
+          try? data.write(to: url)
+        }
+      }
+      // Do not disconnect here — caller may clear the fence and retry adopt
+      // with the same pending handle.
       return false
     }
     lastLaunchError = nil
     guard seyal_bridge_adopt_handle(handle) == 0 else {
-      seyal_bridge_disconnect_handle(handle)
+      let line = "seyal: adopt rejected seyal_bridge_adopt_handle\n"
+      NSLog("%@", line)
+      if let data = line.data(using: .utf8) {
+        let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
+        if FileManager.default.fileExists(atPath: url.path),
+          let file = try? FileHandle(forWritingTo: url)
+        {
+          defer { try? file.close() }
+          _ = try? file.seekToEnd()
+          try? file.write(contentsOf: data)
+        } else {
+          try? data.write(to: url)
+        }
+      }
+      // Pending handle was not taken; caller may disconnect.
       onError(-1)
       onStatusChanged()
       return false
     }
     let recoveryResult = RecoveryResult(opened: opened)
     lastRecoveryResult = recoveryResult
-    return finishAdoptedHandle(handle, recoveryResult: recoveryResult)
+    let finished = finishAdoptedHandle(handle, recoveryResult: recoveryResult)
+    if !finished {
+      let line = "seyal: adopt rejected finishAdoptedHandle (fd/reconstruction)\n"
+      NSLog("%@", line)
+      if let data = line.data(using: .utf8) {
+        let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
+        if FileManager.default.fileExists(atPath: url.path),
+          let file = try? FileHandle(forWritingTo: url)
+        {
+          defer { try? file.close() }
+          _ = try? file.seekToEnd()
+          try? file.write(contentsOf: data)
+        } else {
+          try? data.write(to: url)
+        }
+      }
+    }
+    return finished
   }
 
   @discardableResult
@@ -352,7 +403,10 @@ final class RustDisplayBridge {
       completeEagerClientDisconnect()
       return
     }
-    guard isConnected || socketFileDescriptor >= 0 else { return }
+    // Half-torn shell-exit / poll-loss often leaves isConnected=false while
+    // clientHandle is still non-zero (Controller lease held). Still drop the
+    // lease so a later New shell open_first is not ControllerBusy.
+    guard isConnected || socketFileDescriptor >= 0 || clientHandle != 0 else { return }
 
     isConnected = false
     disconnectRuntimeReconstruction(continuityAppHandle)

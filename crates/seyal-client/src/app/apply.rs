@@ -57,6 +57,7 @@ impl ApplicationRoot {
                 authoritative_snapshot_committed,
             ),
             AppAction::DisconnectReconstruction => self.disconnect_reconstruction(),
+            AppAction::ClearReconstructionContinuity => self.clear_reconstruction_continuity(),
             AppAction::SetComposerDraft {
                 fence,
                 text,

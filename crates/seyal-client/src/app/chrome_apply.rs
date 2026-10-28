@@ -208,6 +208,8 @@ impl ApplicationRoot {
             .presentation
             .apply(PresentationAction::BindIdentity(identity));
         self.authority = Some(authority);
+        // A live bind replaces any prior shell-exit latch on this Pane (#1379).
+        self.clear_execution_ended_for_pane(focused);
         let stored_mode = self
             .shell
             .snapshot()

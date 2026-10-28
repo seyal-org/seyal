@@ -30,6 +30,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// An adopted handle still has to report SPEC-009 §10 Restoring/Usable
   /// presentation progress to Rust.
   var recoveryPresentationPending = false
+  /// #1379 Defect B: after shell exit, the next explicit recovery episode must
+  /// bootstrap a fresh execution (`open_first`) instead of re-pinning the dead
+  /// `lastRecoveryResult` identity. Cleared once Usable is reached.
+  var preferFreshExecutionBootstrap = false
   /// When true, the surface still supports first-responder / AX / IME restore
   /// (SPEC §10) but does not begin automatic Runtime recovery. Used by the
   /// Pass 9 native_ready probe so it does not open a second client alongside

@@ -282,6 +282,9 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 authoritative_snapshot_committed,
             })
         }
+        // reserved != 0: clear continuity pins for a fresh ExecutionId bootstrap
+        // (New shell after exit). reserved == 0: same-execution disconnect fence.
+        57 if action.reserved != 0 => Ok(AppAction::ClearReconstructionContinuity),
         57 => Ok(AppAction::DisconnectReconstruction),
         58 => Ok(AppAction::MoveSplitDivider {
             pane: PaneId::from_bytes(id16(

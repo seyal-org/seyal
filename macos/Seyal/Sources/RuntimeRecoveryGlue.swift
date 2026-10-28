@@ -56,18 +56,40 @@ func openRuntimeRecoveryHandle(
   guard handle != 0 else {
     let result = seyal_bridge_last_recovery_result()
     // Rust owns failure_class → outcome mapping (ADR-015 / #1065).
-    switch seyal_bridge_classify_open_result(result.failure_class, result.retryable) {
+    let classified = seyal_bridge_classify_open_result(result.failure_class, result.retryable)
+    let outcome: RuntimeRecoveryAttemptOutcome
+    switch classified {
     case UInt32(SEYAL_APP_RECOVERY_ENDPOINT_MISSING.rawValue):
-      return .endpointMissing
+      outcome = .endpointMissing
     case UInt32(SEYAL_APP_RECOVERY_CONTROLLER_BUSY.rawValue):
-      return .controllerBusy
+      outcome = .controllerBusy
     case UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue):
-      return .executionEnded
+      outcome = .executionEnded
     case UInt32(SEYAL_APP_RECOVERY_RETRYABLE.rawValue):
-      return .retryable
+      outcome = .retryable
     default:
-      return .blocked
+      outcome = .blocked
     }
+    let line = String(
+      format: "seyal: open_first fail class=%u retryable=%u → %@\n",
+      result.failure_class,
+      result.retryable,
+      String(describing: outcome)
+    )
+    NSLog("%@", line)
+    if let data = line.data(using: .utf8) {
+      let url = URL(fileURLWithPath: "/tmp/seyal-new-shell.log")
+      if FileManager.default.fileExists(atPath: url.path),
+        let handle = try? FileHandle(forWritingTo: url)
+      {
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: data)
+      } else {
+        try? data.write(to: url)
+      }
+    }
+    return outcome
   }
   // `LAST_RECOVERY_RESULT` is executor-local in the Rust bridge. Capture the
   // accepted attachment identities on this lifecycle queue and carry them to

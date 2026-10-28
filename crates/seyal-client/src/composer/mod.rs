@@ -583,6 +583,13 @@ impl ComposerState {
         })
     }
 
+    /// Sticky per-pane shell-exit latch (#1379 Defect B). Absent panes have not ended.
+    pub fn execution_ended(&self, pane: PaneId) -> bool {
+        self.panes
+            .get(&pane)
+            .is_some_and(|composer| composer.execution_ended)
+    }
+
     fn pane_mut(&mut self, pane: PaneId) -> &mut PaneComposer {
         self.panes.entry(pane).or_insert_with(PaneComposer::new)
     }

@@ -125,7 +125,12 @@ enum SeyalAppActionKind {
      * layout is unchanged.
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
-    /** Mark reconstruction disconnected after the host drops the live client. */
+    /**
+     * Mark reconstruction disconnected after the host drops the live client.
+     * `reserved == 0`: keep continuity pins (same-execution reconnect fence).
+     * `reserved != 0`: clear Runtime/execution/attachment pins so New shell
+     * after exit can commit a fresh ExecutionId (SPEC-009 §8.2).
+     */
     SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
     /*
      * Drag one Split divider (#928). target_execution_lo/hi = the divider's

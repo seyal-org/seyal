@@ -309,6 +309,7 @@ impl ApplicationRoot {
                         .map_err(|_| AppError::AlreadyBound)?;
                     self.bind_pane_recovery(pane, execution);
                     let _ = self.provisioning.apply_bind_success(pane, execution);
+                    self.clear_execution_ended_for_pane(pane);
                     bound = Some(execution);
                 }
                 other => {
@@ -568,6 +569,7 @@ impl ApplicationRoot {
                         .map_err(|_| AppError::AlreadyBound)?;
                     self.bind_pane_recovery(pane, execution);
                     let _ = self.provisioning.apply_bind_success(pane, execution);
+                    self.clear_execution_ended_for_pane(pane);
                 }
                 ProvisioningEffect::AttachController { owner, execution } => {
                     #[cfg(target_os = "macos")]

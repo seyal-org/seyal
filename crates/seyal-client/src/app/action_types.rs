@@ -53,6 +53,9 @@ pub enum AppAction {
     },
     /// Mark reconstruction disconnected after the host drops the live client.
     DisconnectReconstruction,
+    /// Drop continuity pins so a fresh ExecutionId (New shell after exit) can
+    /// commit. Same-execution reconnect must keep using DisconnectReconstruction.
+    ClearReconstructionContinuity,
     SetComposerDraft {
         fence: AppFence,
         text: String,

@@ -474,6 +474,8 @@ impl ApplicationRoot {
         self.bind_pane_recovery(fence.pane, evidence.execution);
         self.remember_primary_pane(fence.pane);
         self.authority = Some(authority);
+        // A live bind replaces any prior shell-exit latch on this Pane (#1379).
+        self.clear_execution_ended_for_pane(fence.pane);
         self.derive_presentation(evidence.alternate_screen)?;
         self.sync_composer_presentation();
         // R8.4 / #1124: new bind/attach must not keep a prior chord prefix.

@@ -8,9 +8,13 @@ use crate::composer::{ComposerAction, RuntimeBlockRecord, RuntimeComposerEligibi
 
 impl ApplicationRoot {
     pub(super) fn composer_eligible_for(&self, eligibility: PresentationEligibility) -> bool {
+        let pane = self.shell.snapshot().focused_pane;
+        // #1379 Defect B: shell-exit is sticky per Pane. A global
+        // RecoveryStage::ExecutionEnded must not disable a newly focused
+        // leaf that never ended (CreateTab / Split / New shell recovery).
         eligibility == PresentationEligibility::Flow
             && !self.frozen
-            && self.recovery.state().stage != crate::recovery::RecoveryStage::ExecutionEnded
+            && !self.composer.execution_ended(pane)
     }
 
     pub(super) fn sync_composer_presentation(&mut self) {
@@ -27,9 +31,27 @@ impl ApplicationRoot {
             mode,
             input_route,
         });
+        // Do not rebroadcast global ExecutionEnded onto the focused Pane.
+        // SetExecutionEnded is latched in complete_recovery for the pane that
+        // ended, and cleared when that pane binds a live execution again.
+    }
+
+    /// Latch shell-exit on the Pane that owned the ended primary episode.
+    pub(super) fn latch_execution_ended_on_focused_pane(&mut self) {
+        let pane = self.shell.snapshot().focused_pane;
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
         let _ = self.composer.apply(ComposerAction::SetExecutionEnded {
             pane,
-            ended: self.recovery.state().stage == crate::recovery::RecoveryStage::ExecutionEnded,
+            ended: true,
+        });
+    }
+
+    /// Clear the shell-exit latch after a Pane binds a live execution again.
+    pub(super) fn clear_execution_ended_for_pane(&mut self, pane: seyal_core::PaneId) {
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        let _ = self.composer.apply(ComposerAction::SetExecutionEnded {
+            pane,
+            ended: false,
         });
     }
 

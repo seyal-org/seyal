@@ -111,12 +111,121 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
 
     let snapshot = root.snapshot();
     assert_eq!(snapshot.recovery_stage, RecoveryStage::ExecutionEnded);
-    assert_eq!(snapshot.eligibility, PresentationEligibility::Flow);
+    // Authority/shell bind are released so New shell can Bind a fresh
+    // ExecutionId; transcript retention is owned by APPLY_RUNTIME_BLOCKS
+    // retain-on-None, not by keeping the dead presentation identity.
+    assert_eq!(snapshot.eligibility, PresentationEligibility::Unbound);
+    assert!(root.authority.is_none());
     assert!(!snapshot.composer_eligible);
     assert_eq!(
         snapshot.composer.unwrap().mode,
         crate::composer::ComposerMode::Hidden
     );
+}
+
+/// #1379 Defect B: ExecutionEnded latches only the Pane that ended. CreateTab
+/// must not inherit a sticky shell-exit flag from the global recovery stage.
+#[test]
+fn execution_ended_does_not_poison_create_tab_pane_latch() {
+    use crate::recovery::{AttemptOutcome, RecoveryStage};
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([0x41; 16]),
+            attachment: AttachmentId::from_bytes([0x42; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .unwrap();
+    let ended_pane = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::ExecutionEnded,
+        now: Duration::from_millis(1),
+        launch: None,
+    })
+    .unwrap();
+    assert!(root.composer.execution_ended(ended_pane));
+    assert_eq!(root.snapshot().recovery_stage, RecoveryStage::ExecutionEnded);
+    assert!(
+        root.authority.is_none(),
+        "ended Pane must release authority so New shell can Bind"
+    );
+
+    root.apply(AppAction::CreateTab)
+        .expect("CreateTab after shell exit must still admit a new leaf");
+    let new_pane = root.snapshot().shell.focused_pane;
+    assert_ne!(new_pane, ended_pane, "CreateTab must focus the new leaf");
+    assert!(
+        root.composer.execution_ended(ended_pane),
+        "ended Pane must keep its sticky latch"
+    );
+    assert!(
+        !root.composer.execution_ended(new_pane),
+        "new CreateTab leaf must not inherit ExecutionEnded"
+    );
+}
+
+/// #1379 Defect B: after shell exit, the same Pane can Bind a fresh
+/// ExecutionId (New shell) and the sticky latch clears.
+#[test]
+fn execution_ended_pane_can_rebind_fresh_execution_and_clear_latch() {
+    use crate::recovery::AttemptOutcome;
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([0x51; 16]),
+            attachment: AttachmentId::from_bytes([0x52; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .unwrap();
+    let pane = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::ExecutionEnded,
+        now: Duration::from_millis(1),
+        launch: None,
+    })
+    .unwrap();
+    assert!(root.composer.execution_ended(pane));
+
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([0x61; 16]),
+            attachment: AttachmentId::from_bytes([0x62; 16]),
+            controller: true,
+            pty_generation: 2,
+            alternate_screen: false,
+        },
+    })
+    .expect("New shell Bind after exit must succeed");
+    assert!(
+        !root.composer.execution_ended(pane),
+        "successful Bind must clear the shell-exit latch"
+    );
+    assert!(root.snapshot().composer_eligible);
 }
 
 /// #1379 / #1171: when the display client is gone, APPLY_RUNTIME_BLOCKS must
