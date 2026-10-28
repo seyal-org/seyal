@@ -45,6 +45,13 @@ struct FlowPaintInspection: Equatable, Sendable {
     var liveGridSubmitted: Bool
     var fullGridBackgroundSubmitted: Bool
     var historyInstanceCount: Int
+    /// History Block buffers that still have at least one drawable glyph.
+    /// clear→exit false-green: total instances can be >0 while later cards
+    /// were culled to empty after a clip collapse (#1379).
+    var paintedHistoryRegionCount: Int
+    /// Distinct Block body clips — `collapse` when two history clips largely
+    /// overlap so later Block output paints over an earlier card.
+    var historyClipsDistinct: Bool
     var instancesOutsideClips: Int
     var opaquePixelsOutsideClips: Int
     var opaquePixelsInsideClips: Int
@@ -57,6 +64,7 @@ struct FlowPaintInspection: Equatable, Sendable {
             && !fullGridBackgroundSubmitted
             && instancesOutsideClips == 0
             && opaquePixelsOutsideClips == 0
+            && historyClipsDistinct
     }
 
     var accessibilityToken: String {

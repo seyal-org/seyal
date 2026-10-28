@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 /// Headed #824 workload evidence on the ADR-015 thin host.
@@ -215,7 +216,12 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertGreaterThan(afterBody.firstMatch.frame.height, 8)
         assertBlockCardFillsTranscript(app, index: 0)
         assertBlockCardFillsTranscript(app, index: 2)
-        assertFlowPaintCleanAfterExit(app)
+        // before-clear + after-clear must each paint; collapse onto one card fails.
+        assertFlowPaintCleanAfterExit(
+            app,
+            minimumPaintedRegions: 2,
+            inkBodyIndices: [0, 2]
+        )
         attachScreenshot(app, name: "1379-clear-then-exit-paint")
     }
 
@@ -387,9 +393,14 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
     /// Metal reports flow-paint=ok only when Flow draws history inside Block
     /// clips without a leftover live-grid / out-of-clip overlay. AX body text
-    /// can stay correct while the screen is blank; require painted history
-    /// instances as well (#1379 false-green guard).
-    private func assertFlowPaintCleanAfterExit(_ app: XCUIApplication) {
+    /// can stay correct while the screen is blank or later Block output is
+    /// collapsed onto an earlier card; require painted history instances,
+    /// multiple painted regions, and distinct clips (#1379 false-green guard).
+    private func assertFlowPaintCleanAfterExit(
+        _ app: XCUIApplication,
+        minimumPaintedRegions: Int = 1,
+        inkBodyIndices: [Int] = [0]
+    ) {
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         XCTAssertTrue(terminal.exists, "terminal surface missing for flow-paint probe")
         let clean = expectation(
@@ -412,6 +423,111 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             .completed,
             "retained Flow Blocks must paint history glyphs after exit; AX=\(terminal.value ?? "nil") (history-instances=0 with AX body text is false-green)"
         )
+        let regions = expectation(
+            for: NSPredicate(
+                format: "value MATCHES %@",
+                ".*history-regions-painted=([\(minimumPaintedRegions)-9]|[1-9][0-9]+).*"
+            ),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [regions], timeout: 5),
+            .completed,
+            "need ≥\(minimumPaintedRegions) painted history regions; AX=\(terminal.value ?? "nil")"
+        )
+        let clips = expectation(
+            for: NSPredicate(format: "value CONTAINS 'history-clips=ok'"),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [clips], timeout: 5),
+            .completed,
+            "history Block clips must stay distinct; AX=\(terminal.value ?? "nil") (history-clips=collapse is clear→exit mispaint)"
+        )
+        assertBlockBodyFramesHaveInk(app, indices: inkBodyIndices)
+    }
+
+    /// Screenshot pixel probe: each Block body frame must contain non-background
+    /// ink. Catches AX-correct / Metal-blank (or wrong-card) false greens that
+    /// instance counters alone can miss (#1379).
+    private func assertBlockBodyFramesHaveInk(_ app: XCUIApplication, indices: [Int]) {
+        let shot = app.screenshot()
+        let image = shot.image
+        var proposed = CGRect(origin: .zero, size: image.size)
+        guard let cgImage = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil) else {
+            XCTFail("could not read headed screenshot for Block body ink probe")
+            return
+        }
+        // XCUI element frames and app.screenshot share top-left point space for
+        // the application; map body rects through the front window.
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.exists, "window missing for ink probe coordinate map")
+        let windowFrame = window.frame
+        let scaleX = CGFloat(cgImage.width) / max(windowFrame.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(windowFrame.height, 1)
+        guard let data = cgImage.dataProvider?.data,
+              let ptr = CFDataGetBytePtr(data)
+        else {
+            XCTFail("screenshot has no pixel bytes for ink probe")
+            return
+        }
+        let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 1)
+        let bytesPerRow = cgImage.bytesPerRow
+        for index in indices {
+            let body = app.descendants(matching: .any)["seyal-block-\(index)-body"].firstMatch
+            guard body.exists else { continue }
+            let frame = body.frame
+            guard frame.width > 4, frame.height > 4 else {
+                XCTFail("seyal-block-\(index)-body frame too small for ink probe: \(frame)")
+                continue
+            }
+            let local = CGRect(
+                x: frame.minX - windowFrame.minX,
+                y: frame.minY - windowFrame.minY,
+                width: frame.width,
+                height: frame.height
+            )
+            let px = CGRect(
+                x: local.minX * scaleX,
+                y: local.minY * scaleY,
+                width: max(local.width * scaleX, 1),
+                height: max(local.height * scaleY, 1)
+            ).integral
+            var ink = 0
+            var samples = 0
+            let step = max(Int(min(px.width, px.height) / 16), 1)
+            var y = Int(px.minY)
+            while y < Int(px.maxY) {
+                var x = Int(px.minX)
+                while x < Int(px.maxX) {
+                    if x >= 0, y >= 0, x < cgImage.width, y < cgImage.height {
+                        let offset = y * bytesPerRow + x * bytesPerPixel
+                        let r = Int(ptr[offset])
+                        let g = Int(ptr[offset + min(1, bytesPerPixel - 1)])
+                        let b = Int(ptr[offset + min(2, bytesPerPixel - 1)])
+                        samples += 1
+                        // Flow cards are near-white; glyph ink is substantially darker.
+                        if (r + g + b) < 650 {
+                            ink += 1
+                        }
+                    }
+                    x += step
+                }
+                y += step
+            }
+            XCTAssertGreaterThan(
+                samples,
+                8,
+                "seyal-block-\(index)-body ink probe under-sampled (\(samples))"
+            )
+            XCTAssertGreaterThan(
+                ink,
+                0,
+                "seyal-block-\(index)-body has AX text but no painted ink in screenshot (false-green)"
+            )
+        }
     }
 
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {

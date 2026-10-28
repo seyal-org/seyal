@@ -262,9 +262,12 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let alternate = lastAlternateScreen == true ? "true" : "false"
     let paint = renderer.inspectFlowPaint()
     let flowPaint = paint.accessibilityToken
-    // history-instances exposes painted Block-body glyphs so XCUI can fail
-    // when AX titles/bodies exist but Metal history is blank (#1379).
+    // history-instances / history-regions-painted expose Metal Block-body
+    // glyphs so XCUI fails when AX titles/bodies exist but paint is blank or
+    // collapsed onto one card (#1379 false-green).
     let historyInstances = paint.historyInstanceCount
+    let historyRegionsPainted = paint.paintedHistoryRegionCount
+    let historyClips = paint.historyClipsDistinct ? "ok" : "collapse"
     let geometry: String
     if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
       geometry =
@@ -278,7 +281,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       "process=\(ProcessInfo.processInfo.processIdentifier) connection=\(connection) "
         + "runtime=\(runtime) execution=\(execution) "
         + "attachment=\(attachment) alternate-screen=\(alternate) "
-        + "\(geometry) flow-paint=\(flowPaint) history-instances=\(historyInstances)"
+        + "\(geometry) flow-paint=\(flowPaint) history-instances=\(historyInstances) "
+        + "history-regions-painted=\(historyRegionsPainted) history-clips=\(historyClips)"
     )
   }
 
@@ -628,17 +632,27 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // Always drop running primary clips on disconnect. Retained history must
     // not share the surface with the last prepared viewport after clear→exit
     // (#1379): that leftover frame paints loose text/cursor over Block cards.
-    // Drop Metal history *buffers* too (keep historyRanges data): stale origins
-    // from a pre-exit tall clear body otherwise stay scissored over earlier
-    // cards until a successful publishBlockOutputFrame re-encodes them.
+    // Drop Metal history *buffers* (and any deferred prepares) too — keep
+    // historyRanges data when retaining so chrome can re-encode against the
+    // settled AppKit clips after this wipe.
     clearLiveTailPresentation()
+    renderer.removeHistoryRegions(except: [])
     if retainHistory {
-      renderer.removeHistoryRegions(except: [])
-    }
-    invalidatePreparedPresentation()
-    if retainHistory, shouldRender, !historyRanges.isEmpty {
-      beginPresentationAttemptSeries()
-      armMetalDisplayLink()
+      // Do not invalidate hasPreparedState: armMetalDisplayLink and history
+      // presents require it. Invalidating left CAMetalLayer showing the
+      // pre-exit live-tail frame while CPU history buffers looked healthy
+      // (AX false-green: flow-paint=ok, screen wrong).
+      cancelPresentationRetries()
+      resetPreparationRecovery()
+      onTimelineChanged?()
+      hasPreparedState = true
+      if shouldRender, !historyRanges.isEmpty {
+        renderer.requestPresent()
+        beginPresentationAttemptSeries()
+        armMetalDisplayLink()
+      }
+    } else {
+      invalidatePreparedPresentation()
     }
     startAutomaticBridgeRecoveryIfNeeded()
   }
@@ -864,6 +878,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         region: rendererRegion,
         backingScale: scale
       )
+      // History-only Flow (shell-exit retain) has no Candidate-D live frame;
+      // still treat encoded history as prepared so the display link can present.
+      hasPreparedState = true
       if shouldRender {
         renderer.requestPresent()
         beginPresentationAttemptSeries()

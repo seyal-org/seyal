@@ -273,4 +273,100 @@ extension RendererValidation {
         }
     }
 
+    /// #1379: shell-exit retain wipes history buffers before republish.
+    /// Deferred prepares must be discarded with that wipe so a GPU-idle flush
+    /// cannot resurrect pre-exit origins over settled Block cards.
+    static func historyRemoveClearsDeferredPrepareSelfTest() -> Bool {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        do {
+            let renderer = try MetalTerminalRenderer(device: device)
+            let liveCells = [preparedCell(scalar: UInt32(ascii: "A"))]
+            var damage = DamageMask()
+            damage.mark(row: 0)
+            guard try liveCells.withUnsafeBufferPointer({ buffer in
+                try renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        fullRebuild: true,
+                        damage: damage
+                    ),
+                    backingScale: 1
+                ) == .updated
+            }) else { return false }
+
+            let cellSize = renderer.cellPixelSize(backingScale: 1)
+            let hosted = makePresentationLayer(
+                device: device,
+                width: max(cellSize.width, 8),
+                height: max(cellSize.height, 8)
+            )
+            let layer = hosted.layer
+            let keepAlive = hosted.keepAlive
+            let completedBefore = renderer.stats.completedFrames
+            guard presentOnLayerForValidation(renderer: renderer, layer: layer),
+                  renderer.hasFrameInFlight
+            else {
+                return false
+            }
+
+            let history = NativeHistoryRange(
+                startLine: 1,
+                endLine: 1,
+                blockID: 99,
+                requestID: 3,
+                revision: 1,
+                rows: [[
+                    NativeHistoryRange.Cell(
+                        scalar: UInt32(ascii: "Q"),
+                        foreground: 0xffe9_e1d8,
+                        background: 0xff10_0d0b,
+                        flags: 0
+                    )
+                ]]
+            )
+            let region = NativeTranscriptRegion(
+                id: 99,
+                origin: .zero,
+                clip: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: CGFloat(cellSize.width),
+                    height: CGFloat(cellSize.height)
+                )
+            )
+            guard try renderer.update(
+                historyRange: history,
+                region: region,
+                backingScale: 1
+            ) == .deferred,
+                renderer.hasDeferredHistoryPrepare
+            else {
+                return false
+            }
+
+            renderer.removeHistoryRegions(except: [])
+            guard !renderer.hasDeferredHistoryPrepare,
+                  renderer.historyRegionCount == 0
+            else {
+                return false
+            }
+
+            guard waitForGPUCompletion(renderer, after: completedBefore),
+                  !renderer.hasFrameInFlight
+            else {
+                return false
+            }
+            // Idle flush must not resurrect the wiped deferred prepare.
+            let ok = !renderer.hasDeferredHistoryPrepare
+                && renderer.historyRegionCount == 0
+            _ = keepAlive
+            return ok
+        } catch {
+            return false
+        }
+    }
+
 }
