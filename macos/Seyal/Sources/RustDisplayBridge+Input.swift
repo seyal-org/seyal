@@ -246,6 +246,13 @@ extension RustDisplayBridge {
     // unread socket data will immediately retrigger this dispatch source.
     for _ in 0..<8 {
       let result = seyal_bridge_poll()
+      // A failed poll may already have unregistered the client (#1379/#1171).
+      // Do not project an empty BlockTimeline wipe after Finalized/NoRunningExecution.
+      if result < 0 {
+        onError(result)
+        stop(reconnect: result == -18)
+        return
+      }
       runtimeBlockMetadata = currentBlockMetadata()
       publishHistoryRanges()
       publishComposerResult()
@@ -269,14 +276,9 @@ extension RustDisplayBridge {
         armProvisioningWakeupSource()
         continue
       }
-      if result == 0 {
-        armAuxiliaryReadSources()
-        armProvisioningWakeupSource()
-        return
-      }
-
-      onError(result)
-      stop(reconnect: result == -18)
+      // result == 0: drained.
+      armAuxiliaryReadSources()
+      armProvisioningWakeupSource()
       return
     }
   }

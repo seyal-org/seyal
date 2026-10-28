@@ -44,9 +44,22 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         )
         let composer = app.descendants(matching: .any)["seyal-composer"]
         XCTAssertFalse(composer.firstMatch.isHittable, "an ended shell must not accept Flow commands")
+        // #1379: an empty `seyal-blocks` container is still hittable — require the
+        // command Block that ran before exit, not merely the transcript host.
+        let exitBlock = app.descendants(matching: .any)["seyal-block-0"]
         XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-blocks"].firstMatch.isHittable,
-            "completed Flow history must remain visible after the shell exits"
+            exitBlock.waitForExistence(timeout: 5),
+            "completed Flow history must keep at least one Block card after shell exit"
+        )
+        let exitCommandVisible = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "seyal-1171-exit-before"),
+            evaluatedWith: exitBlock.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [exitCommandVisible], timeout: 5),
+            .completed,
+            "Flow Block content from before exit must remain visible; empty chrome is not enough"
         )
         let terminal = app.descendants(matching: .any)["terminal-input"]
         XCTAssertTrue((terminal.value as? String ?? "").contains("execution=none"))
