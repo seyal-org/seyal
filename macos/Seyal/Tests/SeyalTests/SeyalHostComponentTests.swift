@@ -1423,6 +1423,53 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(text.contains("ComposerRequestCorrelation"))
     }
 
+    /// #1379 / #1171: after Finalized/NoRunningExecution a failed poll may have
+    /// already unregistered the client. Projecting BlockTimeline after that
+    /// wipe empties Flow history; fail closed before metadata publish.
+    @MainActor
+    func testFailedPollReturnsBeforeBlockTimelineProjection() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let input = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
+        let text = (try? String(contentsOf: input, encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.isEmpty, "RustDisplayBridge+Input.swift must be readable")
+        guard let drainRange = text.range(of: "func drainReadyDisplayWork()") else {
+            XCTFail("drainReadyDisplayWork must exist on the Input bridge")
+            return
+        }
+        let afterDrain = text[drainRange.lowerBound...]
+        guard let pollCall = afterDrain.range(of: "seyal_bridge_poll()") else {
+            XCTFail("drainReadyDisplayWork must poll the bridge")
+            return
+        }
+        let afterPoll = afterDrain[pollCall.upperBound...]
+        guard let failGuard = afterPoll.range(of: "if result < 0") else {
+            XCTFail("failed poll must return before timeline projection")
+            return
+        }
+        let metadata = afterPoll.range(of: "currentBlockMetadata()")
+        let revision = afterPoll.range(of: "seyal_bridge_block_timeline_revision()")
+        XCTAssertNotNil(metadata, "drainReadyDisplayWork still publishes block metadata on success")
+        XCTAssertNotNil(revision, "drainReadyDisplayWork still observes timeline revision on success")
+        XCTAssertLessThan(
+            failGuard.lowerBound,
+            metadata!.lowerBound,
+            "poll failure must stop before currentBlockMetadata"
+        )
+        XCTAssertLessThan(
+            failGuard.lowerBound,
+            revision!.lowerBound,
+            "poll failure must stop before block_timeline_revision"
+        )
+        XCTAssertTrue(
+            afterPoll[failGuard.upperBound...].contains("return"),
+            "poll failure path must return without projecting an empty timeline"
+        )
+    }
+
     /// #1250: Runtime revisions are execution-scoped; equal revisions from
     /// distinct focused attachments each need to reach the native composer.
     func testComposerStatusRelayDeduplicatesByFocusedAttachmentAndRevision() {
