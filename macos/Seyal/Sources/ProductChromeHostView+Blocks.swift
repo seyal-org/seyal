@@ -92,9 +92,9 @@ extension ProductChromeHostView {
             }
         }
         pane.inputSurface.discardHistoryRequests(except: retained)
-        if retained.isEmpty {
-            pane.inputSurface.removeTranscriptRegions(except: [])
-        }
+        // Prune retained history to the live Block set so New shell / eviction
+        // cannot paint a prior execution's cells under a reused Block id.
+        pane.inputSurface.removeTranscriptRegions(except: retained)
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         publishLiveTailBlocks()

@@ -41,6 +41,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var isNativeInteractionProbe: Bool { installation == .nativeInteractionProbe }
   var forceNextFrame = false
   var hasPreparedState = false
+  /// Encoded Flow history is on-screen without a Candidate-D live frame
+  /// (shell-exit retain). Must not satisfy SPEC-009 renderer-ready / Usable.
+  var hasRetainedHistoryPresentation = false
   var presentationState = PresentationRecoveryState()
   var presentationRetryScheduled = false
   var presentationRetryTimer: Timer?
@@ -225,6 +228,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func removeTranscriptRegions(except ids: Set<UInt64>) {
     historyRanges = historyRanges.filter { ids.contains($0.key.blockID) }
+    if historyRanges.isEmpty {
+      hasRetainedHistoryPresentation = false
+    }
     renderer.removeHistoryRegions(except: ids)
     clearLiveTailWhenTranscriptEmpty(ids)
   }
@@ -323,7 +329,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     updateDrawableSize()
     proposeCurrentGeometry()
     guard shouldRender,
-      hasPreparedState,
+      canPresentSurface,
       renderer.persistentDisplayFailure == nil,
       !presentationState.exhausted
     else { return }
@@ -487,7 +493,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         lastRenderError = nil
       }
       bridge?.publishCurrentFrame()
-      if hasPreparedState, !presentationState.exhausted {
+      if canPresentSurface, !presentationState.exhausted {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
@@ -624,38 +630,37 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     }
     lastProposedGeometry = .null
     recoveryPresentationPending = false
-    // Rust decides when an ended execution keeps Flow history. Poll codes do not.
-    // If historyRanges already hold completed Blocks, keep them even when the
-    // retain flag races behind ExecutionEnded (#1379 XCUI clear→exit AX loss).
+    // Rust owns which Blocks remain (composer timeline). Do not wipe
+    // historyRanges here from a retain-flag race — rebuildBlocks prunes via
+    // removeTranscriptRegions(except: retained) against that timeline
+    // (ADR-015; #1379). Ordinary disconnect with an empty timeline clears
+    // the cache there; shell-exit keeps completed Block ids.
     let retainHistory = recoveryAppHandle != 0 && seyal_app_retains_flow_history(recoveryAppHandle) != 0
-    let keepHistory = retainHistory || !historyRanges.isEmpty
-    if !keepHistory {
-      historyRanges.removeAll(keepingCapacity: false)
-    }
     // Always drop running primary clips on disconnect. Retained history must
     // not share the surface with the last prepared viewport after clear→exit
     // (#1379): that leftover frame paints loose text/cursor over Block cards.
     // Drop Metal history *buffers* (and any deferred prepares) too — keep
-    // historyRanges data when retaining so chrome can re-encode against the
-    // settled AppKit clips after this wipe.
+    // historyRanges rows so chrome can re-encode against settled AppKit clips.
     clearLiveTailPresentation()
     renderer.removeHistoryRegions(except: [])
-    if keepHistory {
-      // Do not invalidate hasPreparedState: armMetalDisplayLink and history
-      // presents require it. Invalidating left CAMetalLayer showing the
-      // pre-exit live-tail frame while CPU history buffers looked healthy
-      // (AX false-green: flow-paint=ok, screen wrong).
-      cancelPresentationRetries()
-      resetPreparationRecovery()
-      onTimelineChanged?()
-      hasPreparedState = true
-      if shouldRender, !historyRanges.isEmpty {
-        renderer.requestPresent()
-        beginPresentationAttemptSeries()
-        armMetalDisplayLink()
-      }
-    } else {
-      invalidatePreparedPresentation()
+    cancelPresentationRetries()
+    resetPreparationRecovery()
+    // Live Candidate-D readiness must not linger into reconnect/New shell
+    // (SPEC-009 §8.2.2 / §10). History present uses the retained flag only
+    // when Rust still retains Flow history.
+    hasPreparedState = false
+    hasRetainedHistoryPresentation = retainHistory && !historyRanges.isEmpty
+    onTimelineChanged?()
+    if retainHistory, shouldRender, hasRetainedHistoryPresentation {
+      renderer.requestPresent()
+      beginPresentationAttemptSeries()
+      armMetalDisplayLink()
+    } else if !retainHistory {
+      // Presentation retries / retained flag already cleared above. Do not
+      // call invalidatePreparedPresentation — it would also drop
+      // hasRetainedHistoryPresentation after a late retain latch and wipe
+      // historyRanges indirectly via Raw/empty rebuild only.
+      presentationState.cancel()
     }
     startAutomaticBridgeRecoveryIfNeeded()
   }
@@ -881,9 +886,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         region: rendererRegion,
         backingScale: scale
       )
-      // History-only Flow (shell-exit retain) has no Candidate-D live frame;
-      // still treat encoded history as prepared so the display link can present.
-      hasPreparedState = true
+      // History-only Flow (shell-exit retain) has no Candidate-D live frame.
+      // Arm presentation without marking renderer-ready / Usable.
+      hasRetainedHistoryPresentation = true
       if shouldRender {
         renderer.requestPresent()
         beginPresentationAttemptSeries()

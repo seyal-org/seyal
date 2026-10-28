@@ -1488,6 +1488,20 @@ final class SeyalHostComponentTests: XCTestCase {
             liveText.contains("frame.regions.isEmpty, !historyRanges.isEmpty"),
             "setTranscriptFrame must retain history paint across transient empty regions"
         )
+        let metalSurface = sourceRoot.appendingPathComponent("MetalSurfaceView.swift")
+        let metalText = (try? String(contentsOf: metalSurface, encoding: .utf8)) ?? ""
+        XCTAssertFalse(
+            metalText.contains("retainHistory || !historyRanges.isEmpty"),
+            "ADR-015: disconnect retain must follow Rust seyal_app_retains_flow_history only"
+        )
+        XCTAssertTrue(
+            metalText.contains("hasRetainedHistoryPresentation"),
+            "shell-exit history present must not reuse hasPreparedState for SPEC-009 Usable"
+        )
+        XCTAssertTrue(
+            hostText.contains("removeTranscriptRegions(except: retained)"),
+            "rebuildBlocks must prune historyRanges to the live Block id set"
+        )
     }
 
     @MainActor
