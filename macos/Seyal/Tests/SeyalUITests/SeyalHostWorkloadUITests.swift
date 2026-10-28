@@ -222,6 +222,58 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "1379-clear-then-exit-paint")
     }
 
+    /// #1379 Gate 1: repeat clear→exit→New shell ten times in one headed
+    /// session. Cold-launch XCUI flake must not mask the paint regression.
+    func testClearThenExitPaintStableAcrossTenCycles() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        for cycle in 1...10 {
+            let beforeToken = "seyal-1379-c\(cycle)-before"
+            let afterToken = "seyal-1379-c\(cycle)-after"
+            submitComposerCommand(app, "printf '\(beforeToken)\\n'")
+            waitForBlockBodyText(app, index: 0, text: beforeToken, timeout: 8)
+            submitComposerCommand(app, "clear")
+            waitBriefly(0.8)
+            submitComposerCommand(app, "printf '\(afterToken)\\n'")
+            waitForBlockBodyText(app, index: 2, text: afterToken, timeout: 8)
+            submitComposerCommand(app, "exit 7")
+            let recovery = app.descendants(matching: .any)["seyal-recovery"]
+            let ended = expectation(
+                for: NSPredicate(format: "value CONTAINS 'shell exited'"),
+                evaluatedWith: recovery,
+                handler: nil
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [ended], timeout: 15),
+                .completed,
+                "cycle \(cycle): shell exit recovery missing"
+            )
+            assertFlowPaintCleanAfterExit(
+                app,
+                minimumPaintedRegions: 2,
+                inkBodyIndices: [0, 2]
+            )
+            let newShell = app.descendants(matching: .any)["seyal-new-shell"].firstMatch
+            XCTAssertTrue(
+                newShell.waitForExistence(timeout: 5),
+                "cycle \(cycle): New shell must be offered after exit"
+            )
+            newShell.click()
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let usable = expectation(
+                for: NSPredicate(format: "value == 'available'"),
+                evaluatedWith: composer,
+                handler: nil
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [usable], timeout: 8),
+                .completed,
+                "cycle \(cycle): New shell stayed \(composer.value ?? "nil")"
+            )
+        }
+        attachScreenshot(app, name: "1379-clear-then-exit-10x")
+    }
+
     /// #1379: New shell after exit must become a usable Flow composer. The
     /// ended shell's admission must not leave "Waiting for prompt..." up
     /// while the new PTY is already at a prompt.
@@ -339,15 +391,16 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             .completed,
             "composer never became available; value=\(composer.value ?? "nil")"
         )
+        app.activate()
         composer.firstMatch.click()
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        // Prefer a single typeText with newline — separate typeKey("\r") often
+        // times out synthesizing during long headed Gate 1 loops.
         if editor.waitForExistence(timeout: 2), editor.firstMatch.isHittable {
             editor.firstMatch.click()
-            editor.firstMatch.typeText(command)
-            editor.firstMatch.typeKey("\r", modifierFlags: [])
+            editor.firstMatch.typeText(command + "\n")
         } else {
-            composer.firstMatch.typeText(command)
-            app.typeKey("\r", modifierFlags: [])
+            composer.firstMatch.typeText(command + "\n")
         }
         let cleared = expectation(
             for: NSPredicate(format: "value == nil OR value == ''"),
@@ -359,12 +412,22 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        // Headed sequential XCUI can leave the next launch BackgroundSuspended when
+        // the IDE steals focus; activate before PTY attach or hittable chrome fails.
+        app.activate()
         let terminal = app.descendants(matching: .any)["terminal-input"]
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
+        if app.state != .runningForeground {
+            app.activate()
+        }
+        XCTAssertEqual(
+            app.state,
+            .runningForeground,
+            "Seyal.app left foreground while waiting for PTY attach (state=\(app.state.rawValue))"
+        )
         XCTAssertEqual(
             result,
             .completed,
@@ -519,15 +582,8 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertTrue(blocks.waitForExistence(timeout: 5), "XCUI must keep seyal-blocks")
         XCTAssertTrue(transcript.waitForExistence(timeout: 5), "XCUI must keep the transcript")
         XCTAssertGreaterThan(transcript.firstMatch.frame.height, 120, "transcript must remain a full Flow surface")
-        let leftPanel = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
-        let leftVisible = expectation(
-            for: NSPredicate(format: "exists == YES AND isHittable == YES"),
-            evaluatedWith: leftPanel,
-            handler: nil
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [leftVisible], timeout: 5),
-            .completed,
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
             "Core Terminal left panel stays visible alongside Flow composer/Blocks (#922)"
         )
     }

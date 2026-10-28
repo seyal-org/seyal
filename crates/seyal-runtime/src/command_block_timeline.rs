@@ -103,6 +103,9 @@ impl CommandBlockTimeline {
     /// then backs up past it. The Block must still complete rather than stay
     /// `Running` with no owner (#1015). The wire range cannot express an empty
     /// output yet; that marker is proposed in the ADR-009 amendment (#1041).
+    /// Production completion prefers `complete_span` (ED2 frontier); this
+    /// wrapper remains the unit-test / no-frontier façade.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn complete(
         &mut self,
         id: CommandBlockId,
