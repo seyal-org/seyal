@@ -625,8 +625,11 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     lastProposedGeometry = .null
     recoveryPresentationPending = false
     // Rust decides when an ended execution keeps Flow history. Poll codes do not.
+    // If historyRanges already hold completed Blocks, keep them even when the
+    // retain flag races behind ExecutionEnded (#1379 XCUI clear→exit AX loss).
     let retainHistory = recoveryAppHandle != 0 && seyal_app_retains_flow_history(recoveryAppHandle) != 0
-    if !retainHistory {
+    let keepHistory = retainHistory || !historyRanges.isEmpty
+    if !keepHistory {
       historyRanges.removeAll(keepingCapacity: false)
     }
     // Always drop running primary clips on disconnect. Retained history must
@@ -637,7 +640,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // settled AppKit clips after this wipe.
     clearLiveTailPresentation()
     renderer.removeHistoryRegions(except: [])
-    if retainHistory {
+    if keepHistory {
       // Do not invalidate hasPreparedState: armMetalDisplayLink and history
       // presents require it. Invalidating left CAMetalLayer showing the
       // pre-exit live-tail frame while CPU history buffers looked healthy

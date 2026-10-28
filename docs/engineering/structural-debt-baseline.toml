@@ -24,7 +24,7 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 909
+acknowledged_loc = 912
 issue = 1379
 reason = "Flow history retention across shell-exit poll loss stays on the Metal surface that already owns historyRanges; #1379 keeps hasPreparedState so retained history presents after wipe (fixes CAMetalLayer stale-frame false-green); AX exposes history-instances/regions/clips."
 

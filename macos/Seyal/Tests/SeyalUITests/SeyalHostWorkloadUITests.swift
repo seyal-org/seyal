@@ -163,16 +163,13 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         submitComposerCommand(app, "printf 'seyal-1379-before-clear\\n'")
         let before = app.descendants(matching: .any)["seyal-block-0"]
         XCTAssertTrue(before.waitForExistence(timeout: 8))
+        // Wait for history AX on the body before clear — card title alone can
+        // match the printf argument while Metal/history is still empty (#1379).
+        waitForBlockBodyText(app, index: 0, text: "seyal-1379-before-clear", timeout: 8)
         submitComposerCommand(app, "clear")
         waitBriefly(0.8)
         submitComposerCommand(app, "printf 'seyal-1379-after-clear\\n'")
-        let after = app.descendants(matching: .any)["seyal-block-2"]
-        let afterVisible = expectation(
-            for: NSPredicate(format: "label CONTAINS %@", "seyal-1379-after-clear"),
-            evaluatedWith: after.firstMatch,
-            handler: nil
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [afterVisible], timeout: 8), .completed)
+        waitForBlockBodyText(app, index: 2, text: "seyal-1379-after-clear", timeout: 8)
         submitComposerCommand(app, "exit 7")
         let recovery = app.descendants(matching: .any)["seyal-recovery"]
         let ended = expectation(
@@ -561,6 +558,30 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
     private func waitBriefly(_ seconds: TimeInterval) {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    private func waitForBlockBodyText(
+        _ app: XCUIApplication,
+        index: Int,
+        text: String,
+        timeout: TimeInterval
+    ) {
+        let body = app.descendants(matching: .any)["seyal-block-\(index)-body"].firstMatch
+        XCTAssertTrue(body.waitForExistence(timeout: timeout), "seyal-block-\(index)-body missing")
+        let painted = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                text,
+                text
+            ),
+            evaluatedWith: body,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [painted], timeout: timeout),
+            .completed,
+            "seyal-block-\(index)-body must show \(text) before continuing (card title alone is false-green)"
+        )
     }
 
     private func attachScreenshot(_ app: XCUIApplication, name: String) {
