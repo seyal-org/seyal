@@ -893,6 +893,7 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testShellExitNewShellRebindsFreshExecution() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         let handle = view.pane.appHandle
