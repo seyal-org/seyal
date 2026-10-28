@@ -246,11 +246,17 @@ extension RustDisplayBridge {
     // unread socket data will immediately retrigger this dispatch source.
     for _ in 0..<8 {
       let result = seyal_bridge_poll()
-      // Rust copies the final Block timeline into the composer before it
-      // unregisters the client. Publish that timeline before stop so Flow
-      // rebuilds completed bodies. APPLY_RUNTIME_BLOCKS with no client retains.
+      // Shell exit (-6): Lifecycle Finalized arrives after the final display /
+      // history frames in the same poll. Publish those history ranges and the
+      // Block timeline while the client is still registered (unregister waits
+      // for stop — #1379 clear→exit). Other losses unregister inside poll;
+      // APPLY_RUNTIME_BLOCKS with no client retains the composer timeline.
       if result < 0 {
+        publishHistoryRanges()
         onTimeline()
+        // Rebuild may have issued fresh history requests for settled Blocks;
+        // one more publish picks up anything already buffered on the client.
+        publishHistoryRanges()
         onError(result)
         stop(reconnect: result == -18)
         return

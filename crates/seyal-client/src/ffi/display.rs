@@ -250,11 +250,14 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
             let code = error_code(error);
             if is_terminal_client_loss(&error) && handle != 0 {
                 if matches!(error, ClientError::NoRunningExecution) {
+                    // Retain the client until the host stop() path so Flow can
+                    // request final Block history after clear→exit (#1379).
+                    // Unregistering here left historyRanges stale vs AppKit cards.
                     super::app::note_application_roots_execution_ended(handle);
                 } else {
                     super::app::note_application_roots_client_loss(handle);
+                    let _ = super::unregister_client(handle);
                 }
-                let _ = super::unregister_client(handle);
             }
             code
         }
@@ -288,8 +291,8 @@ pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
                     super::app::note_application_roots_execution_ended(handle);
                 } else {
                     super::app::note_application_roots_client_loss(handle);
+                    let _ = super::unregister_client(handle);
                 }
-                let _ = super::unregister_client(handle);
             }
             code
         }

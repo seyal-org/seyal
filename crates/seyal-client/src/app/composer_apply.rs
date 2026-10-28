@@ -39,6 +39,10 @@ impl ApplicationRoot {
     /// An ended execution is not still running a Block. Keep an observed exit
     /// status; a block the timeline left `Running` becomes Unknown (ADR-009
     /// mechanism 5) instead of `/ running`.
+    ///
+    /// Clamp a missing end to `start_line` so projection hands off to History
+    /// instead of FailClosed (which collapses the body and leaves stale
+    /// live-tail paint after clear → exit).
     pub(super) fn settle_running_blocks_after_exit(&mut self, pane: seyal_core::PaneId) {
         let Ok(snapshot) = self.composer.snapshot(pane) else {
             return;
@@ -56,11 +60,14 @@ impl ApplicationRoot {
             .map(|block| {
                 let ended_without_status =
                     block.state == crate::composer::BlockPresentationState::Running;
+                let end_line = block
+                    .end_line
+                    .or_else(|| (block.start_line > 0).then_some(block.start_line));
                 RuntimeBlockRecord {
                     id: block.id,
                     command: block.command,
                     start_line: block.start_line,
-                    end_line: block.end_line,
+                    end_line,
                     running: false,
                     exit_status: if ended_without_status {
                         None

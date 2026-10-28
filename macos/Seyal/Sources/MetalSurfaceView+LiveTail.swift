@@ -22,7 +22,9 @@ extension MetalSurfaceView {
     renderer.setTranscriptRegions(liveTailPixelRegions(in: frame))
     // Body intrinsic growth moves every following Block. Re-encode all
     // retained canonical ranges against this complete frame so no region
-    // retains its previous clip or origin.
+    // retains its previous clip or origin. History keeps AppKit surface
+    // coordinates (convert already matches the shader); live-tail alone
+    // uses top-left pixel clips.
     for region in frame.regions {
       guard let range = historyRanges[PaneBlockKey(paneID: paneID, blockID: region.id)] else {
         continue
@@ -42,8 +44,12 @@ extension MetalSurfaceView {
 
   func clearLiveTailWhenTranscriptEmpty(_ ids: Set<UInt64>) {
     guard ids.isEmpty else { return }
-    renderer.setLiveTailBlocks([:])
-    renderer.setTranscriptRegions([])
+    renderer.clearLiveTailPresentation()
+  }
+
+  /// End running primary clips without touching retained history regions.
+  func clearLiveTailPresentation() {
+    renderer.clearLiveTailPresentation()
   }
 
   /// AppKit bottom-left → terminal top-left pixel clips for live-tail.

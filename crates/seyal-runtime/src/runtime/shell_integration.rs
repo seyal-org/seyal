@@ -334,7 +334,7 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                 // A trusted D marker's parser-stamped line is authoritative.
                 // Without one (lost D, or execution ended with no D observed)
                 // the current cursor is the best available fallback.
-                let end_line = line.map(|line| line.0).unwrap_or_else(|| {
+                let mut end_line = line.map(|line| line.0).unwrap_or_else(|| {
                     let cursor = entry.execution.terminal().cursor();
                     entry
                         .execution
@@ -343,6 +343,24 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                         .map(|line| line.0)
                         .unwrap_or(1)
                 });
+                // ED2 (`clear`) seals start into history and remints the
+                // viewport before D. Clamp so Flow history cannot claim the
+                // reminted blanks as this Block's body (#1379 clear→exit).
+                if let Some(start_line) = entry
+                    .block_timeline
+                    .records()
+                    .find(|record| record.id == block_id)
+                    .map(|record| record.start_line)
+                {
+                    end_line = entry
+                        .execution
+                        .terminal()
+                        .clamp_block_end_across_ed2_remint(
+                            seyal_exec::LineId(start_line),
+                            seyal_exec::LineId(end_line),
+                        )
+                        .0;
+                }
                 let exit_status = match exit {
                     BlockExit::Code(code) => Some(code),
                     BlockExit::Unknown => None,

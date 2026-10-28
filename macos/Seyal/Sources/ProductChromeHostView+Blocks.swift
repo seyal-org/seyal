@@ -102,6 +102,15 @@ extension ProductChromeHostView {
             scrollTranscriptToLiveEnd()
         }
         lastBlockCount = count
+        // clear→exit: card heights change after live-tail drop and History
+        // settle; one async republish re-encodes retained history against the
+        // final AppKit clips so prior origins cannot stick to earlier cards.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.layoutSubtreeIfNeeded()
+            self.syncTranscriptDocumentSize()
+            self.publishBlockOutputFrame()
+        }
     }
 
     func outputLineCount(projection: SeyalAppBlockProjection) -> Int {
@@ -231,11 +240,16 @@ extension ProductChromeHostView {
         var regions = collectBlockOutputRegions(surface: surface)
         // Cards exist but clips are still zero-sized: retry once after layout.
         // Never publish an empty region set while cards remain — that clears
-        // retained history paint (#1379 titles-only white bodies).
+        // retained history paint (#1379 titles-only white bodies). After clear
+        // shrinks a tall PRIMARY_CLIP body, a zero-clip publish would also leave
+        // prior history origins stuck over earlier cards (clear→exit mispaint).
         if regions.isEmpty, !blockCards.isEmpty {
             layoutSubtreeIfNeeded()
             regions = collectBlockOutputRegions(surface: surface)
             if regions.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.publishBlockOutputFrame()
+                }
                 return
             }
         }

@@ -268,6 +268,7 @@ impl ApplicationRoot {
         };
         self.install_pane_authority(pane, evidence)?;
         self.clear_execution_ended_for_pane(pane);
+        self.flow_history_hold = false;
         // The ended shell's submit and composer-status revision do not describe
         // the new attachment. Clear them before applying the adopted client.
         let _ = self

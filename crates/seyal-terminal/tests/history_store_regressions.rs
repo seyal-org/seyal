@@ -841,3 +841,31 @@ fn ed2_clear_preserves_prior_primary_lines_in_history() {
         "ED2 must mint a fresh LineId for row 0"
     );
 }
+
+/// #1379: a Block that starts on the primary, runs ED2, then finishes on a
+/// reminted row must not own the numeric span through every reminted blank.
+#[test]
+fn ed2_mid_command_block_end_clamps_before_remint() {
+    let mut terminal = TerminalState::new(20, 6).expect("terminal");
+    terminal.feed(b"before-clear\r\n").expect("feed");
+    // Simulate the clear command's start row still on the primary.
+    terminal.feed(b"clear-command").expect("feed");
+    let start = terminal
+        .line_id(terminal.cursor().row)
+        .expect("clear start line");
+    terminal.feed(b"\x1b[H\x1b[2J").expect("ED2");
+    let finish = terminal.line_id(0).expect("reminted finish line");
+    assert!(
+        finish.0 > start.0 + 1,
+        "ED2 must remint multiple LineIds after start ({start:?} → {finish:?})"
+    );
+    let clamped = terminal.clamp_block_end_across_ed2_remint(start, finish);
+    assert_eq!(
+        clamped, start,
+        "ED2 remint finish must clamp end to the sealed start row, not {finish:?}"
+    );
+    assert!(
+        finish.0 - start.0 >= 5,
+        "unclamped numeric span must be remint-tall ({start:?}..{finish:?})"
+    );
+}

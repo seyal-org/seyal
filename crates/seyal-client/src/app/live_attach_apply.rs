@@ -47,6 +47,11 @@ fn runtime_block_from_ended_timeline(
     if mapped.running {
         mapped.running = false;
         mapped.exit_status = None;
+        // History projection needs a finite end. Running records carry none;
+        // clamp to start so clear→exit cannot FailClosed and leave live-tail.
+        if mapped.end_line.is_none() && mapped.start_line > 0 {
+            mapped.end_line = Some(mapped.start_line);
+        }
     }
     mapped
 }
@@ -326,8 +331,10 @@ impl ApplicationRoot {
     /// Terminal poll loss. `execution_ended` keeps Flow authority and copies the
     /// final Block timeline before the client is unregistered (#1379).
     pub(crate) fn note_terminal_client_loss(&mut self, handle: u64, execution_ended: bool) {
-        self.hold_flow_history();
+        // Only shell-exit retains history forever. Ordinary disconnect must not
+        // sticky-hold Flow paint across panes (#1379 Opus recheck).
         if execution_ended {
+            self.hold_flow_history();
             self.note_ended_execution_client_loss(handle);
         } else {
             self.note_registry_client_loss(handle);

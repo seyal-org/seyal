@@ -2981,6 +2981,24 @@ final class SeyalHostComponentTests: XCTestCase {
         renderer.setLiveTailBlocks([:])
         XCTAssertEqual(renderer.liveTailRegionCount, 0)
         XCTAssertFalse(renderer.inspectPresentation().drawsLiveGrid)
+
+        // #1379 clear→exit: retain history must drop the prepared viewport.
+        // setLiveTailBlocks([:]) alone left lastPreparedFrame so a later
+        // refresh could repaint loose primary rows over Block cards.
+        XCTAssertEqual(try update(generation: 868, fullRebuild: false, damage: DamageMask()), .updated)
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
+        XCTAssertGreaterThan(renderer.lastPreparedRowCount, 0)
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        renderer.clearLiveTailPresentation()
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "clearLiveTailPresentation must drop clips")
+        XCTAssertEqual(
+            renderer.lastPreparedRowCount,
+            0,
+            "clearLiveTailPresentation must drop lastPreparedFrame so exit cannot overlay history"
+        )
+        XCTAssertTrue(renderer.inspectFlowPaint().isClean)
     }
 
     /// #865 / SPEC-008 §3.1: Flow transcript scroll handling republishes Block

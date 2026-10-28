@@ -430,17 +430,21 @@ fn controller_terminate_requests_then_finalizes_via_lifecycle_only() {
     let mut saw_progress = false;
     while Instant::now() < progress_deadline {
         h.pump();
-        let generation = h
-            .runtime
-            .execution(streamer)
-            .unwrap()
-            .terminal()
-            .damage_generation();
+        let Some(execution) = h.runtime.execution(streamer) else {
+            // Unrelated streamer must remain registered; None is a real
+            // failure but avoid panicking mid-poll under CI load.
+            continue;
+        };
+        let generation = execution.terminal().damage_generation();
         if generation > gen_before {
             saw_progress = true;
             break;
         }
     }
+    assert!(
+        h.runtime.execution(streamer).is_some(),
+        "unrelated streamer execution must remain registered during terminate"
+    );
     assert!(
         saw_progress,
         "unrelated execution output must keep progressing"

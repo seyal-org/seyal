@@ -148,8 +148,75 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         )
         assertBlockCardFillsTranscript(app, index: 0)
         assertBlockCardFillsTranscript(app, index: 1)
+        assertFlowPaintCleanAfterExit(app)
         XCTAssertEqual(app.state, .runningForeground)
         attachScreenshot(app, name: "1171-primary-shell-exit")
+    }
+
+    /// #1379 P0: clear → command → exit must keep Block bodies painted.
+    /// AX body text alone is false-green when Metal still draws the last
+    /// viewport over the cards; require flow-paint=ok from the Metal surface.
+    func testClearThenExitKeepsPaintedBlockBodies() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "printf 'seyal-1379-before-clear\\n'")
+        let before = app.descendants(matching: .any)["seyal-block-0"]
+        XCTAssertTrue(before.waitForExistence(timeout: 8))
+        submitComposerCommand(app, "clear")
+        waitBriefly(0.8)
+        submitComposerCommand(app, "printf 'seyal-1379-after-clear\\n'")
+        let after = app.descendants(matching: .any)["seyal-block-2"]
+        let afterVisible = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "seyal-1379-after-clear"),
+            evaluatedWith: after.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [afterVisible], timeout: 8), .completed)
+        submitComposerCommand(app, "exit 7")
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        let ended = expectation(
+            for: NSPredicate(format: "value CONTAINS 'shell exited'"),
+            evaluatedWith: recovery,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 15), .completed)
+
+        let beforeBody = app.descendants(matching: .any)["seyal-block-0-body"]
+        let beforeText = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1379-before-clear",
+                "seyal-1379-before-clear"
+            ),
+            evaluatedWith: beforeBody.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [beforeText], timeout: 8),
+            .completed,
+            "pre-clear body AX must remain after clear→exit"
+        )
+        let afterBody = app.descendants(matching: .any)["seyal-block-2-body"]
+        let afterText = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1379-after-clear",
+                "seyal-1379-after-clear"
+            ),
+            evaluatedWith: afterBody.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [afterText], timeout: 8),
+            .completed,
+            "post-clear body AX must remain after clear→exit"
+        )
+        XCTAssertGreaterThan(beforeBody.firstMatch.frame.height, 8)
+        XCTAssertGreaterThan(afterBody.firstMatch.frame.height, 8)
+        assertBlockCardFillsTranscript(app, index: 0)
+        assertBlockCardFillsTranscript(app, index: 2)
+        assertFlowPaintCleanAfterExit(app)
+        attachScreenshot(app, name: "1379-clear-then-exit-paint")
     }
 
     /// #1379: New shell after exit must become a usable Flow composer. The
@@ -315,6 +382,35 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             abs(card.frame.minX - blocks.frame.minX),
             24,
             "Flow Block cards must start with the transcript, not hug the trailing edge"
+        )
+    }
+
+    /// Metal reports flow-paint=ok only when Flow draws history inside Block
+    /// clips without a leftover live-grid / out-of-clip overlay. AX body text
+    /// can stay correct while the screen is blank; require painted history
+    /// instances as well (#1379 false-green guard).
+    private func assertFlowPaintCleanAfterExit(_ app: XCUIApplication) {
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.exists, "terminal surface missing for flow-paint probe")
+        let clean = expectation(
+            for: NSPredicate(format: "value CONTAINS 'flow-paint=ok'"),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [clean], timeout: 5),
+            .completed,
+            "Metal Flow paint must stay clean after exit; AX=\(terminal.value ?? "nil") (flow-paint=leak means viewport overlay survived)"
+        )
+        let painted = expectation(
+            for: NSPredicate(format: "value MATCHES %@", ".*history-instances=[1-9][0-9]*.*"),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [painted], timeout: 5),
+            .completed,
+            "retained Flow Blocks must paint history glyphs after exit; AX=\(terminal.value ?? "nil") (history-instances=0 with AX body text is false-green)"
         )
     }
 

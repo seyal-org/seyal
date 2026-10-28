@@ -379,6 +379,12 @@ mod tests {
         assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
         assert_eq!(completed.start_line, 10);
         assert_eq!(completed.end_line, 12);
+        // ExecutionEnded settles the Running Block with end=start so History
+        // projects instead of FailClosed (clear→exit must not collapse bodies).
+        let settled = seyal_app_block_projection(handle, 1);
+        assert_eq!(settled.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(settled.start_line, 20);
+        assert_eq!(settled.end_line, 20);
 
         APPS.with(|apps| {
             let mut apps = apps.borrow_mut();
@@ -400,8 +406,10 @@ mod tests {
         assert_eq!(retained.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
         assert_eq!(retained.start_line, 10);
         assert_eq!(retained.end_line, 12);
-        let running = seyal_app_block_projection(handle, 1);
-        assert_eq!(running.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
+        let settled_unbound = seyal_app_block_projection(handle, 1);
+        assert_eq!(settled_unbound.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(settled_unbound.start_line, 20);
+        assert_eq!(settled_unbound.end_line, 20);
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

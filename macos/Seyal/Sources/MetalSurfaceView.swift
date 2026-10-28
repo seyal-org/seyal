@@ -260,7 +260,11 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let execution = terminalExecutionIdentity ?? "none"
     let attachment = terminalAttachmentIdentity ?? "none"
     let alternate = lastAlternateScreen == true ? "true" : "false"
-    let flowPaint = renderer.inspectFlowPaint().accessibilityToken
+    let paint = renderer.inspectFlowPaint()
+    let flowPaint = paint.accessibilityToken
+    // history-instances exposes painted Block-body glyphs so XCUI can fail
+    // when AX titles/bodies exist but Metal history is blank (#1379).
+    let historyInstances = paint.historyInstanceCount
     let geometry: String
     if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
       geometry =
@@ -274,7 +278,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       "process=\(ProcessInfo.processInfo.processIdentifier) connection=\(connection) "
         + "runtime=\(runtime) execution=\(execution) "
         + "attachment=\(attachment) alternate-screen=\(alternate) "
-        + "\(geometry) flow-paint=\(flowPaint)"
+        + "\(geometry) flow-paint=\(flowPaint) history-instances=\(historyInstances)"
     )
   }
 
@@ -621,7 +625,17 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     if !retainHistory {
       historyRanges.removeAll(keepingCapacity: false)
     }
+    // Always drop running primary clips on disconnect. Retained history must
+    // not share the surface with the last prepared viewport after clear→exit
+    // (#1379): that leftover frame paints loose text/cursor over Block cards.
+    // Do not present here — wait for rebuildBlocks → publishBlockOutputFrame so
+    // clips match AppKit card layout after composer → New shell chrome changes.
+    clearLiveTailPresentation()
     invalidatePreparedPresentation()
+    if retainHistory, shouldRender, !historyRanges.isEmpty {
+      beginPresentationAttemptSeries()
+      armMetalDisplayLink()
+    }
     startAutomaticBridgeRecoveryIfNeeded()
   }
 
