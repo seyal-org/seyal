@@ -238,11 +238,8 @@ acknowledged_loc = 782
 issue = 1379
 reason = "Thin AppKit chrome host stays one cold-path façade; #866/#1218 keep eligibility-driven focus and recovery presentation on this host, and #1379 only wires the explicit New shell recovery action into the existing composer slot without moving product authority into Swift."
 
-[[cohesion_acknowledgement]]
-path = "macos/Seyal/Sources/ProductChromeHostView+Recovery.swift"
-acknowledged_loc = 705
-issue = 1379
-reason = "Recovery effect drain stays one host adapter beside ProductChromeHostView; #1379 adds the create-capable New shell open_first path (continuity clear, lease teardown, adopt retry) without inventing a second recovery coordinator or partN split."
+# ProductChromeHostView+Recovery.swift is below review_loc after #1379
+# New-shell logging cleanup; no cohesion acknowledgement remains.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"
