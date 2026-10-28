@@ -38,6 +38,10 @@ pub(crate) struct Screen {
     pub(in crate::screen) saved_cursor: Option<SavedCursor>,
     pub(in crate::screen) history: HistoryStore,
     pub(in crate::screen) retain_history: bool,
+    /// First `LineId` allocated by the latest CSI ED2 remint on this screen.
+    /// Blocks whose `[start, end]` crosses this frontier started before the
+    /// remint and must not claim reminted blanks as body (#1379).
+    pub(crate) ed2_remint_frontier: Option<LineId>,
     /// Inclusive 0-based DECSTBM top margin.
     pub(in crate::screen) scroll_top: u16,
     /// Inclusive 0-based DECSTBM bottom margin.
@@ -80,6 +84,7 @@ impl Screen {
             saved_cursor: None,
             history: HistoryStore::default(),
             retain_history,
+            ed2_remint_frontier: None,
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
         })

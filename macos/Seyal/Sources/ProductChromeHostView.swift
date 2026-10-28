@@ -67,6 +67,9 @@ final class ProductChromeHostView: NSView {
     var chromeNeedsReconcile = false
     var blockCards: [UInt64: CommandBlockView] = [:]
     var transcriptFrameRevision: UInt64 = 0
+    /// Bounds zero-clip async republish so layout stalls cannot spin forever (#1379).
+    var blockOutputZeroClipRetries: Int = 0
+    static let blockOutputZeroClipRetryLimit = 8
     var paneFollowsTranscript: [NSLayoutConstraint] = []
     var paneFillsCenter: [NSLayoutConstraint] = []
     var centerLeadingHost: NSLayoutConstraint!

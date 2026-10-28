@@ -16,23 +16,18 @@ impl TerminalState {
     /// numeric `[start, finish]` would otherwise include every reminted blank
     /// and paint a viewport-tall empty Flow body after clear → exit.
     ///
-    /// When `start` is already sealed and `end` still names a live primary
-    /// row, the Block stops at `start`. ED2 seals the whole pre-remint
-    /// viewport — including blank rows below the command — so a max-sealed
-    /// clamp would still size a viewport-tall empty Flow body. Pre-ED2
-    /// command output that must appear in the Block is on `start` itself
-    /// (echoed command) or on earlier completed Blocks. Spans that never
-    /// crossed ED2 are unchanged.
+    /// Only spans that cross the latest ED2 remint frontier are clamped to
+    /// `start`. A long-output Block whose start has merely scrolled into
+    /// history (no ED2 between start and end) must keep its full end line —
+    /// sealed-start + primary-end alone is not an ED2 signal.
     pub fn clamp_block_end_across_ed2_remint(&self, start: LineId, end: LineId) -> LineId {
         if end < start {
             return start;
         }
-        let start_on_primary = (0..self.rows()).any(|row| self.line_id(row) == Some(start));
-        if start_on_primary {
+        let Some(frontier) = self.core.primary.ed2_remint_frontier else {
             return end;
-        }
-        let end_on_primary = (0..self.rows()).any(|row| self.line_id(row) == Some(end));
-        if end_on_primary {
+        };
+        if start < frontier && end >= frontier {
             return start;
         }
         end

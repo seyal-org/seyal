@@ -247,12 +247,16 @@ extension ProductChromeHostView {
             layoutSubtreeIfNeeded()
             regions = collectBlockOutputRegions(surface: surface)
             if regions.isEmpty {
-                DispatchQueue.main.async { [weak self] in
-                    self?.publishBlockOutputFrame()
+                if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
+                    blockOutputZeroClipRetries += 1
+                    DispatchQueue.main.async { [weak self] in
+                        self?.publishBlockOutputFrame()
+                    }
                 }
                 return
             }
         }
+        blockOutputZeroClipRetries = 0
         regions.sort { $0.id < $1.id }
         transcriptFrameRevision &+= 1
         surface.setTranscriptFrame(

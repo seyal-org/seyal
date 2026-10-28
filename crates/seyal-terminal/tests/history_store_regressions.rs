@@ -869,3 +869,58 @@ fn ed2_mid_command_block_end_clamps_before_remint() {
         "unclamped numeric span must be remint-tall ({start:?}..{finish:?})"
     );
 }
+
+/// #1379: long scrolled output seals `start` into history without ED2. Sealed
+/// start + primary end alone must not clamp — that truncates Flow bodies.
+#[test]
+fn long_scrolled_output_end_not_clamped_without_ed2() {
+    let mut terminal = TerminalState::new(20, 6).expect("terminal");
+    terminal.feed(b"seq-start\r\n").expect("feed");
+    let start = terminal.line_id(0).expect("start line");
+    // Scroll the start row into history while more output lands on primary.
+    for i in 0..20 {
+        let line = format!("line-{i:02}\r\n");
+        terminal.feed(line.as_bytes()).expect("feed");
+    }
+    let end = terminal
+        .line_id(terminal.cursor().row.saturating_sub(1))
+        .expect("end line");
+    assert!(
+        start.0 < end.0,
+        "scrolled span must grow ({start:?}..{end:?})"
+    );
+    let start_on_primary = (0..terminal.rows()).any(|row| terminal.line_id(row) == Some(start));
+    assert!(
+        !start_on_primary,
+        "start must already be sealed off the primary"
+    );
+    let clamped = terminal.clamp_block_end_across_ed2_remint(start, end);
+    assert_eq!(
+        clamped, end,
+        "without ED2, sealed-start + primary-end must keep full end {end:?}, not clamp to {start:?}"
+    );
+}
+
+/// #1379: a prior ED2 frontier must not clamp later Blocks that never crossed it.
+#[test]
+fn prior_ed2_frontier_does_not_clamp_later_block() {
+    let mut terminal = TerminalState::new(20, 6).expect("terminal");
+    terminal.feed(b"before\r\n").expect("feed");
+    terminal.feed(b"\x1b[H\x1b[2J").expect("prior ED2");
+    terminal.feed(b"later-start\r\n").expect("feed");
+    let start = terminal
+        .line_id(terminal.cursor().row.saturating_sub(1))
+        .expect("later start");
+    for i in 0..12 {
+        let line = format!("later-{i:02}\r\n");
+        terminal.feed(line.as_bytes()).expect("feed");
+    }
+    let end = terminal
+        .line_id(terminal.cursor().row.saturating_sub(1))
+        .expect("later end");
+    let clamped = terminal.clamp_block_end_across_ed2_remint(start, end);
+    assert_eq!(
+        clamped, end,
+        "Block entirely after a prior ED2 frontier must keep end {end:?}"
+    );
+}

@@ -309,10 +309,16 @@ impl Screen {
         if !line_ids.can_allocate(row_count) {
             return Err(TerminalError::LineIdentityExhausted);
         }
+        let mut frontier = None;
         for row in 0..row_count {
-            self.line_ids[row] = line_ids.allocate()?;
+            let id = line_ids.allocate()?;
+            if frontier.is_none() {
+                frontier = Some(id);
+            }
+            self.line_ids[row] = id;
             self.row_breaks[row] = Some(HistoryBreakAfter::HardBreak);
         }
+        self.ed2_remint_frontier = frontier;
         Ok(Mutation::full(self.rows))
     }
 
