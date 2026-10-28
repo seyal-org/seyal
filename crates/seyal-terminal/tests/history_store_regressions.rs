@@ -812,7 +812,9 @@ fn ed2_clear_preserves_prior_primary_lines_in_history() {
     assert_eq!(before_second, "block-two-output");
 
     terminal.feed(b"\x1b[H\x1b[2J").expect("clear");
-    terminal.feed(b"RED GREEN\r\n").expect("rewrite after clear");
+    terminal
+        .feed(b"RED GREEN\r\n")
+        .expect("rewrite after clear");
     terminal.feed(b"sleep-bleed\r\n").expect("more raw");
 
     let after_first: String = terminal
