@@ -856,7 +856,8 @@ final class SeyalHostComponentTests: XCTestCase {
 
         let snapshot = seyal_app_snapshot(handle)
         // Shell exit keeps Flow and the execution so completed Block bodies
-        // still project. The composer hides and New shell is the create path.
+        // still project. The composer hides; New shell is the dedicated recovery
+        // control — "+" must still forward CreateTab (ADR-015 / #1379).
         XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
         XCTAssertNotEqual(snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION), 0)
         XCTAssertEqual(snapshot.recovery_stage, UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue))
@@ -867,6 +868,17 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(
             accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
             "New shell must appear after primary exit"
+        )
+        view.createTab()
+        view.reconcileChrome()
+        XCTAssertEqual(
+            seyal_app_replacement_bootstrap_pending(handle),
+            0,
+            "CreateTab after exit must not silently become New shell (ADR-015)"
+        )
+        XCTAssertFalse(
+            accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
+            "New shell remains the explicit recovery path after CreateTab"
         )
 
         var prepare = SeyalAppAction()

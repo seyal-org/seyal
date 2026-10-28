@@ -860,8 +860,7 @@ fn ed2_mid_command_block_span_advances_to_remint_frontier() {
         frontier.0 > start.0 + 1,
         "ED2 must remint multiple LineIds after start ({start:?} → {frontier:?})"
     );
-    let (clamped_start, clamped_end) =
-        terminal.clamp_block_span_across_ed2_remint(start, finish);
+    let (clamped_start, clamped_end) = terminal.clamp_block_span_across_ed2_remint(start, finish);
     assert_eq!(
         clamped_start, frontier,
         "ED2 remint must advance start to frontier {frontier:?}, not keep sealed {start:?}"
@@ -881,12 +880,12 @@ fn ed2_mid_command_block_span_advances_to_remint_frontier() {
 fn ed2_then_output_keeps_post_clear_end() {
     let mut terminal = TerminalState::new(20, 6).expect("terminal");
     terminal.feed(b"clear-and-print").expect("feed");
-    let start = terminal
-        .line_id(terminal.cursor().row)
-        .expect("start line");
+    let start = terminal.line_id(terminal.cursor().row).expect("start line");
     terminal.feed(b"\x1b[H\x1b[2J").expect("ED2");
     let frontier = terminal.line_id(0).expect("frontier");
-    terminal.feed(b"file-a\r\nfile-b\r\n").expect("post-clear output");
+    terminal
+        .feed(b"file-a\r\nfile-b\r\n")
+        .expect("post-clear output");
     let end = terminal
         .line_id(terminal.cursor().row.saturating_sub(1))
         .expect("end line");

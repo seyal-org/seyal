@@ -115,21 +115,19 @@ extension ProductChromeHostView {
         return "\(stage) · attempts \(snapshot.recovery_attempts)"
     }
 
-    /// #1379 Defect B: show one clear recovery action after primary shell exit
-    /// and while a follow-on bootstrap attempt is blocked/exhausted so the user
-    /// can retry without relaunching the app.
+    /// #1379 Defect B: show one clear recovery action only when Rust has
+    /// latched primary shell exit on this Pane (composer hidden). Do not offer
+    /// New shell for Blocked/Exhausted without that latch — Rust rejects those
+    /// creates (`InvalidPayload`), which would leave a dead button (ADR-015).
     func updateNewShellRecoveryAction(_ snapshot: SeyalAppSnapshot) {
         let stage = snapshot.recovery_stage
         let composerSnap = seyal_app_composer(pane.appHandle)
-        let endedFocused = stage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
+        let show = stage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
             && composerSnap.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
-        let show = endedFocused
-            || stage == UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
-            || stage == UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue)
         newShellButton.isHidden = !show
         // Hide the composer only when Rust already hid it for this Pane.
         // A focused sibling stays eligible and must not lose its composer.
-        if show, composerSnap.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue) {
+        if show {
             composer.isHidden = true
         }
     }

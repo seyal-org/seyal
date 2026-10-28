@@ -36,14 +36,9 @@ extension ProductChromeHostView {
     }
 
     @objc func createTab() {
-        // #1379 Defect B: after shell exit, "+" is an explicit recovery action —
-        // bootstrap a fresh shell on the focused pane before chrome CreateTab.
-        if seyal_app_snapshot(pane.appHandle).recovery_stage
-            == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
-        {
-            requestNewShellAfterExit()
-            return
-        }
+        // ADR-015: always forward CreateTab. New shell after exit is a separate
+        // typed recovery action (`seyal-new-shell`); Swift must not reinterpret
+        // "+" / menu New Tab as replacement bootstrap (#1379).
         applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
     }
 
