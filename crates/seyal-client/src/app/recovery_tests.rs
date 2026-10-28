@@ -119,6 +119,51 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
     );
 }
 
+/// #1379 / #1171: when the display client is gone, APPLY_RUNTIME_BLOCKS must
+/// not wipe completed Flow history (decode reports `records: None`).
+#[test]
+fn missing_active_client_does_not_wipe_completed_flow_blocks() {
+    use crate::composer::RuntimeBlockRecord;
+    use seyal_core::BlockId;
+
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([4; 16]),
+            attachment: AttachmentId::from_bytes([5; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .unwrap();
+    let block = BlockId::from_bytes([0x71; 16]);
+    root.apply(AppAction::ApplyRuntimeBlocks {
+        fence: root.fence(),
+        records: Some(vec![RuntimeBlockRecord {
+            id: block,
+            command: "pwd".into(),
+            start_line: 1,
+            end_line: Some(2),
+            running: false,
+            exit_status: Some(0),
+        }]),
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().composer.unwrap().blocks.len(), 1);
+
+    root.apply(AppAction::ApplyRuntimeBlocks {
+        fence: root.fence(),
+        records: None,
+    })
+    .unwrap();
+    let retained = root.snapshot().composer.unwrap().blocks;
+    assert_eq!(retained.len(), 1, "disconnect must retain Flow history");
+    assert_eq!(retained[0].id, block);
+    assert_eq!(retained[0].command, "pwd");
+}
+
 #[test]
 fn recovery_cancel_and_presentation_advance_through_app_root() {
     let mut root = ApplicationRoot::new();

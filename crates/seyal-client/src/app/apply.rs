@@ -71,9 +71,14 @@ impl ApplicationRoot {
                 request_id,
                 accepted,
             } => self.apply_composer_result(fence, request_id, accepted),
-            AppAction::ApplyRuntimeBlocks { fence, records } => {
-                self.apply_runtime_blocks(fence, records)
-            }
+            AppAction::ApplyRuntimeBlocks { fence, records } => match records {
+                // Disconnect / teardown: keep completed Flow history visible.
+                None => {
+                    self.require_fence(fence)?;
+                    Ok(())
+                }
+                Some(records) => self.apply_runtime_blocks(fence, records),
+            },
             AppAction::ApplyRuntimeComposerStatus {
                 fence,
                 eligibility,

@@ -237,7 +237,7 @@ mod tests {
                 .root
                 .apply(AppAction::ApplyRuntimeBlocks {
                     fence,
-                    records: vec![
+                    records: Some(vec![
                         RuntimeBlockRecord {
                             id: BlockId::from_bytes([0x21; 16]),
                             command: "printf hello".into(),
@@ -254,7 +254,7 @@ mod tests {
                             running: true,
                             exit_status: None,
                         },
-                    ],
+                    ]),
                 })
                 .unwrap();
         });

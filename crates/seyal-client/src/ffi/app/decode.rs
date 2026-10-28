@@ -19,7 +19,9 @@ use super::{
     FLAG_HAS_EXECUTION, FLAG_TARGET_CONTROLLER,
 };
 
-fn runtime_blocks_from_active_client() -> Vec<RuntimeBlockRecord> {
+/// Reads the attached client's BlockTimeline. `None` when no client is active
+/// so disconnect cannot be mistaken for an empty timeline wipe (#1379).
+fn runtime_blocks_from_active_client() -> Option<Vec<RuntimeBlockRecord>> {
     with_active_client(|client| {
         client
             .block_timeline()
@@ -28,7 +30,6 @@ fn runtime_blocks_from_active_client() -> Vec<RuntimeBlockRecord> {
             .map(runtime_block_from_command)
             .collect()
     })
-    .unwrap_or_default()
 }
 
 pub(super) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockRecord {

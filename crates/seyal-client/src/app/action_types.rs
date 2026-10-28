@@ -69,7 +69,9 @@ pub enum AppAction {
     },
     ApplyRuntimeBlocks {
         fence: AppFence,
-        records: Vec<RuntimeBlockRecord>,
+        /// `None` means the active display client is unavailable. Retain the
+        /// last projected Flow Block history instead of wiping it (#1379/#1171).
+        records: Option<Vec<RuntimeBlockRecord>>,
     },
     /// Relay the attached client's Runtime-published composer eligibility
     /// (ADR-009 invariant 7). `None` clears it when the transport is lost.

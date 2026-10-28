@@ -786,3 +786,56 @@ fn hist_wide_grapheme_overflow_sentinel_is_retained() {
         units_text(&units)
     );
 }
+
+/// Gate 1 / #1379: completed Block history spans are LineId ranges that often
+/// still sit on the live primary grid. CSI ED2 (`clear`) must seal those rows
+/// and mint fresh LineIds so a later rewrite cannot contaminate history queries
+/// used by Flow Block bodies.
+#[test]
+fn ed2_clear_preserves_prior_primary_lines_in_history() {
+    let mut terminal = TerminalState::new(20, 4).expect("terminal");
+    terminal.feed(b"block-one\r\n").expect("feed");
+    terminal.feed(b"block-two-output\r\n").expect("feed");
+    let first = terminal.line_id(0).expect("line 0");
+    let second = terminal.line_id(1).expect("line 1");
+    let before_first: String = terminal
+        .primary_history_units_range(first, first, 32)
+        .into_iter()
+        .map(|u| u.text)
+        .collect();
+    let before_second: String = terminal
+        .primary_history_units_range(second, second, 32)
+        .into_iter()
+        .map(|u| u.text)
+        .collect();
+    assert_eq!(before_first, "block-one");
+    assert_eq!(before_second, "block-two-output");
+
+    terminal.feed(b"\x1b[H\x1b[2J").expect("clear");
+    terminal.feed(b"RED GREEN\r\n").expect("rewrite after clear");
+    terminal.feed(b"sleep-bleed\r\n").expect("more raw");
+
+    let after_first: String = terminal
+        .primary_history_units_range(first, first, 32)
+        .into_iter()
+        .map(|u| u.text)
+        .collect();
+    let after_second: String = terminal
+        .primary_history_units_range(second, second, 32)
+        .into_iter()
+        .map(|u| u.text)
+        .collect();
+    assert_eq!(
+        after_first, "block-one",
+        "ED2 must not let later primary text replace Block line {first:?}: got {after_first:?}"
+    );
+    assert_eq!(
+        after_second, "block-two-output",
+        "ED2 must not let later primary text replace Block line {second:?}: got {after_second:?}"
+    );
+    assert_ne!(
+        terminal.line_id(0).expect("fresh row 0"),
+        first,
+        "ED2 must mint a fresh LineId for row 0"
+    );
+}

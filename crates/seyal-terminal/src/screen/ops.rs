@@ -259,7 +259,16 @@ impl Screen {
         Mutation::rows(old, self.cursor.row)
     }
 
-    pub(crate) fn erase_display(&mut self, mode: u16, store: &mut GraphemeStore) -> Mutation {
+    /// CSI J. Mode 2 (`ED2` / `clear`) seals retained primary rows into
+    /// HistoryStore and mints fresh `LineId`s so later rewrites cannot
+    /// contaminate completed Flow Block history spans that still named the
+    /// pre-clear live rows (#1379).
+    pub(crate) fn erase_display(
+        &mut self,
+        mode: u16,
+        line_ids: &mut LineIdAllocator,
+        store: &mut GraphemeStore,
+    ) -> Result<Mutation, TerminalError> {
         let blank = Cell::blank(self.pen.bg);
         let cursor_index = self.index(self.cursor.col, self.cursor.row);
         match mode {
@@ -268,23 +277,39 @@ impl Screen {
                     Self::release_cell(*cell, store);
                 }
                 self.cells[cursor_index..].fill(blank);
-                Mutation::rows(self.cursor.row, self.rows - 1)
+                Ok(Mutation::rows(self.cursor.row, self.rows - 1))
             }
             1 => {
                 for cell in &self.cells[..=cursor_index] {
                     Self::release_cell(*cell, store);
                 }
                 self.cells[..=cursor_index].fill(blank);
-                Mutation::rows(0, self.cursor.row)
+                Ok(Mutation::rows(0, self.cursor.row))
             }
             2 => {
+                if self.retain_history {
+                    for row in 0..usize::from(self.rows) {
+                        let break_after = self.row_breaks[row]
+                            .unwrap_or(HistoryBreakAfter::HardBreak);
+                        self.append_row_to_history(row, break_after, store);
+                    }
+                }
                 for cell in &self.cells {
                     Self::release_cell(*cell, store);
                 }
                 self.cells.fill(blank);
-                Mutation::full(self.rows)
+                self.cell_anchors.fill(None);
+                let row_count = usize::from(self.rows);
+                if !line_ids.can_allocate(row_count) {
+                    return Err(TerminalError::LineIdentityExhausted);
+                }
+                for row in 0..row_count {
+                    self.line_ids[row] = line_ids.allocate()?;
+                    self.row_breaks[row] = Some(HistoryBreakAfter::HardBreak);
+                }
+                Ok(Mutation::full(self.rows))
             }
-            _ => Mutation::none(),
+            _ => Ok(Mutation::none()),
         }
     }
 

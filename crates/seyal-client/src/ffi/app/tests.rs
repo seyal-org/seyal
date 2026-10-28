@@ -505,7 +505,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
             .root
             .apply(AppAction::ApplyRuntimeBlocks {
                 fence,
-                records: vec![
+                records: Some(vec![
                     RuntimeBlockRecord {
                         id: BlockId::from_bytes([0x51; 16]),
                         command: "git status".into(),
@@ -522,7 +522,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         running: true,
                         exit_status: None,
                     },
-                ],
+                ]),
             })
             .unwrap();
     });
