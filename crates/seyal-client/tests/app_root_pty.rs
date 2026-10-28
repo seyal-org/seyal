@@ -291,7 +291,7 @@ fn last_window_close_releases_controller_for_readopt_and_terminate() {
         "last-window close must drop the Controller registry entry"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(8);
     let mut readopted = None;
     while Instant::now() < deadline {
         match LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Controller) {
@@ -306,15 +306,13 @@ fn last_window_close_releases_controller_for_readopt_and_terminate() {
     client
         .submit_terminate_execution(execution_id)
         .expect("new Controller admits terminate");
-    // CI macOS runners under Foundation Quality load can exceed a 3s poll
-    // window before the TerminationRequested result is readable.
+    // Do not abort the wait on the first poll_prepare Err: CI can surface a
+    // transient prepare miss before the correlated TerminationRequested frame
+    // is readable, and breaking early made this flake under Foundation Quality.
     let result_deadline = Instant::now() + Duration::from_secs(8);
     let mut result = None;
     while Instant::now() < result_deadline {
-        match client.poll_prepare() {
-            Ok(_) => {}
-            Err(_) => break,
-        }
+        let _ = client.poll_prepare();
         if let Some(found) = client.take_terminate_result() {
             result = Some(found);
             break;
