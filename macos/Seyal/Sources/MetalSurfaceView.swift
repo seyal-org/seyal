@@ -628,9 +628,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // Always drop running primary clips on disconnect. Retained history must
     // not share the surface with the last prepared viewport after clear→exit
     // (#1379): that leftover frame paints loose text/cursor over Block cards.
-    // Do not present here — wait for rebuildBlocks → publishBlockOutputFrame so
-    // clips match AppKit card layout after composer → New shell chrome changes.
+    // Drop Metal history *buffers* too (keep historyRanges data): stale origins
+    // from a pre-exit tall clear body otherwise stay scissored over earlier
+    // cards until a successful publishBlockOutputFrame re-encodes them.
     clearLiveTailPresentation()
+    if retainHistory {
+      renderer.removeHistoryRegions(except: [])
+    }
     invalidatePreparedPresentation()
     if retainHistory, shouldRender, !historyRanges.isEmpty {
       beginPresentationAttemptSeries()
