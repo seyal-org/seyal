@@ -467,7 +467,7 @@ final class ProductChromeHostView: NSView {
             driveRecovery()
             let recoverySnap = seyal_app_snapshot(pane.appHandle)
             recoveryLabel.stringValue = recoveryText(recoverySnap)
-            updateNewShellRecoveryAction(recoverySnap)
+            updateNewShellRecoveryAction()
             return
         }
         lastSnapshotGeneration = snapshot.generation
@@ -498,7 +498,7 @@ final class ProductChromeHostView: NSView {
         driveRecovery()
         let recoverySnap = seyal_app_snapshot(pane.appHandle)
         recoveryLabel.stringValue = recoveryText(recoverySnap)
-        updateNewShellRecoveryAction(recoverySnap)
+        updateNewShellRecoveryAction()
         if eligibilityChanged {
             routeFocus()
         }
