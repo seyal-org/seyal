@@ -344,22 +344,27 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                         .unwrap_or(1)
                 });
                 // ED2 (`clear`) seals start into history and remints the
-                // viewport before D. Clamp so Flow history cannot claim the
-                // reminted blanks as this Block's body (#1379 clear→exit).
+                // viewport before D. Advance start to the remint frontier so
+                // Flow drops sealed pre-remint blanks but keeps post-clear
+                // output (#1379 clear→exit / clear&&ls).
+                let mut span_start = None;
                 if let Some(start_line) = entry
                     .block_timeline
                     .records()
                     .find(|record| record.id == block_id)
                     .map(|record| record.start_line)
                 {
-                    end_line = entry
+                    let (clamped_start, clamped_end) = entry
                         .execution
                         .terminal()
-                        .clamp_block_end_across_ed2_remint(
+                        .clamp_block_span_across_ed2_remint(
                             seyal_exec::LineId(start_line),
                             seyal_exec::LineId(end_line),
-                        )
-                        .0;
+                        );
+                    if clamped_start.0 != start_line {
+                        span_start = Some(clamped_start.0);
+                    }
+                    end_line = clamped_end.0;
                 }
                 let exit_status = match exit {
                     BlockExit::Code(code) => Some(code),
@@ -367,7 +372,7 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                 };
                 if entry
                     .block_timeline
-                    .complete(block_id, end_line, exit_status)
+                    .complete_span(block_id, span_start, end_line, exit_status)
                     .is_ok()
                 {
                     changed = true;

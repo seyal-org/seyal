@@ -843,9 +843,9 @@ fn ed2_clear_preserves_prior_primary_lines_in_history() {
 }
 
 /// #1379: a Block that starts on the primary, runs ED2, then finishes on a
-/// reminted row must not own the numeric span through every reminted blank.
+/// reminted row must drop sealed pre-remint blanks (advance start to frontier).
 #[test]
-fn ed2_mid_command_block_end_clamps_before_remint() {
+fn ed2_mid_command_block_span_advances_to_remint_frontier() {
     let mut terminal = TerminalState::new(20, 6).expect("terminal");
     terminal.feed(b"before-clear\r\n").expect("feed");
     // Simulate the clear command's start row still on the primary.
@@ -854,19 +854,62 @@ fn ed2_mid_command_block_end_clamps_before_remint() {
         .line_id(terminal.cursor().row)
         .expect("clear start line");
     terminal.feed(b"\x1b[H\x1b[2J").expect("ED2");
-    let finish = terminal.line_id(0).expect("reminted finish line");
+    let frontier = terminal.line_id(0).expect("remint frontier");
+    let finish = frontier;
     assert!(
-        finish.0 > start.0 + 1,
-        "ED2 must remint multiple LineIds after start ({start:?} → {finish:?})"
+        frontier.0 > start.0 + 1,
+        "ED2 must remint multiple LineIds after start ({start:?} → {frontier:?})"
     );
-    let clamped = terminal.clamp_block_end_across_ed2_remint(start, finish);
+    let (clamped_start, clamped_end) =
+        terminal.clamp_block_span_across_ed2_remint(start, finish);
     assert_eq!(
-        clamped, start,
-        "ED2 remint finish must clamp end to the sealed start row, not {finish:?}"
+        clamped_start, frontier,
+        "ED2 remint must advance start to frontier {frontier:?}, not keep sealed {start:?}"
+    );
+    assert_eq!(
+        clamped_end, finish,
+        "ED2 remint must keep finish {finish:?}"
     );
     assert!(
         finish.0 - start.0 >= 5,
         "unclamped numeric span must be remint-tall ({start:?}..{finish:?})"
+    );
+}
+
+/// #1379: `clear && printf` must keep post-clear output in the Block span.
+#[test]
+fn ed2_then_output_keeps_post_clear_end() {
+    let mut terminal = TerminalState::new(20, 6).expect("terminal");
+    terminal.feed(b"clear-and-print").expect("feed");
+    let start = terminal
+        .line_id(terminal.cursor().row)
+        .expect("start line");
+    terminal.feed(b"\x1b[H\x1b[2J").expect("ED2");
+    let frontier = terminal.line_id(0).expect("frontier");
+    terminal.feed(b"file-a\r\nfile-b\r\n").expect("post-clear output");
+    let end = terminal
+        .line_id(terminal.cursor().row.saturating_sub(1))
+        .expect("end line");
+    assert!(
+        end.0 > frontier.0,
+        "post-clear output must land after frontier ({frontier:?}..{end:?})"
+    );
+    let (clamped_start, clamped_end) = terminal.clamp_block_span_across_ed2_remint(start, end);
+    assert_eq!(clamped_start, frontier, "start advances to frontier");
+    assert_eq!(
+        clamped_end, end,
+        "post-clear output end must be kept (was truncated to start in early clamp)"
+    );
+    let rows = terminal
+        .primary_history_range(clamped_start, clamped_end, 64)
+        .expect("history range");
+    let blob: String = rows
+        .iter()
+        .flat_map(|(_, cells)| cells.iter().map(|c| c.canonical_scalar()))
+        .collect();
+    assert!(
+        blob.contains("file-a") && blob.contains("file-b"),
+        "post-clear body must include printed files, got {blob:?}"
     );
 }
 

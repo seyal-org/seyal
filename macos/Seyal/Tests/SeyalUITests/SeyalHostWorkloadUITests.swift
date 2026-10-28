@@ -245,8 +245,10 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             evaluatedWith: composer,
             handler: nil
         )
+        // Click→available is ~1–2s on this host; 8s rejects a 15–25s hang
+        // without masking it as a soft wait (#1379 P1).
         XCTAssertEqual(
-            XCTWaiter.wait(for: [usable], timeout: 20),
+            XCTWaiter.wait(for: [usable], timeout: 8),
             .completed,
             "New shell composer stayed \(composer.value ?? "nil"); prompt wait must not persist"
         )
@@ -446,69 +448,47 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         assertBlockBodyFramesHaveInk(app, indices: inkBodyIndices)
     }
 
-    /// Screenshot pixel probe: each Block body frame must contain non-background
-    /// ink. Catches AX-correct / Metal-blank (or wrong-card) false greens that
-    /// instance counters alone can miss (#1379).
+    /// Per-element screenshot ink probe. Uses `body.screenshot()` so sampling
+    /// cannot pick up card titles / chrome from a full-screen `app.screenshot`
+    /// coordinate mis-map (#1379 Opus false-green).
     private func assertBlockBodyFramesHaveInk(_ app: XCUIApplication, indices: [Int]) {
-        let shot = app.screenshot()
-        let image = shot.image
-        var proposed = CGRect(origin: .zero, size: image.size)
-        guard let cgImage = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil) else {
-            XCTFail("could not read headed screenshot for Block body ink probe")
-            return
-        }
-        // XCUI element frames and app.screenshot share top-left point space for
-        // the application; map body rects through the front window.
-        let window = app.windows.firstMatch
-        XCTAssertTrue(window.exists, "window missing for ink probe coordinate map")
-        let windowFrame = window.frame
-        let scaleX = CGFloat(cgImage.width) / max(windowFrame.width, 1)
-        let scaleY = CGFloat(cgImage.height) / max(windowFrame.height, 1)
-        guard let data = cgImage.dataProvider?.data,
-              let ptr = CFDataGetBytePtr(data)
-        else {
-            XCTFail("screenshot has no pixel bytes for ink probe")
-            return
-        }
-        let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 1)
-        let bytesPerRow = cgImage.bytesPerRow
+        _ = app
         for index in indices {
             let body = app.descendants(matching: .any)["seyal-block-\(index)-body"].firstMatch
-            guard body.exists else { continue }
+            XCTAssertTrue(
+                body.waitForExistence(timeout: 2),
+                "seyal-block-\(index)-body missing for ink probe"
+            )
             let frame = body.frame
-            guard frame.width > 4, frame.height > 4 else {
-                XCTFail("seyal-block-\(index)-body frame too small for ink probe: \(frame)")
+            XCTAssertGreaterThan(frame.width, 4, "seyal-block-\(index)-body frame too narrow")
+            XCTAssertGreaterThan(frame.height, 4, "seyal-block-\(index)-body frame too short")
+            let shot = body.screenshot()
+            let image = shot.image
+            var proposed = CGRect(origin: .zero, size: image.size)
+            guard let cgImage = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil),
+                  let data = cgImage.dataProvider?.data,
+                  let ptr = CFDataGetBytePtr(data)
+            else {
+                XCTFail("seyal-block-\(index)-body screenshot has no pixels")
                 continue
             }
-            let local = CGRect(
-                x: frame.minX - windowFrame.minX,
-                y: frame.minY - windowFrame.minY,
-                width: frame.width,
-                height: frame.height
-            )
-            let px = CGRect(
-                x: local.minX * scaleX,
-                y: local.minY * scaleY,
-                width: max(local.width * scaleX, 1),
-                height: max(local.height * scaleY, 1)
-            ).integral
+            let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 1)
+            let bytesPerRow = cgImage.bytesPerRow
             var ink = 0
             var samples = 0
-            let step = max(Int(min(px.width, px.height) / 16), 1)
-            var y = Int(px.minY)
-            while y < Int(px.maxY) {
-                var x = Int(px.minX)
-                while x < Int(px.maxX) {
-                    if x >= 0, y >= 0, x < cgImage.width, y < cgImage.height {
-                        let offset = y * bytesPerRow + x * bytesPerPixel
-                        let r = Int(ptr[offset])
-                        let g = Int(ptr[offset + min(1, bytesPerPixel - 1)])
-                        let b = Int(ptr[offset + min(2, bytesPerPixel - 1)])
-                        samples += 1
-                        // Flow cards are near-white; glyph ink is substantially darker.
-                        if (r + g + b) < 650 {
-                            ink += 1
-                        }
+            let step = max(min(cgImage.width, cgImage.height) / 16, 1)
+            var y = 0
+            while y < cgImage.height {
+                var x = 0
+                while x < cgImage.width {
+                    let offset = y * bytesPerRow + x * bytesPerPixel
+                    let r = Int(ptr[offset])
+                    let g = Int(ptr[offset + min(1, bytesPerPixel - 1)])
+                    let b = Int(ptr[offset + min(2, bytesPerPixel - 1)])
+                    samples += 1
+                    // Flow body canvas is near-white; glyph ink is darker.
+                    if (r + g + b) < 650 {
+                        ink += 1
                     }
                     x += step
                 }
@@ -522,7 +502,7 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             XCTAssertGreaterThan(
                 ink,
                 0,
-                "seyal-block-\(index)-body has AX text but no painted ink in screenshot (false-green)"
+                "seyal-block-\(index)-body has AX text but no painted ink in body screenshot (false-green)"
             )
         }
     }

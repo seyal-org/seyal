@@ -109,6 +109,18 @@ impl CommandBlockTimeline {
         end_line: u64,
         exit_status: Option<i32>,
     ) -> Result<(), CommandBlockTimelineError> {
+        self.complete_span(id, None, end_line, exit_status)
+    }
+
+    /// Complete a running record, optionally advancing `start_line` (ED2 remint
+    /// frontier). Start never rewinds.
+    pub(crate) fn complete_span(
+        &mut self,
+        id: CommandBlockId,
+        start_line: Option<u64>,
+        end_line: u64,
+        exit_status: Option<i32>,
+    ) -> Result<(), CommandBlockTimelineError> {
         let record = self
             .records
             .iter_mut()
@@ -116,6 +128,11 @@ impl CommandBlockTimeline {
             .ok_or(CommandBlockTimelineError::UnknownBlock)?;
         if record.lifecycle != CommandBlockLifecycle::Running {
             return Err(CommandBlockTimelineError::InvalidCompletion);
+        }
+        if let Some(start) = start_line {
+            if start > record.start_line {
+                record.start_line = start;
+            }
         }
         record.end_line = Some(end_line.max(record.start_line));
         record.lifecycle = CommandBlockLifecycle::Completed { exit_status };
