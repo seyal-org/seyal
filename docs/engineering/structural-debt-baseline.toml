@@ -104,12 +104,13 @@ reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests modu
 
 # #1020 Screen responsibility split: edit/scroll/cursor mutations land in the
 # cohesion-review band by design; resize planner and Screen façade stay under
-# review_loc.
+# review_loc. #1379 adds ED2 primary seal+LineId remint on the same history-seal
+# surface so completed Flow Block spans cannot bleed after Raw clear.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/screen/ops.rs"
-acknowledged_loc = 881
-issue = 1020
-reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen impl block after the resize-planner extraction; further fragmentation would separate tightly coupled DECSTBM region helpers. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 909
+issue = 1379
+reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen impl after the #1020 resize-planner extraction; #1379 ED2 seal+remint belongs with scroll-off seal rather than a second Screen authority. Ceiling matches rustfmt-normalized LOC after ED2."
 
 # #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
 # partitioned into print / execute / csi / osc siblings; all landed <= review_loc,
