@@ -89,6 +89,9 @@ extension ProductChromeHostView {
             }
         }
         pane.inputSurface.discardHistoryRequests(except: retained)
+        if retained.isEmpty {
+            pane.inputSurface.removeTranscriptRegions(except: [])
+        }
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         publishLiveTailBlocks()
@@ -185,6 +188,11 @@ extension ProductChromeHostView {
         if let card = blockCards[range.blockID] {
             card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
         }
+        // Paint with Auto Layout sizes first, then expand the document frame.
+        // setFrameSize-before-publish can yield zero-height clips that wipe Metal
+        // history and leave titles-only white bodies (#1379).
+        layoutSubtreeIfNeeded()
+        publishBlockOutputFrame()
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         // History replies arrive after the initial live-end scroll and can grow
@@ -196,16 +204,17 @@ extension ProductChromeHostView {
     }
 
     /// AppKit scrolls with `documentView.frame`, while Auto Layout growth often
-    /// only updates `fittingSize`. Sync after Block body height changes so
-    /// long Flow output (`ls -la`, `seq`) is actually scrollable (#1379).
+    /// only updates `fittingSize`. Expand (never shrink) after Block body growth
+    /// so long Flow output is scrollable without collapsing live clips (#1379).
     func syncTranscriptDocumentSize() {
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
-        let width = max(fitted.width, transcript.contentView.bounds.width)
-        let height = max(fitted.height, 1)
+        let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
+        let height = max(fitted.height, blocks.frame.height, 1)
         if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - height) > 0.5 {
             blocks.setFrameSize(NSSize(width: width, height: height))
             transcript.reflectScrolledClipView(transcript.contentView)
+            layoutSubtreeIfNeeded()
         }
     }
 
@@ -215,11 +224,16 @@ extension ProductChromeHostView {
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         guard !direct else { return }
         let surface = pane.inputSurface
-        var regions: [NativeTranscriptRegion] = []
-        for (blockID, card) in blockCards {
-            let clip = card.body.convert(card.body.bounds, to: surface)
-            guard clip.width > 0, clip.height > 0 else { continue }
-            regions.append(NativeTranscriptRegion(id: blockID, origin: clip.origin, clip: clip))
+        var regions = collectBlockOutputRegions(surface: surface)
+        // Cards exist but clips are still zero-sized: retry once after layout.
+        // Never publish an empty region set while cards remain — that clears
+        // retained history paint (#1379 titles-only white bodies).
+        if regions.isEmpty, !blockCards.isEmpty {
+            layoutSubtreeIfNeeded()
+            regions = collectBlockOutputRegions(surface: surface)
+            if regions.isEmpty {
+                return
+            }
         }
         regions.sort { $0.id < $1.id }
         transcriptFrameRevision &+= 1
@@ -233,6 +247,16 @@ extension ProductChromeHostView {
         // Scroll / clip republish must not propose geometry; refresh the
         // read-only AX probe so headed tests can observe unchanged PTY size.
         surface.refreshRecoveryAccessibilityValue()
+    }
+
+    private func collectBlockOutputRegions(surface: InteractiveMetalSurfaceView) -> [NativeTranscriptRegion] {
+        var regions: [NativeTranscriptRegion] = []
+        for (blockID, card) in blockCards {
+            let clip = card.body.convert(card.body.bounds, to: surface)
+            guard clip.width > 0, clip.height > 0 else { continue }
+            regions.append(NativeTranscriptRegion(id: blockID, origin: clip.origin, clip: clip))
+        }
+        return regions
     }
 
     func isNearLiveEnd(tolerance: CGFloat = 24) -> Bool {

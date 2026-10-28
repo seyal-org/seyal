@@ -26,6 +26,24 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "824-high-volume")
     }
 
+    /// #1379: completed Flow Blocks must paint output bodies, not titles-only
+    /// chrome with an empty white Metal clip.
+    func testCompletedFlowBlockKeepsPaintedOutputBody() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "printf 'seyal-1379-body-paint\\n'")
+        waitBriefly(1.0)
+        assertFlowBlocksOrFail(in: app)
+        let body = app.descendants(matching: .any)["seyal-block-0-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 5), "completed Block must expose a body region")
+        XCTAssertGreaterThan(
+            body.firstMatch.frame.height,
+            8,
+            "completed Block body must reserve Metal output height, not titles-only chrome"
+        )
+        attachScreenshot(app, name: "1379-flow-block-body-paint")
+    }
+
     func testPrimaryShellExitIsReportedAndKeepsFlowHistoryVisible() {
         let app = hostedApp()
         waitForUsablePty(in: app)

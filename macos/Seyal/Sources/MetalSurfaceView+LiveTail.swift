@@ -8,6 +8,13 @@ extension MetalSurfaceView {
     else {
       return
     }
+    // #1379: a transient empty region publish (zero-height Block bodies during
+    // document-size sync) must not filter away retained history paint and leave
+    // Flow titles with white bodies. Intentional clears use
+    // `removeTranscriptRegions(except:)`.
+    if frame.regions.isEmpty, !historyRanges.isEmpty {
+      return
+    }
     let regionIDs = Set(frame.regionIDs)
     historyRanges = historyRanges.filter { regionIDs.contains($0.key.blockID) }
     renderer.removeHistoryRegions(except: regionIDs)

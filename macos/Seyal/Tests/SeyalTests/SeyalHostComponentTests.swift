@@ -1449,6 +1449,16 @@ final class SeyalHostComponentTests: XCTestCase {
             hostText.contains("syncTranscriptDocumentSize"),
             "Flow transcript must sync document frame after Block body growth"
         )
+        XCTAssertTrue(
+            hostText.contains("regions.isEmpty, !blockCards.isEmpty"),
+            "publishBlockOutputFrame must not wipe history when Block cards still exist"
+        )
+        let liveTail = sourceRoot.appendingPathComponent("MetalSurfaceView+LiveTail.swift")
+        let liveText = (try? String(contentsOf: liveTail, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            liveText.contains("frame.regions.isEmpty, !historyRanges.isEmpty"),
+            "setTranscriptFrame must retain history paint across transient empty regions"
+        )
     }
 
     /// #1379 / #1171: after Finalized/NoRunningExecution a failed poll may have
