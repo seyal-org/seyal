@@ -306,7 +306,9 @@ fn last_window_close_releases_controller_for_readopt_and_terminate() {
     client
         .submit_terminate_execution(execution_id)
         .expect("new Controller admits terminate");
-    let result_deadline = Instant::now() + Duration::from_secs(3);
+    // CI macOS runners under Foundation Quality load can exceed a 3s poll
+    // window before the TerminationRequested result is readable.
+    let result_deadline = Instant::now() + Duration::from_secs(8);
     let mut result = None;
     while Instant::now() < result_deadline {
         match client.poll_prepare() {
