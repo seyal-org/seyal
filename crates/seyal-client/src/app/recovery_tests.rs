@@ -243,6 +243,23 @@ fn execution_ended_pane_can_rebind_fresh_execution_and_clear_latch() {
     })
     .unwrap();
     assert!(root.composer.execution_ended(pane));
+    assert!(
+        root.retains_flow_history(),
+        "shell exit retains Flow history without a host poll-code check"
+    );
+    root.composer
+        .apply(crate::composer::ComposerAction::SetBusy {
+            pane,
+            process: Some("exit".to_string()),
+        })
+        .unwrap();
+    root.composer
+        .apply(crate::composer::ComposerAction::ApplyRuntimeEligibility {
+            pane,
+            eligibility: Some(crate::composer::RuntimeComposerEligibility::Busy),
+            revision: 40,
+        })
+        .unwrap();
 
     root.apply(AppAction::CreateReplacementExecution {
         execution: None,
@@ -269,6 +286,15 @@ fn execution_ended_pane_can_rebind_fresh_execution_and_clear_latch() {
     root.provisioning
         .begin_intent(fresh, None)
         .expect("a new split leaf is not blocked by the released dead binding");
+    assert!(
+        root.apply(AppAction::CreateReplacementExecution {
+            execution: Some(ExecutionId::from_bytes([0x61; 16])),
+            attachment: Some(AttachmentId::from_bytes([0x62; 16])),
+            pty_generation: 0,
+        })
+        .is_err(),
+        "generation 0 without an adopted client is not a PTY generation"
+    );
     root.apply(AppAction::CreateReplacementExecution {
         execution: Some(ExecutionId::from_bytes([0x61; 16])),
         attachment: Some(AttachmentId::from_bytes([0x62; 16])),
@@ -284,6 +310,18 @@ fn execution_ended_pane_can_rebind_fresh_execution_and_clear_latch() {
     assert_eq!(
         root.shell.pane_execution(pane).unwrap(),
         Some(ExecutionId::from_bytes([0x61; 16]))
+    );
+    root.composer
+        .apply(crate::composer::ComposerAction::ApplyRuntimeEligibility {
+            pane,
+            eligibility: Some(crate::composer::RuntimeComposerEligibility::Available),
+            revision: 1,
+        })
+        .unwrap();
+    assert_eq!(
+        root.composer.snapshot(pane).unwrap().mode,
+        crate::composer::ComposerMode::Available,
+        "a new attachment's revision 1 must not stay stale behind the ended shell"
     );
 }
 

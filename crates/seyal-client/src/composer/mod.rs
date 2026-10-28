@@ -207,6 +207,12 @@ pub enum ComposerAction {
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
     },
+    /// A replacement execution must not inherit the ended shell's admission
+    /// or a composer-status revision. A new attachment's revision starts over;
+    /// treating it as stale leaves the composer Waiting for prompt.
+    ResetAdmission {
+        pane: PaneId,
+    },
     /// Open the history overlay above this Pane's composer. Requires
     /// [`ComposerMode::Available`] and at least one recorded entry.
     OpenHistory {
@@ -508,6 +514,20 @@ impl ComposerState {
                 }
                 Ok(None)
             }
+            ComposerAction::ResetAdmission { pane } => {
+                let composer = self.pane_mut(pane);
+                let dirty = composer.pending_request_id.is_some()
+                    || composer.busy_process.is_some()
+                    || composer.runtime_eligibility.is_some();
+                composer.pending_request_id = None;
+                composer.busy_process = None;
+                composer.runtime_eligibility = None;
+                if dirty {
+                    composer.bump_epoch();
+                    composer.close_overlay_if_unavailable();
+                }
+                Ok(None)
+            }
             ComposerAction::OpenHistory { pane } => {
                 let composer = self.existing_mut(pane)?;
                 // An empty history has no rows to show; the host affordance is
@@ -588,6 +608,10 @@ impl ComposerState {
         self.panes
             .get(&pane)
             .is_some_and(|composer| composer.execution_ended)
+    }
+
+    pub fn any_execution_ended(&self) -> bool {
+        self.panes.values().any(|composer| composer.execution_ended)
     }
 
     fn pane_mut(&mut self, pane: PaneId) -> &mut PaneComposer {

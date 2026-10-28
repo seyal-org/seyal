@@ -11,10 +11,11 @@ final class IdentityButton: NSButton {
     var containmentGeneration: UInt64 = 0
 }
 
-/// Accessibility stand-in for Metal-painted Block output. The glyphs stay on
-/// the renderer; this label only publishes the retained transcript to XCUI
-/// and VoiceOver. `draw` is empty so the string is not painted twice.
-final class BlockBodyView: NSTextField {
+/// Accessibility stand-in for Metal-painted Block output. It is not in Auto
+/// Layout: an `NSTextField` intrinsic width shrinks Flow cards to the string
+/// and pins them to the trailing edge. `draw` stays empty so Metal remains
+/// the only glyphs.
+final class BlockBodyTranscript: NSTextField {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         isEditable = false
@@ -23,10 +24,11 @@ final class BlockBodyView: NSTextField {
         isBordered = false
         drawsBackground = false
         font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        lineBreakMode = .byWordWrapping
-        maximumNumberOfLines = 0
-        cell?.wraps = true
+        lineBreakMode = .byClipping
+        maximumNumberOfLines = 1
         cell?.isScrollable = false
+        translatesAutoresizingMaskIntoConstraints = true
+        autoresizingMask = [.width, .height]
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
@@ -37,12 +39,13 @@ final class BlockBodyView: NSTextField {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("BlockBodyView is programmatic")
+        fatalError("BlockBodyTranscript is programmatic")
     }
 }
 
 final class CommandBlockView: NSView {
-    let body = BlockBodyView(frame: .zero)
+    let body = NSView()
+    private let bodyTranscript = BlockBodyTranscript(frame: .zero)
     /// Host click on the header; `true` when the card is already selected.
     var onSelect: ((Bool) -> Void)?
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
@@ -97,7 +100,8 @@ final class CommandBlockView: NSView {
         body.wantsLayer = true
         body.layer?.isOpaque = false
         body.layer?.backgroundColor = NSColor.clear.cgColor
-        body.setAccessibilityElement(true)
+        bodyTranscript.setAccessibilityElement(true)
+        body.addSubview(bodyTranscript)
         header.addSubview(self.prompt)
         header.addSubview(command)
         header.addSubview(status)
@@ -138,8 +142,19 @@ final class CommandBlockView: NSView {
         fatalError("CommandBlockView is programmatic")
     }
 
+    func setBodyAccessibilityIdentifier(_ identifier: String) {
+        bodyTranscript.setAccessibilityIdentifier(identifier)
+    }
+
     func setBodyTranscript(_ text: String) {
-        body.stringValue = text
+        bodyTranscript.stringValue = text
+        bodyTranscript.setAccessibilityLabel(text)
+        bodyTranscript.setAccessibilityValue(text)
+    }
+
+    override func layout() {
+        super.layout()
+        bodyTranscript.frame = body.bounds
     }
 
     func setOutputLines(_ lines: Int, cellHeight: CGFloat) {
@@ -150,7 +165,7 @@ final class CommandBlockView: NSView {
         // The card is itself an accessibility element, so XCUI cannot see the
         // body (the live-tail target) without an explicit child list. Header
         // labels stay in the tree so VoiceOver still hears prompt, command, and status.
-        [prompt, command, status, body]
+        [prompt, command, status, bodyTranscript]
     }
 
     /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must

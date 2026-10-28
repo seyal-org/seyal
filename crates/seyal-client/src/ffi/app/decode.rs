@@ -296,7 +296,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                     pty_generation: 0,
                 });
             }
-            if action.flags & FLAG_HAS_ATTACHMENT == 0 || action.target_generation == 0 {
+            if action.flags & FLAG_HAS_ATTACHMENT == 0 {
                 return Err(-6);
             }
             Ok(AppAction::CreateReplacementExecution {

@@ -412,7 +412,7 @@ fn registry_client_is_gone(handle: u64) -> bool {
     registry_client_terminal_loss(handle).is_some()
 }
 
-/// `Some(true)` when the loss is shell exit (`NoRunningExecution`).
+#[cfg(target_os = "macos")] // Some(true) means shell exit (NoRunningExecution).
 fn registry_client_terminal_loss(handle: u64) -> Option<bool> {
     match crate::ffi::with_client_mut(handle, LocalDisplayClient::poll_prepare) {
         None => Some(false),

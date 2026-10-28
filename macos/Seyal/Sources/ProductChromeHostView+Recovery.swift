@@ -202,6 +202,9 @@ extension ProductChromeHostView {
                 Self.logNewShellFailure("adopt-rejected after create")
                 break
             }
+            // Attach publishes composer eligibility once. Drain it before bind
+            // so a later idle socket cannot leave the composer Waiting.
+            pane.inputSurface.bridge?.drainReadyDisplayWork()
             let bound = applyRuntimeRecoveryAction(
                 pane.appHandle,
                 kind: SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION
@@ -213,7 +216,8 @@ extension ProductChromeHostView {
                 $0.target_execution_hi = opened.executionIDHigh
                 $0.target_attachment_lo = opened.attachmentIDLow
                 $0.target_attachment_hi = opened.attachmentIDHigh
-                $0.target_generation = 1
+                // Rust reads the adopted client's PTY generation.
+                $0.target_generation = 0
                 $0.reserved = 0
             }
             if bound == 0 {

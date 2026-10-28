@@ -1492,11 +1492,25 @@ final class SeyalHostComponentTests: XCTestCase {
 
     @MainActor
     func testShellExitRetainsFlowHistoryPaint() {
-        XCTAssertTrue(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: -6))
-        XCTAssertTrue(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: -10))
-        XCTAssertTrue(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: -3))
-        XCTAssertFalse(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: -1))
-        XCTAssertFalse(MetalSurfaceView.retainsFlowHistoryPaint(afterBridgeError: nil))
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let handle = view.pane.appHandle
+        XCTAssertEqual(seyal_app_retains_flow_history(handle), 0)
+        var begin = SeyalAppAction()
+        begin.version = UInt16(SEYAL_APP_ABI_VERSION)
+        begin.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
+        let generation = seyal_app_snapshot(handle).recovery_generation
+        var ended = begin
+        ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
+        ended.target_execution_lo = generation
+        ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
+        XCTAssertEqual(
+            seyal_app_retains_flow_history(handle),
+            1,
+            "shell exit retains Flow history in Rust, not by a host poll-code check"
+        )
     }
 
     /// #1250: Runtime revisions are execution-scoped; equal revisions from

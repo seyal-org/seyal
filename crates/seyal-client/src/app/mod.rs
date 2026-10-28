@@ -338,6 +338,9 @@ pub struct ApplicationRoot {
     quit_deadline: Option<std::time::Instant>,
     /// Ended Pane waiting for SPEC-004 §18 Create+Bind (New shell). Not focused-sibling.
     replacement_bootstrap: Option<seyal_core::PaneId>,
+    /// Terminal display loss must keep Flow history paint. Set before the host
+    /// observes the poll error. Cleared only by process teardown.
+    flow_history_hold: bool,
     /// Extra live display attachments and probe peers owned through quit cleanup.
     #[cfg(target_os = "macos")]
     live_attachments: Vec<session::QuitProbeAttachment>,
@@ -429,6 +432,7 @@ impl ApplicationRoot {
             live_attach_gate: None,
             last_window_event: None,
             replacement_bootstrap: None,
+            flow_history_hold: false,
             quit_deadline: None,
             #[cfg(target_os = "macos")]
             live_attachments: Vec::new(),

@@ -36,6 +36,7 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         assertFlowBlocksOrFail(in: app)
         let body = app.descendants(matching: .any)["seyal-block-0-body"]
         XCTAssertTrue(body.waitForExistence(timeout: 5), "completed Block must expose a body region")
+        assertBlockCardFillsTranscript(app, index: 0)
         XCTAssertGreaterThan(
             body.firstMatch.frame.height,
             8,
@@ -65,6 +66,18 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             XCTWaiter.wait(for: [beforeExit], timeout: 5),
             .completed,
             "pre-exit Block must show the completed command label"
+        )
+        submitComposerCommand(app, "printf 'seyal-1171-exit-second\\n'")
+        let secondBlock = app.descendants(matching: .any)["seyal-block-1"]
+        let secondVisible = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "seyal-1171-exit-second"),
+            evaluatedWith: secondBlock.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [secondVisible], timeout: 8),
+            .completed,
+            "a second completed Block must stay a separate card before exit"
         )
 
         submitComposerCommand(app, "exit 7")
@@ -111,15 +124,77 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [bodyText], timeout: 8),
             .completed,
-            "completed Block body must keep the pre-exit transcript, not an empty title card"
+            "completed Block body must keep the pre-exit transcript, not an empty title card; value=\(body.firstMatch.value ?? "nil") label=\(body.firstMatch.label)"
         )
         XCTAssertGreaterThan(
             body.firstMatch.frame.height,
             8,
             "completed Block body must reserve Metal output height after shell exit"
         )
+        let secondBody = app.descendants(matching: .any)["seyal-block-1-body"]
+        let secondBodyText = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1171-exit-second",
+                "seyal-1171-exit-second"
+            ),
+            evaluatedWith: secondBody.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [secondBodyText], timeout: 8),
+            .completed,
+            "each completed Block body must keep its own transcript after exit"
+        )
+        assertBlockCardFillsTranscript(app, index: 0)
+        assertBlockCardFillsTranscript(app, index: 1)
         XCTAssertEqual(app.state, .runningForeground)
         attachScreenshot(app, name: "1171-primary-shell-exit")
+    }
+
+    /// #1379: New shell after exit must become a usable Flow composer. The
+    /// ended shell's admission must not leave "Waiting for prompt..." up
+    /// while the new PTY is already at a prompt.
+    func testNewShellAfterExitBecomesUsable() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "exit 0")
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        let ended = expectation(
+            for: NSPredicate(format: "value CONTAINS 'shell exited'"),
+            evaluatedWith: recovery,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 15), .completed)
+        let newShell = app.descendants(matching: .any)["seyal-new-shell"].firstMatch
+        XCTAssertTrue(newShell.waitForExistence(timeout: 5), "New shell must be offered after exit")
+        newShell.click()
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let usable = expectation(
+            for: NSPredicate(format: "value == 'available'"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [usable], timeout: 20),
+            .completed,
+            "New shell composer stayed \(composer.value ?? "nil"); prompt wait must not persist"
+        )
+        submitComposerCommand(app, "printf 'seyal-1379-new-shell\\n'")
+        let body = app.descendants(matching: .any)["seyal-block-0-body"]
+        let painted = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1379-new-shell",
+                "seyal-1379-new-shell"
+            ),
+            evaluatedWith: body.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [painted], timeout: 8), .completed)
+        assertBlockCardFillsTranscript(app, index: 0)
+        XCTAssertEqual(composer.value as? String, "available")
+        attachScreenshot(app, name: "1379-new-shell")
     }
 
     func testUnicodeComposerSubmitAndResizeStayOnFlowBlocks() throws {
@@ -224,6 +299,23 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil"). If another Runtime holds control.sock this run is INCONCLUSIVE."
         )
         assertFlowBlocksOrFail(in: app)
+    }
+
+    private func assertBlockCardFillsTranscript(_ app: XCUIApplication, index: Int) {
+        let blocks = app.descendants(matching: .any)["seyal-blocks"].firstMatch
+        let card = app.descendants(matching: .any)["seyal-block-\(index)"].firstMatch
+        XCTAssertTrue(blocks.exists, "seyal-blocks missing")
+        XCTAssertTrue(card.exists, "seyal-block-\(index) missing")
+        XCTAssertGreaterThan(
+            card.frame.width,
+            blocks.frame.width * 0.85,
+            "Flow Block cards must span the transcript, not shrink to the command string"
+        )
+        XCTAssertLessThan(
+            abs(card.frame.minX - blocks.frame.minX),
+            24,
+            "Flow Block cards must start with the transcript, not hug the trailing edge"
+        )
     }
 
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {

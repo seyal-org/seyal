@@ -5,9 +5,18 @@ use std::time::Duration;
 use seyal_core::{AttachmentId, ExecutionId, PaneId};
 
 use super::*;
-use crate::presentation::PresentationAction;
-use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult};
+use crate::composer::RuntimeComposerEligibility;
+use crate::presentation::{PresentationAction, PresentationIdentity};
+use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
 use crate::shell::ShellAction;
+
+struct ReplacementClientFacts {
+    attachment: AttachmentId,
+    pty_generation: u64,
+    alternate_screen: bool,
+    controller: bool,
+    composer: Option<(RuntimeComposerEligibility, u64)>,
+}
 
 impl ApplicationRoot {
     pub(super) fn begin_recovery(&mut self, now: Duration) -> Result<(), AppError> {
@@ -151,8 +160,25 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn replacement_bootstrap_pending(&self) -> bool {
         self.replacement_bootstrap.is_some()
+    }
+
+    /// Shell exit keeps Flow history paint. The host must not decide that from
+    /// raw poll codes.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn retains_flow_history(&self) -> bool {
+        self.flow_history_hold
+            || self.recovery.state().stage == RecoveryStage::ExecutionEnded
+            || self.composer.any_execution_ended()
+    }
+
+    /// A terminal display loss (shell exit, disconnect, or IO) keeps Flow
+    /// history. The host must not re-derive that from poll codes.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn hold_flow_history(&mut self) {
+        self.flow_history_hold = true;
     }
 
     /// SPEC-004 §18 Create+Bind for the ended Pane. Prepare releases only that
@@ -213,9 +239,22 @@ impl ApplicationRoot {
         if self.replacement_bootstrap != Some(pane) {
             return Err(AppError::StalePane);
         }
+        let facts = self.replacement_client_facts(execution)?;
+        let attachment = facts
+            .as_ref()
+            .map(|facts| facts.attachment)
+            .unwrap_or(attachment);
+        let pty_generation = facts
+            .as_ref()
+            .map(|facts| facts.pty_generation)
+            .unwrap_or(pty_generation);
+        let alternate_screen = facts.as_ref().is_some_and(|facts| facts.alternate_screen);
+        let controller = facts.as_ref().map(|facts| facts.controller).unwrap_or(true);
+        let composer = facts.as_ref().and_then(|facts| facts.composer);
         if pty_generation == 0 {
             return Err(AppError::ZeroPtyGeneration);
         }
+        self.record_replacement_client(pane, execution)?;
         self.shell
             .apply(ShellAction::BindExecution { pane, execution })
             .map_err(|_| AppError::AlreadyBound)?;
@@ -223,17 +262,181 @@ impl ApplicationRoot {
         let evidence = BindingEvidence {
             execution,
             attachment,
-            controller: true,
+            controller,
             pty_generation,
-            alternate_screen: false,
+            alternate_screen,
         };
         self.install_pane_authority(pane, evidence)?;
         self.clear_execution_ended_for_pane(pane);
+        // The ended shell's submit and composer-status revision do not describe
+        // the new attachment. Clear them before applying the adopted client.
+        let _ = self
+            .composer
+            .apply(crate::composer::ComposerAction::ResetAdmission { pane });
+        if let Some((eligibility, revision)) = composer {
+            self.apply_known_composer_status(pane, eligibility, revision);
+        }
         self.replacement_bootstrap = None;
         if self.shell.snapshot().focused_pane == pane {
             self.recovery.mark_usable();
             self.sync_composer_presentation();
         }
         Ok(())
+    }
+
+    /// Install or replace per-pane Controller authority and activate it when
+    /// that pane is focused. Portable: display-handle fan-out is macOS-only.
+    pub(super) fn install_pane_authority(
+        &mut self,
+        pane: PaneId,
+        evidence: BindingEvidence,
+    ) -> Result<(), AppError> {
+        if evidence.pty_generation == 0 {
+            return Err(AppError::ZeroPtyGeneration);
+        }
+        if self.shell.pane_execution(pane).ok().flatten() != Some(evidence.execution) {
+            return Err(AppError::StaleExecution);
+        }
+        self.bind_pane_recovery(pane, evidence.execution);
+        self.remember_primary_pane(pane);
+        let authority = PaneAuthority {
+            pane,
+            execution: evidence.execution,
+            attachment: evidence.attachment,
+            controller: evidence.controller,
+            pty_generation: evidence.pty_generation,
+        };
+        self.pane_authorities.insert(pane, authority);
+        if self.shell.snapshot().focused_pane == pane {
+            let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
+                .ok_or(AppError::ZeroPtyGeneration)?;
+            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+            self.presentation
+                .apply(PresentationAction::BindIdentity(identity))
+                .map_err(|_| AppError::AlreadyBound)?;
+            self.authority = Some(authority);
+            self.derive_presentation(evidence.alternate_screen)?;
+            self.sync_composer_presentation();
+            #[cfg(target_os = "macos")]
+            {
+                self.refresh_output_from_pane_client(pane);
+                if let Some(raw) = self.pane_client_raws.get(&pane).copied() {
+                    crate::ffi::set_focused_display_handle(raw);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The adopted display client is the PTY generation and composer-status
+    /// authority. No active client (in-process tests) keeps the action payload.
+    fn replacement_client_facts(
+        &self,
+        execution: ExecutionId,
+    ) -> Result<Option<ReplacementClientFacts>, AppError> {
+        #[cfg(target_os = "macos")]
+        let facts = {
+            let handle = crate::ffi::active_handle();
+            if handle == 0 {
+                None
+            } else {
+                crate::ffi::with_client(handle, |client| {
+                    if client.execution_id() != execution {
+                        return None;
+                    }
+                    let composer = client.composer_status().map(|status| {
+                        let eligibility = match status.eligibility {
+                            seyal_protocol::framing::ComposerEligibility::Available => {
+                                RuntimeComposerEligibility::Available
+                            }
+                            seyal_protocol::framing::ComposerEligibility::Busy => {
+                                RuntimeComposerEligibility::Busy
+                            }
+                            seyal_protocol::framing::ComposerEligibility::Unsupported => {
+                                RuntimeComposerEligibility::Unsupported
+                            }
+                        };
+                        (eligibility, status.revision)
+                    });
+                    Some(ReplacementClientFacts {
+                        attachment: client.attachment_id(),
+                        pty_generation: client.cache().generation,
+                        alternate_screen: client.cache().alternate_screen,
+                        controller: matches!(
+                            client.role(),
+                            seyal_protocol::framing::Role::Controller
+                        ),
+                        composer,
+                    })
+                })
+                .flatten()
+            }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let facts = {
+            let _ = execution;
+            None
+        };
+        Ok(facts)
+    }
+
+    /// Remember the adopted client on the Pane so Split can present it.
+    /// Call only after the bind generation is known to be usable.
+    fn record_replacement_client(
+        &mut self,
+        pane: PaneId,
+        execution: ExecutionId,
+    ) -> Result<(), AppError> {
+        #[cfg(target_os = "macos")]
+        {
+            let handle = crate::ffi::active_handle();
+            if handle == 0 {
+                return Ok(());
+            }
+            let Some(runtime_id) = crate::ffi::with_client(handle, |client| {
+                (client.execution_id() == execution).then(|| client.runtime_id())
+            })
+            .flatten() else {
+                return Ok(());
+            };
+            if self
+                .client_handle
+                .as_ref()
+                .is_none_or(|owned| owned.raw() != handle)
+            {
+                self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+            }
+            self.pane_client_raws.insert(pane, handle);
+            self.remember_pane_runtime(pane, runtime_id);
+            self.seed_provisioning_request_floor_from_wire();
+            if self.shell.snapshot().focused_pane == pane {
+                crate::ffi::set_focused_display_handle(handle);
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (pane, execution);
+        }
+        Ok(())
+    }
+
+    fn apply_known_composer_status(
+        &mut self,
+        pane: PaneId,
+        eligibility: RuntimeComposerEligibility,
+        revision: u64,
+    ) {
+        let _ = self
+            .composer
+            .apply(crate::composer::ComposerAction::ApplyRuntimeEligibility {
+                pane,
+                eligibility: Some(eligibility),
+                revision,
+            });
+        self.integration_unsupported = eligibility == RuntimeComposerEligibility::Unsupported;
+        self.recompute_resting();
+        if self.authority.is_some() {
+            let _ = self.derive_presentation(self.alternate_screen);
+        }
     }
 }

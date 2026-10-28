@@ -13,6 +13,21 @@ pub extern "C" fn seyal_app_replacement_bootstrap_pending(handle: u64) -> u8 {
     })
 }
 
+/// 1 while an ended execution must keep Flow history paint. Hosts do not
+/// interpret poll error codes.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_retains_flow_history(handle: u64) -> u8 {
+    if handle == 0 {
+        return 0;
+    }
+    super::APPS.with(|apps| {
+        apps.borrow()
+            .get(&handle)
+            .map(|state| u8::from(state.root.retains_flow_history()))
+            .unwrap_or(0)
+    })
+}
+
 pub(crate) fn note_application_roots_client_loss(handle: u64) {
     note_application_roots_client_loss_kind(handle, false);
 }

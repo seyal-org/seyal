@@ -74,7 +74,7 @@ extension ProductChromeHostView {
                 lines: lines
             )
             card.setAccessibilityIdentifier("seyal-block-\(index)")
-            card.body.setAccessibilityIdentifier("seyal-block-\(index)-body")
+            card.setBodyAccessibilityIdentifier("seyal-block-\(index)-body")
             if blockID != 0, let retainedRange = pane.inputSurface.retainedHistoryRange(blockID: blockID) {
                 card.setBodyTranscript(retainedRange.transcriptText)
             }

@@ -600,11 +600,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     preparationState.resetForLifecycleRecovery()
   }
 
-  /// Keep Flow history rows across shell-exit poll losses (-6, -10, -3).
-  static func retainsFlowHistoryPaint(afterBridgeError code: Int32?) -> Bool {
-    code == -6 || code == -10 || code == -3
-  }
-
   func terminalBridgeDidFail(_ code: Int32) {
     _ = code
   }
@@ -621,8 +616,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     }
     lastProposedGeometry = .null
     recoveryPresentationPending = false
-    // Shell-exit losses keep Flow history. Other disconnects drop connection paint.
-    if !Self.retainsFlowHistoryPaint(afterBridgeError: lastBridgeError) {
+    // Rust decides when an ended execution keeps Flow history. Poll codes do not.
+    let retainHistory = recoveryAppHandle != 0 && seyal_app_retains_flow_history(recoveryAppHandle) != 0
+    if !retainHistory {
       historyRanges.removeAll(keepingCapacity: false)
     }
     invalidatePreparedPresentation()

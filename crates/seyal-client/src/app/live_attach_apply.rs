@@ -10,10 +10,10 @@ use std::thread;
 use seyal_core::{ExecutionId, PaneId};
 use seyal_runtime::local_ipc::framing::Role;
 
-use super::{AppError, ApplicationRoot, BindingEvidence, PaneAuthority};
+use super::{AppError, ApplicationRoot, BindingEvidence};
 use crate::composer::ComposerAction;
 use crate::local::{ClientError, LocalDisplayClient};
-use crate::presentation::{PresentationAction, PresentationIdentity};
+use crate::presentation::PresentationAction;
 use crate::provisioning::{ConnectionOwner, ProvisioningEffect, ProvisioningFailure};
 
 fn runtime_block_from_timeline(
@@ -323,52 +323,10 @@ impl ApplicationRoot {
         }
     }
 
-    /// Install or replace per-pane Controller authority; activate when focused.
-    pub(super) fn install_pane_authority(
-        &mut self,
-        pane: PaneId,
-        evidence: BindingEvidence,
-    ) -> Result<(), AppError> {
-        if evidence.pty_generation == 0 {
-            return Err(AppError::ZeroPtyGeneration);
-        }
-        if self.shell.pane_execution(pane).ok().flatten() != Some(evidence.execution) {
-            return Err(AppError::StaleExecution);
-        }
-        self.bind_pane_recovery(pane, evidence.execution);
-        self.remember_primary_pane(pane);
-        let authority = PaneAuthority {
-            pane,
-            execution: evidence.execution,
-            attachment: evidence.attachment,
-            controller: evidence.controller,
-            pty_generation: evidence.pty_generation,
-        };
-        self.pane_authorities.insert(pane, authority);
-        if self.shell.snapshot().focused_pane == pane {
-            let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
-                .ok_or(AppError::ZeroPtyGeneration)?;
-            // A prior tab may already hold presentation identity; clear then bind
-            // so CreateTab's focused leaf becomes the live SPEC-008 fence.
-            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
-            self.presentation
-                .apply(PresentationAction::BindIdentity(identity))
-                .map_err(|_| AppError::AlreadyBound)?;
-            self.authority = Some(authority);
-            self.derive_presentation(evidence.alternate_screen)?;
-            self.sync_composer_presentation();
-            self.refresh_output_from_pane_client(pane);
-            #[cfg(target_os = "macos")]
-            if let Some(raw) = self.pane_client_raws.get(&pane).copied() {
-                crate::ffi::set_focused_display_handle(raw);
-            }
-        }
-        Ok(())
-    }
-
     /// Terminal poll loss. `execution_ended` keeps Flow authority and copies the
     /// final Block timeline before the client is unregistered (#1379).
     pub(crate) fn note_terminal_client_loss(&mut self, handle: u64, execution_ended: bool) {
+        self.hold_flow_history();
         if execution_ended {
             self.note_ended_execution_client_loss(handle);
         } else {
