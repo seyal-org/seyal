@@ -71,6 +71,15 @@ codesign --verify --strict --all-architectures "$HELPERS_DIR/seyal-runtime"
 codesign --verify --strict "$APP_BUNDLE"
 codesign --verify --deep --strict "$PRODUCTS/SeyalUITests-Runner.app"
 
+# xcodebuild only injects TEST_RUNNER_*-prefixed vars into the XCUI runner
+# (prefix stripped). Forward the plain Gate 1 stress opt-in so
+# `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test` actually runs the 10-cycle
+# case instead of silently XCTSkipping while the suite still reports PASS.
+XCODEBUILD_TEST_ENV=()
+if [[ "${SEYAL_UI_TEST_CLEAR_EXIT_STRESS:-}" == "1" ]]; then
+  XCODEBUILD_TEST_ENV+=(TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1)
+fi
+
 xcodebuild \
   -project macos/Seyal/Seyal.xcodeproj \
   -scheme Seyal \
@@ -80,6 +89,7 @@ xcodebuild \
   ARCHS=arm64 \
   ONLY_ACTIVE_ARCH=YES \
   -resultBundlePath "$RESULT_BUNDLE" \
+  "${XCODEBUILD_TEST_ENV[@]}" \
   test-without-building
 
 echo "[seyal macOS UI test] XCTest component + XCUIAutomation E2E passed."

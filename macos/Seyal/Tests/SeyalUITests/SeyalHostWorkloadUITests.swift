@@ -225,15 +225,23 @@ final class SeyalHostWorkloadUITests: XCTestCase {
     /// #1379 Gate 1: repeat clear→exit→New shell ten times in one headed
     /// session. Cold-launch XCUI flake must not mask the paint regression.
     ///
-    /// Opt-in only: set `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1`. Default
-    /// `make test` / `native-macos-smoke` skips this (~6–7 min) so the
-    /// 35-minute smoke job still finishes `make bench`. CI regression
-    /// coverage stays on `testClearThenExitKeepsPaintedBlockBodies`.
+    /// Opt-in only. Default `make test` / `native-macos-smoke` skips this
+    /// (~6–7 min) so the 35-minute smoke job can finish `make bench`. CI
+    /// regression stays on `testClearThenExitKeepsPaintedBlockBodies`.
+    ///
+    /// Enable with either:
+    /// - `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test` (script forwards
+    ///   `TEST_RUNNER_…` into the XCUI runner), or
+    /// - `TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1` on a raw `xcodebuild
+    ///   test` (xcodebuild only injects `TEST_RUNNER_`-prefixed vars; a bare
+    ///   `SEYAL_UI_TEST_…=1` silently skips and still reports suite PASS).
     func testClearThenExitPaintStableAcrossTenCycles() throws {
-        guard ProcessInfo.processInfo.environment["SEYAL_UI_TEST_CLEAR_EXIT_STRESS"] == "1"
-        else {
+        let env = ProcessInfo.processInfo.environment
+        let stressEnabled = env["SEYAL_UI_TEST_CLEAR_EXIT_STRESS"] == "1"
+            || env["TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS"] == "1"
+        guard stressEnabled else {
             throw XCTSkip(
-                "set SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 for Gate 1 headed 10-cycle clear→exit stress; default make test keeps the single-cycle paint case"
+                "enable Gate 1 10-cycle clear→exit stress via SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test (or TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 on xcodebuild); default make test keeps the single-cycle paint case"
             )
         }
         let app = hostedApp()
