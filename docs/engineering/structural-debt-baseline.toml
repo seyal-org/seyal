@@ -234,9 +234,21 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 780
-issue = 1218
-reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and #1218 reconnects Rust recovery presentation when the composer becomes focus-eligible without moving draft/admission policy into Swift."
+acknowledged_loc = 782
+issue = 1379
+reason = "Thin AppKit chrome host stays one cold-path façade; #866/#1218 keep eligibility-driven focus and recovery presentation on this host, and #1379 only wires the explicit New shell recovery action into the existing composer slot without moving product authority into Swift."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView+Recovery.swift"
+acknowledged_loc = 705
+issue = 1379
+reason = "Recovery effect drain stays one host adapter beside ProductChromeHostView; #1379 adds the create-capable New shell open_first path (continuity clear, lease teardown, adopt retry) without inventing a second recovery coordinator or partN split."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/app/session.rs"
+acknowledged_loc = 701
+issue = 1379
+reason = "ApplicationRoot bind/session façade stays one module; #1379 only clears the sticky ExecutionEnded latch on successful Bind so New shell can restore composer eligibility without a second session authority."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
@@ -247,9 +259,9 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 812
-issue = 1219
-reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, #1144 adds the ActivationFailed event, #1219 adds PT5 zoom/swap/move/directional/equalize kinds, and the window-stack merge places CLOSE_WINDOW after those codes without splitting the ABI table."
+acknowledged_loc = 815
+issue = 1379
+reason = "ABI action decoding remains one versioned match surface; prior window/PT5 kinds stay here, and #1379 only maps DISCONNECT_RECONSTRUCTION reserved!=0 to ClearReconstructionContinuity for New shell after exit without splitting the ABI table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"
