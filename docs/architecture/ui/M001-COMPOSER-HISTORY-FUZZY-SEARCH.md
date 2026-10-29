@@ -65,7 +65,7 @@ Preferred behavior:
 - optionally replace it with compact real process-running guidance;
 - restore it when the shell becomes available.
 
-**Contingent on acceptance of Proposed ADR-026 (#1384):** "busy" follows the ADR-026 §3.2 input target. That includes `TrustedShell(session)` (`Submit`) and a clearly labeled `Relay` for an eligible foreground program. Retraction remains correct when the input target is `None`. See `M001-LIVE-TAIL-BEHAVIOR.md` §6.
+**Accepted ADR-026 (#1384):** "busy" follows the ADR-026 §3.2 input target, which qualifies the retraction above. That includes `TrustedShell(session)` (`Submit`) and a clearly labeled `Relay` for an eligible foreground program. Retraction remains correct when the input target is `None`. See `M001-LIVE-TAIL-BEHAVIOR.md` §6.
 
 During full-screen TUI takeover, the composer is hidden/disabled entirely for that Pane.
 

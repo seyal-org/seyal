@@ -12,7 +12,7 @@
 - **Superseded** — legacy shape must not be implemented; the named owner carries the replacement need.
 - **Rejected** — deliberately outside current Seyal direction.
 
-The 216 historical `F-*` rows are fully accounted for: **137 known future implementation, 31 spike/R&D, 25 explicitly deferred, 15 superseded, 8 rejected**. F-088a is outside that historical set. It is **Proposed under #1384** (a contingent exception only once Proposed ADR-026 is Accepted) and does not change the rejected tally of 8 or F-088's Rejected disposition. There is no F-088b; #1385 has no F-ID yet.
+The 216 historical `F-*` rows are fully accounted for: **137 known future implementation, 31 spike/R&D, 25 explicitly deferred, 15 superseded, 8 rejected**. F-088a is outside that historical set. It is **Accepted direction** under Accepted ADR-026 / #1384 and does not change the rejected tally of 8 or F-088's Rejected disposition. There is no F-088b; #1385 has no F-ID yet.
 
 ## F-* ownership
 
@@ -63,7 +63,7 @@ Ranges below are inclusive. Together they cover exactly the 216 IDs in the canon
 | F-080 | M008 | #695 | Superseded |
 | F-159 | M008 | #695 | Spike/R&D before implementation |
 | F-023, F-088, F-160, F-164, F-179, F-200, F-205, F-250 | — | `FEATURES.md` decision | Rejected |
-| F-088a | — | Proposed ADR-026 / #1384 | Proposed (contingent exception only; becomes Accepted direction on ADR-026 acceptance, not on this proposal) |
+| F-088a | — | Accepted ADR-026 / #1384 | Accepted direction |
 
 ## SY-* ownership
 
