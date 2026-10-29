@@ -1,8 +1,8 @@
 # SPEC-008 — M003 command Blocks, Pane composer and presentation modes
 
-- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`) and the duration / shell-metadata boundary amendment accepted by #686 / PR #1022. Amendments below that cite ADR-025 are **contingent on acceptance of Proposed ADR-025 under #1384** by a non-author maintainer (the same convention as Proposed ADR-024 in SPEC-030). Until that acceptance, the pre-ADR-025 sentences remain the normative contract, and ADR-009 remains the composer-eligibility authority.
-- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-025 contingent alignment 2026-10-29 (#1384)
-- **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract. Proposed ADR-025 (#1384) is the contingent authority for the session-bootstrap and input-target amendments in §3.1, §3.2, §3.5, §4, §5.5, §8 and §10. It is not governing architecture until Accepted.
+- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`) and the duration / shell-metadata boundary amendment accepted by #686 / PR #1022. Amendments below that cite ADR-026 are **contingent on acceptance of Proposed ADR-026 under #1384** by a non-author maintainer (the same convention as Proposed ADR-024 in SPEC-030). Until that acceptance, the pre-ADR-026 sentences remain the normative contract, and ADR-009 remains the composer-eligibility authority.
+- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 contingent alignment 2026-10-29 (#1384)
+- **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract. Proposed ADR-026 (#1384) is the contingent authority for the session-bootstrap and input-target amendments in §3.1, §3.2, §3.5, §4, §5.5, §8 and §10. It is not governing architecture until Accepted.
 - **Depends on:** accepted SPEC-001 through SPEC-007 and completed Pass 7
 
 ## 1. Observable contract
@@ -83,10 +83,10 @@ If the current projection protocol cannot produce the running Block's live tail,
 implementation must refine that projection first. Rendering the full current
 terminal grid behind the Block transcript is not an allowed substitute.
 
-**Contingent on acceptance of Proposed ADR-025 (#1384):** Relay is a line-level
+**Contingent on acceptance of Proposed ADR-026 (#1384):** Relay is a line-level
 Flow input mode, distinct from Raw. It never routes character-level input.
 When character-level semantics are required, presentation still transitions to
-full-Pane Raw first (ADR-009 invariant 11). Until ADR-025 is Accepted, Flow
+full-Pane Raw first (ADR-009 invariant 11). Until ADR-026 is Accepted, Flow
 has no Relay mode.
 
 ### 3.2 Raw
@@ -106,7 +106,7 @@ Enter Raw when any of the following applies:
 Entering Raw yields Flow interaction/composer. Raw is a replacement presentation,
 not another viewport added to Flow.
 
-**Contingent on acceptance of Proposed ADR-025 (#1384):** labeled Relay is not
+**Contingent on acceptance of Proposed ADR-026 (#1384):** labeled Relay is not
 Raw and does not satisfy this section. Raw remains the full-Pane
 character-level presentation.
 
@@ -165,13 +165,13 @@ ExecutionId
 + presentation/input epoch
 + relevant canonical generation and terminal mode state
 + trusted shell-integration generation/state
-+ input target            # contingent on Proposed ADR-025 (#1384); absent until Accepted
-+ target generation       # contingent on Proposed ADR-025 (#1384); absent until Accepted
++ input target            # contingent on Proposed ADR-026 (#1384); absent until Accepted
++ target generation       # contingent on Proposed ADR-026 (#1384); absent until Accepted
 ```
 
-Until Proposed ADR-025 is Accepted, eligibility is the tuple without input
+Until Proposed ADR-026 is Accepted, eligibility is the tuple without input
 target or target generation. On acceptance, a submission is bound to the
-target and generation the client displayed (ADR-025 §3.2); a mismatch is a
+target and generation the client displayed (ADR-026 §3.2); a mismatch is a
 correlated refusal and the draft is kept.
 
 The exact wire/internal representation may differ. The observable requirement is
@@ -209,11 +209,11 @@ snapshot.
 - successful admission creates the next Block and preserves Pane focus;
 - while a normal foreground command occupies the shell, the composer is
   disabled or represented by real busy state as specified by product behavior.
-  **Contingent on acceptance of Proposed ADR-025 (#1384):** composer
-  availability follows the ADR-025 §3.2 input target. A `TrustedShell` target,
+  **Contingent on acceptance of Proposed ADR-026 (#1384):** composer
+  availability follows the ADR-026 §3.2 input target. A `TrustedShell` target,
   including `TrustedShell(session)`, is composer mode `Submit`. A
   `ForegroundProgram` target may be labeled `Relay`. Neither mode is implied
-  by Block lifecycle `Running` alone. Until ADR-025 is Accepted, the first
+  by Block lifecycle `Running` alone. Until ADR-026 is Accepted, the first
   sentence of this bullet remains the contract;
 - supported Pane-level control actions such as an explicit interrupt may route
   through typed input semantics without turning empty Flow space into a raw
@@ -331,8 +331,8 @@ M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
 | Interactive Bash | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
 | Interactive fish | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
 | `/bin/sh` and any other shell without an accepted integration | Unsupported → full-Pane Raw; no guessed Blocks |
-| Nested shell / SSH child (no consent) | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim. Unsupported for trusted Blocks → Raw, or labeled relay only after ADR-025 acceptance |
-| Consented session (SSH / `docker exec -it` / interactive bash or zsh), ADR-025 | **Contingent on acceptance of Proposed ADR-025 (#1384).** Session-trusted `A`/`C`/`D` with a session secret; session-scoped Blocks; composer `Submit` at a session prompt. Decline, unsupported shell, or failed bootstrap → labeled relay / Raw. The offer hint never authorizes bootstrap |
+| Nested shell / SSH child (no consent) | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim. Unsupported for trusted Blocks → Raw, or labeled relay only after ADR-026 acceptance |
+| Consented session (SSH / `docker exec -it` / interactive bash or zsh), ADR-026 | **Contingent on acceptance of Proposed ADR-026 (#1384).** Session-trusted `A`/`C`/`D` with a session secret; session-scoped Blocks; composer `Submit` at a session prompt. Decline, unsupported shell, or failed bootstrap → labeled relay / Raw. The offer hint never authorizes bootstrap |
 | Startup working directory | Launch/config policy (#676 / related launch-policy Issues) may supply initial CWD; not inferred from terminal output |
 | Live CWD / OSC 7 | **Deferred** for M003 Block semantics; OSC 7 and other terminal-emitted path text remain untrusted and must not populate Block or Workspace authority |
 
@@ -342,18 +342,18 @@ M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
   interactive shells; Runtime-owned completed-Block duration as above.
 - **Deferred for M003:** trusted live CWD; Bash/fish (or other) local
   integrations. Remote/SSH Block claims stay in this deferred list until
-  Proposed ADR-025 (#1384) is Accepted. Live-CWD claims stay deferred either
+  Proposed ADR-026 (#1384) is Accepted. Live-CWD claims stay deferred either
   way.
-- **Contingent on acceptance of Proposed ADR-025 (#1384):** remote/SSH Block
-  claims move from **Deferred** to **Accepted under ADR-025 (#1384),
+- **Contingent on acceptance of Proposed ADR-026 (#1384):** remote/SSH Block
+  claims move from **Deferred** to **Accepted under ADR-026 (#1384),
   consent-gated**. Decline does not create a trusted remote Block. Local
   Bash/fish Flow integration and trusted live CWD stay deferred.
-- **Default offer-hint argv (ADR-025 §4.2), contingent on that acceptance:**
+- **Default offer-hint argv (ADR-026 §4.2), contingent on that acceptance:**
   the proactive hint matches a foreground process-group leader whose program
   basename is `ssh`. Nested `ssh` is excluded: an `ssh` whose host Block is
   already a session scope is not a proactive hint. The list is
   user-configurable. The hint never authorizes bootstrap. An explicit "Enable
-  Blocks for this session" action does not require the hint. Until ADR-025 is
+  Blocks for this session" action does not require the hint. Until ADR-026 is
   Accepted, Seyal does not offer session bootstrap.
 - Evidence disposition and remaining zsh gaps are recorded in
   `docs/evidence/m003-686-shell-metadata-decision.md`.
@@ -420,12 +420,12 @@ a different execution, attachment or presentation epoch.
 | secret/interactive child requiring direct input | Pane becomes Raw before arbitrary terminal input is routed |
 | Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
 | unsupported/nested SSH interaction | full-Pane Raw fallback; no simultaneous Flow + raw viewport |
-| consented session (ADR-025) | **Contingent on acceptance of Proposed ADR-025 (#1384).** Discrete session-scoped Blocks under the host Running Block, and a retained composer (`Submit`) at a session-trusted prompt |
-| declined session (ADR-025) | **Contingent.** Labeled relay; no guessed Block |
-| forged remote `A`/`D` (ADR-025) | **Contingent.** Ignored; no secret match, so no trusted session transition |
-| depth-two session (ADR-025) | **Contingent.** Relay or Raw; no second session secret |
-| auth/password prompt (ADR-025) | **Contingent.** Bootstrap is not offered; relay is suppressed; Raw remains available |
-| session alternate-screen (ADR-025) | **Contingent.** TUI takeover of the Pane; composer hidden |
+| consented session (ADR-026) | **Contingent on acceptance of Proposed ADR-026 (#1384).** Discrete session-scoped Blocks under the host Running Block, and a retained composer (`Submit`) at a session-trusted prompt |
+| declined session (ADR-026) | **Contingent.** Labeled relay; no guessed Block |
+| forged remote `A`/`D` (ADR-026) | **Contingent.** Ignored; no secret match, so no trusted session transition |
+| depth-two session (ADR-026) | **Contingent.** Relay or Raw; no second session secret. A candidate requires F4 ∈ {None, Declined, Failed}; arming while `Trusted(_)` is forbidden |
+| auth/password prompt (ADR-026) | **Contingent.** Local canonical-no-echo: bootstrap is not offered and relay is suppressed when F9 is available. A remote password prompt remains a residual plaintext risk even when F9 is available. Raw is held during `Armed`/`Delivering` and available otherwise |
+| session alternate-screen (ADR-026) | **Contingent.** TUI takeover of the Pane; composer hidden |
 | Neovim/htop/full-screen app | TUI owns full Pane; composer/Flow interaction absent |
 | TUI exit | same execution returns to Flow or Raw after eligibility re-evaluation |
 | detach/reattach | Block IDs/anchors and selected presentation recover without duplicate execution |
@@ -465,5 +465,5 @@ This specification does not require:
 - AppKit text reconstruction of terminal output;
 - a portable cross-platform GUI abstraction;
 - prompt/output scraping to recover missing trusted command boundaries;
-- Bash/fish local Flow integration or trusted live CWD in M003. Remote trusted integration stays a non-goal until Proposed ADR-025 (#1384) is Accepted. On that acceptance it is consent-gated per ADR-025 and is no longer covered by this non-goal; local Bash/fish Flow integration and trusted live CWD remain non-goals;
+- Bash/fish local Flow integration or trusted live CWD in M003. Remote trusted integration stays a non-goal until Proposed ADR-026 (#1384) is Accepted. On that acceptance it is consent-gated per ADR-026 and is no longer covered by this non-goal; local Bash/fish Flow integration and trusted live CWD remain non-goals;
 - commercial/agent/cloud services on the terminal path.

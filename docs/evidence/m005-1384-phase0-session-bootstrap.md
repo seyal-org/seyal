@@ -1,19 +1,19 @@
 # Phase 0 evidence — consented session-only remote shell bootstrap (#1384)
 
-**Status:** Static classification + macOS F9 probe recorded. Headed Seyal.app SSH repro and bootstrap spike remain open before ADR-025 acceptance. Non-production evidence for Proposed ADR-025 under #1384.
+**Status:** Static classification + macOS F9 line-discipline probe recorded. Headed Seyal.app SSH repro and bootstrap spike remain open before any ADR-026 acceptance PR. Non-production evidence for Proposed ADR-026 under #1384. This proposal does not Accept the ADR. Review of the first draft renumbered it from the collided ADR-025 slot to ADR-026 (ADR-025 is reserved by #1382 / #1381) and tightened bootstrap, trust, relay, consent, depth-one and F9 rules; those edits are in the ADR, not a claim that Phase 0 measured them.
 
 | Field | Value |
 |---|---|
 | Issue | #1384 (Architecture, Ticket A) |
-| ADR | ADR-025 — Consented session-only remote shell bootstrap (Proposed) |
+| ADR | ADR-026 — Consented session-only remote shell bootstrap (Proposed; acceptance is a later PR) |
 | Classification | Phase 0 repro/classify + F9 probe — **no production code** |
 | Branch | `mahboobmonnamd/issue/1384` @ worktree `seyal-1384` |
 | Tree | `8ff4092c` (+ docs) |
-| Sibling | #1385 (Ticket B) — blocked on this ADR |
+| Sibling | #1385 (Ticket B) — blocked on this ADR; companion reserved as ADR-027 (no F-ID yet). ADR-025 is reserved by #1382 / #1381 and is not this decision |
 | Recorded | 2026-10-29 |
 | Reviewer (independent, human) | _TBD_ |
 
-> Fill rule: every behavioral claim cites a file+line or a reproducible spike. Existing code alone is not authority.
+> Fill rule: every behavioral claim cites a file+line or a reproducible spike. Existing code alone is not authority. Fenced snippets in §1 are paraphrases of the cited regions, abbreviated for this note. They are not verbatim source.
 
 ## 1. Static classification of the “command running” stuck state
 
@@ -94,10 +94,11 @@ Explicit escape: `Cmd+Enter` → `presentation.toggle_raw` (`crates/seyal-client
 | Master sees slave `ECHO`/`ICANON` changes? | **YES** — Phase1 canonical-no-echo: `ECHO=False, ICANON=True`; Phase2 non-canonical: `ECHO=False, ICANON=False` |
 | `tcgetpgrp` on master? | **YES** after child takes controlling TTY (`fg_pgid == child`); **0** before controlling-TTY claim |
 | Production code today? | **NO** — `seyal-exec` macOS PTY passes null termios; only `TIOCGWINSZ`; no `tcgetattr` / `ICANON` / `ECHO` / `tcgetpgrp` in Rust production sources |
-| Hot-path safe? | Observation can be cold-path only (ADR-025 §4.3); not required per byte |
-| Residual risk | Before controlling TTY / when F9 unavailable: ADR-025 §8.4 conservative relay (user-enabled) and no proactive offer |
+| Leader argv observed? | **Not measured.** This probe did not read the foreground leader's argv. ADR-026 §4.3 allows argv only on line-terminator or interrupt admissions, never on the raw keystroke path, and requires measurement before an implementation Issue is Done |
+| Hot-path safe? | Not shown by this probe. ADR-026 §4.3 confines sampling to cold edges with bounded backoff and an explicit stop. That design is unmeasured here |
+| Residual risk | Before controlling TTY, and whenever F9 is unavailable: no proactive offer, and relay only after explicit enable (ADR-026 §8.4). Even when local termios is observable, a remote password prompt is not. F9 does not remove that residual risk |
 
-**Implication for ADR-025:** F9 is **feasible on Darwin** for proactive offer (non-canonical + foreign FG) and auth-prompt suppression (canonical-no-echo). Specifying F9-unavailable fallback remains mandatory for non-macOS and early-session races.
+**Implication for ADR-026:** Local line discipline and foreground process-group id look observable on Darwin after the child takes the controlling TTY. That is not an argv result and not a proactive-offer proof. Auth-prompt suppression for *local* canonical-no-echo is plausible from the termios result and still unmeasured inside Seyal. Remote secret prompts stay a residual risk either way. The F9-unavailable fallback remains mandatory.
 
 ## 3. Authority conflict summary (why ADR required)
 
@@ -108,16 +109,16 @@ Current accepted text **forbids** the desired product:
 - SPEC-008 §5.5: nested/SSH child → no remote Block claim.
 - SPEC-008 §3.2 simultaneously requires Raw for interactive/secret children — **missing trigger** in code.
 
-Desired #1384 model (consented session bootstrap + orthogonal input target) therefore **requires** ADR-025 acceptance before implementation.
+Desired #1384 model (consented session bootstrap + orthogonal input target) therefore **requires** ADR-026 acceptance before implementation.
 
 ## 4. Consented bootstrap spike (still open)
 
-Non-mergeable spike checklist (ADR-025 §6) — not run in this pass:
+Non-mergeable spike checklist (ADR-026 §6) — not run in this pass:
 
-- [ ] stager → K-authenticated readiness → length-bounded payload
-- [ ] session `A`/`C`/`D` with session secret; discrete Blocks; composer retained
-- [ ] no remote persistence; secret absent from screen/history/argv/env/files
-- [ ] fail-closed: decline, `RemoteCommand`, drop mid-arm, forged markers
+- [ ] echo off before readiness; then K-authenticated readiness; then `read -t` of exactly N printable-ASCII+LF bytes (payload or non-eval padding)
+- [ ] session `A`/`C`/`D` with session secret; discrete Blocks; composer retained; `SessionTrusted` stays presentation-only
+- [ ] Seyal writes no remote file; stager line may still enter remote shell history; hooks last until the remote shell exits; no history-option mutation; secret absent from screen/argv/env/Seyal files
+- [ ] fail-closed: decline, `RemoteCommand`, drop mid-arm (T8), detach during Armed vs exact-N during Delivering (T15/T18), forged markers, Raw held during Armed/Delivering
 - [ ] `docker exec -it` / local nested zsh comparative
 
 ## 5. Warp comparative matrix (docs)
@@ -127,12 +128,12 @@ Non-mergeable spike checklist (ADR-025 §6) — not run in this pass:
 | Warp “Continue without installing” | Legacy SSH wrapper: ephemeral remote bash/zsh bootstrap ([docs](https://docs.warp.dev/terminal/warpify/ssh-legacy/)) | Yes | No |
 | Warp “Install SSH extension” | Persistent `~/.warp*/remote-server` ([docs](https://docs.warp.dev/terminal/warpify/ssh/)) | Yes + coding features | Yes → #1385 |
 | Seyal today | Outer Running Block + Busy + Flow | No remote Blocks | N/A |
-| Seyal ADR-025 A2 | Consented session-only in-band bootstrap (no remote files; in-memory hooks) | Session-trusted Blocks | No |
-| Seyal ADR-025 A1 | Labeled relay / Raw; unverified segments | Unverified only | No |
+| Seyal ADR-026 A2 | Consented session-only in-band bootstrap (Seyal writes no remote file; stager may enter remote history; hooks until that shell exits) | Session-trusted Blocks (presentation only) | No |
+| Seyal ADR-026 A1 | Labeled relay / Raw; unverified segments | Unverified only | No |
 
 ## 6. Threat / adversarial notes (pointer)
 
-Full 20-row matrix lives in ADR-025 §10. Phase 0 static work adds:
+Full 20-row matrix lives in ADR-026 §10. Phase 0 static work adds:
 
 - Inverse case: Busy without alternate screen → no input (observed Class A) — ADR must not leave this as the only path for consented sessions.
 - Inverse case: forged remote OSC 133 without session secret → must not change eligibility (local ADR-009 behavior already rejects wrong nonce).
@@ -142,13 +143,13 @@ Full 20-row matrix lives in ADR-025 §10. Phase 0 static work adds:
 
 | Finding | Action |
 |---|---|
-| Class A design gap under accepted ADR-009 | ADR-025 Proposed; amend F-088 / SPEC-008 / SPEC-004 / SPEC-009 / UI busy text |
-| SPEC-008 §3.2 Raw trigger missing | Covered by orthogonal target + consent/Raw rules in ADR-025; not a silent code fix alone |
-| F9 feasible on Darwin | Keep F9 in ADR; keep unavailable fallback |
+| Class A design gap under accepted ADR-009 | ADR-026 Proposed; amend F-088 / SPEC-008 / SPEC-004 / SPEC-009 / UI busy text |
+| SPEC-008 §3.2 Raw trigger missing | Covered by orthogonal target + consent/Raw rules in ADR-026; not a silent code fix alone |
+| Local termios / fg pgrp look observable; argv not measured | Keep F9 in ADR-026 with §4.3 bounds; do not treat this probe as an argv or raw-keystroke result; keep unavailable fallback and remote-password residual risk |
 | Bootstrap spike / headed repro | Required before marking ADR acceptance criteria fully evidenced; may continue on this branch as evidence-only |
 
 ## 8. Follow-on after ADR acceptance
 
 1. Ready implementation Issue(s) for Runtime session overlay + composer target + protocol bits (CAP bit 13 / types 42–45).
 2. Separate Issue for any Class B post-exit stuck Bugs under existing ADR-005/009.
-3. #1385 companion ADR after #1384 acceptance.
+3. #1385 companion ADR-027 after ADR-026 is Accepted. ADR-025 stays reserved by #1382 / #1381. This proposal is not that acceptance.

@@ -44,7 +44,7 @@ For a foreground process such as `npm run dev`:
 - retract or disable the composer while that shell cannot accept a new unrelated command;
 - preserve the Pane draft and restore the composer when the shell becomes available.
 
-**Contingent on acceptance of Proposed ADR-025 (#1384):** "busy" follows the ADR-025 §3.2 input target. That includes `TrustedShell(session)` (`Submit`) and a clearly labeled `Relay` for an eligible foreground program. Retraction remains correct when the input target is `None`. See `M001-LIVE-TAIL-BEHAVIOR.md` §6.
+**Contingent on acceptance of Proposed ADR-026 (#1384):** "busy" follows the ADR-026 §3.2 input target. That includes `TrustedShell(session)` (`Submit`) and a clearly labeled `Relay` for an eligible foreground program. Retraction remains correct when the input target is `None`. See `M001-LIVE-TAIL-BEHAVIOR.md` §6.
 
 Parallel commands use another Pane/Tab/execution.
 

@@ -55,7 +55,7 @@ Until that asset exists in the repository, the UI container must be checked agai
 2. Workspace → Tab → Pane is the product/navigation hierarchy; a Tab owns its split tree.
 3. Every available terminal Pane owns independent multiline composer state; there is no shared/global composer.
 4. **Normal Block/transcript output has one scroll owner: the Pane.** Blocks grow intrinsically; long output does not create nested Block output scrollbars.
-5. A foreground-busy Pane retracts/disables its composer; a full-screen TUI hides/disables it and occupies the Pane viewport. **Contingent on acceptance of Proposed ADR-025 (#1384):** busy follows the ADR-025 §3.2 input target, so a `TrustedShell(session)` target keeps `Submit` and an eligible foreground program may offer labeled `Relay`. Retraction remains correct when the input target is `None`.
+5. A foreground-busy Pane retracts/disables its composer; a full-screen TUI hides/disables it and occupies the Pane viewport. **Contingent on acceptance of Proposed ADR-026 (#1384):** busy follows the ADR-026 §3.2 input target, so a `TrustedShell(session)` target keeps `Submit` and an eligible foreground program may offer labeled `Relay`. Retraction remains correct when the input target is `None`.
 6. Inspector content is contextual: explicit selection → focused object → active Pane → active Tab → active Workspace.
 7. Agents/resource/Block enrichments are additive and asynchronous; terminal progress never waits for them.
 8. Full-screen TUI/raw presentation uses the same terminal execution and canonical terminal state.
@@ -92,7 +92,7 @@ Important superseded old details include:
 
 - fixed/configurable maximum Block height for terminal output;
 - internal Block output scrolling and parent-scroll chaining;
-- active composer while the foreground shell is occupied, except a `Submit` or labeled `Relay` composer once Proposed ADR-025 (#1384) is Accepted (ADR-025 §3.2);
+- active composer while the foreground shell is occupied, except a `Submit` or labeled `Relay` composer once Proposed ADR-026 (#1384) is Accepted (ADR-026 §3.2);
 - permanent per-Pane split-control clusters;
 - duplicated full agent inventories;
 - decorative utility controls;

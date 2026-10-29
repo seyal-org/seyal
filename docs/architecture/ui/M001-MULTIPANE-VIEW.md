@@ -74,7 +74,7 @@ A Pane whose shell is occupied by a long-running foreground process must not pre
 - optionally show compact real running-process status;
 - restore the composer when the shell becomes available.
 
-**Contingent on acceptance of Proposed ADR-025 (#1384):** "busy" follows the ADR-025 §3.2 input target. That includes `TrustedShell(session)` (`Submit`) and a clearly labeled `Relay` for an eligible foreground program. Retraction remains correct when the input target is `None`. See `M001-LIVE-TAIL-BEHAVIOR.md` §6.
+**Contingent on acceptance of Proposed ADR-026 (#1384):** "busy" follows the ADR-026 §3.2 input target. That includes `TrustedShell(session)` (`Submit`) and a clearly labeled `Relay` for an eligible foreground program. Retraction remains correct when the input target is `None`. See `M001-LIVE-TAIL-BEHAVIOR.md` §6.
 
 During full-screen TUI takeover, that Pane's composer is hidden/disabled.
 
