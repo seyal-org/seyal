@@ -276,11 +276,17 @@ Switching Pane focus must not move drafts between panes.
 
 ## 11. Busy foreground process
 
-"Busy" is not a separate Composer definition. It is exactly the negation of
-ADR-009 composer eligibility (invariant 7): the integration state is not
-`AtPrompt`, or the presentation is not Flow, or the canonical state is not on
-the primary screen. A submission attempted anyway gets the correlated
-`Busy`/`Unsupported` admission result (§6).
+"Busy" is not a separate Composer definition. Until Proposed ADR-026 (#1384)
+is Accepted, it is exactly the negation of ADR-009 composer eligibility
+(invariant 7): the integration state is not `AtPrompt`, or the presentation is
+not Flow, or the canonical state is not on the primary screen. **Contingent on
+that acceptance,** busy is the negation of the ADR-026 §3.2 composer mode:
+the input target is not `TrustedShell` (including `TrustedShell(session)`,
+which is `Submit`) and is not an eligible `ForegroundProgram` offering labeled
+`Relay`, or the presentation is not Flow, or the canonical state is not on the
+primary screen. Retraction remains correct when the input target is `None`.
+A submission attempted anyway gets the correlated `Busy`/`Unsupported`
+admission result (§6).
 
 While the execution is not eligible:
 
@@ -293,6 +299,10 @@ While the execution is not eligible:
 Do not queue an implicit Git branch switch behind a foreground process.
 
 ## 12. TUI/raw takeover
+
+A session alternate-screen program is still this full TUI takeover once
+Proposed ADR-026 (#1384) is Accepted (ADR-026 §7.2 / §10 T11). Until then,
+alternate-screen takeover is unchanged.
 
 During canonical full-screen TUI/raw takeover:
 
