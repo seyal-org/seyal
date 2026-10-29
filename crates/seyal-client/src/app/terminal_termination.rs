@@ -28,6 +28,7 @@ impl ApplicationRoot {
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub(super) fn finish_terminal_termination(
         &mut self,
         pane: PaneId,
@@ -38,10 +39,7 @@ impl ApplicationRoot {
             pane,
             terminal_tab,
         ));
-        #[cfg(target_os = "macos")]
         self.release_terminal_after_terminate(terminal_tab);
-        #[cfg(not(target_os = "macos"))]
-        let _ = terminal_tab;
         self.terminal_authorities.remove(&terminal_tab);
         self.pane_authorities.remove(&pane);
         if self
