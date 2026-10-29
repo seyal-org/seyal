@@ -459,8 +459,18 @@ final class RustDisplayBridge {
           let result = seyal_bridge_poll_for(handle)
           if result < 0 {
             // Level-trigger progress: EOF/disconnect must disarm this fd's
-            // sources and drop the dead client. Tab 1 stays up (do not stop()).
+            // sources. Tab 1 stays up (do not stop()).
             self.cancelAuxiliarySources(for: handle)
+            // Shell exit (-6): match primary drainReadyDisplayWork — publish
+            // final Block history / timeline while the client is still
+            // registered, then disconnect. Early disconnect dropped retained
+            // clear→exit bodies for an unfocused sibling Controller (#1379 /
+            // SPEC-009 §8.2.2).
+            if result == -6, seyal_bridge_select(handle) == 0 {
+              self.publishHistoryRanges()
+              self.onTimeline()
+              self.publishHistoryRanges()
+            }
             seyal_bridge_disconnect_handle(handle)
             _ = self.selectClient()
             self.publishCurrentFrame()

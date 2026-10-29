@@ -1593,6 +1593,31 @@ final class SeyalHostComponentTests: XCTestCase {
             hostText.contains("Keep timeline history for floor-hidden Blocks"),
             "floor omit must retain pre-clear historyRanges for shell-exit reveal"
         )
+        let bridgePath = sourceRoot.appendingPathComponent("RustDisplayBridge.swift")
+        let bridgeText = (try? String(contentsOf: bridgePath, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            bridgeText.contains("result == -6, seyal_bridge_select(handle) == 0"),
+            "auxiliary poll must select the ended Controller before history publish"
+        )
+        XCTAssertTrue(
+            bridgeText.contains("publishHistoryRanges()"),
+            "auxiliary shell-exit must publish history before disconnect_handle"
+        )
+        // Ensure disconnect stays after the -6 publish window (order gate).
+        if let exitRange = bridgeText.range(of: "result == -6, seyal_bridge_select(handle) == 0"),
+           let disconnectRange = bridgeText.range(
+            of: "seyal_bridge_disconnect_handle(handle)",
+            range: exitRange.upperBound..<bridgeText.endIndex
+           )
+        {
+            XCTAssertTrue(
+                bridgeText[exitRange.upperBound..<disconnectRange.lowerBound]
+                    .contains("publishHistoryRanges()"),
+                "auxiliary -6 must publishHistoryRanges before disconnect_handle"
+            )
+        } else {
+            XCTFail("auxiliary -6 publish-before-disconnect ordering markers missing")
+        }
     }
 
     @MainActor
