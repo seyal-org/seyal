@@ -39,7 +39,9 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_destroy(handle), 0)
         let theme = seyal_app_theme(0)
         XCTAssertNotEqual(theme.canvas, theme.text)
-        XCTAssertEqual(MemoryLayout<SeyalAppComposer>.size, 40)
+        XCTAssertEqual(MemoryLayout<SeyalAppComposer>.size, 56)
+        XCTAssertEqual(MemoryLayout<SeyalAppComposer>.offset(of: \.canvas_floor_block_id_lo), 40)
+        XCTAssertEqual(MemoryLayout<SeyalAppComposer>.offset(of: \.canvas_floor_block_id_hi), 48)
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 32)
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.revision), 0)
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.attachment_id_low), 8)
@@ -1585,7 +1587,11 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertTrue(
             hostText.contains("removeTranscriptRegions(except: retained)"),
-            "rebuildBlocks must prune historyRanges to the live Block id set"
+            "rebuildBlocks must prune historyRanges to the timeline Block id set"
+        )
+        XCTAssertTrue(
+            hostText.contains("Keep timeline history for floor-hidden Blocks"),
+            "floor omit must retain pre-clear historyRanges for shell-exit reveal"
         )
     }
 

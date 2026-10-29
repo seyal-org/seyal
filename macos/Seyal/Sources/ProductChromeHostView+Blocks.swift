@@ -62,6 +62,13 @@ extension ProductChromeHostView {
         var visibleIndex = 0
         for index in 0..<count {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
+            let blockID = row.id_lo
+            // Keep timeline history for floor-hidden Blocks so shell-exit can
+            // re-reveal retained bodies. Omitting the card must not prune
+            // historyRanges / pending history requests (#1379 clear→exit).
+            if blockID != 0 {
+                retained.insert(blockID)
+            }
             // Rust owns the clear canvas floor; Swift only omits cards at/below
             // it so `clear` leaves a fully empty live canvas (no clear card).
             if floorLo != 0 || floorHi != 0 {
@@ -76,7 +83,6 @@ extension ProductChromeHostView {
             let detail = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
             let promptRow = seyal_app_copy(pane.appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
-            let blockID = row.id_lo
             let lines = outputLineCount(projection: projection)
             let card = CommandBlockView(
                 prompt: prompt,
@@ -101,13 +107,14 @@ extension ProductChromeHostView {
             blocks.addArrangedSubview(card)
             if blockID != 0 {
                 blockCards[blockID] = card
-                retained.insert(blockID)
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
             }
         }
         pane.inputSurface.discardHistoryRequests(except: retained)
-        // Prune retained history to the live Block set so New shell / eviction
-        // cannot paint a prior execution's cells under a reused Block id.
+        // Prune retained history to the timeline Block set (including
+        // floor-hidden cards) so New shell / eviction cannot paint a prior
+        // execution's cells under a reused Block id, while clear→exit can
+        // still re-materialize pre-clear bodies.
         pane.inputSurface.removeTranscriptRegions(except: retained)
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
