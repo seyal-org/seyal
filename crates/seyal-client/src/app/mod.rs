@@ -27,6 +27,7 @@ mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
+mod terminal_termination;
 mod unpresented_apply;
 
 #[cfg(target_os = "macos")]

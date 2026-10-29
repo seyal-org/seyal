@@ -143,6 +143,7 @@ pub enum ShellAction {
         terminal_tab: TerminalTabId,
         execution: ExecutionId,
     },
+    UnbindTerminal(PaneId, TerminalTabId),
     /// Finalize removal only after the exact execution's terminate result succeeds.
     CloseTerminalTab {
         pane: PaneId,

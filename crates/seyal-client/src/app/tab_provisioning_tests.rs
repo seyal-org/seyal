@@ -505,7 +505,11 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
     assert!(root.snapshot().shell.tabs.iter().any(|item| item.id == tab));
     // Authority stays until TerminateExecutionResult; shell binding still present.
     assert_eq!(root.shell.pane_execution(pane).unwrap(), Some(execution));
-    assert_eq!(root.provisioning().recorded_execution(pane), None);
+    assert_eq!(
+        root.provisioning().recorded_execution(pane),
+        Some(execution),
+        "binding remains authoritative until Runtime confirms termination"
+    );
     assert_ne!(
         root.snapshot().eligibility,
         PresentationEligibility::Unbound

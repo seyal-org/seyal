@@ -267,8 +267,7 @@ impl ApplicationRoot {
         // even if attach forgot to seed (bootstrap create used connection id 1).
         self.seed_provisioning_request_floor_from_wire();
         let effects = self
-            .provisioning
-            .begin_explicit_terminate(bound.pane, bound.attachment)
+            .begin_bound_terminate(bound.pane, bound.execution, bound.attachment)
             .map_err(provisioning_app_error)?;
         debug_assert!(
             effects
@@ -516,13 +515,10 @@ impl ApplicationRoot {
             match effect {
                 ProvisioningEffect::Detach { .. } => {
                     if let (Some(pane), Some(terminal_tab)) = (pane, intent.terminal_tab) {
-                        if matches!(outcome, TerminateOutcome::TerminationRequested) {
-                            let _ = self.shell.apply(ShellAction::CloseTerminalTab {
-                                pane,
-                                terminal_tab,
-                                containment_generation: self.shell.containment_generation(),
-                            });
-                            self.finish_terminal_tab_close(pane, terminal_tab);
+                        if matches!(outcome, TerminateOutcome::TerminationRequested)
+                            && let Some(execution) = disposed_execution
+                        {
+                            self.finish_terminal_termination(pane, terminal_tab, execution);
                         }
                     } else if let Some(pane) = pane {
                         let _ = self.shell.release_execution(pane);

@@ -257,12 +257,6 @@ issue = 1381
 reason = "Session adoption and Runtime attachment reconciliation also register exact terminal-tab bindings under #1381 so portable selected-terminal authority follows the attached execution."
 
 [[cohesion_acknowledgement]]
-path = "macos/Seyal/Sources/PaneLayoutView.swift"
-acknowledged_loc = 706
-issue = 1381
-reason = "The existing Rust-projected pane layout owns its pane-local tab-strip host and per-pane accessibility identifiers under #1381; terminal identity and selection remain Rust-provided."
-
-[[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"
 acknowledged_loc = 833
 issue = 1220

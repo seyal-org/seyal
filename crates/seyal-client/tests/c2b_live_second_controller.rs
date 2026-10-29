@@ -100,7 +100,7 @@ fn poll_until(
     }
     let snapshot = root.snapshot();
     panic!(
-        "deadline exceeded waiting for CreateTab live bind: last_failure={:?}, app_error={:?}, outstanding={}, retries={}, tabs={}, focused_pane={:?}, panes={:?}",
+        "deadline exceeded waiting for CreateTab live bind: last_failure={:?}, app_error={:?}, outstanding={}, retries={}, tabs={}, focused_pane={:?}, panes={:?}, terminal_bindings={:?}, pane_intents={:?}",
         root.provisioning().last_failure(),
         snapshot.last_error,
         root.provisioning().has_outstanding_intent(),
@@ -108,6 +108,8 @@ fn poll_until(
         snapshot.shell.tabs.len(),
         snapshot.shell.focused_pane,
         snapshot.shell.panes.iter().map(|pane| (pane.id, pane.selected_terminal_tab, pane.execution, &pane.terminal_tabs)).collect::<Vec<_>>(),
+        snapshot.shell.panes.iter().flat_map(|pane| pane.terminal_tabs.iter().map(|terminal| (terminal.id, root.provisioning().terminal_execution(terminal.id)))).collect::<Vec<_>>(),
+        snapshot.shell.panes.iter().map(|pane| (pane.id, root.provisioning().pending_intent(pane.id).cloned())).collect::<Vec<_>>(),
     );
 }
 
@@ -251,14 +253,40 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
     root.apply(AppAction::CreateTab).expect("CreateTab");
     let second_pane = root.snapshot().shell.focused_pane;
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
-        root.provisioning()
-            .recorded_execution(second_pane)
-            .is_some()
+        root.snapshot().shell.panes.iter().any(|pane| {
+            pane.terminal_tabs.iter().any(|terminal| {
+                root.provisioning()
+                    .terminal_execution(terminal.id)
+                    .is_some()
+            })
+        })
     });
+    let second_terminal = root
+        .snapshot()
+        .shell
+        .panes
+        .iter()
+        .find(|pane| pane.id == second_pane)
+        .and_then(|pane| pane.selected_terminal_tab)
+        .expect("selected terminal");
     let second_execution = root
         .provisioning()
-        .recorded_execution(second_pane)
-        .expect("second pane bound");
+        .terminal_execution(second_terminal)
+        .expect("second terminal bound");
+    assert_eq!(
+        root.snapshot()
+            .shell
+            .panes
+            .iter()
+            .find(|pane| pane.id == second_pane)
+            .and_then(|pane| pane
+                .terminal_tabs
+                .iter()
+                .find(|terminal| terminal.id == second_terminal))
+            .and_then(|terminal| terminal.execution),
+        Some(second_execution),
+        "ShellState must expose the execution bound to the selected terminal"
+    );
     assert_ne!(second_execution, first_execution);
 
     root.apply(AppAction::TerminateExecution {
@@ -267,7 +295,7 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
     .expect("P4 terminate on focused second-tab Controller");
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         root.provisioning()
-            .recorded_execution(second_pane)
+            .terminal_execution(second_terminal)
             .is_none()
             && root.extra_controller_client_count() == 0
     });

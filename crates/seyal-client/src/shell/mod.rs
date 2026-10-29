@@ -517,9 +517,7 @@ impl ShellState {
         std::mem::take(&mut self.last_removed_tab_panes)
     }
 
-    /// Clear a Pane→execution binding without removing the Pane (explicit
-    /// terminate). Presentation close uses [`ShellAction::ClosePane`] /
-    /// [`ShellAction::CloseTab`] instead.
+    /// Clear a Pane's selected execution without removing its chrome.
     pub fn release_execution(&mut self, pane: PaneId) -> Result<Option<ExecutionId>, ShellError> {
         let pane = self.pane_mut(pane)?;
         Ok(pane
@@ -793,6 +791,7 @@ impl ShellState {
                 terminal_tab,
                 execution,
             } => self.bind_terminal_execution(pane, terminal_tab, execution),
+            ShellAction::UnbindTerminal(pane, terminal_tab) => self.unbind(pane, terminal_tab),
             ShellAction::CloseTerminalTab {
                 pane,
                 terminal_tab,

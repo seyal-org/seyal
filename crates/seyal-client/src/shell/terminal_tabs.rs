@@ -91,6 +91,21 @@ impl ShellState {
         Ok(())
     }
 
+    pub(super) fn unbind(
+        &mut self,
+        pane_id: PaneId,
+        terminal_tab: TerminalTabId,
+    ) -> Result<(), ShellError> {
+        let pane = self.pane_mut(pane_id)?;
+        let terminal = pane
+            .terminal_tabs
+            .iter_mut()
+            .find(|terminal| terminal.id == terminal_tab)
+            .ok_or(ShellError::UnknownTerminalTab)?;
+        terminal.execution = None;
+        Ok(())
+    }
+
     pub(super) fn close_terminal_tab(
         &mut self,
         pane_id: PaneId,

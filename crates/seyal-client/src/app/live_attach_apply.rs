@@ -499,6 +499,32 @@ impl ApplicationRoot {
         }
     }
 
+    pub(super) fn release_terminal_after_terminate(&mut self, terminal_tab: TerminalTabId) {
+        let raw = self.terminal_client_raws.remove(&terminal_tab);
+        if let Some(handle) = self.extra_terminal_clients.remove(&terminal_tab) {
+            let handle_raw = handle.raw();
+            if let Some(mut client) = crate::ffi::unregister_client(handle_raw) {
+                client.request_bounded_detach();
+            }
+            self.pane_client_raws
+                .retain(|_, value| *value != handle_raw);
+        } else if let Some(raw) = raw {
+            self.pane_client_raws.retain(|_, value| *value != raw);
+            if self
+                .client_handle
+                .as_ref()
+                .is_some_and(|handle| handle.raw() == raw)
+            {
+                let _ = crate::ffi::with_client_mut(raw, |client| {
+                    client.release_controller_keep_connection()
+                });
+            }
+        }
+        if let Some(raw) = raw {
+            self.terminal_client_raws.retain(|_, value| *value != raw);
+        }
+    }
+
     /// Presentation close releases the closed execution's Controller (ADR-018
     /// §3.2) and keeps a remaining pane's socket for create admission.
     pub(super) fn release_presentation_controller(
