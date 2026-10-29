@@ -1,6 +1,6 @@
 //! ADR-018 §2.2 / §6 window and tab actions (W2a create/move/select).
 
-use seyal_core::{TabId, WindowId, WorkspaceId};
+use seyal_core::{TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use super::workspace::{Pane, Tab, Window};
 use super::{CycleDirection, ShellAction, ShellError, ShellNativeEffect, ShellState};
@@ -351,10 +351,15 @@ impl ShellState {
     fn new_tab_record(&mut self) -> Tab {
         let ordinal = self.next_tab_ordinal;
         self.next_tab_ordinal = self.next_tab_ordinal.saturating_add(1);
+        let terminal_id = TerminalTabId::new();
         let pane = Pane {
             id: seyal_core::PaneId::new(),
             title: "Pane 1".to_owned(),
-            execution: None,
+            terminal_tabs: vec![super::workspace::TerminalTab {
+                id: terminal_id,
+                execution: None,
+            }],
+            selected_terminal_tab: Some(terminal_id),
             allows_implicit_execution_bootstrap: false,
             presentation_mode: crate::presentation::PresentationMode::Flow,
         };

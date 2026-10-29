@@ -2,7 +2,9 @@
 
 use std::{slice, str, time::Duration};
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{
+    AttachmentId, BlockId, ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId,
+};
 use seyal_protocol::framing::{CommandBlock, CommandBlockState};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
@@ -405,6 +407,22 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         75 => Ok(AppAction::EqualizeTab),
         76 => Ok(AppAction::CloseWindow {
             id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            containment_generation: action.target_generation,
+        }),
+        77 => Ok(AppAction::NewTerminal),
+        78 => Ok(AppAction::SelectTerminalTab {
+            pane: fence.pane,
+            terminal_tab: TerminalTabId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        79 => Ok(AppAction::CloseTerminalTab {
+            pane: fence.pane,
+            terminal_tab: TerminalTabId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),

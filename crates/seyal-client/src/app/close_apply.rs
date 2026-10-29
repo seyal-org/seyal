@@ -7,9 +7,79 @@ use super::{
 use crate::chrome::ChromeAction;
 use crate::provisioning::ProvisioningEffect;
 use crate::shell::ShellAction;
-use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 impl ApplicationRoot {
+    fn close_terminal_tab(
+        &mut self,
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        containment_generation: u64,
+    ) -> Result<(), AppError> {
+        let execution = self
+            .shell
+            .terminal_execution(pane, terminal_tab)
+            .map_err(|_| AppError::UnknownPane)?;
+        if let Some(execution) = execution {
+            let authority = self
+                .terminal_authorities
+                .get(&terminal_tab)
+                .copied()
+                .filter(|authority| authority.execution == execution && authority.controller)
+                .ok_or(AppError::UnboundUnauthorized)?;
+            let effects = self
+                .provisioning
+                .begin_terminal_terminate(pane, terminal_tab, authority.attachment)
+                .map_err(|_| AppError::ProvisioningRejected)?;
+            self.dispatch_wire_effects(
+                effects,
+                WireDispatchContext {
+                    workspace_id: 0,
+                    launch_profile: 0,
+                },
+            )?;
+            return Ok(());
+        }
+
+        self.provisioning.mark_terminal_intent_dead(terminal_tab);
+        self.shell
+            .apply(ShellAction::CloseTerminalTab {
+                pane,
+                terminal_tab,
+                containment_generation,
+            })
+            .map_err(close_pane_error)?;
+        self.finish_terminal_tab_close(pane, terminal_tab);
+        Ok(())
+    }
+
+    pub(super) fn finish_terminal_tab_close(&mut self, pane: PaneId, terminal_tab: TerminalTabId) {
+        #[cfg(target_os = "macos")]
+        self.unregister_extra_terminal_client(terminal_tab);
+        self.terminal_authorities.remove(&terminal_tab);
+        if let Ok(Some(selected)) = self.shell.selected_terminal_tab(pane) {
+            let _ = self.provisioning.select_terminal_binding(pane, selected);
+            if let Some(authority) = self.terminal_authorities.get(&selected).copied() {
+                self.pane_authorities.insert(pane, authority);
+            } else {
+                self.pane_authorities.remove(&pane);
+            }
+            #[cfg(target_os = "macos")]
+            if let Some(raw) = self.terminal_client_raws.get(&selected).copied() {
+                self.pane_client_raws.insert(pane, raw);
+            } else {
+                self.pane_client_raws.remove(&pane);
+            }
+        } else {
+            self.pane_authorities.remove(&pane);
+            #[cfg(target_os = "macos")]
+            self.pane_client_raws.remove(&pane);
+        }
+        if self.shell.snapshot().focused_pane == pane {
+            self.activate_focused_pane_authority();
+        }
+    }
+
     pub(super) fn apply_close(&mut self, action: AppAction) -> Result<(), AppError> {
         match action {
             AppAction::CloseWindow {
@@ -24,6 +94,11 @@ impl ApplicationRoot {
                 id,
                 containment_generation,
             } => self.close_pane(id, containment_generation),
+            AppAction::CloseTerminalTab {
+                pane,
+                terminal_tab,
+                containment_generation,
+            } => self.close_terminal_tab(pane, terminal_tab, containment_generation),
             _ => unreachable!("apply_close receives only structural close actions"),
         }
     }
@@ -116,22 +191,40 @@ impl ApplicationRoot {
         workspace: WorkspaceId,
     ) -> Result<(), AppError> {
         let mut effects = Vec::new();
+        let released = self.shell.take_released_executions();
         for pane in panes {
-            let released = self.provisioning.recorded_execution(pane);
-            let pane_effects = self.provisioning.on_bound_pane_closed(pane);
-            debug_assert!(
-                !pane_effects
-                    .iter()
-                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                "presentation removal must not terminate a bound execution"
-            );
-            effects.extend(pane_effects);
-            #[cfg(target_os = "macos")]
-            self.release_presentation_controller(pane, released);
-            self.clear_authority_for_pane(pane);
-            if let Some(execution) = released {
-                self.record_unpresented(execution, workspace)?;
+            let mut released_any_terminal = false;
+            for (_, terminal_tab, execution) in released
+                .iter()
+                .filter(|(owner_pane, _, _)| *owner_pane == pane)
+            {
+                released_any_terminal = true;
+                effects.extend(
+                    self.provisioning
+                        .on_bound_terminal_pane_closed(pane, *terminal_tab),
+                );
+                #[cfg(target_os = "macos")]
+                self.release_terminal_presentation_controller(*terminal_tab, *execution);
+                self.record_unpresented(*execution, workspace)?;
             }
+            self.provisioning.mark_terminal_pane_intents_dead(pane);
+            if !released_any_terminal {
+                let execution = self.provisioning.recorded_execution(pane);
+                let pane_effects = self.provisioning.on_bound_pane_closed(pane);
+                debug_assert!(
+                    !pane_effects
+                        .iter()
+                        .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
+                    "presentation removal must not terminate a bound execution"
+                );
+                effects.extend(pane_effects);
+                #[cfg(target_os = "macos")]
+                self.release_presentation_controller(pane, execution);
+                if let Some(execution) = execution {
+                    self.record_unpresented(execution, workspace)?;
+                }
+            }
+            self.clear_authority_for_pane(pane);
         }
         self.dispatch_wire_effects(
             effects,

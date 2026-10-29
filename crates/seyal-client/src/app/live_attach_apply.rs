@@ -7,7 +7,7 @@
 use std::sync::mpsc;
 use std::thread;
 
-use seyal_core::{ExecutionId, PaneId};
+use seyal_core::{ExecutionId, PaneId, TerminalTabId};
 use seyal_runtime::local_ipc::framing::Role;
 
 use super::{AppError, ApplicationRoot, BindingEvidence, PaneAuthority};
@@ -19,6 +19,7 @@ pub(super) struct PendingLiveAttach {
     pub owner: ConnectionOwner,
     pub request_id: u64,
     pub pane: Option<PaneId>,
+    pub terminal_tab: Option<TerminalTabId>,
     pub rx: mpsc::Receiver<Result<LocalDisplayClient, ClientError>>,
 }
 
@@ -63,6 +64,7 @@ impl ApplicationRoot {
             .provisioning
             .pending_attach_pane_by_request_id(request_id)
             .ok_or(AppError::ProvisioningRejected)?;
+        let terminal_tab = self.provisioning.pending_terminal_by_request_id(request_id);
 
         if self.inject_live_attach_failures > 0 {
             self.inject_live_attach_failures -= 1;
@@ -117,6 +119,7 @@ impl ApplicationRoot {
             owner,
             request_id,
             pane,
+            terminal_tab,
             rx,
         });
         Ok(())
@@ -137,7 +140,12 @@ impl ApplicationRoot {
         let completed = match result {
             Ok(client) => {
                 if let Some(pane) = pending.pane {
-                    self.complete_live_controller_attach(pane, pending.request_id, client)
+                    self.complete_live_controller_attach(
+                        pane,
+                        pending.terminal_tab,
+                        pending.request_id,
+                        client,
+                    )
                 } else {
                     self.complete_dispose_controller_attach(
                         pending.owner,
@@ -171,6 +179,7 @@ impl ApplicationRoot {
     fn complete_live_controller_attach(
         &mut self,
         pane: PaneId,
+        terminal_tab: Option<TerminalTabId>,
         request_id: u64,
         client: LocalDisplayClient,
     ) -> Result<(), AppError> {
@@ -187,18 +196,40 @@ impl ApplicationRoot {
             Err(()) => return Err(AppError::AlreadyBound),
         };
         let raw = registered.raw();
-        if self.client_handle.is_none() {
+        if let Some(terminal_tab) = terminal_tab {
+            if self.client_handle.is_none() {
+                self.client_handle = Some(registered);
+            } else {
+                self.extra_terminal_clients.insert(terminal_tab, registered);
+            }
+            self.terminal_client_raws.insert(terminal_tab, raw);
+            if self.shell.selected_terminal_tab(pane).ok().flatten() == Some(terminal_tab) {
+                self.pane_client_raws.insert(pane, raw);
+            }
+        } else if self.client_handle.is_none() {
             self.client_handle = Some(registered);
         } else {
             self.extra_pane_clients.insert(pane, registered);
         }
-        self.pane_client_raws.insert(pane, raw);
+        if terminal_tab.is_none() {
+            self.pane_client_raws.insert(pane, raw);
+            if let Ok(Some(terminal)) = self.shell.selected_terminal_tab(pane) {
+                self.terminal_client_raws.insert(terminal, raw);
+            }
+        }
         self.remember_pane_runtime(pane, runtime_id);
 
         let attach = self.complete_create_attach_and_bind(request_id, evidence.attachment);
         match attach {
             Ok(execution) => {
-                if self.shell.pane_execution(pane).ok().flatten() == Some(execution) {
+                if let Some(terminal_tab) = terminal_tab {
+                    if let Err(error) =
+                        self.install_terminal_authority(pane, terminal_tab, evidence)
+                    {
+                        self.unregister_extra_terminal_client(terminal_tab);
+                        return Err(error);
+                    }
+                } else if self.shell.pane_execution(pane).ok().flatten() == Some(execution) {
                     if let Err(error) = self.install_pane_authority(pane, evidence) {
                         self.unregister_extra_pane_client(pane);
                         return Err(error);
@@ -293,10 +324,30 @@ impl ApplicationRoot {
         pane: PaneId,
         evidence: BindingEvidence,
     ) -> Result<(), AppError> {
+        let terminal_tab = self
+            .shell
+            .selected_terminal_tab(pane)
+            .map_err(|_| AppError::UnknownPane)?
+            .ok_or(AppError::UnboundUnauthorized)?;
+        self.install_terminal_authority(pane, terminal_tab, evidence)
+    }
+
+    pub(super) fn install_terminal_authority(
+        &mut self,
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        evidence: BindingEvidence,
+    ) -> Result<(), AppError> {
         if evidence.pty_generation == 0 {
             return Err(AppError::ZeroPtyGeneration);
         }
-        if self.shell.pane_execution(pane).ok().flatten() != Some(evidence.execution) {
+        if self
+            .shell
+            .terminal_execution(pane, terminal_tab)
+            .ok()
+            .flatten()
+            != Some(evidence.execution)
+        {
             return Err(AppError::StaleExecution);
         }
         self.bind_pane_recovery(pane, evidence.execution);
@@ -308,6 +359,10 @@ impl ApplicationRoot {
             controller: evidence.controller,
             pty_generation: evidence.pty_generation,
         };
+        self.terminal_authorities.insert(terminal_tab, authority);
+        if self.shell.selected_terminal_tab(pane).ok().flatten() != Some(terminal_tab) {
+            return Ok(());
+        }
         self.pane_authorities.insert(pane, authority);
         if self.shell.snapshot().focused_pane == pane {
             let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
@@ -381,6 +436,95 @@ impl ApplicationRoot {
         }
     }
 
+    pub(super) fn unregister_extra_terminal_client(&mut self, terminal_tab: TerminalTabId) {
+        let raw = self.terminal_client_raws.remove(&terminal_tab);
+        if let Some(handle) = self.extra_terminal_clients.remove(&terminal_tab) {
+            let handle_raw = handle.raw();
+            if let Some(mut client) = crate::ffi::unregister_client(handle_raw) {
+                client.request_bounded_detach();
+            }
+            self.pane_client_raws
+                .retain(|_, value| *value != handle_raw);
+        }
+        if let Some(raw) = raw
+            && self
+                .client_handle
+                .as_ref()
+                .is_some_and(|handle| handle.raw() == raw)
+        {
+            if let Some(mut client) = crate::ffi::unregister_client(raw) {
+                client.request_bounded_detach();
+            }
+            self.client_handle = self
+                .extra_terminal_clients
+                .keys()
+                .next()
+                .copied()
+                .and_then(|sibling| self.extra_terminal_clients.remove(&sibling));
+            if let Some(handle) = self.client_handle.as_ref() {
+                let promoted_raw = handle.raw();
+                if let Some(sibling) = self
+                    .terminal_client_raws
+                    .iter()
+                    .find_map(|(id, value)| (*value == promoted_raw).then_some(*id))
+                {
+                    self.extra_terminal_clients.remove(&sibling);
+                    if let Some(authority) = self.terminal_authorities.get(&sibling)
+                        && self
+                            .shell
+                            .selected_terminal_tab(authority.pane)
+                            .ok()
+                            .flatten()
+                            == Some(sibling)
+                    {
+                        self.pane_client_raws.insert(authority.pane, promoted_raw);
+                    }
+                }
+            }
+        }
+        self.terminal_authorities.remove(&terminal_tab);
+    }
+
+    pub(super) fn release_terminal_presentation_controller(
+        &mut self,
+        terminal_tab: TerminalTabId,
+        execution: ExecutionId,
+    ) {
+        self.unregister_extra_terminal_client(terminal_tab);
+        if !self.execution_is_presented(execution)
+            && let Some(client) = self.wire_client.as_mut()
+            && client.execution_id() == execution
+        {
+            client.release_controller_keep_connection();
+        }
+    }
+
+    pub(super) fn release_terminal_after_terminate(&mut self, terminal_tab: TerminalTabId) {
+        let raw = self.terminal_client_raws.remove(&terminal_tab);
+        if let Some(handle) = self.extra_terminal_clients.remove(&terminal_tab) {
+            let handle_raw = handle.raw();
+            if let Some(mut client) = crate::ffi::unregister_client(handle_raw) {
+                client.request_bounded_detach();
+            }
+            self.pane_client_raws
+                .retain(|_, value| *value != handle_raw);
+        } else if let Some(raw) = raw {
+            self.pane_client_raws.retain(|_, value| *value != raw);
+            if self
+                .client_handle
+                .as_ref()
+                .is_some_and(|handle| handle.raw() == raw)
+            {
+                let _ = crate::ffi::with_client_mut(raw, |client| {
+                    client.release_controller_keep_connection()
+                });
+            }
+        }
+        if let Some(raw) = raw {
+            self.terminal_client_raws.retain(|_, value| *value != raw);
+        }
+    }
+
     /// Presentation close releases the closed execution's Controller (ADR-018
     /// §3.2) and keeps a remaining pane's socket for create admission.
     pub(super) fn release_presentation_controller(
@@ -420,9 +564,11 @@ impl ApplicationRoot {
     fn execution_is_presented(&self, execution: ExecutionId) -> bool {
         self.shell.snapshot().windows.iter().any(|window| {
             window.tabs.iter().any(|tab| {
-                tab.panes
-                    .iter()
-                    .any(|pane| pane.execution == Some(execution))
+                tab.panes.iter().any(|pane| {
+                    pane.terminal_tabs
+                        .iter()
+                        .any(|terminal| terminal.execution == Some(execution))
+                })
             })
         })
     }

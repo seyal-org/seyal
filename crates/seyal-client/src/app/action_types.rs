@@ -1,6 +1,7 @@
 //! Public application actions accepted by the portable product-state root.
 
 use super::*;
+use seyal_core::TerminalTabId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AppAction {
@@ -111,6 +112,16 @@ pub enum AppAction {
         id: TabId,
     },
     CreateTab,
+    NewTerminal,
+    SelectTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+    },
+    CloseTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        containment_generation: u64,
+    },
     SelectWindow {
         id: WindowId,
     },
