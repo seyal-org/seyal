@@ -100,6 +100,45 @@ impl ApplicationRoot {
             .map_err(chrome_error)
     }
 
+    /// Rerun (#1010): load a finished focused-Pane Block's Runtime-published
+    /// command as the draft. Fails closed, leaving the draft untouched, unless
+    /// the composer is Available (the same gate `block_actions` projects) and
+    /// the draft is empty.
+    pub(super) fn rerun_block(
+        &mut self,
+        fence: AppFence,
+        id: BlockId,
+        composer_epoch: u64,
+    ) -> Result<(), AppError> {
+        self.require_fence(fence)?;
+        let block = self
+            .focused_blocks()
+            .into_iter()
+            .find(|block| block.id == id)
+            .ok_or(AppError::UnknownBlock)?;
+        if block.state == crate::composer::BlockPresentationState::Running {
+            return Err(AppError::BlockRunning);
+        }
+        let snap = self
+            .composer
+            .snapshot(fence.pane)
+            .map_err(|_| AppError::ComposerUnavailable)?;
+        if snap.mode != crate::composer::ComposerMode::Available {
+            return Err(AppError::ComposerUnavailable);
+        }
+        if !snap.draft.is_empty() {
+            return Err(AppError::ComposerDraftOccupied);
+        }
+        self.composer
+            .apply(ComposerAction::SetDraft {
+                pane: fence.pane,
+                text: block.command,
+                epoch: composer_epoch,
+            })
+            .map(|_| ())
+            .map_err(composer_error)
+    }
+
     /// History recall is fenced like every other pane-sensitive composer
     /// action: stale Pane/execution/attachment identity fails closed.
     pub(super) fn composer_history(

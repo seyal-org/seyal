@@ -190,7 +190,16 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_EQUALIZE_FOCUSED = 74,
     SEYAL_APP_ACTION_EQUALIZE_TAB = 75,
     /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
-    SEYAL_APP_ACTION_CLOSE_WINDOW = 76
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 76,
+    /*
+     * Block Rerun (#1010). target_execution_lo/hi = BlockId,
+     * target_generation = composer epoch. Rust loads that focused-Pane
+     * Block's command as the composer draft only when the composer is
+     * Available and the draft is empty; the host then submits through the
+     * ordinary composer path. Error 30 = UnknownBlock, 63 = BlockRunning,
+     * 64 = ComposerUnavailable, 65 = ComposerDraftOccupied.
+     */
+    SEYAL_APP_ACTION_RERUN_BLOCK = 77
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
@@ -405,6 +414,28 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_BLOCK_STATE_MASK 7u
 #define SEYAL_APP_BLOCK_SELECTED 8u
 
+/*
+ * Block quick actions (#1010), from seyal_app_block_action_row. Rust owns the
+ * action set, order, labels (title), shortcut hints (detail, e.g. "cmd+c")
+ * and availability; the host only draws them and routes `kind` back.
+ * row.kind = SEYAL_APP_BLOCK_ACTION_*; row.flags = ENABLED bit plus placement
+ * ((flags & PLACEMENT_MASK) >> PLACEMENT_SHIFT) = SEAM / COPY_MENU / MORE_MENU.
+ */
+#define SEYAL_APP_BLOCK_ACTION_COPY_MENU 1u
+#define SEYAL_APP_BLOCK_ACTION_COPY_COMMAND 2u
+#define SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT 3u
+#define SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT 4u
+#define SEYAL_APP_BLOCK_ACTION_RERUN 5u
+#define SEYAL_APP_BLOCK_ACTION_MORE_MENU 6u
+#define SEYAL_APP_BLOCK_ACTION_INSPECT 7u
+#define SEYAL_APP_BLOCK_ACTION_ENABLED 1u
+#define SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT 4u
+#define SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK 0x30u
+#define SEYAL_APP_BLOCK_ACTION_SEAM 0u
+#define SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU 1u
+#define SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU 2u
+
+
 typedef struct SeyalAppComposer {
     uint16_t version;
     uint16_t size;
@@ -472,8 +503,17 @@ typedef struct SeyalAppTheme {
     uint32_t text;
     uint32_t accent;
     uint16_t appearance;
-    uint16_t reserved;
+    /* SEYAL_APP_THEME_* flags (#1010). */
+    uint16_t flags;
+    /* Block Component roles (#1010), packed RGBA like the fields above. */
+    uint32_t block_focus;
+    uint32_t block_border_rest;
+    uint32_t block_border_hover;
+    uint32_t success;
+    uint32_t danger;
 } SeyalAppTheme;
+
+#define SEYAL_APP_THEME_ALLOWS_MOTION 1u
 
 /*
  * SeyalAppShell.flags: whether CREATE_TAB/SPLIT_FOCUSED would currently be
@@ -967,7 +1007,19 @@ typedef struct SeyalAppBlockProjection {
 SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
-SeyalAppTheme seyal_app_theme(uint16_t appearance);
+SeyalAppTheme seyal_app_theme(uint16_t appearance, uint16_t accessibility_flags);
+
+/*
+ * Block quick-action rows (#1010). See SEYAL_APP_BLOCK_ACTION_* above.
+ */
+uint32_t seyal_app_block_action_count(uint64_t handle, uint32_t block_index);
+SeyalAppRow seyal_app_block_action_row(uint64_t handle, uint32_t block_index, uint32_t action_index);
+
+/*
+ * Request a Rust-owned Block pasteboard copy. kind = SEYAL_APP_BLOCK_ACTION_COPY_*.
+ * Final text arrives via seyal_bridge_take_block_copy.
+ */
+int32_t seyal_app_request_block_copy(uint64_t handle, uint32_t block_index, uint16_t kind);
 
 /*
  * Resolved visual snapshot from Rust cold TOML/theme authority (#993 / ADR-015).

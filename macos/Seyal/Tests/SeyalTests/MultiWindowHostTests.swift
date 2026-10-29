@@ -223,9 +223,11 @@ final class MultiWindowHostTests: XCTestCase {
         for case let file as URL in enumerator where file.pathExtension == "swift" {
             let name = file.lastPathComponent
             // Input surfaces may implement keyDown for terminal bytes; product
-            // window shortcuts must not.
+            // window shortcuts must not. A focused Block card handles only
+            // Space/Return element activation, routed to Rust SelectBlock (#1010).
             if name.contains("Metal") || name.contains("Composer") || name.contains("Interactive")
                 || name.contains("CommandPalette") || name.contains("History")
+                || name.contains("CommandBlock")
             {
                 continue
             }

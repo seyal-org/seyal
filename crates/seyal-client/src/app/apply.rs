@@ -122,6 +122,11 @@ impl ApplicationRoot {
                 attention,
             } => self.replace_chrome(fence, agents, attention),
             AppAction::SelectBlock { fence, id } => self.select_block(fence, id),
+            AppAction::RerunBlock {
+                fence,
+                id,
+                composer_epoch,
+            } => self.rerun_block(fence, id, composer_epoch),
             AppAction::ClearBlockSelection { fence } => {
                 self.require_fence(fence)?;
                 let shell = self.shell.snapshot();

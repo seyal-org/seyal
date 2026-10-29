@@ -168,22 +168,24 @@ impl LocalDisplayClient {
                     MessageType::HistoryRangeSnapshot => {
                         let snapshot = HistoryRangeSnapshot::decode(&frame[HEADER_LEN..])
                             .map_err(|_| ClientError::Protocol)?;
-                        let Some((expected_block, _start, _end)) =
-                            self.history_requests.get(&snapshot.request_id).copied()
-                        else {
-                            continue;
-                        };
-                        if snapshot.block_id == 0 || snapshot.request_id == 0 {
-                            continue;
-                        }
-                        if snapshot.block_id != expected_block {
-                            continue;
-                        }
+                        // Always fall through to read_offset advance. A purged,
+                        // superseded, zero-id, or mismatched reply must not
+                        // re-enter an unbounded hot loop (#1010).
+                        let expected = self
+                            .history_requests
+                            .get(&snapshot.request_id)
+                            .copied()
+                            .is_some_and(|(expected_block, _, _)| {
+                                snapshot.block_id != 0
+                                    && snapshot.request_id != 0
+                                    && snapshot.block_id == expected_block
+                            });
                         let key = (snapshot.block_id, snapshot.request_id);
-                        if self
-                            .history_ranges
-                            .get(&key)
-                            .is_none_or(|old| old.revision <= snapshot.revision)
+                        if expected
+                            && self
+                                .history_ranges
+                                .get(&key)
+                                .is_none_or(|old| old.revision <= snapshot.revision)
                         {
                             if self.history_ranges.len() >= 32
                                 && let Some(key) = self.history_ranges.keys().next().copied()
@@ -307,6 +309,9 @@ impl LocalDisplayClient {
         }
 
         self.compact_buffer();
+        // Block-copy replies may arrive without a display commit; always try
+        // to drain a pending pasteboard accumulation after the read turn.
+        self.advance_block_copy()?;
         metadata_changed |= self.drop_unpaired_viewport_line_ids();
         if !committed_any && !metadata_changed {
             return Ok(None);

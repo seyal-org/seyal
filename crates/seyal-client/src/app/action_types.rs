@@ -287,6 +287,13 @@ pub enum AppAction {
     ClearBlockSelection {
         fence: AppFence,
     },
+    /// Load a focused-Pane Block's command as the composer draft so the host
+    /// submits it through the ordinary composer path (#1010 Rerun).
+    RerunBlock {
+        fence: AppFence,
+        id: BlockId,
+        composer_epoch: u64,
+    },
 }
 
 /// Typed native window inputs (ADR-018 §2.3). `BecameKey` commits the native

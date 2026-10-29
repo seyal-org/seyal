@@ -248,6 +248,7 @@ extension RustDisplayBridge {
       let result = seyal_bridge_poll()
       runtimeBlockMetadata = currentBlockMetadata()
       publishHistoryRanges()
+      publishBlockCopy()
       publishComposerResult()
       publishComposerStatus()
       if let text = copiedText() {

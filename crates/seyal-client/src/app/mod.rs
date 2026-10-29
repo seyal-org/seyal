@@ -59,6 +59,8 @@ mod tab_provisioning_tests;
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
+#[cfg(test)]
+mod block_rerun_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
@@ -171,6 +173,12 @@ pub enum AppError {
     ExecutionNotUnpresented,
     /// Attachment delivery suspend/resume failed. ABI 62.
     DeliveryControlFailed,
+    /// Block Rerun while the Block is still running. ABI 63.
+    BlockRunning,
+    /// Block Rerun while the composer is not Available. ABI 64.
+    ComposerUnavailable,
+    /// Block Rerun while the composer draft is non-empty. ABI 65.
+    ComposerDraftOccupied,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -492,6 +500,10 @@ impl ApplicationRoot {
             return false;
         };
         crate::ffi::with_client_mut(raw, |client| client.poll_prepare().is_ok()).unwrap_or(false)
+    }
+
+    pub fn snapshot_generation(&self) -> u64 {
+        self.snapshot_generation
     }
 
     /// R8.4: clear chord prefix without dispatch and without PTY bytes.

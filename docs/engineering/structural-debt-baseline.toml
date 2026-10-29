@@ -72,7 +72,7 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1084
+ceiling_loc = 1076
 issue = 1123
 responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, and #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs."
 
@@ -246,9 +246,9 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 812
-issue = 1219
-reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, #1144 adds the ActivationFailed event, #1219 adds PT5 zoom/swap/move/directional/equalize kinds, and the window-stack merge places CLOSE_WINDOW after those codes without splitting the ABI table."
+acknowledged_loc = 821
+issue = 1010
+reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, #1144 adds the ActivationFailed event, #1219 adds PT5 kinds, the window-stack merge places CLOSE_WINDOW (76), and #1010 adds only the RerunBlock (77) decode arm without splitting the ABI table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"
@@ -261,3 +261,10 @@ path = "macos/Seyal/Sources/MultiWindowHostController.swift"
 acknowledged_loc = 769
 issue = 1158
 reason = "The macOS host stays one AppKit adapter. #1158 adds CloseWindow forwarding, deferred AppKit destruction, Dock reopen, and hierarchical close on the activation and resize host already owned here. The W5 occlusion-hidden forwarding was restored by this landing."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/local/mod.rs"
+acknowledged_loc = 495
+issue = 1010
+reason = "LocalDisplayClient stays one attach/poll client; #1123 adds bounded detach; #1220 delivery fields; #1010 adds Block-copy state fields, history_range_text, and post-read advance_block_copy. Copy accumulation lives in local/block_copy.rs and text building in history_text.rs."
+

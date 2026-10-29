@@ -1,6 +1,7 @@
 //! Versioned one-Pane application-root C ABI. Focused siblings keep each
 //! responsibility reviewable without changing published symbols.
 
+mod block_actions;
 mod block_projection;
 mod decode;
 mod encode;
@@ -33,10 +34,14 @@ use super::allocate_handle;
 
 use decode::decode_action;
 use encode::{
-    chrome_visibility_flags, encode_accessibility, encode_block_rows, encode_chrome_rows,
-    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot,
+    chrome_visibility_flags, encode_accessibility, encode_chrome_rows, encode_history_rows,
+    encode_palette_rows, encode_shell_rows, encode_snapshot,
 };
 
+pub use block_actions::{
+    seyal_app_block_action_count, seyal_app_block_action_row, seyal_app_block_row,
+    seyal_app_request_block_copy,
+};
 pub use block_projection::seyal_app_block_projection;
 pub(crate) use loss::note_application_roots_client_loss;
 pub use pane_region::*;
@@ -293,6 +298,8 @@ pub(super) struct AppHandle {
     shell_rows: Vec<SeyalAppRow>,
     chrome_rows: Vec<SeyalAppRow>,
     block_rows: Vec<SeyalAppRow>,
+    /// Block quick-action rows (#1010), encoded with `block_rows` per generation.
+    block_actions: block_actions::BlockActionRows,
     history_rows: Vec<SeyalAppRow>,
     palette_rows: Vec<SeyalAppRow>,
     pub(super) window_scratch: window::WindowEncodeScratch,
@@ -391,6 +398,7 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 shell_rows: Vec::new(),
                 chrome_rows: Vec::new(),
                 block_rows: Vec::new(),
+                block_actions: block_actions::BlockActionRows::default(),
                 history_rows: Vec::new(),
                 palette_rows: Vec::new(),
                 window_scratch: window::WindowEncodeScratch::new(),
@@ -798,22 +806,6 @@ pub extern "C" fn seyal_app_chrome_row(handle: u64, kind: u16, index: u32) -> Se
             .iter()
             .copied()
             .find(|row| row.kind == kind && row.reserved == index)
-            .unwrap_or_else(SeyalAppRow::empty)
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_block_row(handle: u64, index: u32) -> SeyalAppRow {
-    APPS.with(|apps| {
-        let mut apps = apps.borrow_mut();
-        let Some(state) = apps.get_mut(&handle) else {
-            return SeyalAppRow::empty();
-        };
-        encode_block_rows(state);
-        state
-            .block_rows
-            .get(index as usize)
-            .copied()
             .unwrap_or_else(SeyalAppRow::empty)
     })
 }

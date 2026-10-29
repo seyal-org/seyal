@@ -68,5 +68,9 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::CrossWorkspaceAdopt => 60,
         AppError::ExecutionNotUnpresented => 61,
         AppError::DeliveryControlFailed => 62,
+        // #1010 Block Rerun (after window-stack delivery errors).
+        AppError::BlockRunning => 63,
+        AppError::ComposerUnavailable => 64,
+        AppError::ComposerDraftOccupied => 65,
     }
 }

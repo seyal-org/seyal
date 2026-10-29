@@ -410,6 +410,15 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             containment_generation: action.target_generation,
         }),
+        // Block Rerun (#1010), after CLOSE_WINDOW: loads the Block command into an empty draft.
+        77 => Ok(AppAction::RerunBlock {
+            fence,
+            id: BlockId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            composer_epoch: action.target_generation,
+        }),
         _ => Err(-6),
     }
 }
