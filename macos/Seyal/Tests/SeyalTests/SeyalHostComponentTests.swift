@@ -406,11 +406,13 @@ final class SeyalHostComponentTests: XCTestCase {
             XCTAssertFalse(control.isHidden, "\(identifier) is shown when Rust allows SplitFocused")
         }
         let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
-        let closePane = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-pane"))
         XCTAssertFalse(closeTab.isHidden, "Rust permits hierarchical tab close")
-        XCTAssertFalse(closePane.isHidden, "Rust permits hierarchical pane close")
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-close-pane"),
+                      "Close Pane is kept out of the always-visible toolbar")
         XCTAssertEqual(view.closeTabButton.containmentGeneration, shell.containment_generation)
-        XCTAssertEqual(view.closePaneButton.containmentGeneration, shell.containment_generation)
+        let paneTabsIdentifier = "seyal-pane-\(shell.focused_pane_hi)-\(shell.focused_pane_lo)-terminal-tabs"
+        let paneTabs = try XCTUnwrap(accessibilityChild(view, identifier: paneTabsIdentifier))
+        XCTAssertEqual(paneTabs.accessibilityValue() as? String, "focused")
     }
 
     @MainActor

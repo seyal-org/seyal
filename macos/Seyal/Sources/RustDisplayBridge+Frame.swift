@@ -59,7 +59,7 @@ extension RustDisplayBridge {
   /// Minimal read-only Pass 8 presentation seam. The rich command transcript
   /// remains the independent Pass 7.1 timeline above.
   func currentBlockMetadata() -> RuntimeBlockMetadata? {
-    guard isConnected, selectClient() else { return nil }
+    guard isConnected, selectPresentedClient() else { return nil }
     let value = seyal_bridge_execution_block_metadata()
     guard value.revision > 0,
       value.start_line_id > 0,
@@ -75,7 +75,7 @@ extension RustDisplayBridge {
   }
 
   func currentTimeline() -> [NativeBlockRecord] {
-    guard isConnected, selectClient() else { return [] }
+    guard isConnected, selectPresentedClient() else { return [] }
     let count = Int(seyal_bridge_block_count())
     return (0..<count).compactMap { index in
       let record = seyal_bridge_block_record(UInt32(index))
@@ -99,6 +99,18 @@ extension RustDisplayBridge {
     }
   }
 
+  /// Re-projects Runtime-owned command history when the focused Pane switches
+  /// terminal tabs. The composer transcript is pane-projected, so selection
+  /// must refresh it even when the newly selected Runtime's revision happens
+  /// to equal the previous terminal's revision.
+  func refreshPresentedTerminalTimeline() {
+    guard isConnected, selectPresentedClient() else { return }
+    runtimeBlockMetadata = currentBlockMetadata()
+    lastTimelineRevision = seyal_bridge_block_timeline_revision()
+    onTimeline()
+    _ = selectClient()
+  }
+
   func nextComposerRequestID() -> UInt64 {
     guard isConnected, selectClient() else { return 0 }
     return seyal_bridge_next_composer_request_id()
@@ -108,7 +120,7 @@ extension RustDisplayBridge {
   /// attachment. Rust owns the status meaning and revision; the host only
   /// scopes deduplication to the attachment that produced it.
   func publishComposerStatus() {
-    guard isConnected, selectClient() else { return }
+    guard isConnected, selectPresentedClient() else { return }
     let status = seyal_bridge_composer_status()
     let shouldRelay = composerStatusRelayTracker.shouldRelay(
       revision: status.revision,
@@ -131,7 +143,7 @@ extension RustDisplayBridge {
   }
 
   func publishComposerResult() {
-    guard isConnected, selectClient() else { return }
+    guard isConnected, selectPresentedClient() else { return }
     let result = seyal_bridge_composer_result()
     guard result.request_id != 0,
       result.request_id != lastComposerResultRequestID

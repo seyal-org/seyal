@@ -15,6 +15,11 @@ import AppKit
 /// projection, so a drag never rebuilds Blocks on every mouse move.
 @MainActor
 final class PaneLayoutView: NSView {
+    enum SplitDirection {
+        case right
+        case down
+    }
+
     struct TerminalTab: Equatable {
         let lo: UInt64
         let hi: UInt64
@@ -132,6 +137,8 @@ final class PaneLayoutView: NSView {
     var onSelectTerminalTab: ((UInt64, UInt64, UInt64, UInt64) -> Void)?
     var onCloseTerminalTab: ((UInt64, UInt64, UInt64, UInt64) -> Void)?
     var onNewTerminal: ((UInt64, UInt64) -> Void)?
+    var onSplitPane: ((UInt64, UInt64, SplitDirection) -> Void)?
+    var onClosePane: ((UInt64, UInt64) -> Void)?
     var onRetryPaneRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
     /// Rust application root the projection is read from; 0 until wired.
     var appHandle: UInt64 = 0
@@ -466,6 +473,7 @@ final class PaneLayoutView: NSView {
             var stripFrame = scaled(region.rect).insetBy(dx: inset, dy: inset)
             stripFrame.size.height = min(PaneTerminalTabStrip.height, stripFrame.height)
             terminalStrips[key]?.frame = stripFrame
+            terminalStrips[key]?.layoutSubtreeIfNeeded()
         }
         for (view, divider) in zip(dividerViews, dividers) {
             // Centre a fixed-thickness hit zone on the Rust-projected line.
@@ -502,13 +510,20 @@ final class PaneLayoutView: NSView {
         terminalStrips.removeAll()
         for region in next {
             let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
-            let strip = PaneTerminalTabStrip(paneLo: region.paneLo, paneHi: region.paneHi, tabs: region.terminalTabs)
+            let shell = seyal_app_shell(appHandle)
+            let strip = PaneTerminalTabStrip(
+                paneLo: region.paneLo,
+                paneHi: region.paneHi,
+                tabs: region.terminalTabs,
+                focused: region.focused,
+                canSplit: shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) != 0,
+                canClosePane: shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) != 0
+            )
             strip.onSelect = { [weak self] tab in self?.onSelectTerminalTab?(key.lo, key.hi, tab.lo, tab.hi) }
             strip.onClose = { [weak self] tab in self?.onCloseTerminalTab?(key.lo, key.hi, tab.lo, tab.hi) }
-            strip.onNew = { [weak self] in
-                self?.onFocusPane?(key.lo, key.hi)
-                self?.onNewTerminal?(key.lo, key.hi)
-            }
+            strip.onNew = { [weak self] in self?.onNewTerminal?(key.lo, key.hi) }
+            strip.onSplit = { [weak self] direction in self?.onSplitPane?(key.lo, key.hi, direction) }
+            strip.onClosePane = { [weak self] in self?.onClosePane?(key.lo, key.hi) }
             terminalStrips[key] = strip
             addSubview(strip, positioned: .above, relativeTo: liveContent)
         }
@@ -530,28 +545,56 @@ private final class PaneTerminalTabStrip: NSView {
     var onSelect: ((PaneLayoutView.TerminalTab) -> Void)?
     var onClose: ((PaneLayoutView.TerminalTab) -> Void)?
     var onNew: (() -> Void)?
+    var onSplit: ((PaneLayoutView.SplitDirection) -> Void)?
+    var onClosePane: (() -> Void)?
     private let tabs: [PaneLayoutView.TerminalTab]
+    private let canClosePane: Bool
+    private let tabStack = NSStackView()
+    private let tabViewport = NSScrollView()
+    private let actionStack = NSStackView()
+    private var actionWidth: CGFloat = 0
+    private var selectedTabButton: NSButton?
+    private var selectedTabIndex: Int?
+    private var terminalGroups: [NSView] = []
+    private var revealedSelectedTab = false
 
-    init(paneLo: UInt64, paneHi: UInt64, tabs: [PaneLayoutView.TerminalTab]) {
+    init(
+        paneLo: UInt64,
+        paneHi: UInt64,
+        tabs: [PaneLayoutView.TerminalTab],
+        focused: Bool,
+        canSplit: Bool,
+        canClosePane: Bool
+    ) {
         self.tabs = tabs
+        self.canClosePane = canClosePane
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("seyal-pane-\(paneHi)-\(paneLo)-terminal-tabs")
-        let stack = NSStackView()
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 4
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        setAccessibilityChildren([stack])
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
-        ])
+        setAccessibilityValue(focused ? "focused" : "")
+        tabStack.orientation = .horizontal
+        tabStack.alignment = .centerY
+        tabStack.spacing = 4
+        tabStack.translatesAutoresizingMaskIntoConstraints = true
+        tabViewport.drawsBackground = false
+        tabViewport.borderType = .noBorder
+        tabViewport.hasHorizontalScroller = false
+        tabViewport.hasVerticalScroller = false
+        tabViewport.horizontalScrollElasticity = .allowed
+        tabViewport.setAccessibilityIdentifier("seyal-pane-\(paneHi)-\(paneLo)-terminal-tab-viewport")
+        tabViewport.documentView = tabStack
+        actionStack.orientation = .horizontal
+        actionStack.alignment = .centerY
+        actionStack.spacing = 4
+        actionStack.translatesAutoresizingMaskIntoConstraints = true
+        let actionCount = 1 + (canSplit ? 2 : 0)
+        actionWidth = CGFloat(actionCount) * 24 + CGFloat(actionCount - 1) * 4
+        addSubview(tabViewport)
+        addSubview(actionStack)
+        actionStack.frame = CGRect(x: 0, y: 0, width: actionWidth, height: 24)
+        setAccessibilityChildren([tabViewport, actionStack])
         for (index, tab) in tabs.enumerated() {
             let group = NSStackView()
             group.orientation = .horizontal
@@ -563,6 +606,10 @@ private final class PaneTerminalTabStrip: NSView {
             button.setAccessibilityValue(tab.selected ? "selected" : "")
             button.state = tab.selected ? .on : .off
             button.tag = index
+            if tab.selected {
+                selectedTabButton = button
+                selectedTabIndex = index
+            }
             group.addArrangedSubview(button)
             let close = NSButton(title: "×", target: self, action: #selector(closeTab(_:)))
             close.bezelStyle = .texturedRounded
@@ -570,13 +617,113 @@ private final class PaneTerminalTabStrip: NSView {
             close.setAccessibilityLabel("Close Terminal \(index + 1)")
             close.tag = index
             group.addArrangedSubview(close)
-            stack.addArrangedSubview(group)
+            tabStack.addArrangedSubview(group)
+            terminalGroups.append(group)
         }
         let add = NSButton(title: "+", target: self, action: #selector(newTerminal))
         add.bezelStyle = .texturedRounded
+        add.isBordered = false
+        add.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        add.heightAnchor.constraint(equalToConstant: 24).isActive = true
         add.setAccessibilityIdentifier("seyal-pane-\(paneHi)-\(paneLo)-new-terminal")
         add.setAccessibilityLabel("New Terminal")
-        stack.addArrangedSubview(add)
+        actionStack.addArrangedSubview(add)
+        tabStack.setFrameSize(tabStack.fittingSize)
+
+        let splitRight = Self.iconButton(
+            symbol: "rectangle.split.2x1",
+            label: "Split Pane Right",
+            identifier: "seyal-split-right",
+            target: self,
+            action: #selector(splitRightPane)
+        )
+        splitRight.isHidden = !canSplit
+        actionStack.addArrangedSubview(splitRight)
+        let splitDown = Self.iconButton(
+            symbol: "rectangle.split.1x2",
+            label: "Split Pane Down",
+            identifier: "seyal-split-down",
+            target: self,
+            action: #selector(splitDownPane)
+        )
+        splitDown.isHidden = !canSplit
+        actionStack.addArrangedSubview(splitDown)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard canClosePane else { return nil }
+        let menu = NSMenu()
+        let closePane = NSMenuItem(title: "Close Pane", action: #selector(closePaneRegion), keyEquivalent: "")
+        closePane.target = self
+        closePane.identifier = NSUserInterfaceItemIdentifier("seyal-close-pane")
+        menu.addItem(closePane)
+        return menu
+    }
+
+    override func layout() {
+        super.layout()
+        let toolbarHeight = min(24, max(0, bounds.height))
+        let toolbarX = max(6, bounds.width - 6 - actionWidth)
+        actionStack.frame = CGRect(
+            x: toolbarX,
+            y: (bounds.height - toolbarHeight) / 2,
+            width: actionWidth,
+            height: toolbarHeight
+        )
+        let viewportHeight = min(26, max(0, bounds.height - 4))
+        let viewportX: CGFloat = 6
+        let viewportWidth = max(0, toolbarX - 8 - viewportX)
+        tabViewport.frame = CGRect(
+            x: viewportX,
+            y: (bounds.height - viewportHeight) / 2,
+            width: viewportWidth,
+            height: viewportHeight
+        )
+        guard
+            !revealedSelectedTab,
+            viewportWidth > 0,
+            selectedTabButton != nil,
+            let selectedTabIndex,
+            terminalGroups.indices.contains(selectedTabIndex)
+        else { return }
+        tabStack.layoutSubtreeIfNeeded()
+        var firstVisibleIndex = selectedTabIndex
+        var visibleWidth = terminalGroups[firstVisibleIndex].frame.width
+        while firstVisibleIndex > 0 {
+            let previousWidth = terminalGroups[firstVisibleIndex - 1].frame.width + tabStack.spacing
+            guard visibleWidth + previousWidth <= viewportWidth else { break }
+            visibleWidth += previousWidth
+            firstVisibleIndex -= 1
+        }
+        let origin = NSPoint(
+            x: terminalGroups[firstVisibleIndex].frame.minX,
+            y: tabViewport.contentView.bounds.origin.y
+        )
+        tabViewport.contentView.scroll(to: origin)
+        tabViewport.reflectScrolledClipView(tabViewport.contentView)
+        revealedSelectedTab = true
+    }
+
+    private static func iconButton(
+        symbol: String,
+        label: String,
+        identifier: String,
+        target: AnyObject,
+        action: Selector
+    ) -> NSButton {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+            ?? NSImage(size: NSSize(width: 16, height: 16))
+        let button = NSButton(image: image, target: target, action: action)
+        button.bezelStyle = .texturedRounded
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.setAccessibilityIdentifier(identifier)
+        button.setAccessibilityLabel(label)
+        button.toolTip = label
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        return button
     }
 
     @available(*, unavailable)
@@ -593,6 +740,12 @@ private final class PaneTerminalTabStrip: NSView {
     }
 
     @objc private func newTerminal() { onNew?() }
+
+    @objc private func splitRightPane() { onSplit?(.right) }
+
+    @objc private func splitDownPane() { onSplit?(.down) }
+
+    @objc private func closePaneRegion() { onClosePane?() }
 }
 
 /// One Pane leaf. In a split it draws a focus-accented border and, when not

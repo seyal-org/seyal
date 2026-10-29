@@ -201,7 +201,8 @@ final class DividerDragProjectionTests: XCTestCase {
         try drag(try XCTUnwrap(element(view, "seyal-pane-divider-0")), toFraction: 0.4)
         reconcile(view)
 
-        try click(view, "seyal-close-pane")
+        let beforeClose = seyal_app_shell(handle)
+        view.closePane(paneLo: beforeClose.focused_pane_lo, paneHi: beforeClose.focused_pane_hi)
         reconcile(view)
         XCTAssertEqual(seyal_app_shell(handle).pane_count, 1, "Close Pane still collapses a resized Split")
         XCTAssertNil(element(view, "seyal-pane-divider-0"))
@@ -217,8 +218,7 @@ final class DividerDragProjectionTests: XCTestCase {
         XCTAssertNotEqual(seyal_app_apply(handle, &stale), 0, "a removed Split's divider fails closed")
         XCTAssertEqual(seyal_app_pane_region(handle, 0).width, 1.0, "rejected drag changes nothing")
         XCTAssertEqual(seyal_app_shell(handle).pane_count, 1)
-        let closePane = try XCTUnwrap(button(view, "seyal-close-pane"))
-        XCTAssertFalse(closePane.isHidden, "the surviving Pane still offers hierarchical Close Pane")
+        XCTAssertNil(element(view, "seyal-close-pane"), "Close Pane is no longer a toolbar button")
     }
 
     // MARK: - Helpers

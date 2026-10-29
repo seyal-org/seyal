@@ -152,6 +152,8 @@ Every Pane exposes a stable accessibility identifier derived from PaneId and sta
 
 Visual styling follows Seyal's current product design system. The cmux screenshot is a layout/behavior reference only; no cmux name or assets are copied. Pixel-level implementation acceptance must be derived from the actual attached reference and the governing Seyal mockup.
 
+The Pane-local strip is the only visible terminal-tab strip. The outer Seyal Tab is a layout container, so its title and create/close actions must not occupy a second terminal-looking strip above the Pane content. Keep outer layout navigation/actions in the navigation rail. Put each Pane's Split Right and Split Down actions at the trailing edge of that Pane's terminal-tab strip as compact icon buttons with visible hover labels and accessible names. Keep Close Pane in that Pane's contextual menu rather than the always-visible icon row. Each action first focuses its Pane, then applies to that exact Pane. The New Terminal affordance stays with the Pane's terminal tabs.
+
 ## 12. Required implementation tests and evidence
 
 Reducer tests first for the contract's success and rejection cases. Required classes:
