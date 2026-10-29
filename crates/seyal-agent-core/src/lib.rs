@@ -19,6 +19,9 @@ mod output_ref;
 mod presence;
 mod restore;
 pub mod routing;
+mod task_input;
+#[cfg(test)]
+mod task_input_tests;
 mod transitions;
 
 pub use action::{
@@ -108,4 +111,5 @@ pub use routing::{
     SoftFactor, BASELINE_ARTIFACT_ID, BASELINE_ARTIFACT_SHA256, FORBIDDEN_SYNTHETIC_POC_SHA256,
     SCORE_EPSILON, SCORE_ONE, UNKNOWN_SOFT_MID,
 };
+pub use task_input::{TaskInput, TaskInputError, PROVISIONAL_MAX_TASK_INPUT_BYTES};
 pub use transitions::TransitionIds;
