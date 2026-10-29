@@ -85,7 +85,10 @@ jobs:
   native-macos-smoke:
     name: native-macos-smoke
     runs-on: macos-15
-    timeout-minutes: 35
+    # Gate 1 XCUI + cold `make bench` needs ~36–37m on typical macos-15
+    # runners (tests green; prior 35m cancelled mid-bench). Keep rust-and-
+    # harness-quality's separate 15m bench job as the contract gate.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
