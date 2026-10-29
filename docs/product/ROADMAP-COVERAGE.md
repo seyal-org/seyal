@@ -12,11 +12,11 @@
 - **Superseded** — legacy shape must not be implemented; the named owner carries the replacement need.
 - **Rejected** — deliberately outside current Seyal direction.
 
-The 216 historical `F-*` rows are fully accounted for: **137 known future implementation, 31 spike/R&D, 25 explicitly deferred, 15 superseded, 8 rejected**.
+The 216 historical `F-*` rows are fully accounted for: **137 known future implementation, 31 spike/R&D, 25 explicitly deferred, 15 superseded, 8 rejected**. F-088a is outside that historical set. It is **Proposed under #1384** (contingent on Proposed ADR-025 acceptance) and does not change the rejected tally of 8 or F-088's Rejected disposition.
 
 ## F-* ownership
 
-Ranges below are inclusive. Together they cover exactly the 216 IDs in the canonical RILL reconciliation table: F-001–029, F-030–047, F-050–089, F-090–104, F-110–124, F-130–164, F-170–180, F-190–205, F-210–231, F-240–250, plus F-252, F-253, F-254 and F-256. There are no duplicate owners.
+Ranges below are inclusive. Together they cover exactly the 216 IDs in the canonical RILL reconciliation table: F-001–029, F-030–047, F-050–089, F-090–104, F-110–124, F-130–164, F-170–180, F-190–205, F-210–231, F-240–250, plus F-252, F-253, F-254 and F-256. There are no duplicate owners. F-088a is an additional ID and is not part of that 216-ID cover.
 
 | Capability IDs | Milestone | Current owner | Roadmap disposition |
 |---|---|---|---|
@@ -63,6 +63,7 @@ Ranges below are inclusive. Together they cover exactly the 216 IDs in the canon
 | F-080 | M008 | #695 | Superseded |
 | F-159 | M008 | #695 | Spike/R&D before implementation |
 | F-023, F-088, F-160, F-164, F-179, F-200, F-205, F-250 | — | `FEATURES.md` decision | Rejected |
+| F-088a | — | Proposed ADR-025 / #1384 | Proposed (becomes Accepted direction on ADR-025 acceptance) |
 
 ## SY-* ownership
 

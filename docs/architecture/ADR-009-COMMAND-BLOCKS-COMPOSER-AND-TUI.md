@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-025 cross-amendment pointer under #1384 (a pointer only; normative on merge of the ADR-025 acceptance PR by a non-author maintainer, and not before)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-025 cross-amendment pointer 2026-10-29 (#1384)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1227,4 +1227,26 @@ pre-V2 key allowlist succeeds at step 4.
   aligned to this chain in a follow-up specification PR, removing the
   "must not request bit 8 and bit 9 in the same ClientHello" restriction.
 - #1043 implements the client chain and its tests.
+
+## 2026-10-29 amendment — orthogonal composer input target (ADR-025, #1384)
+
+**Status:** Cross-link pointer. It becomes normative on merge of the ADR-025 acceptance PR by a non-author maintainer under #1384. Until Proposed ADR-025 is Accepted, this section does not amend the normative invariants, mechanism text, or required-seam list above. The #1041 prompt-anchor section stays Proposed. An author or agent comment is not acceptance.
+
+ADR-025 owns the behavior. This section exists so ADR-009 does not contradict that ADR once it is Accepted.
+
+On acceptance, read the following accepted text through ADR-025 rather than by editing it here:
+
+- **Composer eligibility (invariant 7).** The sentence "Composer eligibility (invariant 7) holds exactly when the state is `AtPrompt`, the presentation is Flow, and the canonical state is on the primary screen" is derived from the ADR-025 §3.2 input target, not from local integration state alone. A `TrustedShell(session)` target makes the composer `Submit`. A `ForegroundProgram(b)` target may offer labeled `Relay`. Block lifecycle `Running` does not by itself decide either mode.
+- **Mechanism 5 (nested interactive shells).** The rule that nested interactive shells (`zsh`, `ssh`) "run inside the outer command's Running Block … emit no trusted marker" is amended for the **consented** case only. A session scope may become session-trusted with its own secret and run the mechanism-5 machine. The parser's accepted-secret set holds the execution nonce **plus at most one session secret**. Decline, unsupported bootstrap, and depth two stay on the no-trusted-marker reading.
+- **Mechanism 2 (per-execution secret).** The local secret remains the per-execution nonce delivered over an inherited descriptor, never the environment. On acceptance, "the secret" that trusts a marker is an accepted secret for a scope: the execution nonce or the active session secret. A marker is trusted only against the scope whose secret it carries.
+- **Alternate screen.** Alternate-screen rules apply per scope (ADR-025 §7.2). A session alternate-screen program is still full TUI takeover of the Pane.
+
+### Seams (Proposed until implementation)
+
+These ADR-025 seams are recorded here by reference only. They are not inserted into the accepted "Required implementation seams" list above, and they stay Proposed until an implementation Issue is Ready after ADR-025 acceptance:
+
+- session overlay on a host Block (ADR-025 F4);
+- at most one session secret beside the execution nonce;
+- target-generation fence (ADR-025 §3.2);
+- session-scoped Blocks (`scope` / `trust` on `BlockTimeline`).
 

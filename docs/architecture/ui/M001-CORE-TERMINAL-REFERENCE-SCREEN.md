@@ -318,6 +318,8 @@ Preferred behavior:
 - retain explicit interrupt/stop guidance only when backed by real behavior;
 - preserve any existing Pane draft and restore the normal composer when the shell is available again.
 
+**Contingent on acceptance of Proposed ADR-025 (#1384):** "busy" follows the ADR-025 §3.2 input target. That includes `TrustedShell(session)` (`Submit`) and a clearly labeled `Relay` for an eligible foreground program. Retraction remains correct when the input target is `None`. See `M001-LIVE-TAIL-BEHAVIOR.md` §6.
+
 Parallel commands should run in another Pane/Tab/execution.
 
 Detailed live-tail behavior is defined by `M001-LIVE-TAIL-BEHAVIOR.md`.

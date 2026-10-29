@@ -56,7 +56,7 @@ These capabilities were accepted/refined during Seyal architecture and product r
 
 ## Historical RILL feature catalog reconciliation
 
-The original RILL competitive catalog contains **216** inventory rows. All 216 are accounted for below. This table preserves useful product discovery while recalculating status against **current Seyal**, not legacy completion state.
+The original RILL competitive catalog contains **216** inventory rows. All 216 are accounted for below. This table preserves useful product discovery while recalculating status against **current Seyal**, not legacy completion state. F-088a is an additional ID under #1384; it is not one of those 216 rows, and it does not change F-088's Rejected disposition.
 
 ### 5.1 — Hierarchy, dashboards and navigation
 
@@ -157,7 +157,8 @@ The original RILL competitive catalog contains **216** inventory rows. All 216 a
 | F-085 | Rich input overlay for CLI agents | Accepted direction | Rich composer may submit to CLI agents only when input ownership is known and safe. |
 | F-086 | Right-click menus | Accepted direction | Context menus for pane/tab/Block/agent actions. |
 | F-087 | Keyboard copy mode | Accepted direction | Keyboard copy/navigation mode over retained terminal history. |
-| F-088 | Warpify / in-band remote cmds | Rejected | No vendor helper that silently injects commands into SSH/subshell PTYs. |
+| F-088 | Silent Warpify / in-band remote inject | Rejected | No vendor helper or Seyal path may inject setup/commands into an SSH/subshell PTY without explicit consent. |
+| F-088a | Consented session-only remote shell bootstrap | Proposed under #1384 | Contingent on acceptance of Proposed ADR-025: explicit per-session consent (or consent-derived per-host policy) bootstraps in-memory bash/zsh hooks over the existing session for secret-authenticated Blocks + retained composer; nothing persists remotely; decline → labeled relay / Raw. Persistent companion is F-088b / #1385. Becomes Accepted direction only when ADR-025 is Accepted. |
 | F-089 | Prompt chips vs PS1 | Accepted direction | Optional cwd/git/dev-tool context chips as host chrome; never replace/break PS1. |
 | F-252 | Up/Down history recall | Accepted direction | Up/Down history recall in composer, prefix-aware; raw mode leaves keys to PTY. |
 | F-253 | Ctrl+R history search | Accepted direction | Ctrl+R fuzzy history/search list with keyboard/mouse selection; raw mode leaves Ctrl+R to PTY. |
