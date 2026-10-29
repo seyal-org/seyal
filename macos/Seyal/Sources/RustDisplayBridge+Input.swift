@@ -15,7 +15,7 @@ extension RustDisplayBridge {
       onStatusChanged()
       return admission
     }
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -40,7 +40,7 @@ extension RustDisplayBridge {
     endCol: UInt16 = 0,
     endRow: UInt16 = 0
   ) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -51,7 +51,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitHostSearch(_ needle: String, forward: Bool) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -72,7 +72,7 @@ extension RustDisplayBridge {
   }
 
   func copiedText() -> String? {
-    guard selectClient() else { return nil }
+    guard selectPresentedClient() else { return nil }
     let copied = seyal_bridge_copied_text()
     guard copied.len > 0, let utf8 = copied.utf8 else { return nil }
     let buffer = UnsafeBufferPointer(start: utf8, count: Int(copied.len))
@@ -81,13 +81,13 @@ extension RustDisplayBridge {
 
   @discardableResult
   func consumeCopiedText() -> Int32 {
-    guard selectClient() else { return -1 }
+    guard selectPresentedClient() else { return -1 }
     return seyal_bridge_copied_text_consume()
   }
 
   @discardableResult
   func submitComposerCommand(_ text: String) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -109,7 +109,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitKey(kind: UInt16, scalar: UInt32) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -117,13 +117,13 @@ extension RustDisplayBridge {
   }
 
   func supportsKeyV2() -> Bool {
-    guard isConnected, selectClient() else { return false }
+    guard isConnected, selectPresentedClient() else { return false }
     return seyal_bridge_supports_key_v2() != 0
   }
 
   @discardableResult
   func submitKeyV2(kind: UInt16, modifiers: UInt16, value: UInt32, event: UInt8, shiftedASCII: UInt32, actionID: UInt32) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -166,7 +166,7 @@ extension RustDisplayBridge {
     row: UInt16,
     actionID: UInt32
   ) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -182,7 +182,7 @@ extension RustDisplayBridge {
     cellWidth: Double,
     cellHeight: Double
   ) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -204,7 +204,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func retryResize() -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -212,12 +212,12 @@ extension RustDisplayBridge {
   }
 
   func inputFailureCode() -> Int32 {
-    guard isConnected, selectClient() else { return 4 }
+    guard isConnected, selectPresentedClient() else { return 4 }
     return seyal_bridge_input_failure()
   }
 
   func resizeFailureCode() -> Int32 {
-    guard isConnected, selectClient() else { return 201 }
+    guard isConnected, selectPresentedClient() else { return 201 }
     return seyal_bridge_resize_failure()
   }
 
@@ -245,6 +245,9 @@ extension RustDisplayBridge {
     // prevents one high-volume terminal from monopolizing the AppKit queue;
     // unread socket data will immediately retrigger this dispatch source.
     for _ in 0..<8 {
+      // Presentation/history reads select the focused terminal below. Keep
+      // readiness polling pinned to this bridge's original Controller.
+      guard selectClient() else { return }
       let result = seyal_bridge_poll()
       runtimeBlockMetadata = currentBlockMetadata()
       publishHistoryRanges()

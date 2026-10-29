@@ -8,15 +8,10 @@ final class ProductChromeHostView: NSView {
     /// Headed/component probe for cold visual snapshot. Identifier-encoded so
     /// VoiceOver does not hear a pipe-delimited token string as the chrome value.
     let coldVisualProbe = NSView()
-    let tabStrip = NSView()
-    let tabTitle = NSTextField(labelWithString: "Terminal")
-    /// Layout-chrome cluster (#922): apply to the active Tab/focused Pane,
-    /// never duplicated per-Pane (M001-CORE-TERMINAL-REFERENCE-SCREEN.md §4.3).
+    /// Outer Seyal Tab actions stay in the navigation rail. Pane actions live
+    /// beside each Pane's terminal tabs below.
     let newTabButton = NSButton(title: "+", target: nil, action: nil)
-    let closeTabButton = IdentityButton(title: "Close Tab", target: nil, action: nil)
-    let splitRightButton = NSButton(title: "Split Right", target: nil, action: nil)
-    let splitDownButton = NSButton(title: "Split Down", target: nil, action: nil)
-    let closePaneButton = IdentityButton(title: "Close Pane", target: nil, action: nil)
+    let closeTabButton = IdentityButton(title: "×", target: nil, action: nil)
     let left = NSView()
     let inspector = NSStackView()
     let attention = NSStackView()
@@ -28,7 +23,7 @@ final class ProductChromeHostView: NSView {
     /// Global command palette overlay (#932); internal for component tests.
     let commandPalette: CommandPaletteOverlayView
     let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
-    let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
+    let tabsButton = NSButton(title: "Layouts", target: nil, action: nil)
     let recoveryLabel = NSTextField(labelWithString: "")
     let leftItems = NSStackView()
     let inspectorColumn = NSView()
@@ -72,7 +67,6 @@ final class ProductChromeHostView: NSView {
     var centerTopHost: NSLayoutConstraint!
     var centerLeadingLeft: NSLayoutConstraint!
     var centerTrailingInspector: NSLayoutConstraint!
-    var centerTopTab: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         pane = ThinPaneHostView(frame: frameRect)
@@ -99,20 +93,11 @@ final class ProductChromeHostView: NSView {
         addSubview(coldVisualProbe)
 
         configureChromeButtons()
-        tabStrip.translatesAutoresizingMaskIntoConstraints = false
-        tabStrip.wantsLayer = true
-        tabStrip.setAccessibilityElement(true)
-        tabStrip.setAccessibilityRole(.group)
-        tabStrip.setAccessibilityIdentifier("seyal-tab-strip")
-        tabTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-        tabTitle.translatesAutoresizingMaskIntoConstraints = false
-        tabStrip.addSubview(tabTitle)
-        for button in [newTabButton, closeTabButton, splitRightButton, splitDownButton, closePaneButton] {
+        for button in [newTabButton, closeTabButton] {
             button.translatesAutoresizingMaskIntoConstraints = false
             button.bezelStyle = .inline
             button.isBordered = false
             button.font = .systemFont(ofSize: 11, weight: .regular)
-            tabStrip.addSubview(button)
         }
 
         left.translatesAutoresizingMaskIntoConstraints = false
@@ -123,6 +108,8 @@ final class ProductChromeHostView: NSView {
         leftItems.translatesAutoresizingMaskIntoConstraints = false
         left.addSubview(workspacesButton)
         left.addSubview(tabsButton)
+        left.addSubview(newTabButton)
+        left.addSubview(closeTabButton)
         left.addSubview(leftItems)
         workspacesButton.translatesAutoresizingMaskIntoConstraints = false
         tabsButton.translatesAutoresizingMaskIntoConstraints = false
@@ -183,9 +170,28 @@ final class ProductChromeHostView: NSView {
         centerColumn.onFocusPane = { [weak self] lo, hi in
             self?.focusPaneRegion(lo: lo, hi: hi)
         }
+        centerColumn.onSelectTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
+            self?.selectTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
+        }
+        centerColumn.onCloseTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
+            self?.closeTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
+        }
+        centerColumn.onNewTerminal = { [weak self] paneLo, paneHi in
+            guard let self, self.focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+            self.createTerminal()
+        }
+        centerColumn.onSplitPane = { [weak self] paneLo, paneHi, direction in
+            guard let self, self.focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+            switch direction {
+            case .right: self.splitFocusedRight()
+            case .down: self.splitFocusedDown()
+            }
+        }
+        centerColumn.onClosePane = { [weak self] paneLo, paneHi in
+            self?.closePane(paneLo: paneLo, paneHi: paneHi)
+        }
         centerColumn.appHandle = pane.appHandle
 
-        addSubview(tabStrip)
         addSubview(left)
         addSubview(centerColumn)
         addSubview(inspectorColumn)
@@ -226,39 +232,25 @@ final class ProductChromeHostView: NSView {
             coldVisualProbe.leadingAnchor.constraint(equalTo: leadingAnchor),
             coldVisualProbe.topAnchor.constraint(equalTo: topAnchor),
 
-            tabStrip.leadingAnchor.constraint(equalTo: leadingAnchor),
-            tabStrip.trailingAnchor.constraint(equalTo: trailingAnchor),
-            tabStrip.topAnchor.constraint(equalTo: topAnchor),
-            tabStrip.heightAnchor.constraint(equalToConstant: 48),
-            tabTitle.leadingAnchor.constraint(equalTo: tabStrip.leadingAnchor, constant: 236),
-            tabTitle.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-
-            newTabButton.leadingAnchor.constraint(equalTo: tabTitle.trailingAnchor, constant: 12),
-            newTabButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            closeTabButton.leadingAnchor.constraint(equalTo: newTabButton.trailingAnchor, constant: 8),
-            closeTabButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            closePaneButton.trailingAnchor.constraint(equalTo: tabStrip.trailingAnchor, constant: -12),
-            closePaneButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            splitDownButton.trailingAnchor.constraint(equalTo: closePaneButton.leadingAnchor, constant: -8),
-            splitDownButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            splitRightButton.trailingAnchor.constraint(equalTo: splitDownButton.leadingAnchor, constant: -8),
-            splitRightButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-
             left.leadingAnchor.constraint(equalTo: leadingAnchor),
-            left.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
+            left.topAnchor.constraint(equalTo: topAnchor),
             left.bottomAnchor.constraint(equalTo: bottomAnchor),
             left.widthAnchor.constraint(equalToConstant: 220),
             workspacesButton.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
             workspacesButton.topAnchor.constraint(equalTo: left.topAnchor, constant: 10),
             tabsButton.leadingAnchor.constraint(equalTo: workspacesButton.trailingAnchor, constant: 8),
             tabsButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
+            newTabButton.leadingAnchor.constraint(equalTo: tabsButton.trailingAnchor, constant: 2),
+            newTabButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
+            closeTabButton.leadingAnchor.constraint(equalTo: newTabButton.trailingAnchor, constant: 2),
+            closeTabButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
             leftItems.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
             leftItems.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -10),
             leftItems.topAnchor.constraint(equalTo: workspacesButton.bottomAnchor, constant: 12),
             leftItems.bottomAnchor.constraint(lessThanOrEqualTo: left.bottomAnchor, constant: -10),
 
             inspectorColumn.trailingAnchor.constraint(equalTo: trailingAnchor),
-            inspectorColumn.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
+            inspectorColumn.topAnchor.constraint(equalTo: topAnchor),
             inspectorColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
             inspectorColumn.widthAnchor.constraint(equalToConstant: 248),
             inspector.leadingAnchor.constraint(equalTo: inspectorColumn.leadingAnchor, constant: 10),
@@ -295,7 +287,6 @@ final class ProductChromeHostView: NSView {
         centerTrailingInspector = centerColumn.trailingAnchor.constraint(
             equalTo: inspectorColumn.leadingAnchor
         )
-        centerTopTab = centerColumn.topAnchor.constraint(equalTo: tabStrip.bottomAnchor)
         paneFollowsTranscript = [
             pane.leadingAnchor.constraint(equalTo: transcript.leadingAnchor),
             pane.trailingAnchor.constraint(equalTo: transcript.trailingAnchor),
@@ -466,7 +457,7 @@ final class ProductChromeHostView: NSView {
         tabsButton.state = chrome.left_panel == 1 ? .on : .off
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
-        rebuildTabStrip(shell: shell)
+        rebuildLayoutActions(shell: shell)
         reconcilePaneHosts(paneCount: Int(shell.pane_count))
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
@@ -587,19 +578,11 @@ final class ProductChromeHostView: NSView {
         }
     }
 
-    func rebuildTabStrip(shell: SeyalAppShell) {
-        if shell.tab_count > 0 {
-            let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), 0)
-            tabTitle.stringValue = productChromeCopyUTF8(row.title, row.title_len) ?? "Terminal"
-        }
-        // Omit rather than disable (mirrors the command palette's own
-        // omission of "New Tab"/"Split" when the M001 shell policy
-        // disallows them; see build_commands).
+    func rebuildLayoutActions(shell: SeyalAppShell) {
+        // These are outer layout-tab actions, grouped with the Layouts
+        // navigation control. Terminal and Pane actions stay pane-local.
         newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
-        splitRightButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) == 0
-        splitDownButton.isHidden = splitRightButton.isHidden
         closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
-        closePaneButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) == 0
         configureCloseButtons(shell: shell)
     }
 
@@ -624,10 +607,11 @@ final class ProductChromeHostView: NSView {
         } else {
             for index in 0..<Int(shell.tab_count) {
                 let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), UInt32(index))
+                let paneCount = productChromeCopyUTF8(row.detail, row.detail_len) ?? "0"
                 leftItems.addArrangedSubview(
                     rowButton(
-                        title: productChromeCopyUTF8(row.title, row.title_len) ?? "Tab",
-                        detail: productChromeCopyUTF8(row.detail, row.detail_len),
+                        title: "Layout \(index + 1)",
+                        detail: "\(paneCount) pane\(paneCount == "1" ? "" : "s")",
                         identifier: "seyal-tab-\(index)",
                         selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
                         action: #selector(selectTab(_:)),
@@ -695,20 +679,16 @@ final class ProductChromeHostView: NSView {
     func applyShellChrome(_ chrome: SeyalAppChrome) {
         let leftOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_LEFT_VISIBLE) != 0
         let inspectorOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE) != 0
-        let tabOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_TAB_STRIP_VISIBLE) != 0
         left.isHidden = !leftOn
         left.setAccessibilityElement(leftOn)
         inspectorColumn.isHidden = !inspectorOn
         inspectorColumn.setAccessibilityElement(inspectorOn)
         inspector.setAccessibilityElement(inspectorOn)
-        tabStrip.isHidden = !tabOn
-        tabStrip.setAccessibilityElement(tabOn)
         centerLeadingHost.isActive = !leftOn
         centerLeadingLeft.isActive = leftOn
         centerTrailingHost.isActive = !inspectorOn
         centerTrailingInspector.isActive = inspectorOn
-        centerTopHost.isActive = !tabOn
-        centerTopTab.isActive = tabOn
+        centerTopHost.isActive = true
     }
 
     func applyTheme() {
@@ -722,17 +702,14 @@ final class ProductChromeHostView: NSView {
         if theme.usesFrostedUtilityMaterial {
             left.layer?.backgroundColor = NSColor.clear.cgColor
             inspectorColumn.layer?.backgroundColor = NSColor.clear.cgColor
-            tabStrip.layer?.backgroundColor = NSColor.clear.cgColor
         } else {
             left.layer?.backgroundColor = theme.utility.cgColor
             inspectorColumn.layer?.backgroundColor = theme.utility.cgColor
-            tabStrip.layer?.backgroundColor = theme.container.cgColor
         }
         centerColumn.layer?.backgroundColor = theme.canvas.cgColor
         centerColumn.apply(theme: theme)
         transcript.backgroundColor = .clear
         left.layer?.borderWidth = 0
-        tabTitle.font = .systemFont(ofSize: theme.uiFontSize, weight: .semibold)
         recoveryLabel.font = .systemFont(ofSize: max(theme.uiFontSize - 1, 10), weight: .regular)
         blocks.edgeInsets = NSEdgeInsets(
             top: theme.terminalPadding,

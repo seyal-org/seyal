@@ -47,6 +47,11 @@ pub struct BlockId(u128);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TabId(u128);
 
+/// Headed composition identity for one terminal session tab inside a Pane.
+/// This is not a Seyal Tab, Pane, ExecutionId, Runtime identity, or PTY owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TerminalTabId(u128);
+
 /// Headed composition identity for one Pane. Binding an `ExecutionId` does not
 /// move PTY/VT ownership into the product shell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -119,6 +124,13 @@ impl PaneId {
 }
 
 #[allow(clippy::new_without_default)]
+impl TerminalTabId {
+    pub fn new() -> Self {
+        Self(unique_id(0x5445_524d_5441_4201))
+    }
+}
+
+#[allow(clippy::new_without_default)]
 impl WindowId {
     pub fn new() -> Self {
         Self(unique_id(0x5749_4e44_4f57_0001))
@@ -146,6 +158,7 @@ impl_id_wire_bytes!(AttachmentId);
 impl_id_wire_bytes!(ProjectionId);
 impl_id_wire_bytes!(BlockId);
 impl_id_wire_bytes!(TabId);
+impl_id_wire_bytes!(TerminalTabId);
 impl_id_wire_bytes!(PaneId);
 impl_id_wire_bytes!(WindowId);
 
@@ -202,6 +215,7 @@ impl_id_display!(AttachmentId);
 impl_id_display!(ProjectionId);
 impl_id_display!(BlockId);
 impl_id_display!(TabId);
+impl_id_display!(TerminalTabId);
 impl_id_display!(PaneId);
 impl_id_display!(WindowId);
 

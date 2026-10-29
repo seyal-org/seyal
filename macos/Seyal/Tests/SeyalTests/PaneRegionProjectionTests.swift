@@ -70,14 +70,12 @@ final class PaneRegionProjectionTests: XCTestCase {
         reconcile(view)
         XCTAssertEqual(seyal_app_shell(handle).pane_count, 2)
 
-        try clickButton(view, "seyal-close-pane")
-        reconcile(view)
+        closeFocusedPane(view)
 
         XCTAssertEqual(seyal_app_shell(handle).pane_count, 1)
         try assertRegions(view, count: 1)
         XCTAssertNil(paneChild(view, "seyal-pane-divider-0"), "no divider without a Split")
-        let closePane = try XCTUnwrap(button(view, "seyal-close-pane"))
-        XCTAssertFalse(closePane.isHidden, "the surviving Pane still offers hierarchical Close Pane")
+        XCTAssertNil(paneChild(view, "seyal-close-pane"), "Close Pane is no longer a toolbar button")
     }
 
     func testLastPaneAndStalePaneIdsFailClosed() throws {
@@ -86,15 +84,13 @@ final class PaneRegionProjectionTests: XCTestCase {
         let sole = seyal_app_shell(handle)
         XCTAssertEqual(sole.pane_count, 1)
         XCTAssertNotEqual(sole.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
-        let soleClose = try XCTUnwrap(button(view, "seyal-close-pane"))
-        XCTAssertFalse(soleClose.isHidden, "hierarchical close is offered for the sole Pane")
+        XCTAssertNil(paneChild(view, "seyal-close-pane"), "Close Pane is no longer a toolbar button")
 
         try clickButton(view, "seyal-split-right")
         reconcile(view)
         let split = seyal_app_shell(handle)
         let removed = (lo: split.focused_pane_lo, hi: split.focused_pane_hi)
-        try clickButton(view, "seyal-close-pane")
-        reconcile(view)
+        closeFocusedPane(view)
         let survivor = seyal_app_shell(handle)
         XCTAssertEqual(survivor.pane_count, 1)
         XCTAssertFalse(survivor.focused_pane_lo == removed.lo && survivor.focused_pane_hi == removed.hi)
@@ -117,6 +113,12 @@ final class PaneRegionProjectionTests: XCTestCase {
     }
 
     // MARK: - Assertions
+
+    private func closeFocusedPane(_ view: ProductChromeHostView) {
+        let shell = seyal_app_shell(view.pane.appHandle)
+        view.closePane(paneLo: shell.focused_pane_lo, paneHi: shell.focused_pane_hi)
+        reconcile(view)
+    }
 
     /// Rust projects exactly `count` regions; the host shows one view per
     /// region, frames do not overlap, exactly one is focused, and the single
@@ -187,13 +189,10 @@ final class PaneRegionProjectionTests: XCTestCase {
         XCTAssertFalse(live.isHidden, file: file, line: line)
         // In a split the live surface sits inside the region's 1pt border.
         let inset: CGFloat = count > 1 ? 1 : 0
-        XCTAssertEqual(
-            live.frame,
-            frames[focused].insetBy(dx: inset, dy: inset),
-            "one live surface, in the focused region",
-            file: file,
-            line: line
-        )
+        var contentFrame = frames[focused].insetBy(dx: inset, dy: inset)
+        contentFrame.origin.y += 30
+        contentFrame.size.height = max(0, contentFrame.height - 30)
+        XCTAssertEqual(live.frame, contentFrame, "live surface leaves room for the Pane-local strip", file: file, line: line)
     }
 
     /// The left panel's Pane rows follow Rust selection: exactly the focused

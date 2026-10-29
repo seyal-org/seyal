@@ -141,9 +141,14 @@ impl ApplicationRoot {
                 }
                 self.create_tab()
             }
+            AppAction::NewTerminal => self.new_terminal(),
+            AppAction::SelectTerminalTab { pane, terminal_tab } => {
+                self.select_terminal_tab(pane, terminal_tab)
+            }
             AppAction::CloseTab { .. }
             | AppAction::CloseWindow { .. }
-            | AppAction::ClosePane { .. } => self.apply_close(action),
+            | AppAction::ClosePane { .. }
+            | AppAction::CloseTerminalTab { .. } => self.apply_close(action),
             AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
             #[cfg(test)]

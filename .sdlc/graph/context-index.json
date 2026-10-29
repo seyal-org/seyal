@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "e5a6aef06cb3edc38fa57c358f697e4a8132d8e1"
+          "fingerprint": "f6962664f86a552a0390e9fa6472a4af28b7529e"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "e5a6aef06cb3edc38fa57c358f697e4a8132d8e1"
+          "fingerprint": "f6962664f86a552a0390e9fa6472a4af28b7529e"
         }
       ],
       "relationships": [
@@ -343,7 +343,7 @@
       "id": "DEC-ADR-026",
       "kind": "decision",
       "title": "ADR-026 consented session remote shell bootstrap",
-      "summary": "Accepted on merge of this acceptance PR by a non-author maintainer under #1384: orthogonal Block lifecycle, composer input target, and presentation, plus a consented session-only in-band bash/zsh bootstrap. ADR-025 is reserved by #1382/#1381. Silent inject stays rejected (F-088); F-088a is Accepted direction. An author or agent comment is not acceptance. Bit 13 and types 42–45 are allocated and not yet shipped.",
+      "summary": "Accepted on merge of this acceptance PR by a non-author maintainer under #1384: orthogonal Block lifecycle, composer input target, and presentation, plus a consented session-only in-band bash/zsh bootstrap. ADR-025 remains a separate Proposed decision under #1382/#1381. Silent inject stays rejected (F-088); F-088a is Accepted direction. An author or agent comment is not acceptance. Bit 13 and types 42\u201345 are allocated and not yet shipped.",
       "tags": [
         "adr",
         "adr-026",
@@ -355,7 +355,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-026-CONSENTED-SESSION-REMOTE-SHELL-BOOTSTRAP.md",
-          "fingerprint": "c54c26fcd120da2176cc9d7c2f24d9ffbde7e570"
+          "fingerprint": "d614b7412c2bad0acd80adc608ddad4ca65f9428"
         }
       ],
       "relationships": []

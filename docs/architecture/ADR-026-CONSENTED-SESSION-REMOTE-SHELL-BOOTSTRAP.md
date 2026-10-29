@@ -7,7 +7,7 @@
 - **Depends on:** Accepted ADR-004, ADR-005, ADR-006, ADR-009 (including the #968 shell-integration mechanism, the #686 shell-metadata boundary and the #1355 composed ClientHello fallback), ADR-015; SPEC-004, SPEC-006, SPEC-008, SPEC-009.
 - **Amends:** ADR-009, `docs/product/FEATURES.md` F-088 / F-088a, SPEC-008, SPEC-004, SPEC-009, `ui/M001-LIVE-TAIL-BEHAVIOR.md` and the composer UI references listed in §13. Those companion amendments are normative on merge of this acceptance PR by a non-author maintainer under #1384. An author or agent comment is not that acceptance. An implementation PR does not Accept this ADR.
 - **Out of scope:** persistent remote companion install (sibling Architecture Issue #1385, reserved as ADR-027 if numbered); local Bash/fish integration beyond the shared bootstrap substrate in §6.5; nested (depth ≥ 2) session bootstrap; remote Seyal Runtime attach (F-171/F-173).
-- **Numbering:** This decision is ADR-026. ADR-025 is reserved by #1382 / #1381 (pane-local terminal tabs) and is not this document; that pane ADR is not on this branch. #1385's companion decision, if numbered, is ADR-027 and must not reuse ADR-025 or ADR-026. Rechecked 2026-10-29 against the architecture index on this branch and the open #1382 claim.
+- **Numbering:** This decision is ADR-026. ADR-025 remains a separate Proposed decision under #1382 / #1381 (pane-local terminal tabs) and is not this document. #1385's companion decision, if numbered, is ADR-027 and must not reuse ADR-025 or ADR-026. Rechecked 2026-10-29 against the architecture index after merging master (ADR-025 Proposed listing present; this ADR stays Accepted on merge of this acceptance PR).
 
 ## 1. Context
 

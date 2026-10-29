@@ -23,7 +23,14 @@ impl Drop for ApplicationRoot {
                 let _ = crate::ffi::unregister_client(raw);
             }
         }
+        for (_, handle) in self.extra_terminal_clients.drain() {
+            let raw = handle.raw();
+            if seen.insert(raw) {
+                let _ = crate::ffi::unregister_client(raw);
+            }
+        }
         self.pane_client_raws.clear();
+        self.terminal_client_raws.clear();
     }
 }
 
@@ -62,6 +69,9 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         self.pane_client_raws.insert(fence.pane, handle);
+        if let Ok(Some(terminal)) = self.shell.selected_terminal_tab(fence.pane) {
+            self.terminal_client_raws.insert(terminal, handle);
+        }
         self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
@@ -91,6 +101,9 @@ impl ApplicationRoot {
             self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         }
         self.pane_client_raws.insert(fence.pane, handle);
+        if let Ok(Some(terminal)) = self.shell.selected_terminal_tab(fence.pane) {
+            self.terminal_client_raws.insert(terminal, handle);
+        }
         self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
@@ -136,6 +149,9 @@ impl ApplicationRoot {
         let raw = registered.raw();
         self.client_handle = Some(registered);
         self.pane_client_raws.insert(fence.pane, raw);
+        if let Ok(Some(terminal)) = self.shell.selected_terminal_tab(fence.pane) {
+            self.terminal_client_raws.insert(terminal, raw);
+        }
         self.remember_pane_runtime(fence.pane, runtime_id);
         crate::ffi::set_focused_display_handle(raw);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
@@ -441,8 +457,16 @@ impl ApplicationRoot {
                 execution: evidence.execution,
             })
             .map_err(|_| AppError::AlreadyBound)?;
-        self.provisioning
-            .record_adopted_binding(fence.pane, evidence.execution);
+        let terminal_tab = self
+            .shell
+            .selected_terminal_tab(fence.pane)
+            .map_err(|_| AppError::UnknownPane)?
+            .ok_or(AppError::UnboundUnauthorized)?;
+        self.provisioning.record_adopted_terminal_binding(
+            fence.pane,
+            terminal_tab,
+            evidence.execution,
+        );
         #[cfg(target_os = "macos")]
         if let Some(handle) = self
             .client_handle
@@ -471,6 +495,7 @@ impl ApplicationRoot {
             pty_generation: evidence.pty_generation,
         };
         self.pane_authorities.insert(fence.pane, authority);
+        self.terminal_authorities.insert(terminal_tab, authority);
         self.bind_pane_recovery(fence.pane, evidence.execution);
         self.remember_primary_pane(fence.pane);
         self.authority = Some(authority);
@@ -622,12 +647,19 @@ impl ApplicationRoot {
                     raws.push(raw);
                 }
             }
+            for (_, handle) in self.extra_terminal_clients.drain() {
+                let raw = handle.raw();
+                if !raws.contains(&raw) {
+                    raws.push(raw);
+                }
+            }
             for raw in self.pane_client_raws.values() {
                 if !raws.contains(raw) {
                     raws.push(*raw);
                 }
             }
             self.pane_client_raws.clear();
+            self.terminal_client_raws.clear();
             if let Some(raw) = primary
                 && !raws.contains(&raw)
             {

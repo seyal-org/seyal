@@ -1,6 +1,6 @@
 //! Issue #1217 / M003 C3 — pane splitting on the C1 create→attach→bind route.
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, TerminalTabId};
 use seyal_protocol::framing::ErrorCode;
 use seyal_runtime::local_ipc::framing::{
     CreateExecutionResult, CreateExecutionResultCode, MessageType, HEADER_LEN,
@@ -69,6 +69,93 @@ fn complete_pending_split(root: &mut ApplicationRoot, pane: PaneId, execution: E
     assert_eq!(
         root.provisioning().recorded_execution(pane),
         Some(execution)
+    );
+}
+
+fn complete_pending_terminal(
+    root: &mut ApplicationRoot,
+    pane: PaneId,
+    terminal_tab: TerminalTabId,
+    execution: ExecutionId,
+) {
+    let intent = root
+        .provisioning()
+        .pending_intent(pane)
+        .expect("terminal create pending")
+        .clone();
+    assert_eq!(intent.terminal_tab, Some(terminal_tab));
+    root.wire_client_mut()
+        .unwrap()
+        .accept_create_result(CreateExecutionResult {
+            execution_id: execution,
+            request_id: intent.request_id,
+            result_code: CreateExecutionResultCode::Created,
+            detail_code: 0,
+        })
+        .unwrap();
+    root.absorb_wire_create_result()
+        .expect("absorb create")
+        .expect("create present");
+    root.complete_create_attach_and_bind(intent.request_id, attachment(execution.to_bytes()[0]))
+        .expect("attach and bind terminal tab");
+}
+
+#[test]
+fn multiple_terminal_tabs_in_one_pane_keep_distinct_execution_bindings_and_selection() {
+    let mut root = ApplicationRoot::new();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    let pane = root.snapshot().shell.focused_pane;
+    let original_terminal = root.shell.selected_terminal_tab(pane).unwrap().unwrap();
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(0xA0),
+    })
+    .unwrap();
+    root.apply(AppAction::NewTerminal)
+        .expect("New Terminal adds a same-Pane session");
+    let second_terminal = root.shell.selected_terminal_tab(pane).unwrap().unwrap();
+    assert_ne!(original_terminal, second_terminal);
+    assert_eq!(root.snapshot().shell.panes.len(), 1);
+    complete_pending_terminal(&mut root, pane, second_terminal, exec(0xA1));
+
+    assert_eq!(
+        root.shell
+            .terminal_execution(pane, original_terminal)
+            .unwrap(),
+        Some(exec(0xA0))
+    );
+    assert_eq!(
+        root.shell
+            .terminal_execution(pane, second_terminal)
+            .unwrap(),
+        Some(exec(0xA1))
+    );
+    assert_eq!(
+        root.snapshot().execution,
+        None,
+        "new unbound selection fenced the old input route"
+    );
+    root.adopt_authority_for_provisioned_pane(evidence(0xA1))
+        .unwrap();
+    root.apply(AppAction::SelectTerminalTab {
+        pane,
+        terminal_tab: original_terminal,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, pane);
+    assert_eq!(root.snapshot().execution, Some(exec(0xA0)));
+    root.apply(AppAction::SelectTerminalTab {
+        pane,
+        terminal_tab: second_terminal,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().execution, Some(exec(0xA1)));
+    assert_eq!(
+        root.shell
+            .terminal_execution(pane, original_terminal)
+            .unwrap(),
+        Some(exec(0xA0))
     );
 }
 

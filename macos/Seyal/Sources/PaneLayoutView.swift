@@ -15,6 +15,17 @@ import AppKit
 /// projection, so a drag never rebuilds Blocks on every mouse move.
 @MainActor
 final class PaneLayoutView: NSView {
+    enum SplitDirection {
+        case right
+        case down
+    }
+
+    struct TerminalTab: Equatable {
+        let lo: UInt64
+        let hi: UInt64
+        let selected: Bool
+    }
+
     struct Region: Equatable {
         let paneLo: UInt64
         let paneHi: UInt64
@@ -30,6 +41,7 @@ final class PaneLayoutView: NSView {
         let recoveryExecutionHi: UInt64
         let recoveryBindingGeneration: UInt64
         let recoveryGeneration: UInt64
+        let terminalTabs: [TerminalTab]
 
         init(
             paneLo: UInt64,
@@ -44,7 +56,8 @@ final class PaneLayoutView: NSView {
             recoveryExecutionLo: UInt64 = 0,
             recoveryExecutionHi: UInt64 = 0,
             recoveryBindingGeneration: UInt64 = 0,
-            recoveryGeneration: UInt64 = 0
+            recoveryGeneration: UInt64 = 0,
+            terminalTabs: [TerminalTab] = []
         ) {
             self.paneLo = paneLo
             self.paneHi = paneHi
@@ -59,6 +72,7 @@ final class PaneLayoutView: NSView {
             self.recoveryExecutionHi = recoveryExecutionHi
             self.recoveryBindingGeneration = recoveryBindingGeneration
             self.recoveryGeneration = recoveryGeneration
+            self.terminalTabs = terminalTabs
         }
 
         /// Everything but geometry: a change here rebuilds region views.
@@ -76,7 +90,8 @@ final class PaneLayoutView: NSView {
                 recoveryExecutionLo: recoveryExecutionLo,
                 recoveryExecutionHi: recoveryExecutionHi,
                 recoveryBindingGeneration: recoveryBindingGeneration,
-                recoveryGeneration: recoveryGeneration
+                recoveryGeneration: recoveryGeneration,
+                terminalTabs: terminalTabs
             )
         }
 
@@ -119,6 +134,11 @@ final class PaneLayoutView: NSView {
     /// Container for the focused Pane's chrome (transcript/composer/primary Metal).
     let liveContent = NSView()
     var onFocusPane: ((UInt64, UInt64) -> Void)?
+    var onSelectTerminalTab: ((UInt64, UInt64, UInt64, UInt64) -> Void)?
+    var onCloseTerminalTab: ((UInt64, UInt64, UInt64, UInt64) -> Void)?
+    var onNewTerminal: ((UInt64, UInt64) -> Void)?
+    var onSplitPane: ((UInt64, UInt64, SplitDirection) -> Void)?
+    var onClosePane: ((UInt64, UInt64) -> Void)?
     var onRetryPaneRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
     /// Rust application root the projection is read from; 0 until wired.
     var appHandle: UInt64 = 0
@@ -126,6 +146,7 @@ final class PaneLayoutView: NSView {
     private(set) var dividers: [Divider] = []
     private var regionViews: [PaneRegionView] = []
     private var dividerViews: [PaneDividerView] = []
+    private var terminalStrips: [PaneKey: PaneTerminalTabStrip] = [:]
     private var secondaryLiveHosts: [PaneKey: SecondaryLivePaneHost] = [:]
     private var theme: NativeTheme?
     /// Owns the focused chrome frame. A translates-on autoresizing mask freezes
@@ -334,11 +355,21 @@ final class PaneLayoutView: NSView {
                     recoveryExecutionLo: recovery.execution_lo,
                     recoveryExecutionHi: recovery.execution_hi,
                     recoveryBindingGeneration: recovery.binding_generation,
-                    recoveryGeneration: recovery.recovery_generation
+                    recoveryGeneration: recovery.recovery_generation,
+                    terminalTabs: readTerminalTabs(appHandle: appHandle, paneLo: raw.pane_lo, paneHi: raw.pane_hi)
                 )
             )
         }
         return regions
+    }
+
+    private static func readTerminalTabs(appHandle: UInt64, paneLo: UInt64, paneHi: UInt64) -> [TerminalTab] {
+        let count = Int(seyal_app_pane_terminal_tab_count(appHandle, paneLo, paneHi))
+        return (0..<count).compactMap { index in
+            let row = seyal_app_pane_terminal_tab(appHandle, paneLo, paneHi, UInt32(index))
+            guard row.size != 0 else { return nil }
+            return TerminalTab(lo: row.terminal_lo, hi: row.terminal_hi, selected: row.flags & 1 != 0)
+        }
     }
 
     func apply(_ next: [Region], dividers nextDividers: [Divider]) {
@@ -354,6 +385,7 @@ final class PaneLayoutView: NSView {
         // AppKit is delivering the drag to.
         if rebuildRegions {
             rebuildRegionViews(next)
+            rebuildTerminalStrips(next)
         }
         if rebuildDividers {
             rebuildDividerViews(nextDividers)
@@ -434,7 +466,14 @@ final class PaneLayoutView: NSView {
         }
         for region in regions where region.live && !region.focused && !region.occluded {
             let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
-            secondaryLiveHosts[key]?.frame = scaled(region.rect).insetBy(dx: inset, dy: inset)
+            secondaryLiveHosts[key]?.frame = contentFrame(region.rect, inset: inset)
+        }
+        for region in regions where !region.occluded {
+            let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
+            var stripFrame = scaled(region.rect).insetBy(dx: inset, dy: inset)
+            stripFrame.size.height = min(PaneTerminalTabStrip.height, stripFrame.height)
+            terminalStrips[key]?.frame = stripFrame
+            terminalStrips[key]?.layoutSubtreeIfNeeded()
         }
         for (view, divider) in zip(dividerViews, dividers) {
             // Centre a fixed-thickness hit zone on the Rust-projected line.
@@ -456,7 +495,38 @@ final class PaneLayoutView: NSView {
         let focusedLive = regions.first(where: { $0.live && $0.focused })?.rect
             ?? regions.first(where: \.live)?.rect
             ?? CGRect(x: 0, y: 0, width: 1, height: 1)
-        return scaled(focusedLive).insetBy(dx: inset, dy: inset)
+        return contentFrame(focusedLive, inset: inset)
+    }
+
+    private func contentFrame(_ unit: CGRect, inset: CGFloat) -> CGRect {
+        var frame = scaled(unit).insetBy(dx: inset, dy: inset)
+        frame.origin.y += PaneTerminalTabStrip.height
+        frame.size.height = max(0, frame.height - PaneTerminalTabStrip.height)
+        return frame
+    }
+
+    private func rebuildTerminalStrips(_ next: [Region]) {
+        terminalStrips.values.forEach { $0.removeFromSuperview() }
+        terminalStrips.removeAll()
+        for region in next {
+            let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
+            let shell = seyal_app_shell(appHandle)
+            let strip = PaneTerminalTabStrip(
+                paneLo: region.paneLo,
+                paneHi: region.paneHi,
+                tabs: region.terminalTabs,
+                focused: region.focused,
+                canSplit: shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) != 0,
+                canClosePane: shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) != 0
+            )
+            strip.onSelect = { [weak self] tab in self?.onSelectTerminalTab?(key.lo, key.hi, tab.lo, tab.hi) }
+            strip.onClose = { [weak self] tab in self?.onCloseTerminalTab?(key.lo, key.hi, tab.lo, tab.hi) }
+            strip.onNew = { [weak self] in self?.onNewTerminal?(key.lo, key.hi) }
+            strip.onSplit = { [weak self] direction in self?.onSplitPane?(key.lo, key.hi, direction) }
+            strip.onClosePane = { [weak self] in self?.onClosePane?(key.lo, key.hi) }
+            terminalStrips[key] = strip
+            addSubview(strip, positioned: .above, relativeTo: liveContent)
+        }
     }
 
     private func scaled(_ unit: CGRect) -> CGRect {

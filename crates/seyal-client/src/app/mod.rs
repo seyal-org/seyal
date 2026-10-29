@@ -27,6 +27,7 @@ mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
+mod terminal_termination;
 mod unpresented_apply;
 
 #[cfg(target_os = "macos")]
@@ -56,6 +57,8 @@ mod recovery_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod tab_provisioning_tests;
 #[cfg(test)]
+mod terminal_tabs_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
@@ -65,7 +68,9 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{
+    AttachmentId, BlockId, ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId,
+};
 
 use crate::app::pane_recovery::PaneRecoveryQueue;
 use crate::chrome::{
@@ -267,6 +272,8 @@ pub struct ApplicationRoot {
     authority: Option<PaneAuthority>,
     /// Per-pane Controller authority after live create→attach→bind (#1175).
     pane_authorities: HashMap<PaneId, PaneAuthority>,
+    /// Controller evidence for every live terminal tab, including unselected tabs.
+    terminal_authorities: HashMap<TerminalTabId, PaneAuthority>,
     /// Portable provisioning/disposition authority (ADR-017 C1).
     provisioning: ProvisioningSession,
     /// Cold-path wire client for create/terminate (tests/harness). Production
@@ -309,6 +316,9 @@ pub struct ApplicationRoot {
     /// Never duplicates [`Self::client_handle`].
     #[cfg(target_os = "macos")]
     extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Additional attached terminal sessions in the same or different Panes.
+    #[cfg(target_os = "macos")]
+    extra_terminal_clients: HashMap<TerminalTabId, crate::ffi::ClientRegistryHandle>,
     /// Dispose-only Controller clients, keyed by synthetic owner and never
     /// associated with a shell Pane or display handle.
     #[cfg(target_os = "macos")]
@@ -316,6 +326,9 @@ pub struct ApplicationRoot {
     /// Pane → registry raw for display/terminate (includes first pane).
     #[cfg(target_os = "macos")]
     pane_client_raws: HashMap<PaneId, u64>,
+    /// Exact display client for each terminal tab; Pane selects one for rendering.
+    #[cfg(target_os = "macos")]
+    terminal_client_raws: HashMap<TerminalTabId, u64>,
     /// Remaining injected live-attach failures before a real connect (C2b tests).
     #[cfg(target_os = "macos")]
     inject_live_attach_failures: u32,
@@ -384,6 +397,7 @@ impl ApplicationRoot {
             shell,
             authority: None,
             pane_authorities: HashMap::new(),
+            terminal_authorities: HashMap::new(),
             provisioning: ProvisioningSession::new(),
             #[cfg(target_os = "macos")]
             wire_client: None,
@@ -412,9 +426,13 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             extra_pane_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
+            extra_terminal_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
             dispose_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
             pane_client_raws: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            terminal_client_raws: HashMap::new(),
             #[cfg(target_os = "macos")]
             inject_live_attach_failures: 0,
             #[cfg(target_os = "macos")]
@@ -446,11 +464,11 @@ impl ApplicationRoot {
         self.live_attach_gate = Some(rx);
     }
 
-    /// Extra per-pane Controller registry entries (second+ tabs).
+    /// Additional Controller registry entries for panes or terminal tabs.
     #[doc(hidden)]
     #[cfg(target_os = "macos")]
-    pub fn extra_pane_client_count(&self) -> usize {
-        self.extra_pane_clients.len()
+    pub fn extra_controller_client_count(&self) -> usize {
+        self.extra_pane_clients.len() + self.extra_terminal_clients.len()
     }
 
     /// Queued `AttachController` work waiting for the in-flight worker.
