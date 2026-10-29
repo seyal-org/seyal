@@ -375,11 +375,22 @@ impl ApplicationRoot {
     /// `seyal_bridge_poll_for`) so a dead fd cannot spin forever.
     #[cfg(target_os = "macos")]
     fn poll_unfocused_pane_clients(&mut self) {
-        let focused = self.shell.snapshot().focused_pane;
+        // Shell focus can move to an unbound window while `authority` still
+        // identifies the displayed Controller. A live attach-for-dispose may
+        // be registered under that focused pane without becoming its display
+        // authority; it still needs polling to deliver its terminate result.
+        let display_handle = self
+            .authority
+            .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
+            .or_else(|| {
+                self.client_handle
+                    .as_ref()
+                    .map(crate::ffi::ClientRegistryHandle::raw)
+            });
         let handles: Vec<(PaneId, u64)> = self
             .pane_client_raws
             .iter()
-            .filter(|(pane, _)| **pane != focused)
+            .filter(|(_, raw)| Some(**raw) != display_handle)
             .map(|(pane, raw)| (*pane, *raw))
             .collect();
         for (_pane, raw) in handles {

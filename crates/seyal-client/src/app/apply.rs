@@ -148,7 +148,6 @@ impl ApplicationRoot {
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
             #[cfg(test)]
             AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
-            #[cfg(test)]
             AppAction::RecordUnpresented {
                 execution,
                 workspace,

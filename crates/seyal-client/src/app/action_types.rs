@@ -145,8 +145,8 @@ pub enum AppAction {
     SyncLiveUnpresented {
         entries: Vec<(ExecutionId, WorkspaceId)>,
     },
-    /// Record one live-unpresented execution (tests construct Unpresented directly).
-    #[cfg(test)]
+    /// Record one live-unpresented execution for Runtime/integration fixtures
+    /// that construct Unpresented directly (not a host FFI kind).
     RecordUnpresented {
         execution: ExecutionId,
         workspace: WorkspaceId,
