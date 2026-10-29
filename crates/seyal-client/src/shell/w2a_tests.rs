@@ -952,7 +952,7 @@ fn composed_reorder_and_move_sequence_fences_stale_action_atomically() {
                 assert!(!window.tabs.is_empty());
                 for tab in &window.tabs {
                     for pane in tab.panes.values() {
-                        if let Some(execution) = pane.execution {
+                        if let Some(execution) = pane.execution() {
                             assert!(actual_bindings.insert(pane.id, execution).is_none());
                             let bound = shell.panes_bound_to(execution);
                             assert_eq!(bound.len(), 1, "execution must have one leaf");

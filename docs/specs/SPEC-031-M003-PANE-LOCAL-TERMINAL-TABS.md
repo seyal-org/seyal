@@ -1,6 +1,6 @@
 # SPEC-031 — M003 pane-local terminal tabs and session lifecycle
 
-- **Status:** Proposed; normative only after ADR-025 is accepted by a non-author maintainer.
+- **Status:** Proposed implementation candidate; normative only if ADR-025 and this specification are accepted in the combined PR by a non-author maintainer.
 - **Date:** 2026-10-29
 - **Issue:** #1381 (parent #674)
 - **Authority:** Proposed ADR-025. Existing accepted ADRs continue to govern until ADR-025 is accepted.
@@ -110,8 +110,8 @@ Closing a terminal tab is an explicit request to close its terminal session:
 
 1. Rust resolves the exact current TerminalTabId→ExecutionId binding and fences it by containment generation and execution/attachment authority.
 2. Rust sends the existing explicit `TerminateExecution` operation for that ExecutionId. This is not a generic Pane/outer-Tab close action.
-3. Until Runtime accepts termination and final drain/lifecycle completes, the terminal tab remains addressable in a closing state. If termination is rejected, disconnected, or outcome-unknown, retain the tab and exact execution route with a typed error; do not detach and forget a possibly live process or retry blindly.
-4. On finalization, remove only the named terminal tab. If it was selected, choose the tab now at the removed index; if none exists, choose the preceding last tab. Closing an unselected tab leaves selection unchanged.
+3. A `TerminationRequested` response is the accepted close boundary used by the existing P4 lifecycle. Rust then removes only the named terminal tab and detaches that exact Controller; Runtime owns process termination and final drain. If termination is rejected, disconnected, or outcome-unknown, retain the tab and exact execution route with a typed error; do not detach and forget a possibly live process or retry blindly.
+4. If the closed tab was selected, choose the tab now at the removed index; if none exists, choose the preceding last tab. Closing an unselected tab leaves selection unchanged.
 5. Closing the final terminal tab leaves its Pane present and empty, with `selected_terminal_tab = None`, a visible New Terminal affordance, and no terminal input target.
 
 ### 7.2 Close Pane with one or more terminal tabs
@@ -169,4 +169,4 @@ Reducer tests first for the contract's success and rejection cases. Required cla
 - versioned action/snapshot migration and accessibility identifiers;
 - bounded resource/capacity behavior for many Panes, terminal tabs and live executions.
 
-End-to-end acceptance uses the exact packaged Seyal.app, its bundled Runtime, real PTYs and headed XCTest/XCUI. It proves command input and output independently in two Panes and multiple terminal tabs, switching preserves process/state/scrollback, resize affects only intended execution, terminal close ends only its named process, pane close leaves sessions adoptable, and recovery has no focus/input cross-targeting. Record exact source SHA, worktree, Runtime endpoint isolation, test artifact and any blocked external gate.
+End-to-end acceptance uses the exact packaged Seyal.app, its bundled Runtime, real PTYs and headed XCTest/XCUI. It proves command input and output independently in two Panes and multiple terminal tabs, switching preserves process/state/scrollback, resize affects only intended execution, terminal close ends only its named process, pane close leaves sessions adoptable, and recovery has no focus/input cross-targeting. Record exact source SHA, worktree, Runtime endpoint isolation, test artifact and any blocked external gate. The maintainer directed this ADR, specification, regression tests, and implementation to be reviewed together in one candidate PR; the candidate remains unmerged until independent review.

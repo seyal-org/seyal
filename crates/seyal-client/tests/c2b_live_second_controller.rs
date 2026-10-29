@@ -98,7 +98,16 @@ fn poll_until(
         }
         thread::sleep(Duration::from_millis(10));
     }
-    panic!("deadline exceeded waiting for CreateTab live bind");
+    let snapshot = root.snapshot();
+    panic!(
+        "deadline exceeded waiting for CreateTab live bind: last_failure={:?}, outstanding={}, retries={}, tabs={}, focused_pane={:?}, panes={:?}",
+        root.provisioning().last_failure(),
+        root.provisioning().has_outstanding_intent(),
+        root.provisioning().automatic_retries(),
+        snapshot.shell.tabs.len(),
+        snapshot.shell.focused_pane,
+        snapshot.shell.panes.iter().map(|pane| (pane.id, pane.selected_terminal_tab, pane.execution, &pane.terminal_tabs)).collect::<Vec<_>>(),
+    );
 }
 
 #[test]
@@ -214,7 +223,7 @@ fn create_tab_live_second_controller_attach_binds_distinct_execution() {
         "unrelated first execution must remain recorded after detach-only close"
     );
     assert_eq!(root.provisioning().automatic_retries(), 0);
-    assert_eq!(root.extra_pane_client_count(), 0);
+    assert_eq!(root.extra_controller_client_count(), 0);
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
@@ -259,7 +268,7 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
         root.provisioning()
             .recorded_execution(second_pane)
             .is_none()
-            && root.extra_pane_client_count() == 0
+            && root.extra_controller_client_count() == 0
     });
     assert!(
         root.provisioning().last_failure().is_none(),
@@ -293,7 +302,7 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
         ),
         "Runtime must no longer attach to the terminated second execution"
     );
-    assert_eq!(root.extra_pane_client_count(), 0);
+    assert_eq!(root.extra_controller_client_count(), 0);
     assert_eq!(root.provisioning().automatic_retries(), 0);
 
     stop.store(true, Ordering::Relaxed);
@@ -329,7 +338,7 @@ fn create_tab_close_before_created_disposes_via_section_6_3() {
 
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         root.snapshot().shell.tabs.len() == 1
-            && root.extra_pane_client_count() == 0
+            && root.extra_controller_client_count() == 0
             && !root.provisioning().has_outstanding_intent()
     });
     thread::sleep(Duration::from_millis(200));
@@ -338,7 +347,7 @@ fn create_tab_close_before_created_disposes_via_section_6_3() {
         root.provisioning().recorded_execution(first_pane),
         Some(first_execution)
     );
-    assert_eq!(root.extra_pane_client_count(), 0);
+    assert_eq!(root.extra_controller_client_count(), 0);
     assert_eq!(root.snapshot().shell.tabs.len(), 1);
 
     stop.store(true, Ordering::Relaxed);
@@ -369,7 +378,7 @@ fn create_tab_attach_failure_n_times_stays_bounded() {
         root.apply(AppAction::CreateTab).expect("CreateTab admits");
         poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
             root.provisioning().last_failure().is_some()
-                && root.extra_pane_client_count() == 0
+                && root.extra_controller_client_count() == 0
                 && !root.provisioning().has_outstanding_intent()
         });
         assert_eq!(
@@ -428,7 +437,7 @@ fn create_tab_live_three_tabs_keep_distinct_executions() {
         executions.push(execution);
     }
     assert_eq!(root.snapshot().shell.tabs.len(), 3);
-    assert_eq!(root.extra_pane_client_count(), 2);
+    assert_eq!(root.extra_controller_client_count(), 2);
     assert_eq!(
         root.provisioning().recorded_execution(first_pane),
         Some(first_execution)
@@ -482,7 +491,7 @@ fn create_tab_live_capacity_exceeded_is_bounded_without_retry() {
         root.provisioning().recorded_execution(first_pane),
         Some(first_execution)
     );
-    assert_eq!(root.extra_pane_client_count(), 1);
+    assert_eq!(root.extra_controller_client_count(), 1);
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
@@ -696,7 +705,7 @@ fn create_tab_overlapping_attach_binds_both() {
     assert_ne!(first_execution, second);
     assert_ne!(first_execution, third);
     assert_ne!(second, third);
-    assert_eq!(root.extra_pane_client_count(), 2);
+    assert_eq!(root.extra_controller_client_count(), 2);
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
@@ -751,7 +760,7 @@ fn create_tab_close_unattached_tab_while_attach_in_flight_disposes() {
         Some(first_execution)
     );
     assert!(root.provisioning().recorded_execution(third_pane).is_none());
-    assert_eq!(root.extra_pane_client_count(), 1);
+    assert_eq!(root.extra_controller_client_count(), 1);
     assert_eq!(root.provisioning().automatic_retries(), 0);
 
     stop.store(true, Ordering::Relaxed);
@@ -906,7 +915,7 @@ fn create_tab_attach_failure_fails_closed_for_input() {
     root.apply(AppAction::CreateTab).expect("CreateTab");
     let second_pane = root.snapshot().shell.focused_pane;
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
-        root.provisioning().last_failure().is_some() && root.extra_pane_client_count() == 0
+        root.provisioning().last_failure().is_some() && root.extra_controller_client_count() == 0
     });
     assert_eq!(root.snapshot().shell.focused_pane, second_pane);
     assert_eq!(

@@ -42,6 +42,43 @@ final class SeyalPaneSplitUITests: XCTestCase {
         assertSingleLiveSurface(in: app, focusedRegion: focused)
     }
 
+    func testPaneLocalTerminalTabsSelectIndependentlyAndNewTerminalDoesNotSplit() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let terminalTabs = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
+        )
+        XCTAssertEqual(terminalTabs.count, 1, "fresh Workspace has one terminal tab in its first Pane")
+
+        let newTerminal = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier CONTAINS %@", "-new-terminal")
+        ).firstMatch
+        XCTAssertTrue(newTerminal.waitForExistence(timeout: 8))
+        newTerminal.click()
+        let twoTabs = expectation(for: NSPredicate(format: "count == 2"), evaluatedWith: terminalTabs, handler: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [twoTabs], timeout: 20), .completed, "New Terminal adds a pane-local tab")
+        XCTAssertFalse(element(app, "seyal-pane-region-1").exists, "New Terminal does not split the PaneTree")
+        waitForUsablePty(in: app, timeout: 20)
+
+        let original = terminalTabs.element(boundBy: 0)
+        let created = terminalTabs.element(boundBy: 1)
+        XCTAssertNotEqual(original.identifier, created.identifier)
+        original.click()
+        XCTAssertEqual(original.value as? String, "selected", "selection returns to the original live terminal")
+        XCTAssertEqual(created.value as? String, "", "the other terminal remains unselected")
+        created.click()
+        XCTAssertEqual(created.value as? String, "selected")
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        let secondPaneStrips = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier CONTAINS %@ AND identifier CONTAINS %@", "-terminal-tabs", "seyal-pane-")
+        )
+        XCTAssertEqual(secondPaneStrips.count, 2, "each Pane owns its own terminal-tab strip")
+
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     func testCloseRemovesNonLastPaneAndLastPaneOffersNoClose() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)

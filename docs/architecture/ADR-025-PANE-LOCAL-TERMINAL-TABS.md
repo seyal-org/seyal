@@ -1,6 +1,6 @@
 # ADR-025 — Pane-local terminal tabs and session lifecycle
 
-- **Status:** Proposed; not implementation authority until accepted by a non-author maintainer.
+- **Status:** Proposed implementation candidate; normative only if this combined PR is accepted and merged by a non-author maintainer.
 - **Date:** 2026-10-29
 - **Issue:** #1381 (parent #674)
 - **Scope:** Rust-owned terminal-tab identity and selection within Pane regions; create, split, close, session retention, recovery, and migration semantics.
@@ -71,7 +71,7 @@ TerminalExecution → one PTY/child lifecycle + one canonical TerminalState
 
 This proposal distinguishes a terminal-session close from closing layout presentation:
 
-- **Close Terminal Tab** is the user's explicit request to close that terminal session. Rust resolves the exact `TerminalTabId → ExecutionId` and issues the existing typed, Controller-fenced `TerminateExecution` operation. It does not infer a target from the focused view after asynchronous work begins. The selected tab remains reachable in a closing state until Runtime accepts termination and the existing final-drain/lifecycle contract completes. If termination is rejected or its outcome is unknown, Rust retains the binding and surfaces a typed failure; it must not detach and forget a possibly live process. On successful finalization, Rust removes only that terminal tab and selects the next tab at the removed position, or the preceding last tab when none follows. Closing an unselected tab leaves the Pane's current selection unchanged.
+- **Close Terminal Tab** is the user's explicit request to close that terminal session. Rust resolves the exact `TerminalTabId → ExecutionId` and issues the existing typed, Controller-fenced `TerminateExecution` operation. It does not infer a target from the focused view after asynchronous work begins. A `TerminationRequested` response is the accepted close boundary used by the existing P4 lifecycle: Rust removes only that terminal tab, detaches that exact Controller, and leaves Runtime to finish process termination and final drain. If termination is rejected or its outcome is unknown, Rust retains the binding and surfaces a typed failure; it must not detach and forget a possibly live process. The successor is the tab now at the removed position, or the preceding last tab when none follows. Closing an unselected tab leaves the Pane's current selection unchanged.
 - **Closing the final terminal tab in a Pane** leaves a valid empty Pane with no selected terminal and no input target. The Pane offers New Terminal. It does not produce a zero-Pane Seyal Tab.
 - **Close Pane**, including one with several terminal tabs, is layout presentation close. Rust detaches each bound execution and removes the Pane; every previously bound execution stays live and becomes an unpresented session. No execution is implicitly terminated. A live-session inventory/adoption route is mandatory before shipping this close behavior, consistent with ADR-018 §3.3 and #929.
 - **Close outer Seyal Tab, Window, or final Pane through hierarchical close** follows ADR-018: presentation is destroyed, its bound executions remain live and re-adoptable, and zero-window re-entry remains possible. No close can terminate a sibling or retarget a different execution.
@@ -111,9 +111,10 @@ The current one-binding Pane is represented as one terminal tab without spawning
 
 - ADR-021's one-execution-per-Pane wording and ADR-009's Pane composer/input route need scoped amendments. ADR-017 provisioning remains the Runtime creation authority. ADR-018's generic layout-close behavior remains detach-only; the new Close Terminal operation is explicit termination. SPEC-004/006/008/009 require scoped amendments as the accepted API and state transitions dictate.
 - #1175 and #1217 provide the existing per-execution provisioning path; #936 provides multi-live Pane renderer/resize/recovery work. This feature must not duplicate those implementations.
-- The implementation child cannot become Ready until this ADR/spec is accepted, exact live-session enumeration/adoption has an accepted path (#929 or a scoped replacement), provisioning/attachment dependencies are current, and the attachment/capacity contract supports the required tab count.
-- The implementation is a separate Issue and PR, test-first, on the exact current OSS base, and must pass real headed XCUI with real Runtime/PTYS. A build or Rust reducer test alone is insufficient.
+- Per the owning maintainer's explicit direction, this candidate PR carries the ADR, specification, regression tests, and implementation together. Independent review and merge of the combined change accepts the architecture and implementation as one decision; the open PR remains an unmerged candidate.
+- The implementation must reuse exact-ID Runtime create, attach, terminate, live-session inventory, and adoption paths. If those paths cannot support the specified behavior, add the narrow exact-ID capability in this PR and update this decision before the corresponding production change.
+- The candidate must pass real headed XCUI with the bundled Runtime and real PTYs. A build or Rust reducer test alone is insufficient.
 
 ## 5. Acceptance
 
-This ADR becomes Accepted only after a separate Architecture/R&D PR receives independent non-author maintainer approval and is merged under #1381. Until then it is a proposal and authorizes no production implementation.
+This ADR becomes Accepted only when this combined PR receives independent non-author maintainer approval and is merged under #1381. Until merge, it remains a proposal.

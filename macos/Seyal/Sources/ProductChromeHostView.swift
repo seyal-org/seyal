@@ -183,6 +183,13 @@ final class ProductChromeHostView: NSView {
         centerColumn.onFocusPane = { [weak self] lo, hi in
             self?.focusPaneRegion(lo: lo, hi: hi)
         }
+        centerColumn.onSelectTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
+            self?.selectTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
+        }
+        centerColumn.onCloseTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
+            self?.closeTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
+        }
+        centerColumn.onNewTerminal = { [weak self] _, _ in self?.createTerminal() }
         centerColumn.appHandle = pane.appHandle
 
         addSubview(tabStrip)

@@ -187,13 +187,10 @@ final class PaneRegionProjectionTests: XCTestCase {
         XCTAssertFalse(live.isHidden, file: file, line: line)
         // In a split the live surface sits inside the region's 1pt border.
         let inset: CGFloat = count > 1 ? 1 : 0
-        XCTAssertEqual(
-            live.frame,
-            frames[focused].insetBy(dx: inset, dy: inset),
-            "one live surface, in the focused region",
-            file: file,
-            line: line
-        )
+        var contentFrame = frames[focused].insetBy(dx: inset, dy: inset)
+        contentFrame.origin.y += 30
+        contentFrame.size.height = max(0, contentFrame.height - 30)
+        XCTAssertEqual(live.frame, contentFrame, "live surface leaves room for the Pane-local strip", file: file, line: line)
     }
 
     /// The left panel's Pane rows follow Rust selection: exactly the focused

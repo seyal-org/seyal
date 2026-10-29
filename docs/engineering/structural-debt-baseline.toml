@@ -48,15 +48,15 @@ reason = "Host Pane region/divider projection stays one layout module; #1219 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 856
-issue = 1175
-reason = "Portable provisioning reducer stays one cold-path authority; #1175 adds pending_attach_by_request_id so dispose-attach after Created can correlate without fabricating AttachmentId."
+acknowledged_loc = 958
+issue = 1381
+reason = "Portable provisioning reducer remains the cold-path request/result authority after #1381 moves tab-specific binding operations into terminal_bindings.rs; terminal identity correlation stays beside shared request lifecycle and disposition rules."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 859
-issue = 936
-reason = "The existing create/close/terminate/split adapter now also binds per-Pane recovery state and invalidates it at the pane lifecycle boundary; focused terminate retains authority after registry loss but still fails closed unless the Controller client is live."
+acknowledged_loc = 978
+issue = 1381
+reason = "The create/close/terminate/split adapter also routes terminal-tab requests to their exact Runtime execution and preserves sibling bindings under #1381."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -227,9 +227,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer;
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 958
-issue = 1167
-reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, #1144 adds Tab-to-Window activation lookup, #1218 adds two equalize dispatch arms, and #1167 only declares the PT6 suite module. Snapshot encoding stays in shell/snapshot.rs; equalize dispatch lives in equalize.rs and tree recursion in tree.rs."
+acknowledged_loc = 974
+issue = 1381
+reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1381 moves pane-local terminal-tab operations and queries to terminal_tabs.rs while the shared reducer retains topology and identity invariants."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -246,9 +246,21 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 812
-issue = 1219
-reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, #1144 adds the ActivationFailed event, #1219 adds PT5 zoom/swap/move/directional/equalize kinds, and the window-stack merge places CLOSE_WINDOW after those codes without splitting the ABI table."
+acknowledged_loc = 830
+issue = 1381
+reason = "ABI action decoding remains one versioned match surface; #1381 adds the three stable terminal-tab operation kinds alongside existing pane actions."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/app/session.rs"
+acknowledged_loc = 731
+issue = 1381
+reason = "Session adoption and Runtime attachment reconciliation also register exact terminal-tab bindings under #1381 so portable selected-terminal authority follows the attached execution."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/PaneLayoutView.swift"
+acknowledged_loc = 706
+issue = 1381
+reason = "The existing Rust-projected pane layout owns its pane-local tab-strip host and per-pane accessibility identifiers under #1381; terminal identity and selection remain Rust-provided."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"

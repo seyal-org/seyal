@@ -39,6 +39,39 @@ extension ProductChromeHostView {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
     }
 
+    @objc func createTerminal() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_NEW_TERMINAL.rawValue), reserved: 0)
+    }
+
+    func selectTerminalTab(paneLo: UInt64, paneHi: UInt64, terminalLo: UInt64, terminalHi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SELECT_TERMINAL_TAB.rawValue)
+        action.fence_pane_lo = paneLo
+        action.fence_pane_hi = paneHi
+        action.target_execution_lo = terminalLo
+        action.target_execution_hi = terminalHi
+        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
+        reconcileChrome()
+        routeFocus()
+    }
+
+    func closeTerminalTab(paneLo: UInt64, paneHi: UInt64, terminalLo: UInt64, terminalHi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_TERMINAL_TAB.rawValue)
+        action.fence_pane_lo = paneLo
+        action.fence_pane_hi = paneHi
+        action.target_execution_lo = terminalLo
+        action.target_execution_hi = terminalHi
+        action.target_generation = seyal_app_shell(pane.appHandle).containment_generation
+        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
+        reconcileChrome()
+        routeFocus()
+    }
+
     /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
     /// WorkspaceCommand. Rust re-validates against the current route context.
     @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {

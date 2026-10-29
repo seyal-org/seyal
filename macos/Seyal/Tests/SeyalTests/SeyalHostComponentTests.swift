@@ -6,6 +6,13 @@ import XCTest
 @testable import Seyal
 
 final class SeyalHostComponentTests: XCTestCase {
+    private func terminalContentFrame(_ region: NSRect, splitInset: CGFloat = 0) -> NSRect {
+        var frame = region.insetBy(dx: splitInset, dy: splitInset)
+        frame.origin.y += 30
+        frame.size.height = max(0, frame.height - 30)
+        return frame
+    }
+
     override func setUp() {
         super.setUp()
         // Pin process cold config to a missing path so tests are hermetic and
@@ -504,7 +511,7 @@ final class SeyalHostComponentTests: XCTestCase {
         // center region, exactly as before multipane projection.
         let live = try XCTUnwrap(view.pane.superview)
         XCTAssertFalse(live.isHidden)
-        XCTAssertEqual(live.frame, regionView.frame)
+        XCTAssertEqual(live.frame, terminalContentFrame(regionView.frame))
         XCTAssertGreaterThan(live.frame.width, 0)
     }
 
@@ -551,7 +558,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(focusedRegion.isAccessibilityEnabled())
         let live = try XCTUnwrap(view.pane.superview)
         XCTAssertFalse(live.isHidden)
-        XCTAssertEqual(live.frame, focusedRegion.frame.insetBy(dx: 1, dy: 1))
+        XCTAssertEqual(live.frame, terminalContentFrame(focusedRegion.frame, splitInset: 1))
     }
 
     @MainActor
@@ -730,7 +737,7 @@ final class SeyalHostComponentTests: XCTestCase {
         let layout = try XCTUnwrap(live.superview)
         let splitFrame = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
-        XCTAssertEqual(live.frame, splitFrame.insetBy(dx: 1, dy: 1))
+        XCTAssertEqual(live.frame, terminalContentFrame(splitFrame, splitInset: 1))
 
         let shell = seyal_app_shell(handle)
         view.zoomPane(lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
@@ -741,14 +748,14 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
         XCTAssertEqual(zoomed.frame.width, layout.bounds.width, accuracy: 1)
         XCTAssertEqual(zoomed.frame.height, layout.bounds.height, accuracy: 1)
-        XCTAssertEqual(live.frame, zoomed.frame, "zoomed leaf is full-Tab with no split inset")
+        XCTAssertEqual(live.frame, terminalContentFrame(zoomed.frame), "zoomed leaf reserves its Pane-local strip")
 
         view.unzoomPane()
         view.layoutSubtreeIfNeeded()
         XCTAssertFalse(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
         XCTAssertEqual(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame, splitFrame)
-        XCTAssertEqual(live.frame, splitFrame.insetBy(dx: 1, dy: 1))
+        XCTAssertEqual(live.frame, terminalContentFrame(splitFrame, splitInset: 1))
     }
 
     @MainActor

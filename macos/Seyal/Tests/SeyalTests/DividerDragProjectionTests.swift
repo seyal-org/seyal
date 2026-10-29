@@ -270,7 +270,10 @@ final class DividerDragProjectionTests: XCTestCase {
         )
         let region = try XCTUnwrap(element(view, "seyal-pane-region-\(focused)")).frame
         let live = try XCTUnwrap(view.pane.superview)
-        XCTAssertEqual(live.frame, region.insetBy(dx: 1, dy: 1))
+        var contentFrame = region.insetBy(dx: 1, dy: 1)
+        contentFrame.origin.y += 30
+        contentFrame.size.height = max(0, contentFrame.height - 30)
+        XCTAssertEqual(live.frame, contentFrame)
     }
 
     private func click(_ view: NSView, _ identifier: String) throws {
