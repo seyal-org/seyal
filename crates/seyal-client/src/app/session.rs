@@ -314,11 +314,14 @@ impl ApplicationRoot {
             // XCTest/Seyal.app retry the same fd. Unregister only on terminal
             // socket loss (same set as `seyal_bridge_poll_for`).
             Err(error) if is_terminal_registry_loss(&error) => {
-                self.note_terminal_client_loss(
-                    handle,
-                    matches!(error, crate::local::ClientError::NoRunningExecution),
-                );
-                let _ = crate::ffi::unregister_client(handle);
+                let ended = matches!(error, crate::local::ClientError::NoRunningExecution);
+                self.note_terminal_client_loss(handle, ended);
+                // Match `seyal_bridge_poll`: keep the registry entry after shell
+                // exit so Flow can still drain final Block history (#1379).
+                // Disconnect/IO still unregister so level-trigger sources stop.
+                if !ended {
+                    let _ = crate::ffi::unregister_client(handle);
+                }
                 return self.fail(AppError::NoLiveClient);
             }
             Err(_) => return self.fail(AppError::NoLiveClient),
@@ -388,7 +391,9 @@ impl ApplicationRoot {
         for (_pane, raw) in handles {
             if let Some(ended) = registry_client_terminal_loss(raw) {
                 self.note_terminal_client_loss(raw, ended);
-                let _ = crate::ffi::unregister_client(raw);
+                if !ended {
+                    let _ = crate::ffi::unregister_client(raw);
+                }
             }
         }
     }

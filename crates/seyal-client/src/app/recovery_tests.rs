@@ -763,3 +763,27 @@ fn duplicate_complete_preserves_queued_schedule() {
         root.snapshot().recovery_stage
     );
 }
+
+/// #1379: `seyal_bridge_poll` retains the registry client after
+/// `NoRunningExecution` so Flow can drain final Block history. ApplicationRoot
+/// poll paths must match that gate and not unregister on shell exit alone.
+#[test]
+fn shell_exit_poll_must_keep_registry_client_like_bridge_poll() {
+    let session = include_str!("session.rs");
+    assert!(
+        session.contains("keep the registry entry after shell"),
+        "poll_client must document retaining the client after NoRunningExecution"
+    );
+    assert!(
+        session.contains(
+            "if !ended {\n                    let _ = crate::ffi::unregister_client(handle);"
+        ),
+        "poll_client must unregister only on disconnect/IO, not shell exit"
+    );
+    assert!(
+        session.contains(
+            "if !ended {\n                    let _ = crate::ffi::unregister_client(raw);"
+        ),
+        "unfocused pane poll must unregister only on disconnect/IO, not shell exit"
+    );
+}
