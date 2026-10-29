@@ -100,8 +100,9 @@ fn poll_until(
     }
     let snapshot = root.snapshot();
     panic!(
-        "deadline exceeded waiting for CreateTab live bind: last_failure={:?}, outstanding={}, retries={}, tabs={}, focused_pane={:?}, panes={:?}",
+        "deadline exceeded waiting for CreateTab live bind: last_failure={:?}, app_error={:?}, outstanding={}, retries={}, tabs={}, focused_pane={:?}, panes={:?}",
         root.provisioning().last_failure(),
+        snapshot.last_error,
         root.provisioning().has_outstanding_intent(),
         root.provisioning().automatic_retries(),
         snapshot.shell.tabs.len(),
