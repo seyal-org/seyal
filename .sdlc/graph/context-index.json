@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "cb5c5bbb8b6da1ba6cdac25e9dd5f70948f49f50"
+          "fingerprint": "b29c6217712a31b99a5b1f6007cbbd804b3c0a72"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "cb5c5bbb8b6da1ba6cdac25e9dd5f70948f49f50"
+          "fingerprint": "b29c6217712a31b99a5b1f6007cbbd804b3c0a72"
         }
       ],
       "relationships": [
@@ -126,7 +126,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "d31c096f3acda899c2adac3346fbd3562ea6637e"
+          "fingerprint": "c6688ed3281db34701b6f2f893d6255038f7f3f0"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
@@ -134,11 +134,11 @@
         },
         {
           "path": "docs/specs/SPEC-008-M003-COMMAND-BLOCKS.md",
-          "fingerprint": "544b658069336fb7866e9fd175aaa5835f9c06ce"
+          "fingerprint": "dc55f64910dc82264e87580e30484deba48f786a"
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
-          "fingerprint": "4a5d416ff851818ca4710fc701f202fe7a4e068d"
+          "fingerprint": "97e841c89f592e732a171408f905c2ed5f3f6b60"
         },
         {
           "path": "docs/architecture/ADR-015-RUST-PRODUCT-UI-THIN-SWIFT-HOST.md",
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "d31c096f3acda899c2adac3346fbd3562ea6637e"
+          "fingerprint": "c6688ed3281db34701b6f2f893d6255038f7f3f0"
         }
       ],
       "relationships": [
@@ -335,6 +335,27 @@
         {
           "path": "docs/architecture/ADR-024-M005-PROTECTED-AGENT-INPUT-STORE.md",
           "fingerprint": "0a620fa1be6f6b90b30ace2353d7a41a46621614"
+        }
+      ],
+      "relationships": []
+    },
+    {
+      "id": "DEC-ADR-026",
+      "kind": "decision",
+      "title": "ADR-026 consented session remote shell bootstrap",
+      "summary": "Proposed, not implementation authority: orthogonal Block lifecycle, composer input target, and presentation, plus a consented session-only in-band bash/zsh bootstrap. ADR-025 is reserved by #1382/#1381. Silent inject stays rejected (F-088); F-088a is contingent on acceptance.",
+      "tags": [
+        "adr",
+        "adr-026",
+        "session",
+        "bootstrap",
+        "composer",
+        "proposed"
+      ],
+      "sources": [
+        {
+          "path": "docs/architecture/ADR-026-CONSENTED-SESSION-REMOTE-SHELL-BOOTSTRAP.md",
+          "fingerprint": "66688af8f7c98be00cb940a98760ee52c6236b56"
         }
       ],
       "relationships": []
