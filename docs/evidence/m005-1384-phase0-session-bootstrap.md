@@ -1,11 +1,11 @@
 # Phase 0 evidence — consented session-only remote shell bootstrap (#1384)
 
-**Status:** Static classification + macOS F9 line-discipline probe recorded. Headed Seyal.app SSH repro and bootstrap spike remain open before any ADR-026 acceptance PR. Non-production evidence for Proposed ADR-026 under #1384. This proposal does not Accept the ADR. Review of the first draft renumbered it from the collided ADR-025 slot to ADR-026 (ADR-025 is reserved by #1382 / #1381) and tightened bootstrap, trust, relay, consent, depth-one and F9 rules; those edits are in the ADR, not a claim that Phase 0 measured them.
+**Status:** Static classification + macOS F9 line-discipline probe recorded. ADR-026 is Accepted on merge of this acceptance PR by a non-author maintainer under #1384. An author or agent comment is not that acceptance. Headed Seyal.app SSH repro and the bootstrap spike remain open. Those open items are evidence gaps for Architecture Done and for implementation Issues. They do not block this acceptance: the proposal is accepted as written. Review of the first draft renumbered it from the collided ADR-025 slot to ADR-026 (ADR-025 is reserved by #1382 / #1381) and tightened bootstrap, trust, relay, consent, depth-one and F9 rules; those edits are in the ADR, not a claim that Phase 0 measured them.
 
 | Field | Value |
 |---|---|
 | Issue | #1384 (Architecture, Ticket A) |
-| ADR | ADR-026 — Consented session-only remote shell bootstrap (Proposed; acceptance is a later PR) |
+| ADR | ADR-026 — Consented session-only remote shell bootstrap (Accepted on merge of this acceptance PR by a non-author maintainer under #1384) |
 | Classification | Phase 0 repro/classify + F9 probe — **no production code** |
 | Branch | `mahboobmonnamd/issue/1384` @ worktree `seyal-1384` |
 | Tree | `8ff4092c` (+ docs) |
@@ -109,7 +109,7 @@ Current accepted text **forbids** the desired product:
 - SPEC-008 §5.5: nested/SSH child → no remote Block claim.
 - SPEC-008 §3.2 simultaneously requires Raw for interactive/secret children — **missing trigger** in code.
 
-Desired #1384 model (consented session bootstrap + orthogonal input target) therefore **requires** ADR-026 acceptance before implementation.
+Desired #1384 model (consented session bootstrap + orthogonal input target) is the Accepted ADR-026 contract. Implementation still waits on `development-readiness`. Open headed and spike items below are evidence gaps for Architecture Done and for implementation.
 
 ## 4. Consented bootstrap spike (still open)
 
@@ -143,13 +143,13 @@ Full 20-row matrix lives in ADR-026 §10. Phase 0 static work adds:
 
 | Finding | Action |
 |---|---|
-| Class A design gap under accepted ADR-009 | ADR-026 Proposed; amend F-088 / SPEC-008 / SPEC-004 / SPEC-009 / UI busy text |
+| Class A design gap under accepted ADR-009 | ADR-026 Accepted on this merge; F-088 stays Rejected; F-088a is Accepted direction; SPEC-008 / SPEC-004 / SPEC-009 / UI busy text are normative |
 | SPEC-008 §3.2 Raw trigger missing | Covered by orthogonal target + consent/Raw rules in ADR-026; not a silent code fix alone |
 | Local termios / fg pgrp look observable; argv not measured | Keep F9 in ADR-026 with §4.3 bounds; do not treat this probe as an argv or raw-keystroke result; keep unavailable fallback and remote-password residual risk |
-| Bootstrap spike / headed repro | Required before marking ADR acceptance criteria fully evidenced; may continue on this branch as evidence-only |
+| Bootstrap spike / headed repro | Open. Evidence gaps for Architecture Done and implementation Issues. Not blockers to acceptance of the proposal as written |
 
 ## 8. Follow-on after ADR acceptance
 
 1. Ready implementation Issue(s) for Runtime session overlay + composer target + protocol bits (CAP bit 13 / types 42–45).
 2. Separate Issue for any Class B post-exit stuck Bugs under existing ADR-005/009.
-3. #1385 companion ADR-027 after ADR-026 is Accepted. ADR-025 stays reserved by #1382 / #1381. This proposal is not that acceptance.
+3. #1385 companion ADR-027 follows this Accepted ADR-026. ADR-025 stays reserved by #1382 / #1381. Acceptance is this PR's merge by a non-author maintainer. An author or agent comment is not that acceptance.

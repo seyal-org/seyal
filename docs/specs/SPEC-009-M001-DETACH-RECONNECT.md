@@ -5,7 +5,7 @@
 - **Reconciled:** 2026-09-04 against closed #719 / Pass 10 review candidate `1005bc42397aac485b1aeff08cafd0f67790d969`
 - **Presentation amendment:** accepted by #858 / PR #859 (`8d08f2f`) on 2026-09-11
 - **Issue:** #717 refinement authority; #719 production implementation (Done)
-- **Architecture authority:** accepted Seyal foundation architecture, ADR-001/004/005/006/007/015 (ADR-015 governs Rust/native ownership only); accepted ADR-009 including the #858 / PR #859 amendment governs presentation behavior. Proposed ADR-026 (#1384) reconnect re-derivation below is **contingent on acceptance** of that ADR by a non-author maintainer and is not authority until then (the same convention as Proposed ADR-024).
+- **Architecture authority:** accepted Seyal foundation architecture, ADR-001/004/005/006/007/015 (ADR-015 governs Rust/native ownership only); accepted ADR-009 including the #858 / PR #859 amendment governs presentation behavior. Accepted ADR-026 (#1384) reconnect re-derivation below is normative on merge of that ADR's acceptance PR by a non-author maintainer. An author or agent comment is not that acceptance.
 - **Depends on:** SPEC-002, SPEC-003, SPEC-004, SPEC-005, SPEC-006 and accepted SPEC-007
 - **Pass 7 authority:** PR #707 merged as `4490d89fd32f96fe5ff04393a5470944c592f546`
 - **Pass 8 authority:** reviewed head `54b3a1748effc7c47c409d1f7cfdcbd547e8d1cc`, merged by PR #721 as `d9d21187e8429bbd3dbeb3e1c7cc4d05c1d147e6`
@@ -45,7 +45,7 @@ Mode ownership after selection is:
 
 Selection/admission is fenced to the exact current `ExecutionId`, fresh `AttachmentId` and relevant canonical/presentation generation or state. Any callback, eligibility result or event belonging to a dead attachment, older presentation generation or uncertain state fails closed. A reconnect transition must revoke the old route before enabling the new route; one physical/native event must never reach both routes or a stale route.
 
-**Contingent on acceptance of Proposed ADR-026 (#1384).** After fresh attachment, Controller, and canonical validation, the Pane re-derives composer mode from current ADR-026 §3.2 facts. A trusted session is not resurrected across Runtime replacement. The session secret stays Runtime-held and is never restored to a client. Detach is not PTY EOF and is not child exit (ADR-026 §10 T8). An in-progress `Armed` bootstrap fails closed on detach with no payload write. An in-progress `Delivering` bootstrap still writes exactly N bytes (payload or padding) while the PTY remains writable, then fails closed with no session trust (ADR-026 §10 T15/T18). Until ADR-026 is Accepted, composer restoration follows the accepted ADR-009 / SPEC-008 eligibility rules.
+**Accepted ADR-026 (#1384).** After fresh attachment, Controller, and canonical validation, the Pane re-derives composer mode from current ADR-026 §3.2 facts. A trusted session is not resurrected across Runtime replacement. The session secret stays Runtime-held and is never restored to a client. Detach is not PTY EOF and is not child exit (ADR-026 §10 T8). An in-progress `Armed` bootstrap fails closed on detach with no payload write. An in-progress `Delivering` bootstrap still writes exactly N bytes (payload or padding) while the PTY remains writable, then fails closed with no session trust (ADR-026 §10 T15/T18).
 
 Renderer/compositor resources may be reused across these modes. Reuse of the Metal renderer is not authority to keep a conventional terminal input surface installed underneath Flow.
 
@@ -483,7 +483,7 @@ Required deterministic/native evidence:
 
 - reconnect selects Flow/Raw/TUI from current state before any first responder or terminal-input route is enabled;
 - Flow reconnect focuses/exposes its Block/composer structure and has no focusable/hit-testable hidden raw-terminal accessibility/input target;
-- **contingent on Proposed ADR-026 (#1384):** after that validation, Flow re-derives composer mode from current ADR-026 §3.2 facts; a trusted session is not resurrected across Runtime replacement; the session secret is never restored to a client; detach is not PTY EOF or child exit (ADR-026 §10 T8); an in-progress `Armed` bootstrap fails closed on detach with no payload write; an in-progress `Delivering` bootstrap still writes exactly N bytes (payload or padding) while the PTY remains writable, then fails closed with no session trust (ADR-026 §10 T15/T18);
+- **Accepted ADR-026 (#1384):** after that validation, Flow re-derives composer mode from current ADR-026 §3.2 facts; a trusted session is not resurrected across Runtime replacement; the session secret is never restored to a client; detach is not PTY EOF or child exit (ADR-026 §10 T8); an in-progress `Armed` bootstrap fails closed on detach with no payload write; an in-progress `Delivering` bootstrap still writes exactly N bytes (payload or padding) while the PTY remains writable, then fails closed with no session trust (ADR-026 §10 T15/T18);
 - Raw/TUI reconnect makes the selected full-Pane terminal presentation first responder when eligible;
 - focus loss/reacquisition remains correct and no hidden old view retains focus;
 - accessibility role/label/description and geometry are valid for the selected presentation;
@@ -598,7 +598,7 @@ Runtime retains only live execution state already required without a GUI plus bo
 
 - presentation selection occurs before focus/input activation;
 - Flow reconnect exposes/focuses Block/composer structure as applicable and no hidden raw-terminal focus/input target exists;
-- **contingent on Proposed ADR-026 (#1384):** that Flow reconnect re-derives composer mode from current ADR-026 §3.2 facts; a trusted session is not resurrected across Runtime replacement; the session secret stays Runtime-held; detach is not PTY EOF or child exit (ADR-026 §10 T8); an in-progress `Armed` bootstrap fails closed on detach with no payload write; an in-progress `Delivering` bootstrap still writes exactly N bytes (payload or padding) while the PTY remains writable, then fails closed with no session trust (ADR-026 §10 T15/T18);
+- **Accepted ADR-026 (#1384):** that Flow reconnect re-derives composer mode from current ADR-026 §3.2 facts; a trusted session is not resurrected across Runtime replacement; the session secret stays Runtime-held; detach is not PTY EOF or child exit (ADR-026 §10 T8); an in-progress `Armed` bootstrap fails closed on detach with no payload write; an in-progress `Delivering` bootstrap still writes exactly N bytes (payload or padding) while the PTY remains writable, then fails closed with no session trust (ADR-026 §10 T15/T18);
 - Raw/TUI reconnect makes the selected terminal presentation first responder when eligible;
 - accessibility role/label/focused state/geometry are valid for the selected presentation;
 - fresh Raw/TUI IME context has empty composition state;
