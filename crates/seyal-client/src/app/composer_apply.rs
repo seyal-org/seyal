@@ -74,6 +74,9 @@ impl ApplicationRoot {
                     } else {
                         block.exit_status
                     },
+                    // Preserve floor across settle; snapshot still reveals all
+                    // Blocks once execution_ended is latched.
+                    canvas_floor: false,
                 }
             })
             .collect();

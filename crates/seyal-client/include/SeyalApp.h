@@ -427,6 +427,15 @@ typedef struct SeyalAppComposer {
     const uint8_t *draft_utf8;
     uint32_t draft_utf8_len;
     uint32_t block_count;
+    /*
+     * Flow canvas floor after clear (CSI ED2). Zero means show every Block.
+     * While the shell is live, hosts omit cards with id <= this floor so clear
+     * leaves a fully empty canvas (including the clear Block itself);
+     * BlockTimeline still retains them. Shell exit clears the floor so the
+     * full retained transcript is reviewable.
+     */
+    uint64_t canvas_floor_block_id_lo;
+    uint64_t canvas_floor_block_id_hi;
 } SeyalAppComposer;
 
 /*

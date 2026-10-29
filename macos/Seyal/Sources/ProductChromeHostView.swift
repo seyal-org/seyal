@@ -406,6 +406,9 @@ final class ProductChromeHostView: NSView {
         if !isProgrammaticTranscriptScroll {
             followingLiveEnd = isNearLiveEnd()
         }
+        // History instance origins are baked in surface pixels; scroll must
+        // re-publish clips/origins. A translate-in-place shortcut desynced
+        // Metal from AppKit card motion (stuck glyphs / fighting scroll).
         publishBlockOutputFrame()
     }
 

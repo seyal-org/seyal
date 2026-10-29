@@ -168,8 +168,20 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         waitForBlockBodyText(app, index: 0, text: "seyal-1379-before-clear", timeout: 8)
         submitComposerCommand(app, "clear")
         waitBriefly(0.8)
+        // Live canvas must drop pre-clear clutter (Warp-like clear). Timeline
+        // still retains it for shell-exit review below. Visible index 0 is the
+        // clear Block (or empty), never the pre-clear printf body.
+        let liveBefore = app.descendants(matching: .any)["seyal-block-0-body"].firstMatch
+        if liveBefore.exists {
+            let value = (liveBefore.value as? String) ?? liveBefore.label
+            XCTAssertFalse(
+                value.contains("seyal-1379-before-clear"),
+                "clear must remove pre-clear Blocks from the live Flow canvas"
+            )
+        }
         submitComposerCommand(app, "printf 'seyal-1379-after-clear\\n'")
-        waitForBlockBodyText(app, index: 2, text: "seyal-1379-after-clear", timeout: 8)
+        // Fully clean clear: clear Block is hidden; after-clear is visible index 0.
+        waitForBlockBodyText(app, index: 0, text: "seyal-1379-after-clear", timeout: 8)
         submitComposerCommand(app, "exit 7")
         let recovery = app.descendants(matching: .any)["seyal-recovery"]
         let ended = expectation(
@@ -179,6 +191,7 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 15), .completed)
 
+        // Shell-exit reveals the full retained transcript.
         let beforeBody = app.descendants(matching: .any)["seyal-block-0-body"]
         let beforeText = expectation(
             for: NSPredicate(
@@ -192,7 +205,7 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [beforeText], timeout: 8),
             .completed,
-            "pre-clear body AX must remain after clear→exit"
+            "pre-clear body AX must return after clear→exit (retained history)"
         )
         let afterBody = app.descendants(matching: .any)["seyal-block-2-body"]
         let afterText = expectation(
@@ -255,7 +268,8 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             submitComposerCommand(app, "clear")
             waitBriefly(0.8)
             submitComposerCommand(app, "printf '\(afterToken)\\n'")
-            waitForBlockBodyText(app, index: 2, text: afterToken, timeout: 8)
+            // Fully clean clear: after-clear is the first visible card.
+            waitForBlockBodyText(app, index: 0, text: afterToken, timeout: 8)
             submitComposerCommand(app, "exit 7")
             let recovery = app.descendants(matching: .any)["seyal-recovery"]
             let ended = expectation(

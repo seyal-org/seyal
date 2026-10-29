@@ -178,22 +178,30 @@ impl Runtime {
         let Some(entry) = self.entries.get(&execution_id) else {
             return;
         };
+        let canvas_floor = entry.block_timeline.canvas_floor();
         let records = entry
             .block_timeline
             .records()
-            .map(|record| CommandBlock {
-                id: record.id.raw(),
-                command: record.command.clone(),
-                start_line: record.start_line,
-                end_line: record.end_line,
-                state: match record.lifecycle {
-                    crate::command_block_timeline::CommandBlockLifecycle::Running => {
-                        CommandBlockState::Running
-                    }
-                    crate::command_block_timeline::CommandBlockLifecycle::Completed {
-                        exit_status,
-                    } => CommandBlockState::Completed { exit_status },
-                },
+            .map(|record| {
+                let mut flags = 0u8;
+                if canvas_floor == Some(record.id) {
+                    flags |= seyal_protocol::framing::COMMAND_BLOCK_FLAG_CANVAS_FLOOR;
+                }
+                CommandBlock {
+                    id: record.id.raw(),
+                    command: record.command.clone(),
+                    start_line: record.start_line,
+                    end_line: record.end_line,
+                    state: match record.lifecycle {
+                        crate::command_block_timeline::CommandBlockLifecycle::Running => {
+                            CommandBlockState::Running
+                        }
+                        crate::command_block_timeline::CommandBlockLifecycle::Completed {
+                            exit_status,
+                        } => CommandBlockState::Completed { exit_status },
+                    },
+                    flags,
+                }
             })
             .collect();
         let payload = match (BlockTimeline {

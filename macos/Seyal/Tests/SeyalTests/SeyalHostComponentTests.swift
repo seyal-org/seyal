@@ -1544,6 +1544,22 @@ final class SeyalHostComponentTests: XCTestCase {
             "Flow transcript must sync document frame after Block body growth"
         )
         XCTAssertTrue(
+            hostText.contains("transcriptDocumentScrollHeight"),
+            "Live-end follow must use document frame height, not fittingSize alone"
+        )
+        XCTAssertTrue(
+            hostText.contains("canvas_floor_block_id_lo"),
+            "Flow rebuild must honor Rust canvas floor after clear"
+        )
+        XCTAssertTrue(
+            hostText.contains("row.id_lo <= floorLo"),
+            "clear Block itself must leave the live canvas (fully clean)"
+        )
+        XCTAssertTrue(
+            hostText.contains("max(document.frame.height, document.fittingSize.height, 1)"),
+            "Expand-never-shrink frame can exceed fittingSize; scroll math must prefer frame"
+        )
+        XCTAssertTrue(
             hostText.contains("regions.isEmpty, !blockCards.isEmpty"),
             "publishBlockOutputFrame must not wipe history when Block cards still exist"
         )
@@ -1552,6 +1568,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(
             liveText.contains("frame.regions.isEmpty, !historyRanges.isEmpty"),
             "setTranscriptFrame must retain history paint across transient empty regions"
+        )
+        XCTAssertFalse(
+            liveText.contains("translateHistoryRegionsIfUniformScroll"),
+            "Scroll must not translate baked history origins (desyncs Metal from AppKit)"
         )
         let metalSurface = sourceRoot.appendingPathComponent("MetalSurfaceView.swift")
         let metalText = (try? String(contentsOf: metalSurface, encoding: .utf8)) ?? ""

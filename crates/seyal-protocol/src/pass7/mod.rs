@@ -14,7 +14,9 @@ mod tests;
 
 use crate::{framing::FramingError, AttachmentId};
 
-pub use command_blocks::{BlockTimeline, CommandBlock, CommandBlockState};
+pub use command_blocks::{
+    BlockTimeline, CommandBlock, CommandBlockState, COMMAND_BLOCK_FLAG_CANVAS_FLOOR,
+};
 pub use composer::{
     ComposerCommandRef, ComposerEligibility, ComposerResult, ComposerResultCode, ComposerStatus,
 };

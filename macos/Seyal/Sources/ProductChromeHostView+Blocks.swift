@@ -54,10 +54,23 @@ extension ProductChromeHostView {
         blockCards.removeAll()
         let composer = seyal_app_composer(pane.appHandle)
         let count = Int(composer.block_count)
+        let floorLo = composer.canvas_floor_block_id_lo
+        let floorHi = composer.canvas_floor_block_id_hi
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         var retained = Set<UInt64>()
+        // Visible canvas index (not timeline index) so AX ids stay dense after clear.
+        var visibleIndex = 0
         for index in 0..<count {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
+            // Rust owns the clear canvas floor; Swift only omits cards at/below
+            // it so `clear` leaves a fully empty live canvas (no clear card).
+            if floorLo != 0 || floorHi != 0 {
+                if row.id_hi < floorHi
+                    || (row.id_hi == floorHi && row.id_lo <= floorLo)
+                {
+                    continue
+                }
+            }
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
             let title = productChromeCopyUTF8(row.title, row.title_len) ?? "command"
             let detail = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
@@ -73,8 +86,9 @@ extension ProductChromeHostView {
                 cellHeight: cellHeight,
                 lines: lines
             )
-            card.setAccessibilityIdentifier("seyal-block-\(index)")
-            card.setBodyAccessibilityIdentifier("seyal-block-\(index)-body")
+            card.setAccessibilityIdentifier("seyal-block-\(visibleIndex)")
+            card.setBodyAccessibilityIdentifier("seyal-block-\(visibleIndex)-body")
+            visibleIndex += 1
             if blockID != 0, let retainedRange = pane.inputSurface.retainedHistoryRange(blockID: blockID) {
                 card.setBodyTranscript(retainedRange.transcriptText)
             }
@@ -98,10 +112,10 @@ extension ProductChromeHostView {
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         publishLiveTailBlocks()
-        if count > lastBlockCount, followingLiveEnd {
+        if visibleIndex > lastBlockCount, followingLiveEnd {
             scrollTranscriptToLiveEnd()
         }
-        lastBlockCount = count
+        lastBlockCount = visibleIndex
         // clear→exit: card heights change after live-tail drop and History
         // settle; one async republish re-encodes retained history against the
         // final AppKit clips so prior origins cannot stick to earlier cards.
@@ -281,21 +295,26 @@ extension ProductChromeHostView {
         return regions
     }
 
-    func isNearLiveEnd(tolerance: CGFloat = 24) -> Bool {
+    /// NSScrollView scrolls against `documentView.frame`. `syncTranscriptDocumentSize`
+    /// expands that frame and never shrinks it, so `fittingSize` can lag below the
+    /// frame after a tall live-tail settles. Live-end math must use the frame or
+    /// follow sticks true and every history republish snaps the user back (#1379).
+    func transcriptDocumentScrollHeight() -> CGFloat {
         let document = transcript.documentView ?? blocks
+        return max(document.frame.height, document.fittingSize.height, 1)
+    }
+
+    func isNearLiveEnd(tolerance: CGFloat = 24) -> Bool {
         let visible = transcript.contentView.bounds
-        let height = document.fittingSize.height
-        let maxY = max(height - visible.height, 0)
+        let maxY = max(transcriptDocumentScrollHeight() - visible.height, 0)
         return visible.origin.y >= maxY - tolerance
     }
 
     func scrollTranscriptToLiveEnd() {
         isProgrammaticTranscriptScroll = true
         defer { isProgrammaticTranscriptScroll = false }
-        let document = transcript.documentView ?? blocks
         let visible = transcript.contentView.bounds.height
-        let height = document.fittingSize.height
-        let y = max(height - visible, 0)
+        let y = max(transcriptDocumentScrollHeight() - visible, 0)
         transcript.contentView.scroll(to: NSPoint(x: 0, y: y))
         transcript.reflectScrolledClipView(transcript.contentView)
         followingLiveEnd = true

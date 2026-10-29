@@ -513,6 +513,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         end_line: Some(3),
                         running: false,
                         exit_status: Some(0),
+                        canvas_floor: false,
                     },
                     RuntimeBlockRecord {
                         id: BlockId::from_bytes([0x61; 16]),
@@ -521,6 +522,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         end_line: None,
                         running: true,
                         exit_status: None,
+                        canvas_floor: false,
                     },
                 ]),
             })
@@ -669,6 +671,7 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
         start_line: 3,
         end_line: None,
         state: CommandBlockState::Running,
+        flags: 0,
     };
     let projected = runtime_block_from_command(&running);
     assert_eq!(projected.command, "echo hi");
@@ -687,6 +690,7 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
         state: CommandBlockState::Completed {
             exit_status: Some(1),
         },
+        flags: 0,
     };
     let projected = runtime_block_from_command(&failed);
     assert!(!projected.running);

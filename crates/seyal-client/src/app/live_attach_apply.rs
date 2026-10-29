@@ -34,6 +34,7 @@ fn runtime_block_from_timeline(
             seyal_protocol::framing::CommandBlockState::Running => None,
             seyal_protocol::framing::CommandBlockState::Completed { exit_status } => exit_status,
         },
+        canvas_floor: record.flags & seyal_protocol::framing::COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0,
     }
 }
 
@@ -520,6 +521,7 @@ mod ended_timeline_tests {
             start_line: 4,
             end_line: Some(4),
             state: CommandBlockState::Running,
+            flags: 0,
         };
         let mapped = runtime_block_from_ended_timeline(&running);
         assert!(!mapped.running);
@@ -534,6 +536,7 @@ mod ended_timeline_tests {
             state: CommandBlockState::Completed {
                 exit_status: Some(0),
             },
+            flags: 0,
         };
         let kept = runtime_block_from_ended_timeline(&completed);
         assert!(!kept.running);

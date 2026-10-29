@@ -251,6 +251,7 @@ mod tests {
                             end_line: Some(12),
                             running: false,
                             exit_status: Some(0),
+                            canvas_floor: false,
                         },
                         RuntimeBlockRecord {
                             id: BlockId::from_bytes([0x22; 16]),
@@ -259,6 +260,7 @@ mod tests {
                             end_line: None,
                             running: true,
                             exit_status: None,
+                            canvas_floor: false,
                         },
                     ]),
                 })
@@ -341,6 +343,7 @@ mod tests {
                             end_line: Some(12),
                             running: false,
                             exit_status: Some(0),
+                            canvas_floor: false,
                         },
                         RuntimeBlockRecord {
                             id: BlockId::from_bytes([0x32; 16]),
@@ -349,6 +352,7 @@ mod tests {
                             end_line: None,
                             running: true,
                             exit_status: None,
+                            canvas_floor: false,
                         },
                     ]),
                 })

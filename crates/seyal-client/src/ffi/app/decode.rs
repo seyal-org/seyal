@@ -3,7 +3,7 @@
 use std::{slice, str, time::Duration};
 
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
-use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+use seyal_protocol::framing::{CommandBlock, CommandBlockState, COMMAND_BLOCK_FLAG_CANVAS_FLOOR};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
@@ -44,6 +44,7 @@ pub(crate) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockR
             CommandBlockState::Running => None,
             CommandBlockState::Completed { exit_status } => exit_status,
         },
+        canvas_floor: record.flags & COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0,
     }
 }
 

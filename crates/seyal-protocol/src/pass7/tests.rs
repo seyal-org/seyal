@@ -26,6 +26,36 @@ fn composer_command_requires_exact_bounded_utf8_payload() {
 }
 
 #[test]
+fn timeline_round_trip_preserves_canvas_floor_flag() {
+    let timeline = BlockTimeline {
+        revision: 3,
+        records: vec![
+            CommandBlock {
+                id: 1,
+                command: "printf before".into(),
+                start_line: 10,
+                end_line: Some(11),
+                state: CommandBlockState::Completed {
+                    exit_status: Some(0),
+                },
+                flags: 0,
+            },
+            CommandBlock {
+                id: 2,
+                command: "clear".into(),
+                start_line: 40,
+                end_line: Some(41),
+                state: CommandBlockState::Completed {
+                    exit_status: Some(0),
+                },
+                flags: COMMAND_BLOCK_FLAG_CANVAS_FLOOR,
+            },
+        ],
+    };
+    assert_eq!(BlockTimeline::decode(&timeline.encode()), Ok(timeline));
+}
+
+#[test]
 fn timeline_round_trip_preserves_only_metadata_and_anchors() {
     let timeline = BlockTimeline {
         revision: 9,
@@ -36,6 +66,7 @@ fn timeline_round_trip_preserves_only_metadata_and_anchors() {
                 start_line: 31,
                 end_line: None,
                 state: CommandBlockState::Running,
+                flags: 0,
             },
             CommandBlock {
                 id: 2,
@@ -45,6 +76,7 @@ fn timeline_round_trip_preserves_only_metadata_and_anchors() {
                 state: CommandBlockState::Completed {
                     exit_status: Some(1),
                 },
+                flags: 0,
             },
         ],
     };
@@ -61,6 +93,7 @@ fn timeline_state_tag_2_round_trips_completed_without_exit_status() {
             start_line: 40,
             end_line: Some(42),
             state: CommandBlockState::Completed { exit_status: None },
+            flags: 0,
         }],
     };
     let encoded = timeline.encode();
@@ -88,6 +121,7 @@ fn timeline_state_tag_2_rejects_nonzero_exit_status_and_inverted_end_line() {
             start_line: 50,
             end_line: Some(52),
             state: CommandBlockState::Completed { exit_status: None },
+            flags: 0,
         }],
     };
     let good = timeline.encode();
@@ -119,6 +153,7 @@ fn timeline_try_encode_rejects_unbounded_record_count() {
         start_line: 1,
         end_line: None,
         state: CommandBlockState::Running,
+        flags: 0,
     };
     let timeline = BlockTimeline {
         revision: 1,
@@ -141,6 +176,7 @@ fn timeline_try_encode_rejects_cumulative_command_bytes_over_frame() {
                 state: CommandBlockState::Completed {
                     exit_status: Some(0),
                 },
+                flags: 0,
             })
             .collect(),
     };
