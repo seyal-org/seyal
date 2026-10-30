@@ -283,6 +283,27 @@ impl LocalDisplayClient {
         self.composer_status
     }
 
+    /// ADR-026 session affordance for the thin host. `kind`: 0 none, 1 enable
+    /// Blocks (Candidate/Declined/Failed), 2 consent offer. Copy stays Rust.
+    pub fn projected_session_surface(&self) -> (u8, u64, u64) {
+        if !self.session_bootstrap_negotiated {
+            return (0, 0, 0);
+        }
+        if let Some(offer) = self.session_offer.as_ref() {
+            return (2, offer.host_block_id, offer.offer_generation);
+        }
+        let Some(status) = self.session_status else {
+            return (0, 0, 0);
+        };
+        use seyal_runtime::local_ipc::framing::SessionOverlayWire;
+        match status.overlay {
+            SessionOverlayWire::Candidate
+            | SessionOverlayWire::Declined
+            | SessionOverlayWire::Failed => (1, status.host_block_id, status.revision),
+            _ => (0, status.host_block_id, status.revision),
+        }
+    }
+
     /// Eligibility byte and revision the host should relay. Type 23 stays the
     /// legacy Busy/Available fact. When a negotiated type 45 says Relay, the
     /// byte is 4 and the revision moves even if type 23 did not.

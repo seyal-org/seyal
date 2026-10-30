@@ -124,6 +124,14 @@ typedef struct SeyalComposerStatus {
     uint8_t reserved[7];
 } SeyalComposerStatus;
 
+/* ADR-026 session affordance. kind: 0 none, 1 enable Blocks, 2 offer. */
+typedef struct SeyalSessionSurface {
+    uint8_t kind;
+    uint8_t reserved[7];
+    uint64_t host_block_id;
+    uint64_t revision;
+} SeyalSessionSurface;
+
 typedef struct SeyalRecoveryResult {
     uint8_t stage;
     uint8_t failure_class;
@@ -244,6 +252,10 @@ SeyalHistorySidecar seyal_bridge_history_range_sidecar_for(uint64_t block_id, ui
 uint8_t seyal_bridge_history_range_consume(uint64_t block_id, uint64_t request_id);
 SeyalComposerResult seyal_bridge_composer_result(void);
 SeyalComposerStatus seyal_bridge_composer_status(void);
+SeyalSessionSurface seyal_bridge_session_surface(void);
+const char *seyal_bridge_session_copy(uint8_t kind);
+int32_t seyal_bridge_session_request(void);
+int32_t seyal_bridge_session_consent(uint8_t accept);
 SeyalRecoveryResult seyal_bridge_last_recovery_result(void);
 /** Classify a failed open into a SeyalAppRecoveryOutcome code (Rust-owned). */
 uint32_t seyal_bridge_classify_open_result(uint8_t failure_class, uint8_t retryable);

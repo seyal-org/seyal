@@ -3732,3 +3732,31 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
     }
     return nil
 }
+
+extension SeyalHostComponentTests {
+    @MainActor
+    func testSessionBootstrapBannerRendersRustCopyAndStaysHiddenWithoutSurface() {
+        let banner = SessionBootstrapBanner()
+        XCTAssertTrue(banner.isHidden)
+        XCTAssertEqual(banner.accessibilityIdentifier(), "seyal-session-bootstrap")
+        let title = String(cString: seyal_bridge_session_copy(0))
+        let enable = String(cString: seyal_bridge_session_copy(4))
+        let accept = String(cString: seyal_bridge_session_copy(2))
+        let decline = String(cString: seyal_bridge_session_copy(3))
+        XCTAssertEqual(title, "Enable Blocks for this session")
+        XCTAssertEqual(enable, "Enable Blocks")
+        XCTAssertEqual(accept, "Enable for this session")
+        XCTAssertEqual(decline, "Not now")
+        let surface = seyal_bridge_session_surface()
+        XCTAssertEqual(surface.kind, 0)
+        banner.reconcile()
+        XCTAssertTrue(banner.isHidden)
+    }
+
+    func testSessionSurfaceAbiLayout() {
+        XCTAssertEqual(MemoryLayout<SeyalSessionSurface>.size, 24)
+        XCTAssertEqual(MemoryLayout<SeyalSessionSurface>.offset(of: \.kind), 0)
+        XCTAssertEqual(MemoryLayout<SeyalSessionSurface>.offset(of: \.host_block_id), 8)
+        XCTAssertEqual(MemoryLayout<SeyalSessionSurface>.offset(of: \.revision), 16)
+    }
+}

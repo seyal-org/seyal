@@ -1888,6 +1888,18 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground, "closing a non-final window must not quit")
     }
 
+    func testSessionBootstrapChromeKeepsComposerUsableAtIdlePrompt() throws {
+        // ProductChromeHostView gained the ADR-026 session banner. Idle prompt
+        // must still admit Flow composer submit while the banner is collapsed.
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        XCTAssertTrue(composer.isHittable)
+        let chrome = app.descendants(matching: .any)["seyal-product-chrome"].firstMatch
+        XCTAssertTrue(chrome.waitForExistence(timeout: 5))
+    }
+
     private func waitForWindowCount(
         _ app: XCUIApplication,
         _ count: Int,

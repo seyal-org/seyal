@@ -299,3 +299,74 @@ fn decline_keeps_relay_and_does_not_arm() {
         ComposerAdmission::Relayed
     );
 }
+
+#[test]
+fn running_host_becomes_candidate_and_relay_stays_busy_until_decline() {
+    let mut h = spawn("candidate");
+    h.pump_until(|runtime, id| runtime.entries[&id].integration == IntegrationState::AtPrompt);
+    h.runtime
+        .submit_composer_command(h.id, "cat".into())
+        .expect("cat");
+    h.pump_until(|runtime, id| {
+        matches!(
+            runtime.entries[&id].integration,
+            IntegrationState::Running { block: Some(_) }
+        ) && matches!(
+            runtime.entries[&id].session,
+            SessionOverlay::Candidate { .. }
+        )
+    });
+    let host = h.runtime.entries[&h.id]
+        .session
+        .host_block()
+        .expect("candidate host");
+    let generation = h.runtime.entries[&h.id].target_generation;
+    assert_eq!(
+        h.runtime
+            .submit_composer_command_fenced(h.id, "no-relay-yet".into(), Some(generation))
+            .expect("busy before enable"),
+        ComposerAdmission::Busy
+    );
+    h.runtime.offer_session(h.id, host).expect("offer");
+    assert!(matches!(
+        h.runtime.entries[&h.id].session,
+        SessionOverlay::Offered { .. }
+    ));
+}
+
+#[test]
+fn request_offer_from_candidate_arms_after_accept() {
+    let mut h = spawn("request");
+    h.pump_until(|runtime, id| runtime.entries[&id].integration == IntegrationState::AtPrompt);
+    let admitted = h
+        .runtime
+        .submit_composer_command(
+            h.id,
+            "env -u HISTFILE -u ZDOTDIR -u SEYAL_NONCE_FD /bin/zsh -f -i".into(),
+        )
+        .expect("nested");
+    let ComposerAdmission::Accepted(host_id) = admitted else {
+        panic!("not admitted: {admitted:?}");
+    };
+    h.pump_until(|runtime, id| {
+        matches!(
+            runtime.entries[&id].integration,
+            IntegrationState::Running { block: Some(block) } if block == host_id
+        ) && matches!(
+            runtime.entries[&id].session,
+            SessionOverlay::Candidate { .. }
+        )
+    });
+    let host = host_id.raw();
+    h.runtime.offer_session(h.id, host).expect("request→offer");
+    let generation = h.runtime.entries[&h.id]
+        .session
+        .offer_generation()
+        .expect("generation");
+    h.runtime
+        .apply_session_consent(h.id, host, generation, 0, true)
+        .expect("accept");
+    h.pump_until(|runtime, id| {
+        matches!(runtime.entries[&id].session, SessionOverlay::Trusted { .. })
+    });
+}

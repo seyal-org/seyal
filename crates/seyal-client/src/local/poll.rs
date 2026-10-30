@@ -207,6 +207,12 @@ impl LocalDisplayClient {
                                 .session_status
                                 .is_none_or(|current| status.revision > current.revision)
                         {
+                            if !matches!(
+                                status.overlay,
+                                seyal_runtime::local_ipc::framing::SessionOverlayWire::Offered
+                            ) {
+                                self.session_offer = None;
+                            }
                             self.session_status = Some(status);
                         }
                     }

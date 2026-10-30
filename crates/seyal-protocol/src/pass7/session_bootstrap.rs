@@ -168,12 +168,14 @@ impl SessionOverlayWire {
     }
 }
 
-/// Controller consent decision. Type 43. Always and Never are reserved.
+/// Controller consent decision. Type 43. Always (3) and Never (4) are reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum SessionConsentDecision {
     Decline = 0,
     Accept = 1,
+    /// Explicit "Enable Blocks for this session" (§4.2). `offer_generation` is 0.
+    Request = 2,
 }
 
 impl SessionConsentDecision {
@@ -181,6 +183,7 @@ impl SessionConsentDecision {
         match value {
             0 => Ok(Self::Decline),
             1 => Ok(Self::Accept),
+            2 => Ok(Self::Request),
             _ => Err(FramingError::MalformedPayload),
         }
     }
@@ -269,8 +272,20 @@ impl SessionConsent {
         }
         let host_block_id = u64::from_le_bytes(bytes[32..40].try_into().unwrap());
         let offer_generation = u64::from_le_bytes(bytes[40..48].try_into().unwrap());
-        if host_block_id == 0 || offer_generation == 0 {
+        let decision = SessionConsentDecision::from_u8(bytes[56])?;
+        if host_block_id == 0 {
             return Err(FramingError::MalformedPayload);
+        }
+        match decision {
+            SessionConsentDecision::Request if offer_generation != 0 => {
+                return Err(FramingError::MalformedPayload);
+            }
+            SessionConsentDecision::Accept | SessionConsentDecision::Decline
+                if offer_generation == 0 =>
+            {
+                return Err(FramingError::MalformedPayload);
+            }
+            _ => {}
         }
         Ok(Self {
             attachment_id: attachment_id_from(&bytes[..16]),
@@ -278,7 +293,7 @@ impl SessionConsent {
             host_block_id,
             offer_generation,
             presentation_epoch: u64::from_le_bytes(bytes[48..56].try_into().unwrap()),
-            decision: SessionConsentDecision::from_u8(bytes[56])?,
+            decision,
         })
     }
 }
@@ -441,6 +456,17 @@ mod tests {
         };
         assert_eq!(consent.encode().len(), 64);
         assert_eq!(SessionConsent::decode(&consent.encode()).unwrap(), consent);
+
+        let request = SessionConsent {
+            attachment_id: attachment(),
+            execution_id: execution(),
+            host_block_id: 7,
+            offer_generation: 0,
+            presentation_epoch: 0,
+            decision: SessionConsentDecision::Request,
+        };
+        assert_eq!(request.encode().len(), 64);
+        assert_eq!(SessionConsent::decode(&request.encode()).unwrap(), request);
 
         let status = SessionStatus {
             attachment_id: attachment(),

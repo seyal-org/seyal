@@ -95,7 +95,6 @@ pub(in crate::runtime) struct Entry {
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) session_revision: u64,
     /// Incremented by `offer_session`. Proactive F9 hints do not call it.
-    #[allow(dead_code)]
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) next_offer_generation: u64,
     #[cfg(target_os = "macos")]
