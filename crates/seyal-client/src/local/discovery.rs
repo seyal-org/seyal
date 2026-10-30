@@ -14,7 +14,8 @@ use seyal_runtime::{
             encode_frame, ClientHello, ErrorCode, ErrorMessage, MessageType, ServerHello,
             CAP_ATTACHMENT_DELIVERY_CONTROL, CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS,
             CAP_CORRELATED_RESIZE, CAP_EXECUTION_PROVISIONING, CAP_EXTENDED_TERMINAL_KEY,
-            CAP_GRAPHEME_DISPLAY, CAP_SEMANTIC_TERMINAL_KEY, CAP_VIEWPORT_LINE_IDS,
+            CAP_GRAPHEME_DISPLAY, CAP_SEMANTIC_TERMINAL_KEY, CAP_SESSION_BOOTSTRAP,
+            CAP_VIEWPORT_LINE_IDS,
         },
     },
     pass8::CAP_BLOCK_METADATA,
@@ -226,6 +227,7 @@ pub(crate) fn requested_capabilities(
     request_viewport_line_ids: bool,
     request_execution_provisioning: bool,
     request_delivery_control: bool,
+    request_session_bootstrap: bool,
 ) -> u32 {
     CAP_COMMAND_BLOCKS
         | CAP_GRAPHEME_DISPLAY
@@ -254,6 +256,21 @@ pub(crate) fn requested_capabilities(
         } else {
             0
         }
+        | if request_session_bootstrap {
+            CAP_SESSION_BOOTSTRAP
+        } else {
+            0
+        }
+}
+
+pub(crate) fn session_bootstrap_negotiated(
+    client_capabilities: u32,
+    server_capabilities: u32,
+) -> bool {
+    client_capabilities & CAP_SESSION_BOOTSTRAP != 0
+        && client_capabilities & CAP_COMMAND_BLOCKS != 0
+        && server_capabilities & CAP_SESSION_BOOTSTRAP != 0
+        && server_capabilities & CAP_COMMAND_BLOCKS != 0
 }
 
 pub(crate) fn extended_terminal_key_supported(server_capabilities: u32) -> bool {
@@ -269,6 +286,7 @@ pub(crate) fn hello_until(
     request_viewport_line_ids: bool,
     request_execution_provisioning: bool,
     request_delivery_control: bool,
+    request_session_bootstrap: bool,
     deadline: Instant,
 ) -> Result<ServerHello, ClientError> {
     let client_capabilities = requested_capabilities(
@@ -277,6 +295,7 @@ pub(crate) fn hello_until(
         request_viewport_line_ids,
         request_execution_provisioning,
         request_delivery_control,
+        request_session_bootstrap,
     );
     send_control_until(
         stream,
@@ -318,76 +337,67 @@ pub(crate) fn hello_until(
 /// New clients advertise newer optional bits; older Runtimes reject unknown
 /// ClientHello bits as `MalformedPayload` instead of ignoring them.
 ///
-/// Ordered reconnect fallback (bounded; each step at most once):
-/// 1. Full advertise (viewport LineIds + extended key + provisioning + delivery control).
-/// 2. Drop `CAP_ATTACHMENT_DELIVERY_CONTROL` (pre-W5 Runtime).
-/// 3. Drop `CAP_VIEWPORT_LINE_IDS` (pre-#865 Runtime; still advertises provisioning).
-/// 4. Drop extended key + provisioning (SPEC-006 §21.5 / pre-V2 M001 allowlist).
+/// Ordered reconnect fallback. `CAP_SESSION_BOOTSTRAP` is dropped before the
+/// existing chain so a Runtime that does not know bit 13 still keeps viewport
+/// LineIds and the extended key. The ADR-009 #1355 order (viewport LineIds,
+/// then extended key) is not reordered. Duration (bit 8) is not requested
+/// until that schema ships.
+pub(crate) struct HelloExchange {
+    pub server: ServerHello,
+    pub client_capabilities: u32,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn hello_until_with_legacy_key_fallback(
     stream: &mut UnixStream,
     mut reconnect: impl FnMut() -> Result<UnixStream, ClientError>,
     interactive: bool,
     request_block_metadata: bool,
     deadline: Instant,
-) -> Result<ServerHello, ClientError> {
-    match hello_until(
-        stream,
-        interactive,
-        request_block_metadata,
-        true,
-        true,
-        true,
-        true,
-        deadline,
-    ) {
-        Ok(hello) => Ok(hello),
-        Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
-            *stream = reconnect()?;
-            match hello_until(
-                stream,
-                interactive,
-                request_block_metadata,
-                true,
-                true,
-                true,
-                false,
-                deadline,
-            ) {
-                Ok(hello) => Ok(hello),
-                Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
-                    *stream = reconnect()?;
-                    match hello_until(
-                        stream,
-                        interactive,
-                        request_block_metadata,
-                        true,
-                        false,
-                        true,
-                        false,
-                        deadline,
-                    ) {
-                        Ok(hello) => Ok(hello),
-                        Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
-                            *stream = reconnect()?;
-                            hello_until(
-                                stream,
-                                interactive,
-                                request_block_metadata,
-                                false,
-                                false,
-                                false,
-                                false,
-                                deadline,
-                            )
-                        }
-                        Err(error) => Err(error),
-                    }
-                }
-                Err(error) => Err(error),
-            }
+) -> Result<HelloExchange, ClientError> {
+    // (session bootstrap, delivery control, viewport LineIds, extended key, provisioning)
+    let steps = [
+        (true, true, true, true, true),
+        (false, true, true, true, true),
+        (false, false, true, true, true),
+        (false, false, false, true, true),
+        (false, false, false, false, false),
+    ];
+    let attempt_stream = stream;
+    for (index, &(session, delivery, viewport, extended, provisioning)) in steps.iter().enumerate()
+    {
+        if index > 0 {
+            *attempt_stream = reconnect()?;
         }
-        Err(error) => Err(error),
+        match hello_until(
+            attempt_stream,
+            interactive,
+            request_block_metadata,
+            extended,
+            viewport,
+            provisioning,
+            delivery,
+            session,
+            deadline,
+        ) {
+            Ok(server) => {
+                return Ok(HelloExchange {
+                    client_capabilities: requested_capabilities(
+                        request_block_metadata,
+                        extended,
+                        viewport,
+                        provisioning,
+                        delivery,
+                        session,
+                    ),
+                    server,
+                });
+            }
+            Err(ClientError::Server(ErrorCode::MalformedPayload)) if index + 1 < steps.len() => {}
+            Err(error) => return Err(error),
+        }
     }
+    Err(ClientError::Server(ErrorCode::MalformedPayload))
 }
 
 pub(crate) fn send_control_until(

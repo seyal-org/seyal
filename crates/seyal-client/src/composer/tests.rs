@@ -895,3 +895,45 @@ fn submit_while_overlay_open_closes_it_and_keeps_history_writer_runtime_only() {
     assert!(snap.history.is_none());
     assert_eq!(snap.history_count, 1, "pending submit is not history yet");
 }
+
+#[test]
+fn relay_submit_is_editable_and_does_not_enter_history() {
+    let pane = pane();
+    let mut state = ComposerState::new();
+    state.apply(ComposerAction::EnsurePane { pane }).unwrap();
+    eligible(&mut state, pane, RuntimeComposerEligibility::Relay, 1);
+    let epoch = state.snapshot(pane).unwrap().epoch;
+    state
+        .apply(ComposerAction::SetDraft {
+            pane,
+            text: "yes".into(),
+            epoch,
+        })
+        .unwrap();
+    let snap = state.snapshot(pane).unwrap();
+    assert_eq!(snap.mode, ComposerMode::Relay);
+    assert!(snap.can_submit);
+    assert_eq!(
+        snap.mode.editor_placeholder(),
+        "Relay to running program (plaintext)..."
+    );
+    assert_eq!(
+        state.apply(ComposerAction::OpenHistory { pane }),
+        Err(ComposerError::HistoryUnavailable)
+    );
+    let request_id = state
+        .apply(ComposerAction::Submit { pane, epoch })
+        .unwrap()
+        .unwrap();
+    state
+        .apply(ComposerAction::ApplyResult {
+            pane,
+            request_id,
+            accepted: true,
+        })
+        .unwrap();
+    let after = state.snapshot(pane).unwrap();
+    assert_eq!(after.history_count, 0);
+    assert!(after.draft.is_empty());
+    assert_eq!(after.mode, ComposerMode::Relay);
+}

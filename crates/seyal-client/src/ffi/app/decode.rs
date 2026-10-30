@@ -245,6 +245,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 1 => Some(RuntimeComposerEligibility::Available),
                 2 => Some(RuntimeComposerEligibility::Busy),
                 3 => Some(RuntimeComposerEligibility::Unsupported),
+                4 => Some(RuntimeComposerEligibility::Relay),
                 _ => return Err(-6),
             },
             revision: action.target_execution_lo,

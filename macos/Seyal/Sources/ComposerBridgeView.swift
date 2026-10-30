@@ -170,8 +170,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         }
         isHidden = hidden
         let available = composer.mode == UInt16(SEYAL_APP_COMPOSER_AVAILABLE.rawValue)
+        let relay = composer.mode == UInt16(SEYAL_APP_COMPOSER_RELAY.rawValue)
         let busy = composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue)
-        textView.isEditable = available
+        textView.isEditable = available || relay
         hasReconciledComposerState = true
         let isNowFocusEligible = isFocusEligibleForRecovery
         execute.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_EXECUTE))
@@ -180,7 +181,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         history.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_HISTORY))
         history.isEnabled = available && recall.flags & UInt16(SEYAL_APP_HISTORY_HAS_ENTRIES) != 0
         placeholder.stringValue = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
-        setAccessibilityValue(available ? "available" : (busy ? "busy" : "hidden"))
+        setAccessibilityValue(
+            relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden"))
+        )
         if composer.epoch != lastEpoch {
             lastEpoch = composer.epoch
             // The Rust draft is authoritative in every mode (SPEC-008 §4). A

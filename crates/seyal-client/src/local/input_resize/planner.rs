@@ -32,6 +32,7 @@ pub(crate) enum OutboundKind {
     },
     Resync,
     ComposerCommand,
+    SessionConsent,
     HistoryRangeRequest,
     CreateExecution {
         request_id: u64,

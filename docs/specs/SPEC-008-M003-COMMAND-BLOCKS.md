@@ -170,7 +170,7 @@ ExecutionId
 
 A submission is bound to the target and generation the client displayed
 (ADR-026 §3.2); a mismatch is a correlated refusal and the draft is kept.
-Type 45 is allocated by Accepted ADR-026 and is not yet shipped on the wire.
+Type 45 is allocated by Accepted ADR-026 and shipped under #1388. A generation mismatch refuses the submit and keeps the draft.
 
 The exact wire/internal representation may differ. The observable requirement is
 that stale evidence cannot authorize a newer execution, attachment or

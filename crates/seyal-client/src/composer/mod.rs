@@ -23,7 +23,11 @@ pub use history::{HistoryOverlaySnapshot, HISTORY_CAPACITY, HISTORY_VISIBLE_ROWS
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ComposerMode {
     Available,
-    Busy { process: String },
+    Busy {
+        process: String,
+    },
+    /// Plaintext line to the foreground program. Not a new Block.
+    Relay,
     Hidden,
 }
 
@@ -38,6 +42,8 @@ pub enum RuntimeComposerEligibility {
     Available,
     Busy,
     Unsupported,
+    /// Type 45 `Relay`. Type 23 stays `Busy` for legacy clients.
+    Relay,
 }
 
 /// Why a [`ComposerAction`] was rejected. The previous state is unchanged
@@ -108,6 +114,7 @@ impl ComposerMode {
             // program), so nothing can be promised beyond waiting for it.
             Self::Busy { process } if process.is_empty() => "Waiting for prompt...",
             Self::Busy { .. } => "Command running...",
+            Self::Relay => "Relay to running program (plaintext)...",
             Self::Available | Self::Hidden => "Type a command...",
         }
     }
@@ -264,6 +271,8 @@ pub struct ComposerSnapshot {
 struct PaneComposer {
     draft: String,
     pending_request_id: Option<u64>,
+    /// The in-flight submit was Relay, so an accept must not enter history.
+    pending_is_relay: bool,
     next_request_id: u64,
     epoch: u64,
     busy_process: Option<String>,
@@ -286,6 +295,7 @@ impl PaneComposer {
         Self {
             draft: String::new(),
             pending_request_id: None,
+            pending_is_relay: false,
             next_request_id: 1,
             epoch: 1,
             busy_process: None,
@@ -358,6 +368,7 @@ impl PaneComposer {
         match self.runtime_eligibility.map(|(eligibility, _)| eligibility) {
             // Unsupported shells keep the raw admission path (out of scope
             // for prompt gating), so the composer stays usable as before.
+            Some(RuntimeComposerEligibility::Relay) => ComposerMode::Relay,
             Some(RuntimeComposerEligibility::Available)
             | Some(RuntimeComposerEligibility::Unsupported) => ComposerMode::Available,
             // Runtime has not proved a trusted prompt for this attachment:
@@ -379,7 +390,8 @@ impl PaneComposer {
     }
 
     fn can_submit(&self) -> bool {
-        matches!(self.mode(), ComposerMode::Available) && !self.draft.is_empty()
+        matches!(self.mode(), ComposerMode::Available | ComposerMode::Relay)
+            && !self.draft.is_empty()
     }
 
     fn allocate_request_id(&mut self) -> u64 {
@@ -443,6 +455,7 @@ impl ComposerState {
                     return self.fail(ComposerError::SubmitDisabled);
                 }
                 let request_id = composer.allocate_request_id();
+                composer.pending_is_relay = matches!(composer.mode(), ComposerMode::Relay);
                 composer.pending_request_id = Some(request_id);
                 composer.overlay = None;
                 composer.bump_epoch();
@@ -459,7 +472,10 @@ impl ComposerState {
                 }
                 composer.pending_request_id = None;
                 if accepted {
-                    composer.history.record(&composer.draft);
+                    if !composer.pending_is_relay {
+                        composer.history.record(&composer.draft);
+                    }
+                    composer.pending_is_relay = false;
                     composer.draft.clear();
                 }
                 composer.bump_epoch();

@@ -70,6 +70,7 @@ impl Runtime {
                     | MessageType::ResizeRequest
                     | MessageType::ComposerCommand
                     | MessageType::HistoryRangeRequest
+                    | MessageType::SessionConsent
             );
         let delivery_control_attach = current_state == LocalIpcConnState::Attached
             && kind == MessageType::Attach
@@ -104,6 +105,7 @@ impl Runtime {
             MessageType::TerminalKey => self.handle_terminal_key(token, payload),
             MessageType::TerminalKeyV2 => self.handle_terminal_key_v2(token, payload),
             MessageType::ComposerCommand => self.handle_composer_command(token, payload),
+            MessageType::SessionConsent => self.handle_session_consent(token, payload),
             MessageType::HistoryRangeRequest => self.handle_history_range_request(token, payload),
             MessageType::Resize => self.handle_resize(token, payload),
             MessageType::ResizeRequest => self.handle_resize_request(token, payload),
@@ -135,8 +137,11 @@ impl Runtime {
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_EXECUTION_PROVISIONING
                 | framing::CAP_VIEWPORT_LINE_IDS
-                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL)
+                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL
+                | framing::CAP_SESSION_BOOTSTRAP)
             != 0
+            || (hello.client_capabilities & framing::CAP_SESSION_BOOTSTRAP != 0
+                && hello.client_capabilities & CAP_COMMAND_BLOCKS == 0)
         {
             self.send_error(
                 token,
@@ -157,7 +162,8 @@ impl Runtime {
                 | framing::CAP_GRAPHEME_DISPLAY
                 | CAP_EXECUTION_PROVISIONING
                 | framing::CAP_VIEWPORT_LINE_IDS
-                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL,
+                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL
+                | framing::CAP_SESSION_BOOTSTRAP,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };

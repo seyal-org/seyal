@@ -658,6 +658,7 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
                 ComposerMode::Hidden => 0,
                 ComposerMode::Available => 1,
                 ComposerMode::Busy { .. } => 2,
+                ComposerMode::Relay => 3,
             },
             flags,
             epoch: composer.epoch,

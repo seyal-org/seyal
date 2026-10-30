@@ -633,7 +633,7 @@ fn map_client_error(error: ClientError) -> AppError {
 #[cfg(test)]
 mod ended_timeline_tests {
     use super::runtime_block_from_ended_timeline;
-    use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+    use seyal_protocol::framing::{BlockScope, BlockTrust, CommandBlock, CommandBlockState};
 
     #[test]
     fn ended_timeline_stops_presenting_a_still_running_block() {
@@ -644,6 +644,8 @@ mod ended_timeline_tests {
             end_line: Some(4),
             state: CommandBlockState::Running,
             flags: 0,
+            scope: BlockScope::Local,
+            trust: BlockTrust::LocalTrusted,
         };
         let mapped = runtime_block_from_ended_timeline(&running);
         assert!(!mapped.running);
@@ -659,6 +661,8 @@ mod ended_timeline_tests {
                 exit_status: Some(0),
             },
             flags: 0,
+            scope: BlockScope::Local,
+            trust: BlockTrust::LocalTrusted,
         };
         let kept = runtime_block_from_ended_timeline(&completed);
         assert!(!kept.running);
