@@ -744,10 +744,11 @@ Conflicts resolved here, with the higher authority named:
 
 No other mockup conflict with ADR-015, ADR-007 or ADR-009 was found.
 
-**Product keybinding defaults (PO decision for PR #1208 / #1000 / #1002):**
-default New Tab is `⌘N` and `⌘T`; default New Window is `⌘⇧N`. SPEC-024 owns
-those builtin rows and the TOML `[[keybindings]]` override path; this ADR owns
-only the CreateWindow / zero-Window re-entry semantics those strokes dispatch.
+**Product keybinding assignment (updated by the product-owner decision in #1392):**
+default New Tab is `⌘T`; default New Window is `⌘N`, with `⌘⇧N` retained
+as an alias. SPEC-024 owns the builtin rows and TOML `[[keybindings]]` override
+path; this ADR owns only the CreateWindow / zero-Window re-entry semantics those
+strokes dispatch.
 
 ## 12. Not in this ADR
 
