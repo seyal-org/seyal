@@ -11,8 +11,41 @@ final class IdentityButton: NSButton {
     var containmentGeneration: UInt64 = 0
 }
 
+/// Accessibility stand-in for Metal-painted Block output. It is not in Auto
+/// Layout: an `NSTextField` intrinsic width shrinks Flow cards to the string
+/// and pins them to the trailing edge. `draw` stays empty so Metal remains
+/// the only glyphs.
+final class BlockBodyTranscript: NSTextField {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isEditable = false
+        isSelectable = false
+        isBezeled = false
+        isBordered = false
+        drawsBackground = false
+        font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        lineBreakMode = .byClipping
+        maximumNumberOfLines = 1
+        cell?.isScrollable = false
+        translatesAutoresizingMaskIntoConstraints = true
+        autoresizingMask = [.width, .height]
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        _ = dirtyRect
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("BlockBodyTranscript is programmatic")
+    }
+}
+
 final class CommandBlockView: NSView {
     let body = NSView()
+    private let bodyTranscript = BlockBodyTranscript(frame: .zero)
     /// Host click on the header; `true` when the card is already selected.
     var onSelect: ((Bool) -> Void)?
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
@@ -67,8 +100,8 @@ final class CommandBlockView: NSView {
         body.wantsLayer = true
         body.layer?.isOpaque = false
         body.layer?.backgroundColor = NSColor.clear.cgColor
-        body.setAccessibilityElement(true)
-        body.setAccessibilityRole(.group)
+        bodyTranscript.setAccessibilityElement(true)
+        body.addSubview(bodyTranscript)
         header.addSubview(self.prompt)
         header.addSubview(command)
         header.addSubview(status)
@@ -109,6 +142,21 @@ final class CommandBlockView: NSView {
         fatalError("CommandBlockView is programmatic")
     }
 
+    func setBodyAccessibilityIdentifier(_ identifier: String) {
+        bodyTranscript.setAccessibilityIdentifier(identifier)
+    }
+
+    func setBodyTranscript(_ text: String) {
+        bodyTranscript.stringValue = text
+        bodyTranscript.setAccessibilityLabel(text)
+        bodyTranscript.setAccessibilityValue(text)
+    }
+
+    override func layout() {
+        super.layout()
+        bodyTranscript.frame = body.bounds
+    }
+
     func setOutputLines(_ lines: Int, cellHeight: CGFloat) {
         bodyHeight.constant = max(cellHeight, 1) * CGFloat(max(lines, 1))
     }
@@ -117,7 +165,7 @@ final class CommandBlockView: NSView {
         // The card is itself an accessibility element, so XCUI cannot see the
         // body (the live-tail target) without an explicit child list. Header
         // labels stay in the tree so VoiceOver still hears prompt, command, and status.
-        [prompt, command, status, body]
+        [prompt, command, status, bodyTranscript]
     }
 
     /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must
@@ -125,6 +173,17 @@ final class CommandBlockView: NSView {
     /// once output exists — a header-only gesture never sees that click.
     override func hitTest(_ point: NSPoint) -> NSView? {
         super.hitTest(point) == nil ? nil : self
+    }
+
+    /// `hitTest` returns `self` for selection, which would otherwise swallow
+    /// trackpad/mouse wheel over Block bodies. Flow scrolling is Pane-owned by
+    /// the transcript `NSScrollView` (#1379 Gate 1).
+    override func scrollWheel(with event: NSEvent) {
+        if let scroll = enclosingScrollView {
+            scroll.scrollWheel(with: event)
+            return
+        }
+        super.scrollWheel(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {

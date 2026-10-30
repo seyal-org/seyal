@@ -181,6 +181,7 @@ fn running(id: BlockId, command: &str, start: u64) -> RuntimeBlockRecord {
         end_line: None,
         running: true,
         exit_status: None,
+        canvas_floor: false,
     }
 }
 
@@ -192,6 +193,7 @@ fn completed(id: BlockId, command: &str, start: u64, end: u64) -> RuntimeBlockRe
         end_line: Some(end),
         running: false,
         exit_status: Some(0),
+        canvas_floor: false,
     }
 }
 
@@ -558,6 +560,7 @@ fn failed_runtime_exit_projects_failed_without_completing_siblings() {
                     end_line: Some(1),
                     running: false,
                     exit_status: Some(1),
+                    canvas_floor: false,
                 },
                 running(running_id, "sleep 10", 2),
             ],
@@ -566,6 +569,43 @@ fn failed_runtime_exit_projects_failed_without_completing_siblings() {
     let snap = state.snapshot(pane).unwrap();
     assert_eq!(snap.blocks[0].state, BlockPresentationState::Failed);
     assert_eq!(snap.blocks[1].state, BlockPresentationState::Running);
+}
+
+#[test]
+fn clear_canvas_floor_hides_until_shell_exit_reveals_history() {
+    let pane = pane();
+    let mut state = ComposerState::new();
+    ready(&mut state, pane);
+    let before = block(1);
+    let clear = block(2);
+    state
+        .apply(ComposerAction::ApplyRuntimeBlocks {
+            pane,
+            records: vec![
+                completed(before, "printf before", 10, 11),
+                RuntimeBlockRecord {
+                    id: clear,
+                    command: "clear".into(),
+                    start_line: 40,
+                    end_line: Some(41),
+                    running: false,
+                    exit_status: Some(0),
+                    canvas_floor: true,
+                },
+            ],
+        })
+        .unwrap();
+    let live = state.snapshot(pane).unwrap();
+    assert_eq!(live.canvas_floor, Some(clear));
+    assert_eq!(live.blocks.len(), 2, "timeline keeps pre-clear Blocks");
+    state
+        .apply(ComposerAction::SetExecutionEnded { pane, ended: true })
+        .unwrap();
+    let ended = state.snapshot(pane).unwrap();
+    assert_eq!(
+        ended.canvas_floor, None,
+        "shell-exit reveals the full retained transcript"
+    );
 }
 
 #[test]
@@ -584,6 +624,7 @@ fn completed_without_exit_status_projects_unknown_never_zero_or_failed() {
                 end_line: Some(12),
                 running: false,
                 exit_status: None,
+                canvas_floor: false,
             }],
         })
         .unwrap();

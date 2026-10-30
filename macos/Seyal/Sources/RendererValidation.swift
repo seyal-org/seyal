@@ -258,6 +258,7 @@ enum RendererValidation {
                   try repeatedLifecycleSelfTest(device: device),
                   try productionLayerPresentSelfTest(device: device),
                   historyPrepareDefersWhileFrameInFlightSelfTest(),
+                  historyRemoveClearsDeferredPrepareSelfTest(),
                   liveTailPrimaryClipSelfTest()
             else {
                 return false

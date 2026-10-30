@@ -164,7 +164,15 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     func requestPresent() {
         dispatchPrecondition(condition: .onQueue(.main))
         drainGPUCompletionsIfNeeded()
-        guard visible, persistentDisplayFailure == nil, instanceBuffer != nil else { return }
+        guard visible, persistentDisplayFailure == nil else { return }
+        // Flow retain after shell exit is history-only: no live instanceBuffer.
+        // Still must present so CAMetalLayer does not keep the pre-exit frame
+        // (#1379 clear→exit mispaint / AX false-green).
+        let historyOrFlow =
+            !historyRegionOrder.isEmpty
+            || !liveTail.order.isEmpty
+            || !presentationPlan.drawsLiveGrid
+        guard instanceBuffer != nil || historyOrFlow else { return }
         needsPresent = true
     }
 
@@ -555,13 +563,18 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     func inspectFlowPaint(from texture: MTLTexture? = nil) -> FlowPaintInspection {
         var instancesOutsideClips = 0
         var historyInstanceCount = 0
-        for region in orderedBlockRegions {
+        var liveTailInstanceCount = 0
+        var paintedHistoryRegionCount = 0
+        let historyOnly = historyRegionOrder.compactMap { historyRegions[$0] }
+        for region in historyOnly {
             let pointer = region.buffer.contents().bindMemory(
                 to: TerminalInstance.self,
                 capacity: region.instanceCount
             )
+            var regionPainted = 0
             for index in 0..<region.instanceCount where pointer[index].size.x > 0 && pointer[index].size.y > 0 {
                 historyInstanceCount += 1
+                regionPainted += 1
                 let origin = pointer[index].origin
                 let size = pointer[index].size
                 let painted = CGRect(
@@ -573,6 +586,49 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 if !region.clip.intersects(painted.insetBy(dx: 0.5, dy: 0.5)) {
                     instancesOutsideClips += 1
                 }
+            }
+            if regionPainted > 0 {
+                paintedHistoryRegionCount += 1
+            }
+        }
+        // Live-tail instances count separately and toward out-of-clip leakage.
+        for region in orderedLiveTailRegions {
+            let pointer = region.buffer.contents().bindMemory(
+                to: TerminalInstance.self,
+                capacity: region.instanceCount
+            )
+            for index in 0..<region.instanceCount where pointer[index].size.x > 0 && pointer[index].size.y > 0 {
+                liveTailInstanceCount += 1
+                let origin = pointer[index].origin
+                let size = pointer[index].size
+                let painted = CGRect(
+                    x: CGFloat(origin.x),
+                    y: CGFloat(origin.y),
+                    width: CGFloat(size.x),
+                    height: CGFloat(size.y)
+                )
+                if !region.clip.intersects(painted.insetBy(dx: 0.5, dy: 0.5)) {
+                    instancesOutsideClips += 1
+                }
+            }
+        }
+        let clips = historyOnly.map(\.clip)
+        var historyClipsDistinct = true
+        if clips.count >= 2 {
+            for i in 0..<(clips.count - 1) {
+                for j in (i + 1)..<clips.count {
+                    let a = clips[i]
+                    let b = clips[j]
+                    guard a.width > 1, a.height > 1, b.width > 1, b.height > 1 else { continue }
+                    let overlap = a.intersection(b)
+                    // Near-identical clips mean later Block glyphs composite onto
+                    // an earlier card (clear→exit after-clear under before-clear).
+                    if overlap.width * overlap.height > 0.85 * min(a.width * a.height, b.width * b.height) {
+                        historyClipsDistinct = false
+                        break
+                    }
+                }
+                if !historyClipsDistinct { break }
             }
         }
         var opaqueOutside = 0
@@ -587,6 +643,9 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             liveGridSubmitted: presentationPlan.drawsLiveGrid,
             fullGridBackgroundSubmitted: presentationPlan.drawsFullGridBackground,
             historyInstanceCount: historyInstanceCount,
+            liveTailInstanceCount: liveTailInstanceCount,
+            paintedHistoryRegionCount: paintedHistoryRegionCount,
+            historyClipsDistinct: historyClipsDistinct,
             instancesOutsideClips: instancesOutsideClips,
             opaquePixelsOutsideClips: opaqueOutside,
             opaquePixelsInsideClips: opaqueInside
@@ -597,6 +656,10 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         guard Set(ids).count == ids.count, ids.allSatisfy({ $0 != 0 }) else { return }
         let keep = Set(ids)
         historyRegions = historyRegions.filter { keep.contains($0.key) }
+        // Drop coalesced prepares for Block IDs that left the frame — otherwise a
+        // later GPU-idle flush can resurrect stale origins over the wrong cards
+        // after clear→exit height collapse (#1379).
+        deferredHistoryPrepares = deferredHistoryPrepares.filter { keep.contains($0.key) }
         historyRegionOrder = ids
         needsPresent = instanceBuffer != nil
     }
@@ -604,7 +667,17 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     func removeHistoryRegions(except ids: Set<UInt64>) {
         historyRegions = historyRegions.filter { ids.contains($0.key) }
         historyRegionOrder.removeAll { !ids.contains($0) }
-        needsPresent = instanceBuffer != nil
+        // Shell-exit retain wipes buffers then republishes. Deferred prepares
+        // must not survive that wipe or they re-apply pre-exit clips/origins
+        // on top of the settled layout (#1379 clear→exit mispaint).
+        if ids.isEmpty {
+            deferredHistoryPrepares.removeAll(keepingCapacity: false)
+        } else {
+            deferredHistoryPrepares = deferredHistoryPrepares.filter { ids.contains($0.key) }
+        }
+        // Always mark presentable: Flow may have no live instanceBuffer, and a
+        // wipe must still clear the prior drawable before history re-encodes.
+        needsPresent = true
     }
 
     /// Submit a frame to a drawable supplied by the platform frame scheduler.

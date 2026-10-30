@@ -135,6 +135,8 @@ pub struct RuntimeBlockRecord {
     pub end_line: Option<u64>,
     pub running: bool,
     pub exit_status: Option<i32>,
+    /// Runtime marked this Block as the Flow canvas floor after `clear` (ED2).
+    pub canvas_floor: bool,
 }
 
 impl RuntimeBlockRecord {
@@ -207,6 +209,12 @@ pub enum ComposerAction {
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
     },
+    /// A replacement execution must not inherit the ended shell's admission
+    /// or a composer-status revision. A new attachment's revision starts over;
+    /// treating it as stale leaves the composer Waiting for prompt.
+    ResetAdmission {
+        pane: PaneId,
+    },
     /// Open the history overlay above this Pane's composer. Requires
     /// [`ComposerMode::Available`] and at least one recorded entry.
     OpenHistory {
@@ -242,6 +250,9 @@ pub struct ComposerSnapshot {
     pub epoch: u64,
     pub allows_direct_terminal: bool,
     pub blocks: Vec<BlockProjection>,
+    /// Active Flow canvas starts at this Block after `clear`. `None` while the
+    /// session has not cleared, and while shell-exit reveals full history.
+    pub canvas_floor: Option<BlockId>,
     pub last_error: Option<ComposerError>,
     /// Number of retained history entries; hosts enable recall only when > 0.
     pub history_count: usize,
@@ -263,6 +274,9 @@ struct PaneComposer {
     presentation_mode: PresentationMode,
     input_route: InputRoute,
     blocks: Vec<BlockProjection>,
+    /// Retained after ED2/`clear`; cleared on admission reset. Hosts hide
+    /// earlier Blocks from the live canvas while the shell is still up.
+    canvas_floor: Option<BlockId>,
     history: PaneHistory,
     overlay: Option<HistoryOverlay>,
 }
@@ -280,6 +294,7 @@ impl PaneComposer {
             presentation_mode: PresentationMode::Flow,
             input_route: InputRoute::Composer,
             blocks: Vec::new(),
+            canvas_floor: None,
             history: PaneHistory::default(),
             overlay: None,
         }
@@ -484,6 +499,16 @@ impl ComposerState {
             }
             ComposerAction::ApplyRuntimeBlocks { pane, records } => {
                 let composer = self.pane_mut(pane);
+                let flagged = records
+                    .iter()
+                    .find(|record| record.canvas_floor)
+                    .map(|record| record.id);
+                composer.canvas_floor = match flagged {
+                    Some(id) => Some(id),
+                    None => composer
+                        .canvas_floor
+                        .filter(|id| records.iter().any(|record| record.id == *id)),
+                };
                 composer.blocks = composer.project_blocks(pane, &records);
                 Ok(None)
             }
@@ -503,6 +528,22 @@ impl ComposerState {
                 }
                 if composer.runtime_eligibility != next {
                     composer.runtime_eligibility = next;
+                    composer.bump_epoch();
+                    composer.close_overlay_if_unavailable();
+                }
+                Ok(None)
+            }
+            ComposerAction::ResetAdmission { pane } => {
+                let composer = self.pane_mut(pane);
+                let dirty = composer.pending_request_id.is_some()
+                    || composer.busy_process.is_some()
+                    || composer.runtime_eligibility.is_some()
+                    || composer.canvas_floor.is_some();
+                composer.pending_request_id = None;
+                composer.busy_process = None;
+                composer.runtime_eligibility = None;
+                composer.canvas_floor = None;
+                if dirty {
                     composer.bump_epoch();
                     composer.close_overlay_if_unavailable();
                 }
@@ -577,10 +618,27 @@ impl ComposerState {
             epoch: composer.epoch,
             allows_direct_terminal: composer.input_route == InputRoute::DirectTerminal,
             blocks: composer.blocks.clone(),
+            // Shell-exit reveals the full retained transcript for review.
+            canvas_floor: if composer.execution_ended {
+                None
+            } else {
+                composer.canvas_floor
+            },
             last_error: self.last_error,
             history_count: composer.history.len(),
             history: composer.overlay_snapshot(),
         })
+    }
+
+    /// Sticky per-pane shell-exit latch (#1379 Defect B). Absent panes have not ended.
+    pub fn execution_ended(&self, pane: PaneId) -> bool {
+        self.panes
+            .get(&pane)
+            .is_some_and(|composer| composer.execution_ended)
+    }
+
+    pub fn any_execution_ended(&self) -> bool {
+        self.panes.values().any(|composer| composer.execution_ended)
     }
 
     fn pane_mut(&mut self, pane: PaneId) -> &mut PaneComposer {

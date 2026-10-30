@@ -334,7 +334,7 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                 // A trusted D marker's parser-stamped line is authoritative.
                 // Without one (lost D, or execution ended with no D observed)
                 // the current cursor is the best available fallback.
-                let end_line = line.map(|line| line.0).unwrap_or_else(|| {
+                let mut end_line = line.map(|line| line.0).unwrap_or_else(|| {
                     let cursor = entry.execution.terminal().cursor();
                     entry
                         .execution
@@ -343,13 +343,36 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                         .map(|line| line.0)
                         .unwrap_or(1)
                 });
+                // ED2 (`clear`) seals start into history and remints the
+                // viewport before D. Advance start to the remint frontier so
+                // Flow drops sealed pre-remint blanks but keeps post-clear
+                // output (#1379 clear→exit / clear&&ls).
+                let mut span_start = None;
+                if let Some(start_line) = entry
+                    .block_timeline
+                    .records()
+                    .find(|record| record.id == block_id)
+                    .map(|record| record.start_line)
+                {
+                    let (clamped_start, clamped_end) = entry
+                        .execution
+                        .terminal()
+                        .clamp_block_span_across_ed2_remint(
+                            seyal_exec::LineId(start_line),
+                            seyal_exec::LineId(end_line),
+                        );
+                    if clamped_start.0 != start_line {
+                        span_start = Some(clamped_start.0);
+                    }
+                    end_line = clamped_end.0;
+                }
                 let exit_status = match exit {
                     BlockExit::Code(code) => Some(code),
                     BlockExit::Unknown => None,
                 };
                 if entry
                     .block_timeline
-                    .complete(block_id, end_line, exit_status)
+                    .complete_span(block_id, span_start, end_line, exit_status)
                     .is_ok()
                 {
                     changed = true;

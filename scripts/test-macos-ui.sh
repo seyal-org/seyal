@@ -71,6 +71,16 @@ codesign --verify --strict --all-architectures "$HELPERS_DIR/seyal-runtime"
 codesign --verify --strict "$APP_BUNDLE"
 codesign --verify --deep --strict "$PRODUCTS/SeyalUITests-Runner.app"
 
+# xcodebuild only injects TEST_RUNNER_*-prefixed vars from its *environment*
+# into the XCUI runner (prefix stripped). A CLI build-setting form is ignored.
+# Export so `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test` actually runs the
+# 10-cycle case instead of silently XCTSkipping while the suite still reports
+# PASS. Do not use a bash array here: macOS /bin/bash 3.2 rejects empty
+# "${arr[@]}" under `set -u` (CI native-macos-smoke).
+if [[ "${SEYAL_UI_TEST_CLEAR_EXIT_STRESS:-}" == "1" ]]; then
+  export TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1
+fi
+
 xcodebuild \
   -project macos/Seyal/Seyal.xcodeproj \
   -scheme Seyal \

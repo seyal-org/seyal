@@ -34,11 +34,11 @@ use super::allocate_handle;
 use decode::decode_action;
 use encode::{
     chrome_visibility_flags, encode_accessibility, encode_block_rows, encode_chrome_rows,
-    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot,
+    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
 };
 
 pub use block_projection::seyal_app_block_projection;
-pub(crate) use loss::note_application_roots_client_loss;
+pub(crate) use loss::{note_application_roots_client_loss, note_application_roots_execution_ended};
 pub use pane_region::*;
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
@@ -160,6 +160,11 @@ pub struct SeyalAppComposer {
     pub draft_utf8: *const u8,
     pub draft_utf8_len: u32,
     pub block_count: u32,
+    /// Flow canvas floor after `clear` (ED2). Zero means show every Block.
+    /// Hosts hide cards with id below this floor while the shell is live;
+    /// shell-exit clears the floor so retained history is reviewable (#1379).
+    pub canvas_floor_block_id_lo: u64,
+    pub canvas_floor_block_id_hi: u64,
 }
 
 /// Pane composer history overlay (#933). `query_utf8` is borrowed until the
@@ -614,6 +619,8 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
                 draft_utf8: ptr::null(),
                 draft_utf8_len: 0,
                 block_count: 0,
+                canvas_floor_block_id_lo: 0,
+                canvas_floor_block_id_hi: 0,
             };
         };
         let snap = state.root.snapshot();
@@ -628,6 +635,8 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
                 draft_utf8: ptr::null(),
                 draft_utf8_len: 0,
                 block_count: 0,
+                canvas_floor_block_id_lo: 0,
+                canvas_floor_block_id_hi: 0,
             };
         };
         state.composer_draft = composer.draft.as_bytes().to_vec();
@@ -638,6 +647,10 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
         if composer.allows_direct_terminal {
             flags |= 2;
         }
+        let (floor_lo, floor_hi) = match composer.canvas_floor {
+            Some(id) => split_id(id.to_bytes()),
+            None => (0, 0),
+        };
         SeyalAppComposer {
             version: APP_ABI_VERSION,
             size: size_of::<SeyalAppComposer>() as u16,
@@ -656,6 +669,8 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
             },
             draft_utf8_len: state.composer_draft.len() as u32,
             block_count: composer.blocks.len() as u32,
+            canvas_floor_block_id_lo: floor_lo,
+            canvas_floor_block_id_hi: floor_hi,
         }
     })
 }

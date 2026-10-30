@@ -101,6 +101,21 @@ struct NativeHistoryRange: Equatable {
     self.rows = rows
     self.status = status
   }
+
+  /// Plain text of retained history rows. Accessibility only; Metal still paints.
+  var transcriptText: String {
+    rows.map { row in
+      row.map { cell in
+        if !cell.graphemeUtf8.isEmpty,
+          let text = String(data: cell.graphemeUtf8, encoding: .utf8)
+        {
+          return text
+        }
+        guard let scalar = Unicode.Scalar(cell.scalar), scalar.value != 0 else { return "" }
+        return String(scalar)
+      }.joined()
+    }.joined(separator: "\n")
+  }
 }
 
 func mergeHistoryRange(

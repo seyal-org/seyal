@@ -183,20 +183,32 @@ final class RustDisplayBridge {
   @discardableResult
   func adoptRecoveredHandle(_ opened: RuntimeRecoveryOpenedHandle) -> Bool {
     let handle = opened.handle
-    guard !isConnected, !teardown.disconnectPending else {
-      seyal_bridge_disconnect_handle(handle)
+    if isConnected || teardown.disconnectPending {
+      NSLog(
+        "seyal: adopt rejected fence isConnected=%d disconnectPending=%d clientHandle=%llu",
+        isConnected ? 1 : 0,
+        teardown.disconnectPending ? 1 : 0,
+        clientHandle
+      )
+      // Do not disconnect here — caller may clear the fence and retry adopt
+      // with the same pending handle.
       return false
     }
     lastLaunchError = nil
     guard seyal_bridge_adopt_handle(handle) == 0 else {
-      seyal_bridge_disconnect_handle(handle)
+      NSLog("seyal: adopt rejected seyal_bridge_adopt_handle")
+      // Pending handle was not taken; caller may disconnect.
       onError(-1)
       onStatusChanged()
       return false
     }
     let recoveryResult = RecoveryResult(opened: opened)
     lastRecoveryResult = recoveryResult
-    return finishAdoptedHandle(handle, recoveryResult: recoveryResult)
+    let finished = finishAdoptedHandle(handle, recoveryResult: recoveryResult)
+    if !finished {
+      NSLog("seyal: adopt rejected finishAdoptedHandle (fd/reconstruction)")
+    }
+    return finished
   }
 
   @discardableResult
@@ -352,7 +364,10 @@ final class RustDisplayBridge {
       completeEagerClientDisconnect()
       return
     }
-    guard isConnected || socketFileDescriptor >= 0 else { return }
+    // Half-torn shell-exit / poll-loss often leaves isConnected=false while
+    // clientHandle is still non-zero (Controller lease held). Still drop the
+    // lease so a later New shell open_first is not ControllerBusy.
+    guard isConnected || socketFileDescriptor >= 0 || clientHandle != 0 else { return }
 
     isConnected = false
     disconnectRuntimeReconstruction(continuityAppHandle)
@@ -444,8 +459,18 @@ final class RustDisplayBridge {
           let result = seyal_bridge_poll_for(handle)
           if result < 0 {
             // Level-trigger progress: EOF/disconnect must disarm this fd's
-            // sources and drop the dead client. Tab 1 stays up (do not stop()).
+            // sources. Tab 1 stays up (do not stop()).
             self.cancelAuxiliarySources(for: handle)
+            // Shell exit (-6): match primary drainReadyDisplayWork — publish
+            // final Block history / timeline while the client is still
+            // registered, then disconnect. Early disconnect dropped retained
+            // clear→exit bodies for an unfocused sibling Controller (#1379 /
+            // SPEC-009 §8.2.2).
+            if result == -6, seyal_bridge_select(handle) == 0 {
+              self.publishHistoryRanges()
+              self.onTimeline()
+              self.publishHistoryRanges()
+            }
             seyal_bridge_disconnect_handle(handle)
             _ = self.selectClient()
             self.publishCurrentFrame()

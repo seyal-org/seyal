@@ -64,15 +64,21 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
         else {
             return SeyalAppBlockProjection::fail_closed();
         };
+        let running = block.state == BlockPresentationState::Running;
         let mode = match snapshot.eligibility {
             PresentationEligibility::Flow => PresentationMode::Flow,
             PresentationEligibility::Raw => PresentationMode::Raw,
             PresentationEligibility::Tui => PresentationMode::Tui,
+            // Completed history does not need a live client. Unbound after an
+            // ended execution must still paint retained Block bodies. A running
+            // clip has no viewport here and stays fail-closed.
             PresentationEligibility::Unbound => {
-                return SeyalAppBlockProjection::fail_closed();
+                if running {
+                    return SeyalAppBlockProjection::fail_closed();
+                }
+                PresentationMode::Flow
             }
         };
-        let running = block.state == BlockPresentationState::Running;
         // Running PRIMARY_CLIP needs ViewportLineIds from the Pane's owning
         // client (matched by fence attachment/execution), never another Pane's
         // ambient ACTIVE_HANDLE. History/fail-closed paths need no client.
@@ -237,7 +243,7 @@ mod tests {
                 .root
                 .apply(AppAction::ApplyRuntimeBlocks {
                     fence,
-                    records: vec![
+                    records: Some(vec![
                         RuntimeBlockRecord {
                             id: BlockId::from_bytes([0x21; 16]),
                             command: "printf hello".into(),
@@ -245,6 +251,7 @@ mod tests {
                             end_line: Some(12),
                             running: false,
                             exit_status: Some(0),
+                            canvas_floor: false,
                         },
                         RuntimeBlockRecord {
                             id: BlockId::from_bytes([0x22; 16]),
@@ -253,8 +260,9 @@ mod tests {
                             end_line: None,
                             running: true,
                             exit_status: None,
+                            canvas_floor: false,
                         },
-                    ],
+                    ]),
                 })
                 .unwrap();
         });
@@ -293,6 +301,119 @@ mod tests {
             clients.remove(&other);
         });
         crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn ended_and_unbound_completed_blocks_project_history() {
+        use std::time::Duration;
+
+        use crate::app::{BindingEvidence, PresentationEligibility};
+        use crate::recovery::AttemptOutcome;
+        use seyal_core::{AttachmentId, ExecutionId};
+
+        let handle = seyal_app_create();
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::Bind {
+                    fence,
+                    evidence: BindingEvidence {
+                        execution: ExecutionId::from_bytes([4; 16]),
+                        attachment: AttachmentId::from_bytes([5; 16]),
+                        controller: true,
+                        pty_generation: 1,
+                        alternate_screen: false,
+                    },
+                })
+                .unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: Some(vec![
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x31; 16]),
+                            command: "printf exiting".into(),
+                            start_line: 10,
+                            end_line: Some(12),
+                            running: false,
+                            exit_status: Some(0),
+                            canvas_floor: false,
+                        },
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x32; 16]),
+                            command: "still running".into(),
+                            start_line: 20,
+                            end_line: None,
+                            running: true,
+                            exit_status: None,
+                            canvas_floor: false,
+                        },
+                    ]),
+                })
+                .unwrap();
+            state
+                .root
+                .apply(AppAction::BeginRecovery {
+                    now: Duration::ZERO,
+                })
+                .unwrap();
+            let generation = state.root.snapshot().recovery_generation;
+            state
+                .root
+                .apply(AppAction::CompleteRecovery {
+                    generation,
+                    outcome: AttemptOutcome::ExecutionEnded,
+                    now: Duration::from_millis(1),
+                    launch: None,
+                })
+                .unwrap();
+            assert_eq!(
+                state.root.snapshot().eligibility,
+                PresentationEligibility::Flow
+            );
+        });
+
+        let completed = seyal_app_block_projection(handle, 0);
+        assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(completed.start_line, 10);
+        assert_eq!(completed.end_line, 12);
+        // ExecutionEnded settles the Running Block with end=start so History
+        // projects instead of FailClosed (clear→exit must not collapse bodies).
+        let settled = seyal_app_block_projection(handle, 1);
+        assert_eq!(settled.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(settled.start_line, 20);
+        assert_eq!(settled.end_line, 20);
+
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            state
+                .root
+                .apply(AppAction::CreateReplacementExecution {
+                    execution: None,
+                    attachment: None,
+                    pty_generation: 0,
+                })
+                .unwrap();
+            assert_eq!(
+                state.root.snapshot().eligibility,
+                PresentationEligibility::Unbound
+            );
+        });
+        let retained = seyal_app_block_projection(handle, 0);
+        assert_eq!(retained.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(retained.start_line, 10);
+        assert_eq!(retained.end_line, 12);
+        let settled_unbound = seyal_app_block_projection(handle, 1);
+        assert_eq!(settled_unbound.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(settled_unbound.start_line, 20);
+        assert_eq!(settled_unbound.end_line, 20);
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

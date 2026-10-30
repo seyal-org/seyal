@@ -295,4 +295,18 @@ extension MetalTerminalRenderer {
         liveTail.regions.removeAll(keepingCapacity: false)
         needsPresent = true
     }
+
+    /// Drop running primary-frame clips and the cached prepared frame.
+    /// Shell-exit retain must keep completed history regions only — leaving
+    /// `lastPreparedFrame` lets clear→exit keep painting a loose viewport
+    /// (cursor + later Block output) over retained cards (#1379).
+    func clearLiveTailPresentation() {
+        liveTail.clips.removeAll(keepingCapacity: false)
+        liveTail.order.removeAll(keepingCapacity: false)
+        liveTail.regions.removeAll(keepingCapacity: false)
+        liveTail.transcriptRegions.removeAll(keepingCapacity: false)
+        liveTail.lastPreparedFrame = nil
+        liveTail.deferredForceRefresh = false
+        needsPresent = true
+    }
 }

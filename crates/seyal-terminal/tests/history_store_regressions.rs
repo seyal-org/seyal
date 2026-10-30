@@ -786,3 +786,183 @@ fn hist_wide_grapheme_overflow_sentinel_is_retained() {
         units_text(&units)
     );
 }
+
+/// Gate 1 / #1379: completed Block history spans are LineId ranges that often
+/// still sit on the live primary grid. CSI ED2 (`clear`) must seal those rows
+/// and mint fresh LineIds so a later rewrite cannot contaminate history queries
+/// used by Flow Block bodies.
+#[test]
+fn ed2_clear_preserves_prior_primary_lines_in_history() {
+    let mut terminal = TerminalState::new(20, 4).expect("terminal");
+    terminal.feed(b"block-one\r\n").expect("feed");
+    terminal.feed(b"block-two-output\r\n").expect("feed");
+    let first = terminal.line_id(0).expect("line 0");
+    let second = terminal.line_id(1).expect("line 1");
+    let before_first: String = terminal
+        .primary_history_units_range(first, first, 32)
+        .into_iter()
+        .map(|u| u.text)
+        .collect();
+    let before_second: String = terminal
+        .primary_history_units_range(second, second, 32)
+        .into_iter()
+        .map(|u| u.text)
+        .collect();
+    assert_eq!(before_first, "block-one");
+    assert_eq!(before_second, "block-two-output");
+
+    terminal.feed(b"\x1b[H\x1b[2J").expect("clear");
+    terminal
+        .feed(b"RED GREEN\r\n")
+        .expect("rewrite after clear");
+    terminal.feed(b"sleep-bleed\r\n").expect("more raw");
+
+    let after_first: String = terminal
+        .primary_history_units_range(first, first, 32)
+        .into_iter()
+        .map(|u| u.text)
+        .collect();
+    let after_second: String = terminal
+        .primary_history_units_range(second, second, 32)
+        .into_iter()
+        .map(|u| u.text)
+        .collect();
+    assert_eq!(
+        after_first, "block-one",
+        "ED2 must not let later primary text replace Block line {first:?}: got {after_first:?}"
+    );
+    assert_eq!(
+        after_second, "block-two-output",
+        "ED2 must not let later primary text replace Block line {second:?}: got {after_second:?}"
+    );
+    assert_ne!(
+        terminal.line_id(0).expect("fresh row 0"),
+        first,
+        "ED2 must mint a fresh LineId for row 0"
+    );
+}
+
+/// #1379: a Block that starts on the primary, runs ED2, then finishes on a
+/// reminted row must drop sealed pre-remint blanks (advance start to frontier).
+#[test]
+fn ed2_mid_command_block_span_advances_to_remint_frontier() {
+    let mut terminal = TerminalState::new(20, 6).expect("terminal");
+    terminal.feed(b"before-clear\r\n").expect("feed");
+    // Simulate the clear command's start row still on the primary.
+    terminal.feed(b"clear-command").expect("feed");
+    let start = terminal
+        .line_id(terminal.cursor().row)
+        .expect("clear start line");
+    terminal.feed(b"\x1b[H\x1b[2J").expect("ED2");
+    let frontier = terminal.line_id(0).expect("remint frontier");
+    let finish = frontier;
+    assert!(
+        frontier.0 > start.0 + 1,
+        "ED2 must remint multiple LineIds after start ({start:?} → {frontier:?})"
+    );
+    let (clamped_start, clamped_end) = terminal.clamp_block_span_across_ed2_remint(start, finish);
+    assert_eq!(
+        clamped_start, frontier,
+        "ED2 remint must advance start to frontier {frontier:?}, not keep sealed {start:?}"
+    );
+    assert_eq!(
+        clamped_end, finish,
+        "ED2 remint must keep finish {finish:?}"
+    );
+    assert!(
+        finish.0 - start.0 >= 5,
+        "unclamped numeric span must be remint-tall ({start:?}..{finish:?})"
+    );
+}
+
+/// #1379: `clear && printf` must keep post-clear output in the Block span.
+#[test]
+fn ed2_then_output_keeps_post_clear_end() {
+    let mut terminal = TerminalState::new(20, 6).expect("terminal");
+    terminal.feed(b"clear-and-print").expect("feed");
+    let start = terminal.line_id(terminal.cursor().row).expect("start line");
+    terminal.feed(b"\x1b[H\x1b[2J").expect("ED2");
+    let frontier = terminal.line_id(0).expect("frontier");
+    terminal
+        .feed(b"file-a\r\nfile-b\r\n")
+        .expect("post-clear output");
+    let end = terminal
+        .line_id(terminal.cursor().row.saturating_sub(1))
+        .expect("end line");
+    assert!(
+        end.0 > frontier.0,
+        "post-clear output must land after frontier ({frontier:?}..{end:?})"
+    );
+    let (clamped_start, clamped_end) = terminal.clamp_block_span_across_ed2_remint(start, end);
+    assert_eq!(clamped_start, frontier, "start advances to frontier");
+    assert_eq!(
+        clamped_end, end,
+        "post-clear output end must be kept (was truncated to start in early clamp)"
+    );
+    let rows = terminal
+        .primary_history_range(clamped_start, clamped_end, 64)
+        .expect("history range");
+    let blob: String = rows
+        .iter()
+        .flat_map(|(_, cells)| cells.iter().map(|c| c.canonical_scalar()))
+        .collect();
+    assert!(
+        blob.contains("file-a") && blob.contains("file-b"),
+        "post-clear body must include printed files, got {blob:?}"
+    );
+}
+
+/// #1379: long scrolled output seals `start` into history without ED2. Sealed
+/// start + primary end alone must not clamp — that truncates Flow bodies.
+#[test]
+fn long_scrolled_output_end_not_clamped_without_ed2() {
+    let mut terminal = TerminalState::new(20, 6).expect("terminal");
+    terminal.feed(b"seq-start\r\n").expect("feed");
+    let start = terminal.line_id(0).expect("start line");
+    // Scroll the start row into history while more output lands on primary.
+    for i in 0..20 {
+        let line = format!("line-{i:02}\r\n");
+        terminal.feed(line.as_bytes()).expect("feed");
+    }
+    let end = terminal
+        .line_id(terminal.cursor().row.saturating_sub(1))
+        .expect("end line");
+    assert!(
+        start.0 < end.0,
+        "scrolled span must grow ({start:?}..{end:?})"
+    );
+    let start_on_primary = (0..terminal.rows()).any(|row| terminal.line_id(row) == Some(start));
+    assert!(
+        !start_on_primary,
+        "start must already be sealed off the primary"
+    );
+    let clamped = terminal.clamp_block_end_across_ed2_remint(start, end);
+    assert_eq!(
+        clamped, end,
+        "without ED2, sealed-start + primary-end must keep full end {end:?}, not clamp to {start:?}"
+    );
+}
+
+/// #1379: a prior ED2 frontier must not clamp later Blocks that never crossed it.
+#[test]
+fn prior_ed2_frontier_does_not_clamp_later_block() {
+    let mut terminal = TerminalState::new(20, 6).expect("terminal");
+    terminal.feed(b"before\r\n").expect("feed");
+    terminal.feed(b"\x1b[H\x1b[2J").expect("prior ED2");
+    terminal.feed(b"later-start\r\n").expect("feed");
+    let start = terminal
+        .line_id(terminal.cursor().row.saturating_sub(1))
+        .expect("later start");
+    for i in 0..12 {
+        let line = format!("later-{i:02}\r\n");
+        terminal.feed(line.as_bytes()).expect("feed");
+    }
+    let end = terminal
+        .line_id(terminal.cursor().row.saturating_sub(1))
+        .expect("later end");
+    let clamped = terminal.clamp_block_end_across_ed2_remint(start, end);
+    assert_eq!(
+        clamped, end,
+        "Block entirely after a prior ED2 frontier must keep end {end:?}"
+    );
+}

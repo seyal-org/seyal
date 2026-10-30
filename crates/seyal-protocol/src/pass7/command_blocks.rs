@@ -9,6 +9,11 @@ use super::composer::MAX_COMPOSER_COMMAND_BYTES;
 // MAX_FRAME_PAYLOAD. Larger histories require a separately versioned
 // continuation protocol.
 pub const MAX_COMMAND_BLOCK_RECORDS: usize = 128;
+
+/// This Block is the Flow canvas floor after CSI ED2 (`clear`): earlier
+/// Blocks stay in the timeline but leave the active canvas (#1379 UX).
+pub const COMMAND_BLOCK_FLAG_CANVAS_FLOOR: u8 = 0x01;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandBlockState {
     Running,
@@ -26,6 +31,8 @@ pub struct CommandBlock {
     pub start_line: u64,
     pub end_line: Option<u64>,
     pub state: CommandBlockState,
+    /// Wire flags (`COMMAND_BLOCK_FLAG_*`). Unknown bits are rejected.
+    pub flags: u8,
 }
 
 /// A bounded full replacement cache for one attached execution. A client must
@@ -61,11 +68,15 @@ impl BlockTimeline {
                 } => (1u8, exit_status),
                 CommandBlockState::Completed { exit_status: None } => (2u8, 0i32),
             };
+            if record.flags & !COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0 {
+                return Err(FramingError::MalformedPayload);
+            }
             out.extend_from_slice(&record.id.to_le_bytes());
             out.extend_from_slice(&record.start_line.to_le_bytes());
             out.extend_from_slice(&record.end_line.unwrap_or(0).to_le_bytes());
             out.push(state);
-            out.extend_from_slice(&[0; 3]);
+            out.push(record.flags);
+            out.extend_from_slice(&[0; 2]);
             out.extend_from_slice(&exit_status.to_le_bytes());
             out.extend_from_slice(&(command.len() as u16).to_le_bytes());
             out.extend_from_slice(&0u16.to_le_bytes());
@@ -110,7 +121,9 @@ impl BlockTimeline {
             let start_line = u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap());
             let end_raw = u64::from_le_bytes(bytes[offset + 16..offset + 24].try_into().unwrap());
             let state_tag = bytes[offset + 24];
-            if bytes[offset + 25..offset + 28] != [0; 3]
+            let flags = bytes[offset + 25];
+            if flags & !COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0
+                || bytes[offset + 26..offset + 28] != [0; 2]
                 || u16::from_le_bytes(bytes[offset + 30..offset + 32].try_into().unwrap()) != 0
             {
                 return Err(FramingError::MalformedPayload);
@@ -159,6 +172,7 @@ impl BlockTimeline {
                 start_line,
                 end_line,
                 state,
+                flags,
             });
             offset = command_end;
         }

@@ -41,6 +41,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var isNativeInteractionProbe: Bool { installation == .nativeInteractionProbe }
   var forceNextFrame = false
   var hasPreparedState = false
+  /// Encoded Flow history is on-screen without a Candidate-D live frame
+  /// (shell-exit retain). Must not satisfy SPEC-009 renderer-ready / Usable.
+  var hasRetainedHistoryPresentation = false
   var presentationState = PresentationRecoveryState()
   var presentationRetryScheduled = false
   var presentationRetryTimer: Timer?
@@ -225,6 +228,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func removeTranscriptRegions(except ids: Set<UInt64>) {
     historyRanges = historyRanges.filter { ids.contains($0.key.blockID) }
+    if historyRanges.isEmpty {
+      hasRetainedHistoryPresentation = false
+    }
     renderer.removeHistoryRegions(except: ids)
     clearLiveTailWhenTranscriptEmpty(ids)
   }
@@ -266,7 +272,14 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let execution = terminalExecutionIdentity ?? "none"
     let attachment = terminalAttachmentIdentity ?? "none"
     let alternate = lastAlternateScreen == true ? "true" : "false"
-    let flowPaint = renderer.inspectFlowPaint().accessibilityToken
+    let paint = renderer.inspectFlowPaint()
+    let flowPaint = paint.accessibilityToken
+    // history-instances / history-regions-painted expose Metal Block-body
+    // glyphs so XCUI fails when AX titles/bodies exist but paint is blank or
+    // collapsed onto one card (#1379 false-green).
+    let historyInstances = paint.historyInstanceCount
+    let historyRegionsPainted = paint.paintedHistoryRegionCount
+    let historyClips = paint.historyClipsDistinct ? "ok" : "collapse"
     let geometry: String
     if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
       geometry =
@@ -280,7 +293,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       "process=\(ProcessInfo.processInfo.processIdentifier) connection=\(connection) "
         + "runtime=\(runtime) execution=\(execution) "
         + "attachment=\(attachment) alternate-screen=\(alternate) "
-        + "\(geometry) flow-paint=\(flowPaint)"
+        + "\(geometry) flow-paint=\(flowPaint) history-instances=\(historyInstances) "
+        + "history-regions-painted=\(historyRegionsPainted) history-clips=\(historyClips)"
     )
   }
 
@@ -321,7 +335,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     updateDrawableSize()
     proposeCurrentGeometry()
     guard shouldRender,
-      hasPreparedState,
+      canPresentSurface,
       renderer.persistentDisplayFailure == nil,
       !presentationState.exhausted
     else { return }
@@ -485,7 +499,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         lastRenderError = nil
       }
       bridge?.publishCurrentFrame()
-      if hasPreparedState, !presentationState.exhausted {
+      if canPresentSurface, !presentationState.exhausted {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
@@ -622,11 +636,38 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     }
     lastProposedGeometry = .null
     recoveryPresentationPending = false
-    // History/composer/display correlations are disposable connection state;
-    // logical pane and Block identity remain owned by Runtime and are not
-    // cleared here.
-    historyRanges.removeAll(keepingCapacity: false)
-    invalidatePreparedPresentation()
+    // Rust owns which Blocks remain (composer timeline). Do not wipe
+    // historyRanges here from a retain-flag race — rebuildBlocks prunes via
+    // removeTranscriptRegions(except: retained) against that timeline
+    // (ADR-015; #1379). Ordinary disconnect with an empty timeline clears
+    // the cache there; shell-exit keeps completed Block ids.
+    let retainHistory = recoveryAppHandle != 0 && seyal_app_retains_flow_history(recoveryAppHandle) != 0
+    // Always drop running primary clips on disconnect. Retained history must
+    // not share the surface with the last prepared viewport after clear→exit
+    // (#1379): that leftover frame paints loose text/cursor over Block cards.
+    // Drop Metal history *buffers* (and any deferred prepares) too — keep
+    // historyRanges rows so chrome can re-encode against settled AppKit clips.
+    clearLiveTailPresentation()
+    renderer.removeHistoryRegions(except: [])
+    cancelPresentationRetries()
+    resetPreparationRecovery()
+    // Live Candidate-D readiness must not linger into reconnect/New shell
+    // (SPEC-009 §8.2.2 / §10). History present uses the retained flag only
+    // when Rust still retains Flow history.
+    hasPreparedState = false
+    hasRetainedHistoryPresentation = retainHistory && !historyRanges.isEmpty
+    onTimelineChanged?()
+    if retainHistory, shouldRender, hasRetainedHistoryPresentation {
+      renderer.requestPresent()
+      beginPresentationAttemptSeries()
+      armMetalDisplayLink()
+    } else if !retainHistory {
+      // Presentation retries / retained flag already cleared above. Do not
+      // call invalidatePreparedPresentation — it would also drop
+      // hasRetainedHistoryPresentation after a late retain latch and wipe
+      // historyRanges indirectly via Raw/empty rebuild only.
+      presentationState.cancel()
+    }
     startAutomaticBridgeRecoveryIfNeeded()
   }
 
@@ -703,6 +744,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func retainHistoryRange(_ range: NativeHistoryRange) {
     historyRanges[PaneBlockKey(paneID: paneID, blockID: range.blockID)] = range
+  }
+
+  func retainedHistoryRange(blockID: UInt64) -> NativeHistoryRange? {
+    historyRanges[PaneBlockKey(paneID: paneID, blockID: blockID)]
   }
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
@@ -847,6 +892,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         region: rendererRegion,
         backingScale: scale
       )
+      // History-only Flow (shell-exit retain) has no Candidate-D live frame.
+      // Arm presentation without marking renderer-ready / Usable.
+      hasRetainedHistoryPresentation = true
       if shouldRender {
         renderer.requestPresent()
         beginPresentationAttemptSeries()

@@ -259,7 +259,13 @@ impl Screen {
         Mutation::rows(old, self.cursor.row)
     }
 
-    pub(crate) fn erase_display(&mut self, mode: u16, store: &mut GraphemeStore) -> Mutation {
+    /// CSI J. ED2 seals retained primary rows and remints `LineId`s (#1379).
+    pub(crate) fn erase_display(
+        &mut self,
+        mode: u16,
+        line_ids: &mut LineIdAllocator,
+        store: &mut GraphemeStore,
+    ) -> Result<Mutation, TerminalError> {
         let blank = Cell::blank(self.pen.bg);
         let cursor_index = self.index(self.cursor.col, self.cursor.row);
         match mode {
@@ -268,24 +274,52 @@ impl Screen {
                     Self::release_cell(*cell, store);
                 }
                 self.cells[cursor_index..].fill(blank);
-                Mutation::rows(self.cursor.row, self.rows - 1)
+                Ok(Mutation::rows(self.cursor.row, self.rows - 1))
             }
             1 => {
                 for cell in &self.cells[..=cursor_index] {
                     Self::release_cell(*cell, store);
                 }
                 self.cells[..=cursor_index].fill(blank);
-                Mutation::rows(0, self.cursor.row)
+                Ok(Mutation::rows(0, self.cursor.row))
             }
-            2 => {
-                for cell in &self.cells {
-                    Self::release_cell(*cell, store);
-                }
-                self.cells.fill(blank);
-                Mutation::full(self.rows)
-            }
-            _ => Mutation::none(),
+            2 => self.erase_display_all(line_ids, store, blank),
+            _ => Ok(Mutation::none()),
         }
+    }
+
+    fn erase_display_all(
+        &mut self,
+        line_ids: &mut LineIdAllocator,
+        store: &mut GraphemeStore,
+        blank: Cell,
+    ) -> Result<Mutation, TerminalError> {
+        if self.retain_history {
+            for row in 0..usize::from(self.rows) {
+                let break_after = self.row_breaks[row].unwrap_or(HistoryBreakAfter::HardBreak);
+                self.append_row_to_history(row, break_after, store);
+            }
+        }
+        for cell in &self.cells {
+            Self::release_cell(*cell, store);
+        }
+        self.cells.fill(blank);
+        self.cell_anchors.fill(None);
+        let row_count = usize::from(self.rows);
+        if !line_ids.can_allocate(row_count) {
+            return Err(TerminalError::LineIdentityExhausted);
+        }
+        let mut frontier = None;
+        for row in 0..row_count {
+            let id = line_ids.allocate()?;
+            if frontier.is_none() {
+                frontier = Some(id);
+            }
+            self.line_ids[row] = id;
+            self.row_breaks[row] = Some(HistoryBreakAfter::HardBreak);
+        }
+        self.ed2_remint_frontier = frontier;
+        Ok(Mutation::full(self.rows))
     }
 
     pub(crate) fn erase_line(&mut self, mode: u16, store: &mut GraphemeStore) -> Mutation {

@@ -239,6 +239,30 @@ fn stale_launch_helper_carries_superseded_generation() {
 }
 
 #[test]
+fn clear_continuity_pins_allows_fresh_execution_after_ended_shell() {
+    let runtime = ContinuityIdentity { low: 1, high: 2 };
+    let ended = ContinuityIdentity { low: 3, high: 4 };
+    let fresh = ContinuityIdentity { low: 30, high: 40 };
+    let first = ContinuityIdentity { low: 5, high: 6 };
+    let second = ContinuityIdentity { low: 7, high: 8 };
+    let mut state = ReconstructionState::default();
+    state.begin_attempt();
+    assert!(state.commit(runtime, ended, first, true, true));
+    // Same-execution disconnect keeps the pin (reconnect path).
+    state.disconnect();
+    state.begin_attempt();
+    assert!(
+        !state.commit(runtime, fresh, second, true, true),
+        "dead ExecutionId pin must reject a different execution"
+    );
+    // New shell after exit clears pins (SPEC-009: continuity not claimed).
+    state.clear_continuity_pins();
+    state.begin_attempt();
+    assert!(state.commit(runtime, fresh, second, true, true));
+    assert!(state.can_mutate());
+}
+
+#[test]
 fn reconstruction_pins_runtime_execution_and_requires_fresh_attachment() {
     let runtime = ContinuityIdentity { low: 1, high: 2 };
     let execution = ContinuityIdentity { low: 3, high: 4 };

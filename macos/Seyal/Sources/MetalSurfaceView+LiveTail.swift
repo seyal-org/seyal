@@ -8,14 +8,26 @@ extension MetalSurfaceView {
     else {
       return
     }
+    // #1379: a transient empty region publish (zero-height Block bodies during
+    // document-size sync) must not filter away retained history paint and leave
+    // Flow titles with white bodies. Intentional clears use
+    // `removeTranscriptRegions(except:)`.
+    if frame.regions.isEmpty, !historyRanges.isEmpty {
+      return
+    }
     let regionIDs = Set(frame.regionIDs)
-    historyRanges = historyRanges.filter { regionIDs.contains($0.key.blockID) }
+    // Do not drop `historyRanges` here when a body clip is briefly omitted —
+    // that erased AX transcript + Metal source data after clear→exit while
+    // cards still existed. Lifetime stays with removeTranscriptRegions /
+    // disconnect retain policy.
     renderer.removeHistoryRegions(except: regionIDs)
     renderer.setHistoryRegionOrder(frame.regionIDs)
     renderer.setTranscriptRegions(liveTailPixelRegions(in: frame))
     // Body intrinsic growth moves every following Block. Re-encode all
     // retained canonical ranges against this complete frame so no region
-    // retains its previous clip or origin.
+    // retains its previous clip or origin. History keeps AppKit surface
+    // coordinates (convert already matches the shader); live-tail alone
+    // uses top-left pixel clips.
     for region in frame.regions {
       guard let range = historyRanges[PaneBlockKey(paneID: paneID, blockID: region.id)] else {
         continue
@@ -35,8 +47,12 @@ extension MetalSurfaceView {
 
   func clearLiveTailWhenTranscriptEmpty(_ ids: Set<UInt64>) {
     guard ids.isEmpty else { return }
-    renderer.setLiveTailBlocks([:])
-    renderer.setTranscriptRegions([])
+    renderer.clearLiveTailPresentation()
+  }
+
+  /// End running primary clips without touching retained history regions.
+  func clearLiveTailPresentation() {
+    renderer.clearLiveTailPresentation()
   }
 
   /// AppKit bottom-left → terminal top-left pixel clips for live-tail.

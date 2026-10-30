@@ -8,6 +8,42 @@ use crate::{
 };
 
 impl TerminalState {
+    /// Adjust a completed Block's `[start, end]` when CSI ED2 reminted the
+    /// primary between them (#1379).
+    ///
+    /// `clear` seals the running command's `start_line` into history (including
+    /// blank rows below the cursor), remints a full viewport of fresh LineIds,
+    /// then may print more output. A numeric `[start, finish]` would otherwise
+    /// include every sealed pre-remint blank and paint a viewport-tall empty
+    /// Flow body after clear → exit.
+    ///
+    /// Spans that cross the latest ED2 remint frontier advance `start` to that
+    /// frontier and keep `end`, so post-clear output (`clear && ls`) remains
+    /// while sealed pre-remint blanks are dropped. Bare `clear` yields a
+    /// frontier-sized span (typically one reminted row). Long scrolled output
+    /// that never crossed ED2 is unchanged.
+    pub fn clamp_block_span_across_ed2_remint(
+        &self,
+        start: LineId,
+        end: LineId,
+    ) -> (LineId, LineId) {
+        if end < start {
+            return (start, start);
+        }
+        let Some(frontier) = self.core.primary.ed2_remint_frontier else {
+            return (start, end);
+        };
+        if start < frontier && end >= frontier {
+            return (frontier, end);
+        }
+        (start, end)
+    }
+
+    /// Backward-compatible end-only helper used by older call sites/tests.
+    pub fn clamp_block_end_across_ed2_remint(&self, start: LineId, end: LineId) -> LineId {
+        self.clamp_block_span_across_ed2_remint(start, end).1
+    }
+
     /// Returns a bounded primary-screen history range. The returned rows are
     /// an explicit read-only projection of **primary** retained history plus
     /// primary visible rows. Alternate-screen cells are never included; the

@@ -57,6 +57,12 @@ impl ApplicationRoot {
                 authoritative_snapshot_committed,
             ),
             AppAction::DisconnectReconstruction => self.disconnect_reconstruction(),
+            AppAction::ClearReconstructionContinuity => self.clear_reconstruction_continuity(),
+            AppAction::CreateReplacementExecution {
+                execution,
+                attachment,
+                pty_generation,
+            } => self.create_replacement_execution(execution, attachment, pty_generation),
             AppAction::SetComposerDraft {
                 fence,
                 text,
@@ -71,9 +77,14 @@ impl ApplicationRoot {
                 request_id,
                 accepted,
             } => self.apply_composer_result(fence, request_id, accepted),
-            AppAction::ApplyRuntimeBlocks { fence, records } => {
-                self.apply_runtime_blocks(fence, records)
-            }
+            AppAction::ApplyRuntimeBlocks { fence, records } => match records {
+                // Disconnect / teardown: keep completed Flow history visible.
+                None => {
+                    self.require_fence(fence)?;
+                    Ok(())
+                }
+                Some(records) => self.apply_runtime_blocks(fence, records),
+            },
             AppAction::ApplyRuntimeComposerStatus {
                 fence,
                 eligibility,

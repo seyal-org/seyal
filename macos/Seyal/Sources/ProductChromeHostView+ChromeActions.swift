@@ -47,6 +47,9 @@ extension ProductChromeHostView {
     }
 
     @objc func createTab() {
+        // ADR-015: always forward CreateTab. New shell after exit is a separate
+        // typed recovery action (`seyal-new-shell`); Swift must not reinterpret
+        // "+" / menu New Tab as replacement bootstrap (#1379).
         applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
     }
 

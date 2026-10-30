@@ -5,7 +5,7 @@ use std::{slice, str, time::Duration};
 use seyal_core::{
     AttachmentId, BlockId, ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId,
 };
-use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+use seyal_protocol::framing::{CommandBlock, CommandBlockState, COMMAND_BLOCK_FLAG_CANVAS_FLOOR};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
@@ -21,7 +21,8 @@ use super::{
     FLAG_HAS_EXECUTION, FLAG_TARGET_CONTROLLER,
 };
 
-fn runtime_blocks_from_active_client() -> Vec<RuntimeBlockRecord> {
+/// Active-client BlockTimeline; `None` on disconnect so wipe ≠ empty (#1379).
+fn runtime_blocks_from_active_client() -> Option<Vec<RuntimeBlockRecord>> {
     with_active_client(|client| {
         client
             .block_timeline()
@@ -30,10 +31,9 @@ fn runtime_blocks_from_active_client() -> Vec<RuntimeBlockRecord> {
             .map(runtime_block_from_command)
             .collect()
     })
-    .unwrap_or_default()
 }
 
-pub(super) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockRecord {
+pub(crate) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockRecord {
     let mut bytes = [0u8; 16];
     bytes[..8].copy_from_slice(&record.id.to_le_bytes());
     RuntimeBlockRecord {
@@ -46,6 +46,7 @@ pub(super) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockR
             CommandBlockState::Running => None,
             CommandBlockState::Completed { exit_status } => exit_status,
         },
+        canvas_floor: record.flags & COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0,
     }
 }
 
@@ -428,6 +429,34 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             containment_generation: action.target_generation,
         }),
+        // New shell: no `reserved` overload. Absent execution prepares the
+        // ended Pane; present target_* binds that exact created ExecutionId.
+        80 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            if action.flags & FLAG_HAS_EXECUTION == 0 {
+                return Ok(AppAction::CreateReplacementExecution {
+                    execution: None,
+                    attachment: None,
+                    pty_generation: 0,
+                });
+            }
+            if action.flags & FLAG_HAS_ATTACHMENT == 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::CreateReplacementExecution {
+                execution: Some(ExecutionId::from_bytes(id16(
+                    action.target_execution_lo,
+                    action.target_execution_hi,
+                )?)),
+                attachment: Some(AttachmentId::from_bytes(id16(
+                    action.target_attachment_lo,
+                    action.target_attachment_hi,
+                )?)),
+                pty_generation: action.target_generation,
+            })
+        }
         _ => Err(-6),
     }
 }

@@ -857,14 +857,15 @@ fn block_selection_is_fenced_and_sourced_from_runtime_blocks() {
     .unwrap();
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![RuntimeBlockRecord {
+        records: Some(vec![RuntimeBlockRecord {
             id: known,
             command: "git status".into(),
             start_line: 1,
             end_line: Some(3),
             running: false,
             exit_status: Some(0),
-        }],
+            canvas_floor: false,
+        }]),
     })
     .unwrap();
     assert_eq!(
@@ -903,7 +904,7 @@ fn block_selection_is_fenced_and_sourced_from_runtime_blocks() {
     // Runtime republishes without that Block: selection clears itself.
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![],
+        records: Some(vec![]),
     })
     .unwrap();
     let after = root.snapshot();
@@ -968,14 +969,15 @@ fn composer_submit_busy_and_stale_request_are_rust_owned() {
     let block = BlockId::from_bytes([0x44; 16]);
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![RuntimeBlockRecord {
+        records: Some(vec![RuntimeBlockRecord {
             id: block,
             command: "echo hi".into(),
             start_line: 1,
             end_line: Some(1),
             running: false,
             exit_status: Some(0),
-        }],
+            canvas_floor: false,
+        }]),
     })
     .unwrap();
     let projected = &root.snapshot().composer.unwrap().blocks;

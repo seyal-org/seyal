@@ -386,6 +386,7 @@ impl ApplicationRoot {
                             execution,
                         );
                     }
+                    self.clear_execution_ended_for_pane(pane);
                     bound = Some(execution);
                 }
                 ProvisioningEffect::BindTerminal {
@@ -411,6 +412,7 @@ impl ApplicationRoot {
                             .provisioning
                             .select_terminal_binding(pane, terminal_tab);
                     }
+                    self.clear_execution_ended_for_pane(pane);
                     bound = Some(execution);
                 }
                 other => {
@@ -690,6 +692,7 @@ impl ApplicationRoot {
                             execution,
                         );
                     }
+                    self.clear_execution_ended_for_pane(pane);
                 }
                 ProvisioningEffect::BindTerminal {
                     pane,
@@ -714,6 +717,7 @@ impl ApplicationRoot {
                             .provisioning
                             .select_terminal_binding(pane, terminal_tab);
                     }
+                    self.clear_execution_ended_for_pane(pane);
                 }
                 ProvisioningEffect::AttachController { owner, execution } => {
                     #[cfg(target_os = "macos")]

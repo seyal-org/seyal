@@ -115,6 +115,130 @@ extension ProductChromeHostView {
         return "\(stage) · attempts \(snapshot.recovery_attempts)"
     }
 
+    /// #1379 Defect B: show New shell only when Rust admits it for the focused
+    /// Pane (`seyal_app_new_shell_available`). Do not re-derive from the
+    /// app-wide recovery stage (ADR-015).
+    func updateNewShellRecoveryAction() {
+        let show = seyal_app_new_shell_available(pane.appHandle) != 0
+        newShellButton.isHidden = !show
+        // Hide the composer only when Rust already hid it for this Pane.
+        // A focused sibling stays eligible and must not lose its composer.
+        if show {
+            composer.isHidden = true
+        }
+    }
+
+    /// Explicit New shell after `exit`. Rust prepares the ended Pane, creates
+    /// one execution (SPEC-004 §18), and binds that id. The host only adopts
+    /// the pending display handle.
+    @objc func requestNewShellAfterExit() {
+        guard recoveryAttemptInFlight == nil else { return }
+        // Admit before tearing down the bridge so a dead button cannot drop
+        // a focused sibling's display connection (ADR-015 / #1379).
+        guard seyal_app_new_shell_available(pane.appHandle) != 0 else {
+            reconcileChrome()
+            return
+        }
+        pane.inputSurface.suppressesAutomaticBridgeRecovery = true
+        if pane.inputSurface.bridge?.clientHandle != 0
+            || pane.inputSurface.bridge?.isConnected == true
+        {
+            pane.inputSurface.bridge?.completeEagerClientDisconnect()
+            pane.inputSurface.bridge?.stop()
+        } else {
+            pane.inputSurface.bridge?.completeEagerClientDisconnect()
+        }
+        pane.inputSurface.isDetachingRuntimeConnection = false
+        let identity = RecoveryAttemptIdentity.primary(UInt64.max)
+        guard applyRuntimeRecoveryAction(
+            pane.appHandle,
+            kind: SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION
+        ) == 0,
+            seyal_app_replacement_bootstrap_pending(pane.appHandle) == 1
+        else {
+            pane.inputSurface.suppressesAutomaticBridgeRecovery = false
+            reconcileChrome()
+            return
+        }
+        recoveryAttemptInFlight = identity
+        recoveryLifecycleQueue.async { [weak self] in
+            let outcome = openCreatedExecutionHandle()
+            DispatchQueue.main.async { [weak self] in
+                seyalRunAsMainActorFromMainQueue {
+                    guard let self else {
+                        if case let .opened(opened) = outcome {
+                            seyal_bridge_disconnect_handle(opened.handle)
+                        }
+                        return
+                    }
+                    self.finishCreatedReplacement(outcome, identity: identity)
+                }
+            }
+        }
+        reconcileChrome()
+    }
+
+    private func finishCreatedReplacement(
+        _ outcome: RuntimeRecoveryAttemptOutcome,
+        identity: RecoveryAttemptIdentity
+    ) {
+        defer {
+            if recoveryAttemptInFlight == identity {
+                recoveryAttemptInFlight = nil
+            }
+            pane.inputSurface.suppressesAutomaticBridgeRecovery = false
+        }
+        switch outcome {
+        case let .opened(opened):
+            pane.inputSurface.bridge?.stop()
+            pane.inputSurface.isDetachingRuntimeConnection = false
+            var adopted = pane.inputSurface.adoptRecoveredHandle(opened)
+            if !adopted {
+                pane.inputSurface.bridge?.completeEagerClientDisconnect()
+                adopted = pane.inputSurface.adoptRecoveredHandle(opened)
+            }
+            guard adopted else {
+                seyal_bridge_disconnect_handle(opened.handle)
+                Self.logNewShellFailure("adopt-rejected after create")
+                break
+            }
+            // Attach publishes composer eligibility once. Drain it before bind
+            // so a later idle socket cannot leave the composer Waiting.
+            pane.inputSurface.bridge?.drainReadyDisplayWork()
+            let bound = applyRuntimeRecoveryAction(
+                pane.appHandle,
+                kind: SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION
+            ) {
+                $0.flags = UInt16(SEYAL_APP_FLAG_HAS_EXECUTION)
+                    | UInt16(SEYAL_APP_FLAG_HAS_ATTACHMENT)
+                    | UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+                $0.target_execution_lo = opened.executionIDLow
+                $0.target_execution_hi = opened.executionIDHigh
+                $0.target_attachment_lo = opened.attachmentIDLow
+                $0.target_attachment_hi = opened.attachmentIDHigh
+                // Rust reads the adopted client's PTY generation.
+                $0.target_generation = 0
+                $0.reserved = 0
+            }
+            if bound == 0 {
+                pane.inputSurface.advanceRecoveryPresentationIfReady()
+            } else {
+                seyal_bridge_disconnect_handle(opened.handle)
+                Self.logNewShellFailure("bind created execution failed (\(bound))")
+            }
+        case .endpointMissing, .retryable, .controllerBusy, .executionEnded, .blocked:
+            Self.logNewShellFailure(String(describing: outcome))
+        }
+        reconcileChrome()
+    }
+
+    private static func logNewShellFailure(_ detail: String) {
+        NSLog(
+            "seyal: New shell create failed (%@); leaving New shell armed",
+            detail as NSString
+        )
+    }
+
     func driveRecovery() {
         // A detached projection host has no window and must not open or launch
         // a Runtime. In-process tests construct those hosts beside the live window.
@@ -219,13 +343,14 @@ extension ProductChromeHostView {
         let issuedAt = ProcessInfo.processInfo.systemUptime
         let executionIdentity = pane.inputSurface.recoveryExecutionIdentity
         let allowsImplicit = pane.inputSurface.allowsImplicitExecutionBootstrap
+        let openBudgetMs = remainingMs
         recoveryLifecycleQueue.async { [weak self] in
             // Queue delay consumes the Rust-issued budget rather than resetting it.
             let elapsed = ProcessInfo.processInfo.systemUptime - issuedAt
             let outcome = openRuntimeRecoveryHandle(
                 executionIdentity: executionIdentity,
                 allowsImplicitExecutionBootstrap: allowsImplicit,
-                remainingBudget: TimeInterval(remainingMs) / 1000 - elapsed
+                remainingBudget: TimeInterval(openBudgetMs) / 1000 - elapsed
             )
             DispatchQueue.main.async { [weak self] in
                 // Lifecycle work returns on the GCD main queue without a Swift

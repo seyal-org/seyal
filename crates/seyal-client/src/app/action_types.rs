@@ -54,6 +54,17 @@ pub enum AppAction {
     },
     /// Mark reconstruction disconnected after the host drops the live client.
     DisconnectReconstruction,
+    /// Drop continuity pins so a fresh ExecutionId (New shell after exit) can
+    /// commit. Same-execution reconnect must keep using DisconnectReconstruction.
+    ClearReconstructionContinuity,
+    /// Explicit New shell after an ended Pane (SPEC-004 §18 Create+Bind).
+    /// `None` prepares that Pane. `Some` binds the created ExecutionId onto it,
+    /// never onto a focused sibling.
+    CreateReplacementExecution {
+        execution: Option<ExecutionId>,
+        attachment: Option<AttachmentId>,
+        pty_generation: u64,
+    },
     SetComposerDraft {
         fence: AppFence,
         text: String,
@@ -70,7 +81,9 @@ pub enum AppAction {
     },
     ApplyRuntimeBlocks {
         fence: AppFence,
-        records: Vec<RuntimeBlockRecord>,
+        /// `None` means the active display client is unavailable. Retain the
+        /// last projected Flow Block history instead of wiping it (#1379/#1171).
+        records: Option<Vec<RuntimeBlockRecord>>,
     },
     /// Relay the attached client's Runtime-published composer eligibility
     /// (ADR-009 invariant 7). `None` clears it when the transport is lost.

@@ -125,7 +125,12 @@ enum SeyalAppActionKind {
      * layout is unchanged.
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
-    /** Mark reconstruction disconnected after the host drops the live client. */
+    /**
+     * Mark reconstruction disconnected after the host drops the live client.
+     * `reserved == 0`: keep continuity pins (same-execution reconnect fence).
+     * `reserved != 0`: clear Runtime/execution/attachment pins so New shell
+     * after exit can commit a fresh ExecutionId (SPEC-009 §8.2).
+     */
     SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
     /*
      * Drag one Split divider (#928). target_execution_lo/hi = the divider's
@@ -193,7 +198,14 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_CLOSE_WINDOW = 76,
     SEYAL_APP_ACTION_NEW_TERMINAL = 77,
     SEYAL_APP_ACTION_SELECT_TERMINAL_TAB = 78,
-    SEYAL_APP_ACTION_CLOSE_TERMINAL_TAB = 79
+    SEYAL_APP_ACTION_CLOSE_TERMINAL_TAB = 79,
+    /*
+     * New shell after an ended Pane (SPEC-004 §18). reserved must be 0.
+     * Without FLAG_HAS_EXECUTION: prepare the ended Pane.
+     * With FLAG_HAS_EXECUTION and FLAG_HAS_ATTACHMENT: bind target_* onto
+     * that Pane. Never selects a sibling by list order.
+     */
+    SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION = 80
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
@@ -418,6 +430,15 @@ typedef struct SeyalAppComposer {
     const uint8_t *draft_utf8;
     uint32_t draft_utf8_len;
     uint32_t block_count;
+    /*
+     * Flow canvas floor after clear (CSI ED2). Zero means show every Block.
+     * While the shell is live, hosts omit cards with id <= this floor so clear
+     * leaves a fully empty canvas (including the clear Block itself);
+     * BlockTimeline still retains them. Shell exit clears the floor so the
+     * full retained transcript is reviewable.
+     */
+    uint64_t canvas_floor_block_id_lo;
+    uint64_t canvas_floor_block_id_hi;
 } SeyalAppComposer;
 
 /*
@@ -982,6 +1003,13 @@ typedef struct SeyalAppBlockProjection {
 
 SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
+
+/** 1 when New shell has prepared an ended Pane and is waiting for Create+Bind. */
+uint8_t seyal_app_replacement_bootstrap_pending(uint64_t handle);
+/** 1 when an ended execution must keep Flow history paint. Not a poll-code check. */
+uint8_t seyal_app_retains_flow_history(uint64_t handle);
+/** 1 when focused-Pane New shell would be admitted (shell-exit latch). ADR-015. */
+uint8_t seyal_app_new_shell_available(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);
 

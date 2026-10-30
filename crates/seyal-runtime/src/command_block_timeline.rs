@@ -59,6 +59,10 @@ pub(crate) struct CommandBlockRecord {
 pub(crate) struct CommandBlockTimeline {
     next_id: u64,
     records: VecDeque<CommandBlockRecord>,
+    /// First Block that remains on the Flow canvas after CSI ED2 (`clear`).
+    /// Earlier completed Blocks stay in `records` for session/history truth
+    /// but leave the active transcript presentation.
+    canvas_floor: Option<CommandBlockId>,
 }
 
 impl CommandBlockTimeline {
@@ -103,9 +107,24 @@ impl CommandBlockTimeline {
     /// then backs up past it. The Block must still complete rather than stay
     /// `Running` with no owner (#1015). The wire range cannot express an empty
     /// output yet; that marker is proposed in the ADR-009 amendment (#1041).
+    /// Production completion prefers `complete_span` (ED2 frontier); this
+    /// wrapper remains the unit-test / no-frontier façade.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn complete(
         &mut self,
         id: CommandBlockId,
+        end_line: u64,
+        exit_status: Option<i32>,
+    ) -> Result<(), CommandBlockTimelineError> {
+        self.complete_span(id, None, end_line, exit_status)
+    }
+
+    /// Complete a running record, optionally advancing `start_line` (ED2 remint
+    /// frontier). Start never rewinds.
+    pub(crate) fn complete_span(
+        &mut self,
+        id: CommandBlockId,
+        start_line: Option<u64>,
         end_line: u64,
         exit_status: Option<i32>,
     ) -> Result<(), CommandBlockTimelineError> {
@@ -117,9 +136,24 @@ impl CommandBlockTimeline {
         if record.lifecycle != CommandBlockLifecycle::Running {
             return Err(CommandBlockTimelineError::InvalidCompletion);
         }
+        if let Some(start) = start_line
+            && start > record.start_line
+        {
+            record.start_line = start;
+            // ED2 reminted this Block's start: collapse earlier cards from the
+            // active Flow canvas while retaining them in the timeline.
+            match self.canvas_floor {
+                Some(floor) if floor.raw() > id.raw() => {}
+                _ => self.canvas_floor = Some(id),
+            }
+        }
         record.end_line = Some(end_line.max(record.start_line));
         record.lifecycle = CommandBlockLifecycle::Completed { exit_status };
         Ok(())
+    }
+
+    pub(crate) fn canvas_floor(&self) -> Option<CommandBlockId> {
+        self.canvas_floor
     }
 
     pub(crate) fn records(&self) -> impl ExactSizeIterator<Item = &CommandBlockRecord> {
@@ -148,7 +182,14 @@ impl CommandBlockTimeline {
             }) else {
                 return Err(CommandBlockTimelineError::Capacity);
             };
-            self.records.remove(index);
+            if let Some(removed) = self.records.remove(index)
+                && self.canvas_floor == Some(removed.id)
+            {
+                // Floor Block itself was capacity-evicted; remaining records are
+                // still post-clear. Pin the floor to the oldest survivor so the
+                // canvas does not resurrect pre-clear clutter.
+                self.canvas_floor = self.records.front().map(|record| record.id);
+            }
         }
         Ok(())
     }
@@ -166,6 +207,31 @@ pub(crate) enum CommandBlockTimelineError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ed2_remint_sets_canvas_floor_without_dropping_earlier_records() {
+        let mut timeline = CommandBlockTimeline::default();
+        let first = timeline.allocate_id().unwrap();
+        timeline.start(first, "printf before".into(), 10).unwrap();
+        timeline.complete(first, 12, Some(0)).unwrap();
+        let clear = timeline.allocate_id().unwrap();
+        timeline.start(clear, "clear".into(), 13).unwrap();
+        // ED2 advances start past sealed pre-remint rows.
+        timeline
+            .complete_span(clear, Some(40), 41, Some(0))
+            .unwrap();
+        assert_eq!(timeline.canvas_floor(), Some(clear));
+        assert_eq!(
+            timeline.records().count(),
+            2,
+            "clear must not delete timeline history"
+        );
+        assert_eq!(
+            timeline.records().next().map(|r| r.id),
+            Some(first),
+            "pre-clear Block stays ordered in the timeline"
+        );
+    }
 
     #[test]
     fn creates_one_ordered_record_per_accepted_command() {
