@@ -315,6 +315,7 @@ impl Runtime {
         if changed {
             self.publish_block_timeline(id);
         }
+        self.consider_session_candidate(id);
         self.publish_composer_status_if_changed(id);
         Ok(())
     }
@@ -328,6 +329,7 @@ impl Runtime {
             // No Block effects are possible from this event.
             let _ = apply_local_integration_event(entry, IntegrationEvent::DirectInputAdmitted);
         }
+        self.consider_session_candidate(id);
         self.publish_composer_status_if_changed(id);
     }
 
@@ -399,11 +401,46 @@ impl Runtime {
             .store(held, std::sync::atomic::Ordering::Release);
     }
 
+    /// Cold-path §4.1 Candidate when a host Block is Running on the primary
+    /// screen. F9 argv is not sampled; proactive Offer is not published.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) fn consider_session_candidate(&mut self, id: ExecutionId) {
+        let changed = {
+            let Some(entry) = self.entries.get_mut(&id) else {
+                return;
+            };
+            let IntegrationState::Running { block: Some(block) } = entry.integration else {
+                return;
+            };
+            let host_block = block.raw();
+            if entry.execution.terminal().modes().alternate_screen
+                || !entry.pending_input.is_empty()
+                || entry.pending_composer.is_some()
+            {
+                return;
+            }
+            match entry
+                .session
+                .on(super::session_overlay::SessionEvent::MarkCandidate { host_block })
+            {
+                Ok(next) => {
+                    entry.session = next;
+                    entry.session_revision = entry.session_revision.saturating_add(1);
+                    true
+                }
+                Err(_) => false,
+            }
+        };
+        if changed {
+            self.note_input_target(id);
+            self.publish_session_frames(id);
+        }
+    }
+
     /// Move a host Block to `Offered` when the overlay gate allows it and the
     /// local integration is `Running` for that Block. Explicit consent is the
-    /// production entry. Proactive F9 argv hints are not implemented, so the
-    /// terminal hot path does not call this.
-    #[allow(dead_code)]
+    /// production entry (type 43 Request). Proactive F9 argv hints are not
+    /// implemented, so the terminal hot path does not call this.
     #[cfg(target_os = "macos")]
     pub(crate) fn offer_session(
         &mut self,
@@ -423,12 +460,29 @@ impl Runtime {
                 "session offer requires a running host block on the primary screen",
             ));
         }
-        let candidate = entry
-            .session
-            .on(super::session_overlay::SessionEvent::MarkCandidate { host_block })
-            .map_err(|_| {
-                RuntimeError::ShellIntegration("session overlay refuses a new candidate")
-            })?;
+        // Already Offered for this host: republish; do not bump generation.
+        if matches!(
+            entry.session,
+            super::session_overlay::SessionOverlay::Offered {
+                host_block: offered,
+                ..
+            } if offered == host_block
+        ) {
+            self.publish_session_frames(id);
+            self.publish_composer_status_if_changed(id);
+            return Ok(());
+        }
+        let candidate = match entry.session {
+            super::session_overlay::SessionOverlay::Candidate {
+                host_block: current,
+            } if current == host_block => entry.session,
+            _ => entry
+                .session
+                .on(super::session_overlay::SessionEvent::MarkCandidate { host_block })
+                .map_err(|_| {
+                    RuntimeError::ShellIntegration("session overlay refuses a new candidate")
+                })?,
+        };
         let generation = entry.next_offer_generation;
         entry.next_offer_generation = generation.saturating_add(1).max(1);
         entry.session = candidate

@@ -1,9 +1,9 @@
-//! Controller `SessionConsent` (type 43). Decline stays on the relay path.
-//! Accept arms the overlay and writes the echo-off stager.
+//! Controller `SessionConsent` (type 43). Request offers; Decline stays on the
+//! relay path; Accept arms the overlay and writes the echo-off stager.
 
 use crate::local_ipc::{
     attachment::AttachmentError,
-    framing::{self, ErrorCode, MessageType, CAP_COMMAND_BLOCKS},
+    framing::{self, ErrorCode, MessageType, SessionConsentDecision, CAP_COMMAND_BLOCKS},
 };
 
 use super::super::Runtime;
@@ -66,16 +66,26 @@ impl Runtime {
             );
             return;
         }
-        if self
-            .apply_session_consent(
+        let result = match consent.decision {
+            SessionConsentDecision::Request => {
+                self.offer_session(execution_id, consent.host_block_id)
+            }
+            SessionConsentDecision::Accept => self.apply_session_consent(
                 execution_id,
                 consent.host_block_id,
                 consent.offer_generation,
                 consent.presentation_epoch,
-                matches!(consent.decision, framing::SessionConsentDecision::Accept),
-            )
-            .is_err()
-        {
+                true,
+            ),
+            SessionConsentDecision::Decline => self.apply_session_consent(
+                execution_id,
+                consent.host_block_id,
+                consent.offer_generation,
+                consent.presentation_epoch,
+                false,
+            ),
+        };
+        if result.is_err() {
             self.send_error(
                 token,
                 ErrorCode::InvalidState,

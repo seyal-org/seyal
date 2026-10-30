@@ -264,9 +264,9 @@ pub(crate) fn input_target_scope(overlay: SessionOverlay) -> BlockScope {
     }
 }
 
-/// ADR-026 §3.2, MVP relay rule: a known Running Block in Flow on the primary
-/// screen for the Controller is Relay, not Busy. Armed/Delivering holds every
-/// direct route, including relay.
+/// ADR-026 §3.2. Without F9, local-scope Relay opens only after Decline or
+/// Failed (explicit enable). A Trusted session may Relay to its own Running
+/// Block. Armed/Delivering holds every direct route, including relay.
 pub(crate) fn derive_composer(facts: ComposerFacts) -> DerivedComposer {
     if facts.overlay.holds_direct_input() {
         return DerivedComposer::Unavailable(ComposerTargetReason::BootstrapHold);
@@ -280,7 +280,8 @@ pub(crate) fn derive_composer(facts: ComposerFacts) -> DerivedComposer {
     if !facts.primary_screen {
         return DerivedComposer::Unavailable(ComposerTargetReason::AlternateScreen);
     }
-    let integration = if matches!(facts.overlay, SessionOverlay::Trusted { .. }) {
+    let trusted = matches!(facts.overlay, SessionOverlay::Trusted { .. });
+    let integration = if trusted {
         facts.session_integration
     } else {
         facts.integration
@@ -289,7 +290,19 @@ pub(crate) fn derive_composer(facts: ComposerFacts) -> DerivedComposer {
         ShellFact::AtPrompt => DerivedComposer::Submit,
         ShellFact::Running {
             block: Some(block_id),
-        } => DerivedComposer::Relay { block_id },
+        } => {
+            if trusted
+                || matches!(
+                    facts.overlay,
+                    SessionOverlay::Declined { .. } | SessionOverlay::Failed { .. }
+                )
+            {
+                DerivedComposer::Relay { block_id }
+            } else {
+                // F9 unavailable: Busy until Decline/Failed enables Relay (§8.4).
+                DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
+            }
+        }
         ShellFact::Running { block: None } => {
             DerivedComposer::Unavailable(ComposerTargetReason::NoKnownBlock)
         }
@@ -515,6 +528,32 @@ mod tests {
                 session_integration: ShellFact::Running { block: Some(9) },
             }),
             DerivedComposer::Relay { block_id: 9 }
+        );
+    }
+
+    #[test]
+    fn running_without_explicit_relay_enable_stays_unavailable() {
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(5) },
+                primary_screen: true,
+                flow: true,
+                controller: true,
+                overlay: SessionOverlay::None,
+                session_integration: ShellFact::Unproven,
+            }),
+            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
+        );
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(5) },
+                primary_screen: true,
+                flow: true,
+                controller: true,
+                overlay: SessionOverlay::Candidate { host_block: 5 },
+                session_integration: ShellFact::Unproven,
+            }),
+            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
         );
     }
 

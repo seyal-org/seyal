@@ -235,8 +235,14 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
 acknowledged_loc = 788
-issue = 1379
-reason = "Thin AppKit chrome host stays one cold-path façade; #866/#1218 keep eligibility-driven focus and recovery presentation on this host, and #1379 wires New shell recovery, retain-history rebuild pruning, and scroll-republish comments into the existing composer slot without moving product authority into Swift."
+issue = 1388
+reason = "Thin AppKit chrome host stays one cold-path façade; #1388 mounts the ADR-026 SessionBootstrapBanner above the composer and reconciles it from Rust session surface without moving product authority into Swift."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
+acknowledged_loc = 737
+issue = 1388
+reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1388 adds consider_session_candidate and explicit offer_session without moving marker dispatch or the submission byte contract into a second hot-path module."
 
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.

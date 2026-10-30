@@ -7,7 +7,7 @@ use super::{
     error_code, with_active_client, with_active_client_mut, with_display_client,
     with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
     SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange, SeyalHistoryRow,
-    SeyalHistorySidecar, SeyalPreparedFrame,
+    SeyalHistorySidecar, SeyalPreparedFrame, SeyalSessionSurface,
 };
 
 #[unsafe(no_mangle)]
@@ -199,6 +199,67 @@ pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
             reserved: [0; 7],
         })
         .unwrap_or_else(SeyalComposerStatus::empty)
+}
+
+/// ADR-026 session affordance for the thin host. Kind 0 means hide the banner.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_surface() -> SeyalSessionSurface {
+    with_display_client(|client| {
+        let (kind, host_block_id, revision) = client.projected_session_surface();
+        SeyalSessionSurface {
+            kind,
+            reserved: [0; 7],
+            host_block_id,
+            revision,
+        }
+    })
+    .unwrap_or_else(SeyalSessionSurface::empty)
+}
+
+/// Rust-owned session copy. `kind`: 0 title, 1 body, 2 primary action, 3 dismiss.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_copy(kind: u8) -> *const std::ffi::c_char {
+    let text: &'static [u8] = match kind {
+        0 => b"Enable Blocks for this session\0",
+        1 => b"Seyal will type one setup line into this session. That line may enter the remote shell's history. Seyal writes no remote file and installs only in-memory hooks until that shell exits. Direct input including Raw is held while bootstrap runs. Afterward Raw and labeled relay remain available. Relay is plaintext to the foreground program.\0",
+        2 => b"Enable for this session\0",
+        3 => b"Not now\0",
+        4 => b"Enable Blocks\0",
+        _ => b"\0",
+    };
+    text.as_ptr().cast()
+}
+
+/// Explicit Enable Blocks → type 43 Request. Host block comes from the surface.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_request() -> i32 {
+    match with_display_client_mut(|client| {
+        let (kind, host_block_id, _) = client.projected_session_surface();
+        if kind != 1 || host_block_id == 0 {
+            return Err(crate::ClientError::Protocol);
+        }
+        client.request_session_offer(host_block_id)
+    }) {
+        Some(Ok(())) => 0,
+        Some(Err(_)) => -1,
+        None => -2,
+    }
+}
+
+/// Accept (1) or Decline (0) the current SessionOffer.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_consent(accept: u8) -> i32 {
+    use seyal_runtime::local_ipc::framing::SessionConsentDecision;
+    let decision = if accept != 0 {
+        SessionConsentDecision::Accept
+    } else {
+        SessionConsentDecision::Decline
+    };
+    match with_display_client_mut(|client| client.submit_session_consent(decision)) {
+        Some(Ok(())) => 0,
+        Some(Err(_)) => -1,
+        None => -2,
+    }
 }
 
 /// Read-only Pass 8 execution metadata for the active Pane client. No command

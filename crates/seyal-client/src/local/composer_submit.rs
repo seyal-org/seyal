@@ -53,6 +53,29 @@ impl LocalDisplayClient {
         result
     }
 
+    /// Explicit "Enable Blocks for this session" (§4.2). Runtime publishes a
+    /// type 42 offer; Accept/Decline use `submit_session_consent`.
+    pub fn request_session_offer(&mut self, host_block_id: u64) -> Result<(), ClientError> {
+        self.require_controller()?;
+        if !self.session_bootstrap_negotiated {
+            return Err(ClientError::UnsupportedInteractiveCapability);
+        }
+        if host_block_id == 0 {
+            return Err(ClientError::Protocol);
+        }
+        let consent = SessionConsent {
+            attachment_id: self.attachment_id,
+            execution_id: self.execution_id,
+            host_block_id,
+            offer_generation: 0,
+            presentation_epoch: 0,
+            decision: SessionConsentDecision::Request,
+        };
+        let frame = encode_frame(MessageType::SessionConsent, &consent.encode());
+        self.admit_frame(frame, OutboundKind::SessionConsent)?;
+        self.flush_control_write()
+    }
+
     /// Echo the current `SessionOffer`. Decline leaves the relay path; Accept
     /// is fenced by Runtime and fails closed until the stager exists.
     pub fn submit_session_consent(
@@ -62,6 +85,9 @@ impl LocalDisplayClient {
         self.require_controller()?;
         if !self.session_bootstrap_negotiated {
             return Err(ClientError::UnsupportedInteractiveCapability);
+        }
+        if matches!(decision, SessionConsentDecision::Request) {
+            return Err(ClientError::Protocol);
         }
         let Some(offer) = self.session_offer else {
             return Err(ClientError::Protocol);
