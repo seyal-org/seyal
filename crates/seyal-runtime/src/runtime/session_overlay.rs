@@ -177,8 +177,8 @@ impl SessionOverlay {
     }
 }
 
-/// Local integration fact used to derive the input target. Session-scope
-/// `Trusted(s)` integration is Slice B; until then the local scope is innermost.
+/// Mechanism-5 fact for one scope. While the overlay is `Trusted`, composer
+/// derivation uses the session fact; otherwise the local fact is innermost.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ShellFact {
     Unproven,
@@ -202,6 +202,8 @@ pub(crate) struct ComposerFacts {
     pub(crate) flow: bool,
     pub(crate) controller: bool,
     pub(crate) overlay: SessionOverlay,
+    /// Mechanism-5 state of the session scope. Used only while `overlay` is `Trusted`.
+    pub(crate) session_integration: ShellFact,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -254,9 +256,12 @@ pub(crate) fn input_target_class(target: InputTargetFact) -> InputTargetClass {
     }
 }
 
-pub(crate) fn input_target_scope(_target: InputTargetFact) -> BlockScope {
-    // Session scope is Slice B (Trusted session shell). Local scope is innermost.
-    BlockScope::Local
+pub(crate) fn input_target_scope(overlay: SessionOverlay) -> BlockScope {
+    if matches!(overlay, SessionOverlay::Trusted { .. }) {
+        BlockScope::Session
+    } else {
+        BlockScope::Local
+    }
 }
 
 /// ADR-026 §3.2, MVP relay rule: a known Running Block in Flow on the primary
@@ -275,7 +280,12 @@ pub(crate) fn derive_composer(facts: ComposerFacts) -> DerivedComposer {
     if !facts.primary_screen {
         return DerivedComposer::Unavailable(ComposerTargetReason::AlternateScreen);
     }
-    match facts.integration {
+    let integration = if matches!(facts.overlay, SessionOverlay::Trusted { .. }) {
+        facts.session_integration
+    } else {
+        facts.integration
+    };
+    match integration {
         ShellFact::AtPrompt => DerivedComposer::Submit,
         ShellFact::Running {
             block: Some(block_id),
@@ -432,6 +442,7 @@ mod tests {
             flow: true,
             controller: true,
             overlay: SessionOverlay::Declined { host_block: 11 },
+            session_integration: ShellFact::Unproven,
         });
         assert_eq!(derived, DerivedComposer::Relay { block_id: 11 });
         assert_eq!(derived.mode(), ComposerTargetMode::Relay);
@@ -446,6 +457,7 @@ mod tests {
                 flow: true,
                 controller: true,
                 overlay: SessionOverlay::None,
+                session_integration: ShellFact::Unproven,
             }),
             DerivedComposer::Submit
         );
@@ -459,6 +471,7 @@ mod tests {
                     host_block: 3,
                     offer_generation: 1,
                 },
+                session_integration: ShellFact::Unproven,
             }),
             DerivedComposer::Unavailable(ComposerTargetReason::BootstrapHold)
         );
@@ -473,8 +486,35 @@ mod tests {
                 flow: true,
                 controller: true,
                 overlay: SessionOverlay::None,
+                session_integration: ShellFact::Unproven,
             }),
             DerivedComposer::Unavailable(ComposerTargetReason::NoKnownBlock)
+        );
+    }
+
+    #[test]
+    fn trusted_session_at_prompt_submits_while_the_host_stays_running() {
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(7) },
+                primary_screen: true,
+                flow: true,
+                controller: true,
+                overlay: SessionOverlay::Trusted { host_block: 7 },
+                session_integration: ShellFact::AtPrompt,
+            }),
+            DerivedComposer::Submit
+        );
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(7) },
+                primary_screen: true,
+                flow: true,
+                controller: true,
+                overlay: SessionOverlay::Trusted { host_block: 7 },
+                session_integration: ShellFact::Running { block: Some(9) },
+            }),
+            DerivedComposer::Relay { block_id: 9 }
         );
     }
 

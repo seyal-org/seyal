@@ -425,6 +425,9 @@ impl Runtime {
             );
             return;
         };
+        let was_controller = self.local_ipc.as_ref().is_some_and(|state| {
+            state.attachments.role_of(detach.attachment_id).ok() == Some(Role::Controller)
+        });
         let execution_id = match self.local_ipc.as_ref().map(|state| {
             state
                 .attachments
@@ -471,6 +474,15 @@ impl Runtime {
         }
         if let Some(entry) = self.entries.get_mut(&execution_id) {
             entry.attachments.remove(&detach.attachment_id);
+        }
+        if was_controller {
+            let still = self
+                .local_ipc
+                .as_ref()
+                .is_some_and(|state| state.attachments.has_controller(execution_id));
+            if !still {
+                let _ = self.abort_bootstrap_on_detach(execution_id);
+            }
         }
         let response = framing::Detached {
             attachment_id: detach.attachment_id,

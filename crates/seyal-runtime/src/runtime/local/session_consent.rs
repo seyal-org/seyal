@@ -1,5 +1,5 @@
 //! Controller `SessionConsent` (type 43). Decline stays on the relay path.
-//! Accept arms and then fails closed until the Slice B stager can write.
+//! Accept arms the overlay and writes the echo-off stager.
 
 use crate::local_ipc::{
     attachment::AttachmentError,

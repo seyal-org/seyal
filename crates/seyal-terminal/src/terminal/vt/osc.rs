@@ -1,6 +1,6 @@
 //! OSC and host-presentation / shell-integration dispatch for TerminalCore.
 
-use super::super::state::{ShellIntegrationEvent, ShellIntegrationToken};
+use super::super::state::{SessionShellKind, ShellIntegrationEvent, ShellIntegrationToken};
 use super::TerminalCore;
 use crate::presentation::{parse_osc_presentation, HostPresentationEvent};
 use crate::LineId;
@@ -78,6 +78,22 @@ impl TerminalCore {
                                         line: self.completion_line(),
                                     })
                             })
+                        }
+                        (Some(b"R"), Some(token), Some(kind)) => {
+                            if fields.next().is_some() || kind.len() != 1 {
+                                None
+                            } else {
+                                let shell = match kind[0] {
+                                    b'z' => Some(SessionShellKind::Zsh),
+                                    b'b' => Some(SessionShellKind::Bash),
+                                    _ => None,
+                                };
+                                shell.and_then(|shell| {
+                                    ShellIntegrationToken::from_hex(token).map(|token| {
+                                        ShellIntegrationEvent::Readiness { token, shell }
+                                    })
+                                })
+                            }
                         }
                         _ => None,
                     }

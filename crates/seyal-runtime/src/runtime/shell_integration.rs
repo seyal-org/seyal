@@ -2,10 +2,8 @@
 //! amendment): composer admission, the submission byte contract, and the
 //! application of trusted markers and Runtime events to the per-execution
 //! integration state. Hooks are installed at spawn by
-//! `ShellIntegrationPolicy`; nothing here writes instrumentation to the PTY.
-
-#[cfg(target_os = "macos")]
-use seyal_exec::ShellIntegrationEvent;
+//! `ShellIntegrationPolicy`. The consented session stager is the one later
+//! PTY write, and it lives in `session_bootstrap`.
 
 #[cfg(target_os = "macos")]
 use crate::command_block_timeline::{CommandBlockId, MAX_COMMAND_BYTES};
@@ -70,7 +68,7 @@ const BRACKET_PASTE_END: &[u8] = b"\x1b[201~";
 /// prompt. Single-line text is raw; text containing a line break is sent
 /// only as a bracketed paste, and only when the shell enabled DECSET 2004.
 #[cfg(target_os = "macos")]
-fn encode_submission(command: &str, bracketed_paste: bool) -> Option<Vec<u8>> {
+pub(super) fn encode_submission(command: &str, bracketed_paste: bool) -> Option<Vec<u8>> {
     let multi_line = command.bytes().any(|byte| byte == b'\n' || byte == b'\r');
     if !multi_line {
         let mut bytes = Vec::with_capacity(command.len() + 1);
@@ -157,6 +155,15 @@ impl Runtime {
                 return Ok(ComposerAdmission::Relayed);
             }
             FencedAdmission::Continue => {}
+        }
+        let session_submit = self.entries.get(&id).is_some_and(|entry| {
+            matches!(
+                entry.session,
+                super::session_overlay::SessionOverlay::Trusted { .. }
+            )
+        });
+        if session_submit {
+            return self.submit_session_command(id, command);
         }
         let entry = self
             .entries
@@ -250,43 +257,33 @@ impl Runtime {
     }
 
     /// Consume bounded canonical parser events after their bytes were applied
-    /// to TerminalState. Only markers carrying this execution's nonce are
-    /// trusted; the rest are counted and ignored. This path never reads a
-    /// prompt, row text, or terminal cell payload.
+    /// to TerminalState. Local markers must carry the execution nonce. Session
+    /// markers must carry S. Anything else is counted and ignored. This path
+    /// never reads a prompt, row text, or terminal cell payload.
     #[cfg(target_os = "macos")]
     pub(super) fn observe_shell_integration_events(
         &mut self,
         id: ExecutionId,
     ) -> Result<(), RuntimeError> {
         let mut changed = false;
-        {
+        loop {
+            let event = {
+                let entry = self
+                    .entries
+                    .get_mut(&id)
+                    .ok_or(RuntimeError::UnknownExecution)?;
+                entry.execution.take_shell_integration_event()
+            };
+            let Some(event) = event else {
+                break;
+            };
+            changed |= self.dispatch_shell_integration_event(id, event)?;
+        }
+        let session_alternate = {
             let entry = self
                 .entries
                 .get_mut(&id)
                 .ok_or(RuntimeError::UnknownExecution)?;
-            while let Some(event) = entry.execution.take_shell_integration_event() {
-                let (token, event) = match event {
-                    ShellIntegrationEvent::PromptStarted { token } => {
-                        (token, IntegrationEvent::PromptStarted)
-                    }
-                    ShellIntegrationEvent::CommandStarted { token, line } => {
-                        (token, IntegrationEvent::CommandStarted { line })
-                    }
-                    ShellIntegrationEvent::CommandFinished {
-                        token,
-                        exit_status,
-                        line,
-                    } => (
-                        token,
-                        IntegrationEvent::CommandFinished { exit_status, line },
-                    ),
-                };
-                if entry.shell_nonce != Some(token) {
-                    entry.untrusted_markers = entry.untrusted_markers.saturating_add(1);
-                    continue;
-                }
-                changed |= apply_integration_event(entry, event);
-            }
             // Canonical alternate-screen entry while the prompt gate is open
             // means a program owns the terminal (mechanism 5).
             if matches!(
@@ -294,9 +291,24 @@ impl Runtime {
                 IntegrationState::AtPrompt | IntegrationState::Pending
             ) && entry.execution.terminal().modes().alternate_screen
             {
-                changed |= apply_integration_event(entry, IntegrationEvent::AlternateScreenEntered);
+                changed |=
+                    apply_local_integration_event(entry, IntegrationEvent::AlternateScreenEntered);
             }
+            let session_alternate = matches!(
+                entry.session,
+                super::session_overlay::SessionOverlay::Trusted { .. }
+            ) && matches!(
+                entry.session_runtime.integration,
+                IntegrationState::AtPrompt | IntegrationState::Pending
+            ) && entry.execution.terminal().modes().alternate_screen;
             if changed {
+                entry.block_revision = entry.block_revision.saturating_add(1);
+            }
+            session_alternate
+        };
+        if session_alternate && self.note_session_alternate_screen(id)? {
+            changed = true;
+            if let Some(entry) = self.entries.get_mut(&id) {
                 entry.block_revision = entry.block_revision.saturating_add(1);
             }
         }
@@ -314,7 +326,7 @@ impl Runtime {
     pub(super) fn note_direct_input_admitted(&mut self, id: ExecutionId) {
         if let Some(entry) = self.entries.get_mut(&id) {
             // No Block effects are possible from this event.
-            let _ = apply_integration_event(entry, IntegrationEvent::DirectInputAdmitted);
+            let _ = apply_local_integration_event(entry, IntegrationEvent::DirectInputAdmitted);
         }
         self.publish_composer_status_if_changed(id);
     }
@@ -323,9 +335,11 @@ impl Runtime {
     /// lifecycle truth (invariant 15) and stop trusting markers.
     #[cfg(target_os = "macos")]
     pub(super) fn note_execution_ended(&mut self, id: ExecutionId) {
+        let _ = self.close_session(id, super::session_bootstrap::SessionClose::End);
         let changed = match self.entries.get_mut(&id) {
             Some(entry) => {
-                let changed = apply_integration_event(entry, IntegrationEvent::ExecutionEnded);
+                let changed =
+                    apply_local_integration_event(entry, IntegrationEvent::ExecutionEnded);
                 if changed {
                     entry.block_revision = entry.block_revision.saturating_add(1);
                 }
@@ -366,7 +380,15 @@ impl Runtime {
         let Some(entry) = self.entries.get_mut(&id) else {
             return;
         };
-        let target = super::session_overlay::input_target(shell_fact(entry.integration));
+        let integration = if matches!(
+            entry.session,
+            super::session_overlay::SessionOverlay::Trusted { .. }
+        ) {
+            entry.session_runtime.integration
+        } else {
+            entry.integration
+        };
+        let target = super::session_overlay::input_target(shell_fact(integration));
         if entry.input_target != target {
             entry.input_target = target;
             entry.target_generation = entry.target_generation.saturating_add(1).max(1);
@@ -378,8 +400,9 @@ impl Runtime {
     }
 
     /// Move a host Block to `Offered` when the overlay gate allows it and the
-    /// local integration is `Running` for that Block. Proactive F9 hints that
-    /// call this are Slice B, so nothing on the hot path invokes it yet.
+    /// local integration is `Running` for that Block. Explicit consent is the
+    /// production entry. Proactive F9 argv hints are not implemented, so the
+    /// terminal hot path does not call this.
     #[allow(dead_code)]
     #[cfg(target_os = "macos")]
     pub(crate) fn offer_session(
@@ -420,9 +443,8 @@ impl Runtime {
         Ok(())
     }
 
-    /// Controller consent. Decline stays on the relay path. Accept arms, then
-    /// fails closed until the Slice B stager exists, so Armed cannot hold
-    /// input with nothing to deliver.
+    /// Controller consent. Decline stays on the relay path. Accept arms and
+    /// admits the echo-off stager.
     #[cfg(target_os = "macos")]
     pub(crate) fn apply_session_consent(
         &mut self,
@@ -448,7 +470,6 @@ impl Runtime {
             entry
                 .session
                 .on(super::session_overlay::SessionEvent::Accept)
-                .and_then(|armed| armed.on(super::session_overlay::SessionEvent::Fail))
         } else {
             entry
                 .session
@@ -457,6 +478,9 @@ impl Runtime {
         .map_err(|_| RuntimeError::ShellIntegration("session consent rejected"))?;
         entry.session = next;
         entry.session_revision = entry.session_revision.saturating_add(1);
+        if accept {
+            return self.begin_armed_bootstrap(id);
+        }
         self.note_input_target(id);
         self.publish_session_frames(id);
         self.publish_composer_status_if_changed(id);
@@ -485,6 +509,7 @@ pub(in crate::runtime) fn composer_facts(
         flow: true,
         controller,
         overlay: entry.session,
+        session_integration: shell_fact(entry.session_runtime.integration),
     }
 }
 
@@ -522,10 +547,58 @@ pub(in crate::runtime) fn composer_eligibility(entry: &Entry) -> ComposerEligibi
     }
 }
 
-/// Apply one trusted event to the entry's integration state and carry out
-/// its Block effects. Returns whether published Block metadata changed.
+/// Complete one Block from a trusted `D`, a lost `D`, or execution end.
+/// The parser-stamped line wins; otherwise the current cursor is the fallback.
 #[cfg(target_os = "macos")]
-fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
+pub(super) fn complete_timeline_block(
+    entry: &mut Entry,
+    block_id: crate::command_block_timeline::CommandBlockId,
+    exit: BlockExit,
+    line: Option<seyal_exec::LineId>,
+) -> bool {
+    let mut end_line = line.map(|line| line.0).unwrap_or_else(|| {
+        let cursor = entry.execution.terminal().cursor();
+        entry
+            .execution
+            .terminal()
+            .line_id(cursor.row)
+            .map(|line| line.0)
+            .unwrap_or(1)
+    });
+    // ED2 (`clear`) seals start into history and remints the viewport before D.
+    let mut span_start = None;
+    if let Some(start_line) = entry
+        .block_timeline
+        .records()
+        .find(|record| record.id == block_id)
+        .map(|record| record.start_line)
+    {
+        let (clamped_start, clamped_end) = entry
+            .execution
+            .terminal()
+            .clamp_block_span_across_ed2_remint(
+                seyal_exec::LineId(start_line),
+                seyal_exec::LineId(end_line),
+            );
+        if clamped_start.0 != start_line {
+            span_start = Some(clamped_start.0);
+        }
+        end_line = clamped_end.0;
+    }
+    let exit_status = match exit {
+        BlockExit::Code(code) => Some(code),
+        BlockExit::Unknown => None,
+    };
+    entry
+        .block_timeline
+        .complete_span(block_id, span_start, end_line, exit_status)
+        .is_ok()
+}
+
+/// Apply one trusted local-scope event and carry out its Block effects.
+/// Returns whether published Block metadata changed.
+#[cfg(target_os = "macos")]
+pub(super) fn apply_local_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
     let transition = entry.integration.on(event);
     entry.integration = transition.next;
     let mut changed = false;
@@ -550,52 +623,7 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                 entry.pending_composer = None;
             }
             Effect::Complete(block_id, exit, line) => {
-                // A trusted D marker's parser-stamped line is authoritative.
-                // Without one (lost D, or execution ended with no D observed)
-                // the current cursor is the best available fallback.
-                let mut end_line = line.map(|line| line.0).unwrap_or_else(|| {
-                    let cursor = entry.execution.terminal().cursor();
-                    entry
-                        .execution
-                        .terminal()
-                        .line_id(cursor.row)
-                        .map(|line| line.0)
-                        .unwrap_or(1)
-                });
-                // ED2 (`clear`) seals start into history and remints the
-                // viewport before D. Advance start to the remint frontier so
-                // Flow drops sealed pre-remint blanks but keeps post-clear
-                // output (#1379 clear→exit / clear&&ls).
-                let mut span_start = None;
-                if let Some(start_line) = entry
-                    .block_timeline
-                    .records()
-                    .find(|record| record.id == block_id)
-                    .map(|record| record.start_line)
-                {
-                    let (clamped_start, clamped_end) = entry
-                        .execution
-                        .terminal()
-                        .clamp_block_span_across_ed2_remint(
-                            seyal_exec::LineId(start_line),
-                            seyal_exec::LineId(end_line),
-                        );
-                    if clamped_start.0 != start_line {
-                        span_start = Some(clamped_start.0);
-                    }
-                    end_line = clamped_end.0;
-                }
-                let exit_status = match exit {
-                    BlockExit::Code(code) => Some(code),
-                    BlockExit::Unknown => None,
-                };
-                if entry
-                    .block_timeline
-                    .complete_span(block_id, span_start, end_line, exit_status)
-                    .is_ok()
-                {
-                    changed = true;
-                }
+                changed |= complete_timeline_block(entry, block_id, exit, line);
             }
         }
     }
