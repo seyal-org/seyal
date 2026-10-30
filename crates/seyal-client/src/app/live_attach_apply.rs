@@ -35,6 +35,7 @@ fn runtime_block_from_timeline(
             seyal_protocol::framing::CommandBlockState::Completed { exit_status } => exit_status,
         },
         canvas_floor: record.flags & seyal_protocol::framing::COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0,
+        scope: record.scope,
     }
 }
 

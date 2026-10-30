@@ -66,9 +66,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1060
-issue = 1379
-responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture, and #1379 adds canvas_floor field literals on RuntimeBlockRecord fixtures."
+ceiling_loc = 1062
+issue = 1388
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture, #1379 adds canvas_floor field literals, and #1388 carries BlockScope on those RuntimeBlockRecord fixtures."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -78,15 +78,15 @@ responsibility = "Published C ABI entry points stay one façade after decode/enc
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 773
-issue = 1149
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shell composition cases to shell_composition_tests.rs. #1065 imports encode-owned SNAP/block-row flag constants; steady-state snapshot call-counter proof lives beside the counter in visual.rs."
+acknowledged_loc = 783
+issue = 1388
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shell composition cases to shell_composition_tests.rs. #1388 asserts BlockScope survives runtime_block_from_command, including a session-scoped record, beside the existing lifecycle proofs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
-acknowledged_loc = 939
+acknowledged_loc = 944
 issue = 1388
-reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module; production composer reducer stays under review_loc. #1379 adds clear canvas-floor hide-until-exit projection coverage, and #1388 adds the Relay submit proof that an accepted plaintext line does not enter command history."
+reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module; production composer reducer stays under review_loc. #1379 adds clear canvas-floor coverage, and #1388 carries BlockScope through the RuntimeBlockRecord fixtures without a second projection test module."
 
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
@@ -239,10 +239,16 @@ issue = 1388
 reason = "Thin AppKit chrome host stays one cold-path façade; #1388 mounts the ADR-026 SessionBootstrapBanner above the composer and reconciles it from Rust session surface without moving product authority into Swift."
 
 [[cohesion_acknowledgement]]
-path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
-acknowledged_loc = 737
+path = "crates/seyal-client/src/local/tests.rs"
+acknowledged_loc = 721
 issue = 1388
-reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1388 adds consider_session_candidate and explicit offer_session without moving marker dispatch or the submission byte contract into a second hot-path module."
+reason = "Local display-client protocol proofs stay one module; #1388 adds the type-45 Submit/Relay/Unavailable projection test beside the existing composer status fixtures rather than a second client test file."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
+acknowledged_loc = 742
+issue = 1388
+reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1388 keeps consider_session_candidate on cold edges only (None, not every PTY read) without moving marker dispatch or the submission byte contract into a second hot-path module."
 
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.
@@ -256,9 +262,9 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 860
+acknowledged_loc = 861
 issue = 1388
-reason = "ABI action decoding remains one versioned match surface; #1381 adds terminal-tab kinds 77–79, #1379 adds kind 80 CreateReplacementExecution and maps COMMAND_BLOCK_FLAG_CANVAS_FLOOR into RuntimeBlockRecord, and #1388 adds composer eligibility code 4 (Relay)."
+reason = "ABI action decoding remains one versioned match surface; #1381 adds terminal-tab kinds 77–79, #1379 maps the canvas-floor flag, and #1388 copies BlockTimeline scope onto RuntimeBlockRecord in the same decoder."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"

@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use seyal_core::{BlockId, PaneId};
+use seyal_protocol::framing::BlockScope;
 
 use crate::presentation::{InputRoute, PresentationMode};
 
@@ -144,6 +145,8 @@ pub struct RuntimeBlockRecord {
     pub exit_status: Option<i32>,
     /// Runtime marked this Block as the Flow canvas floor after `clear` (ED2).
     pub canvas_floor: bool,
+    /// Timeline scope. Session Blocks are nested under a local host Block.
+    pub scope: BlockScope,
 }
 
 impl RuntimeBlockRecord {
@@ -168,6 +171,7 @@ pub struct BlockProjection {
     pub end_line: Option<u64>,
     /// Runtime-published exit status; `None` while running or unknown.
     pub exit_status: Option<i32>,
+    pub scope: BlockScope,
 }
 
 /// Typed host → Rust command. One action is one coarse transition.
@@ -415,6 +419,7 @@ impl PaneComposer {
                 start_line: record.start_line,
                 end_line: record.end_line,
                 exit_status: record.exit_status,
+                scope: record.scope,
             })
             .collect()
     }

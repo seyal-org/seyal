@@ -182,6 +182,7 @@ fn running(id: BlockId, command: &str, start: u64) -> RuntimeBlockRecord {
         running: true,
         exit_status: None,
         canvas_floor: false,
+        scope: seyal_protocol::framing::BlockScope::Local,
     }
 }
 
@@ -194,6 +195,7 @@ fn completed(id: BlockId, command: &str, start: u64, end: u64) -> RuntimeBlockRe
         running: false,
         exit_status: Some(0),
         canvas_floor: false,
+        scope: seyal_protocol::framing::BlockScope::Local,
     }
 }
 
@@ -561,6 +563,7 @@ fn failed_runtime_exit_projects_failed_without_completing_siblings() {
                     running: false,
                     exit_status: Some(1),
                     canvas_floor: false,
+                    scope: seyal_protocol::framing::BlockScope::Local,
                 },
                 running(running_id, "sleep 10", 2),
             ],
@@ -591,6 +594,7 @@ fn clear_canvas_floor_hides_until_shell_exit_reveals_history() {
                     running: false,
                     exit_status: Some(0),
                     canvas_floor: true,
+                    scope: seyal_protocol::framing::BlockScope::Local,
                 },
             ],
         })
@@ -625,6 +629,7 @@ fn completed_without_exit_status_projects_unknown_never_zero_or_failed() {
                 running: false,
                 exit_status: None,
                 canvas_floor: false,
+                scope: seyal_protocol::framing::BlockScope::Local,
             }],
         })
         .unwrap();

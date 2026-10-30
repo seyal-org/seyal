@@ -865,6 +865,7 @@ fn block_selection_is_fenced_and_sourced_from_runtime_blocks() {
             running: false,
             exit_status: Some(0),
             canvas_floor: false,
+            scope: seyal_protocol::framing::BlockScope::Local,
         }]),
     })
     .unwrap();
@@ -977,6 +978,7 @@ fn composer_submit_busy_and_stale_request_are_rust_owned() {
             running: false,
             exit_status: Some(0),
             canvas_floor: false,
+            scope: seyal_protocol::framing::BlockScope::Local,
         }]),
     })
     .unwrap();

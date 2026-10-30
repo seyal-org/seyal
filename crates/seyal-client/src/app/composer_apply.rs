@@ -77,6 +77,7 @@ impl ApplicationRoot {
                     // Preserve floor across settle; snapshot still reveals all
                     // Blocks once execution_ended is latched.
                     canvas_floor: false,
+                    scope: block.scope,
                 }
             })
             .collect();

@@ -2815,6 +2815,8 @@ final class SeyalHostComponentTests: XCTestCase {
     func testBlockSelectionFailsClosedWithoutRuntimeBlocks() {
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_STATE_MASK), 7)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_SELECTED), 8)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_SESSION), 16)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_STATE_MASK) & UInt16(SEYAL_APP_BLOCK_SESSION), 0)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_STATE_FAILED) & UInt16(SEYAL_APP_BLOCK_SELECTED), 0)
         XCTAssertEqual(UInt16(SEYAL_APP_INSPECTOR_BLOCK.rawValue), 4)
         let handle = seyal_app_create()

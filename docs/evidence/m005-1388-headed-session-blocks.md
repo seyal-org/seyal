@@ -23,6 +23,17 @@ Rust owns affordance copy (`seyal_bridge_session_copy`). Swift `SessionBootstrap
 - `request_offer_from_candidate_arms_after_accept` (nested `/bin/zsh -f -i`)
 - Prior Slice B nested-zsh Trusted + forge ignore + decline→Relay
 
+## Headed runtime hygiene
+
+Quit Seyal and stop a stale helper before a headed run. A Runtime left from an earlier launch keeps serving `control.sock`, so the new app attaches to old session-Block behavior.
+
+```sh
+osascript -e 'quit app "Seyal"'
+pkill -f 'Seyal.app/Contents/Helpers/seyal-runtime'
+```
+
+Confirm the socket mtime is from this launch before judging Blocks. Production discovery uses `$(getconf DARWIN_USER_TEMP_DIR)/seyal-runtime/control.sock`. `ls -l` that path and check the timestamp is after the `pkill`.
+
 ## Headed SSH matrix (manual)
 
 Target: `ssh mahboob@nt-ssh@orb` (or equivalent).
@@ -39,5 +50,6 @@ Record pass/fail in the PR when exercised on a headed build of this branch.
 
 - F9 argv / termios sampling and proactive SSH offer
 - Always/Never host policy
+- Full bash-preexec rewrite (deferred; zsh hooks remain the production local integration)
 - Live detach during Armed/Delivering
 - CI-hosted SSH (orb) when available

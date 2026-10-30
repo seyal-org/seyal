@@ -107,6 +107,7 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
                 running: false,
                 exit_status: Some(0),
                 canvas_floor: false,
+                scope: seyal_protocol::framing::BlockScope::Local,
             },
             crate::composer::RuntimeBlockRecord {
                 id: seyal_core::BlockId::from_bytes([0x22; 16]),
@@ -116,6 +117,7 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
                 running: true,
                 exit_status: None,
                 canvas_floor: false,
+                scope: seyal_protocol::framing::BlockScope::Local,
             },
         ]),
     })
@@ -460,6 +462,7 @@ fn missing_active_client_does_not_wipe_completed_flow_blocks() {
             running: false,
             exit_status: Some(0),
             canvas_floor: false,
+            scope: seyal_protocol::framing::BlockScope::Local,
         }]),
     })
     .unwrap();
