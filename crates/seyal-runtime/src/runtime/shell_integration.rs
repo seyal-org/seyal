@@ -54,6 +54,11 @@ pub(crate) enum ComposerAdmission {
     /// The text cannot be sent as one command line (multi-line without
     /// bracketed paste); nothing was written.
     Invalid,
+    /// Target generation did not match the generation the client displayed.
+    /// Nothing was written; the draft stays.
+    StaleTarget,
+    /// Line written to the running program. No Block is created.
+    Relayed,
 }
 
 #[cfg(target_os = "macos")]
@@ -95,16 +100,68 @@ impl Runtime {
         id: ExecutionId,
         command: String,
     ) -> Result<ComposerAdmission, RuntimeError> {
+        self.submit_composer_command_fenced(id, command, None)
+    }
+
+    /// `target_generation` is `Some` only when the client negotiated
+    /// `CAP_SESSION_BOOTSTRAP` and sent the fenced composer schema.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn submit_composer_command_fenced(
+        &mut self,
+        id: ExecutionId,
+        command: String,
+        target_generation: Option<u64>,
+    ) -> Result<ComposerAdmission, RuntimeError> {
         if command.is_empty() || command.len() > MAX_COMMAND_BYTES {
             return Err(RuntimeError::CapacityExceeded);
+        }
+        self.note_input_target(id);
+        let fence = {
+            let entry = self
+                .entries
+                .get(&id)
+                .ok_or(RuntimeError::UnknownExecution)?;
+            if entry.session.holds_direct_input() || !entry.terminal_io_active() {
+                FencedAdmission::Busy
+            } else if let Some(generation) = target_generation {
+                if generation != entry.target_generation {
+                    FencedAdmission::Stale
+                } else {
+                    let derived =
+                        super::session_overlay::derive_composer(composer_facts(entry, true));
+                    match derived {
+                        super::session_overlay::DerivedComposer::Relay { .. } => {
+                            FencedAdmission::Relay
+                        }
+                        super::session_overlay::DerivedComposer::Unavailable(_) => {
+                            FencedAdmission::Busy
+                        }
+                        super::session_overlay::DerivedComposer::Submit => {
+                            FencedAdmission::Continue
+                        }
+                    }
+                }
+            } else {
+                FencedAdmission::Continue
+            }
+        };
+        match fence {
+            FencedAdmission::Busy => return Ok(ComposerAdmission::Busy),
+            FencedAdmission::Stale => return Ok(ComposerAdmission::StaleTarget),
+            FencedAdmission::Relay => {
+                let mut bytes = Vec::with_capacity(command.len() + 1);
+                bytes.extend_from_slice(command.as_bytes());
+                bytes.push(b'\r');
+                self.input_ingress(id)?
+                    .try_submit_kind(bytes, InputKind::Direct)?;
+                return Ok(ComposerAdmission::Relayed);
+            }
+            FencedAdmission::Continue => {}
         }
         let entry = self
             .entries
             .get(&id)
             .ok_or(RuntimeError::UnknownExecution)?;
-        if !entry.terminal_io_active() {
-            return Ok(ComposerAdmission::Busy);
-        }
         if entry.shell_integration_mode == ShellIntegrationMode::Unsupported {
             // Unsupported shells remain fully usable through the ordinary raw
             // PTY path, but never receive synthetic Block metadata.
@@ -148,6 +205,7 @@ impl Runtime {
         // sampled here: the cursor right now is still on the prompt row.
         entry.pending_composer = Some(PendingComposerCommand { command, block_id });
         entry.integration = entry.integration.submitted();
+        self.note_input_target(id);
         self.publish_composer_status_if_changed(id);
         Ok(ComposerAdmission::Accepted(block_id))
     }
@@ -158,16 +216,37 @@ impl Runtime {
     /// per transition, and one bounded frame per attachment per flip.
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) fn publish_composer_status_if_changed(&mut self, id: ExecutionId) {
-        let Some(entry) = self.entries.get_mut(&id) else {
-            return;
+        self.note_input_target(id);
+        let publish_status = {
+            let Some(entry) = self.entries.get_mut(&id) else {
+                return;
+            };
+            let eligibility = composer_eligibility(entry);
+            let derived = super::session_overlay::derive_composer(composer_facts(entry, true));
+            let stamp = (
+                derived.mode() as u8,
+                derived.reason() as u8,
+                entry.target_generation,
+            );
+            let eligibility_changed = entry.published_composer_eligibility != Some(eligibility);
+            let target_changed = entry.published_target_stamp != Some(stamp);
+            if !eligibility_changed && !target_changed {
+                return;
+            }
+            entry.published_target_stamp = Some(stamp);
+            entry.published_target_generation = entry.target_generation;
+            entry.composer_target_revision = entry.composer_target_revision.saturating_add(1);
+            if eligibility_changed {
+                entry.published_composer_eligibility = Some(eligibility);
+                entry.composer_status_revision = entry.composer_status_revision.saturating_add(1);
+            }
+            eligibility_changed
         };
-        let eligibility = composer_eligibility(entry);
-        if entry.published_composer_eligibility == Some(eligibility) {
-            return;
+        if publish_status {
+            self.publish_composer_status(id);
+        } else {
+            self.publish_composer_target(id);
         }
-        entry.published_composer_eligibility = Some(eligibility);
-        entry.composer_status_revision = entry.composer_status_revision.saturating_add(1);
-        self.publish_composer_status(id);
     }
 
     /// Consume bounded canonical parser events after their bytes were applied
@@ -280,6 +359,146 @@ impl Runtime {
             .ok_or(RuntimeError::UnknownExecution)?;
         while entry.execution.take_shell_integration_event().is_some() {}
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) fn note_input_target(&mut self, id: ExecutionId) {
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return;
+        };
+        let target = super::session_overlay::input_target(shell_fact(entry.integration));
+        if entry.input_target != target {
+            entry.input_target = target;
+            entry.target_generation = entry.target_generation.saturating_add(1).max(1);
+        }
+        let held = entry.session.holds_direct_input();
+        entry
+            .direct_input_held
+            .store(held, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Move a host Block to `Offered` when the overlay gate allows it and the
+    /// local integration is `Running` for that Block. Proactive F9 hints that
+    /// call this are Slice B, so nothing on the hot path invokes it yet.
+    #[allow(dead_code)]
+    #[cfg(target_os = "macos")]
+    pub(crate) fn offer_session(
+        &mut self,
+        id: ExecutionId,
+        host_block: u64,
+    ) -> Result<(), RuntimeError> {
+        let entry = self
+            .entries
+            .get_mut(&id)
+            .ok_or(RuntimeError::UnknownExecution)?;
+        let running = matches!(
+            entry.integration,
+            IntegrationState::Running { block: Some(block) } if block.raw() == host_block
+        );
+        if !running || entry.execution.terminal().modes().alternate_screen {
+            return Err(RuntimeError::ShellIntegration(
+                "session offer requires a running host block on the primary screen",
+            ));
+        }
+        let candidate = entry
+            .session
+            .on(super::session_overlay::SessionEvent::MarkCandidate { host_block })
+            .map_err(|_| {
+                RuntimeError::ShellIntegration("session overlay refuses a new candidate")
+            })?;
+        let generation = entry.next_offer_generation;
+        entry.next_offer_generation = generation.saturating_add(1).max(1);
+        entry.session = candidate
+            .on(super::session_overlay::SessionEvent::Offer {
+                offer_generation: generation,
+            })
+            .map_err(|_| RuntimeError::ShellIntegration("session overlay refuses the offer"))?;
+        entry.session_revision = entry.session_revision.saturating_add(1);
+        self.note_input_target(id);
+        self.publish_session_frames(id);
+        self.publish_composer_status_if_changed(id);
+        Ok(())
+    }
+
+    /// Controller consent. Decline stays on the relay path. Accept arms, then
+    /// fails closed until the Slice B stager exists, so Armed cannot hold
+    /// input with nothing to deliver.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn apply_session_consent(
+        &mut self,
+        id: ExecutionId,
+        host_block: u64,
+        offer_generation: u64,
+        presentation_epoch: u64,
+        accept: bool,
+    ) -> Result<(), RuntimeError> {
+        let entry = self
+            .entries
+            .get_mut(&id)
+            .ok_or(RuntimeError::UnknownExecution)?;
+        if entry.session.host_block() != Some(host_block)
+            || entry.session.offer_generation() != Some(offer_generation)
+            || presentation_epoch != entry.offer_presentation_epoch
+        {
+            return Err(RuntimeError::ShellIntegration(
+                "session consent fence rejected",
+            ));
+        }
+        let next = if accept {
+            entry
+                .session
+                .on(super::session_overlay::SessionEvent::Accept)
+                .and_then(|armed| armed.on(super::session_overlay::SessionEvent::Fail))
+        } else {
+            entry
+                .session
+                .on(super::session_overlay::SessionEvent::Decline)
+        }
+        .map_err(|_| RuntimeError::ShellIntegration("session consent rejected"))?;
+        entry.session = next;
+        entry.session_revision = entry.session_revision.saturating_add(1);
+        self.note_input_target(id);
+        self.publish_session_frames(id);
+        self.publish_composer_status_if_changed(id);
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+enum FencedAdmission {
+    Busy,
+    Stale,
+    Relay,
+    Continue,
+}
+
+#[cfg(target_os = "macos")]
+pub(in crate::runtime) fn composer_facts(
+    entry: &Entry,
+    controller: bool,
+) -> super::session_overlay::ComposerFacts {
+    super::session_overlay::ComposerFacts {
+        integration: shell_fact(entry.integration),
+        primary_screen: !entry.execution.terminal().modes().alternate_screen,
+        // Pane Raw/Flow is client presentation. Runtime derives the Flow
+        // target; the client hides the composer when the Pane is Raw.
+        flow: true,
+        controller,
+        overlay: entry.session,
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(in crate::runtime) fn shell_fact(state: IntegrationState) -> super::session_overlay::ShellFact {
+    use super::session_overlay::ShellFact;
+    match state {
+        IntegrationState::Unproven => ShellFact::Unproven,
+        IntegrationState::AtPrompt => ShellFact::AtPrompt,
+        IntegrationState::Pending => ShellFact::Pending,
+        IntegrationState::Running { block } => ShellFact::Running {
+            block: block.map(|id| id.raw()),
+        },
+        IntegrationState::Terminated => ShellFact::Terminated,
     }
 }
 

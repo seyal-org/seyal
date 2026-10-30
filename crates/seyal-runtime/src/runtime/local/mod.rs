@@ -33,6 +33,7 @@ mod provisioning;
 mod resize_resync;
 mod send;
 mod session;
+mod session_consent;
 
 pub(super) struct LocalIpcState {
     pub(super) server: LocalIpcServer,

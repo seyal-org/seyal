@@ -17,6 +17,8 @@ use super::entry::{Entry, ExecutionSummary};
 use super::integration_state::IntegrationState;
 use super::lifecycle::{BlockCompletion, Lifecycle};
 #[cfg(target_os = "macos")]
+use super::session_overlay::{InputTargetFact, SessionOverlay};
+#[cfg(target_os = "macos")]
 use super::shell_integration::ShellIntegrationMode;
 use super::Runtime;
 #[cfg(target_os = "macos")]
@@ -280,6 +282,26 @@ impl Runtime {
             published_composer_eligibility: None,
             #[cfg(target_os = "macos")]
             composer_status_revision: 0,
+            #[cfg(target_os = "macos")]
+            session: SessionOverlay::None,
+            #[cfg(target_os = "macos")]
+            input_target: InputTargetFact::None,
+            #[cfg(target_os = "macos")]
+            target_generation: 1,
+            #[cfg(target_os = "macos")]
+            published_target_generation: 0,
+            #[cfg(target_os = "macos")]
+            composer_target_revision: 0,
+            #[cfg(target_os = "macos")]
+            published_target_stamp: None,
+            #[cfg(target_os = "macos")]
+            direct_input_held: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_os = "macos")]
+            session_revision: 0,
+            #[cfg(target_os = "macos")]
+            next_offer_generation: 1,
+            #[cfg(target_os = "macos")]
+            offer_presentation_epoch: 0,
         };
         let previous = self.by_token.insert(token, id);
         debug_assert!(previous.is_none());
@@ -314,6 +336,10 @@ impl Runtime {
             self.config.aggregate_input_bytes,
             Arc::clone(&entry.reserved_input),
             self.config.per_execution_input_bytes,
+            #[cfg(target_os = "macos")]
+            Some(Arc::clone(&entry.direct_input_held)),
+            #[cfg(not(target_os = "macos"))]
+            None,
         ))
     }
     pub fn attach(&mut self, id: ExecutionId) -> Result<AttachmentId, RuntimeError> {

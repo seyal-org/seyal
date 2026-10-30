@@ -14,16 +14,18 @@ mod presentation;
 mod tests;
 
 pub use crate::pass7::{
-    BlockTimeline, CommandBlock, CommandBlockState, ComposerCommandRef, ComposerEligibility,
-    ComposerResult, ComposerResultCode, ComposerStatus, HistoryCell, HistoryRangeRequest,
-    HistoryRangeSnapshot, HistoryRangeStatus, HistoryRow, HistorySourceCell, ResizeRequest,
-    ResizeResult, ResizeResultCode, TerminalKey, TerminalKeyKind, TerminalKeyModifiers,
-    TerminalKeyV2, TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers, ViewportLineIds,
-    CAP_CORRELATED_RESIZE, CAP_EXTENDED_TERMINAL_KEY, CAP_SEMANTIC_TERMINAL_KEY,
-    COMMAND_BLOCK_FLAG_CANVAS_FLOOR, HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG,
-    HISTORY_CELL_WIDTH_MASK, HISTORY_CELL_WIDTH_SHIFT, MAX_HISTORY_GRAPHEME_BYTES,
-    MAX_HISTORY_RANGE_BYTES, MAX_HISTORY_RANGE_CELLS, MAX_HISTORY_RANGE_LINES,
-    MAX_HISTORY_SIDECAR_BYTES,
+    BlockScope, BlockTimeline, BlockTrust, CommandBlock, CommandBlockState, ComposerCommandRef,
+    ComposerEligibility, ComposerResult, ComposerResultCode, ComposerStatus, ComposerTarget,
+    ComposerTargetMode, ComposerTargetReason, HistoryCell, HistoryRangeRequest,
+    HistoryRangeSnapshot, HistoryRangeStatus, HistoryRow, HistorySourceCell, InputTargetClass,
+    ResizeRequest, ResizeResult, ResizeResultCode, SessionConsent, SessionConsentDecision,
+    SessionOffer, SessionOverlayWire, SessionStatus, TerminalKey, TerminalKeyKind,
+    TerminalKeyModifiers, TerminalKeyV2, TerminalKeyV2Event, TerminalKeyV2Kind,
+    TerminalKeyV2Modifiers, ViewportLineIds, CAP_CORRELATED_RESIZE, CAP_EXTENDED_TERMINAL_KEY,
+    CAP_SEMANTIC_TERMINAL_KEY, CAP_SESSION_BOOTSTRAP, COMMAND_BLOCK_FLAG_CANVAS_FLOOR,
+    HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG, HISTORY_CELL_WIDTH_MASK,
+    HISTORY_CELL_WIDTH_SHIFT, MAX_HISTORY_GRAPHEME_BYTES, MAX_HISTORY_RANGE_BYTES,
+    MAX_HISTORY_RANGE_CELLS, MAX_HISTORY_RANGE_LINES, MAX_HISTORY_SIDECAR_BYTES,
 };
 
 pub use envelope::{

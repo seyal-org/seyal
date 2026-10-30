@@ -1,4 +1,4 @@
-use seyal_runtime::local_ipc::framing::{ComposerEligibility, ComposerResultCode};
+use seyal_runtime::local_ipc::framing::ComposerResultCode;
 
 use crate::local::ClientError;
 use crate::LocalDisplayClient;
@@ -189,21 +189,14 @@ pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
 /// 0 means nothing published yet. Rust remains the only reader of its meaning.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
-    with_display_client(|client| client.composer_status())
+    with_display_client(|client| client.projected_composer_status())
         .flatten()
-        .map(|status| {
-            let attachment = status.attachment_id.to_bytes();
-            SeyalComposerStatus {
-                revision: status.revision,
-                attachment_id_low: u64::from_le_bytes(attachment[..8].try_into().unwrap()),
-                attachment_id_high: u64::from_le_bytes(attachment[8..].try_into().unwrap()),
-                eligibility: match status.eligibility {
-                    ComposerEligibility::Available => 1,
-                    ComposerEligibility::Busy => 2,
-                    ComposerEligibility::Unsupported => 3,
-                },
-                reserved: [0; 7],
-            }
+        .map(|(eligibility, revision, attachment)| SeyalComposerStatus {
+            revision,
+            attachment_id_low: u64::from_le_bytes(attachment[..8].try_into().unwrap()),
+            attachment_id_high: u64::from_le_bytes(attachment[8..].try_into().unwrap()),
+            eligibility,
+            reserved: [0; 7],
         })
         .unwrap_or_else(SeyalComposerStatus::empty)
 }

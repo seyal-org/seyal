@@ -24,6 +24,8 @@ pub enum RuntimeError {
     ShellIntegration(&'static str),
     /// Pre-spawn launch-policy failure (SPEC-023 §9). Carries no path/env bytes.
     LaunchPolicy(LaunchPolicyFailure),
+    /// Direct input was refused because the session overlay is Armed or Delivering.
+    InputHeld,
 }
 
 impl fmt::Display for RuntimeError {
@@ -53,6 +55,9 @@ impl fmt::Display for RuntimeError {
             Self::Terminfo(message) => write!(f, "terminfo error: {message}"),
             Self::ShellIntegration(message) => write!(f, "shell integration error: {message}"),
             Self::LaunchPolicy(failure) => f.write_str(failure.as_str()),
+            Self::InputHeld => {
+                f.write_str("direct input is held while session bootstrap is in progress")
+            }
         }
     }
 }

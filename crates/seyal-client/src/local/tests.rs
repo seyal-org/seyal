@@ -78,6 +78,15 @@ pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
         last_terminate_result: None,
         viewport_line_ids: Vec::new(),
         viewport_line_ids_generation: 0,
+        session_bootstrap_negotiated: false,
+        composer_target: None,
+        target_generation: 0,
+        session_offer: None,
+        session_status: None,
+        pending_relay_requests: std::collections::HashSet::new(),
+        projected_eligibility: 0,
+        projected_wire_revision: 0,
+        composer_projection_revision: 0,
     }
 }
 
@@ -316,8 +325,8 @@ fn composer_status_frames_update_the_client_in_revision_order() {
 
 #[test]
 fn raw_metadata_fallback_keeps_pass71_but_drops_only_pass8_capability() {
-    let full = discovery::requested_capabilities(true, true, true, true, true);
-    let fallback = discovery::requested_capabilities(false, true, true, true, true);
+    let full = discovery::requested_capabilities(true, true, true, true, true, false);
+    let fallback = discovery::requested_capabilities(false, true, true, true, true, false);
     assert_ne!(
         full & seyal_runtime::local_ipc::framing::CAP_EXTENDED_TERMINAL_KEY,
         0

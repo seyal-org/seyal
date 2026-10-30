@@ -5,7 +5,7 @@ use std::{
 };
 
 use seyal_core::BlockId;
-use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+use seyal_protocol::framing::{BlockScope, BlockTrust, CommandBlock, CommandBlockState};
 
 use crate::app::AppAction;
 use crate::composer::RuntimeBlockRecord;
@@ -672,6 +672,8 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
         end_line: None,
         state: CommandBlockState::Running,
         flags: 0,
+        scope: BlockScope::Local,
+        trust: BlockTrust::LocalTrusted,
     };
     let projected = runtime_block_from_command(&running);
     assert_eq!(projected.command, "echo hi");
@@ -691,6 +693,8 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
             exit_status: Some(1),
         },
         flags: 0,
+        scope: BlockScope::Local,
+        trust: BlockTrust::LocalTrusted,
     };
     let projected = runtime_block_from_command(&failed);
     assert!(!projected.running);

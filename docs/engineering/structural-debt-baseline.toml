@@ -72,9 +72,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1099
-issue = 1379
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs, and #1379 publishes canvas_floor_block_id on SeyalAppComposer for Flow clear presentation."
+ceiling_loc = 1100
+issue = 1388
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs, #1379 publishes canvas_floor_block_id on SeyalAppComposer for Flow clear presentation, and #1388 adds the Relay composer mode constant beside the existing Available/Busy mapping."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -84,9 +84,9 @@ reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shel
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
-acknowledged_loc = 897
-issue = 1379
-reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module; production composer reducer stays under review_loc. #1379 adds clear canvas-floor hide-until-exit projection coverage beside existing presentation-state matrix proofs."
+acknowledged_loc = 939
+issue = 1388
+reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module; production composer reducer stays under review_loc. #1379 adds clear canvas-floor hide-until-exit projection coverage, and #1388 adds the Relay submit proof that an accepted plaintext line does not enter command history."
 
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
@@ -250,9 +250,9 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 859
-issue = 1379
-reason = "ABI action decoding remains one versioned match surface; #1381 adds terminal-tab kinds 77–79, #1379 adds kind 80 CreateReplacementExecution and maps COMMAND_BLOCK_FLAG_CANVAS_FLOOR into RuntimeBlockRecord."
+acknowledged_loc = 860
+issue = 1388
+reason = "ABI action decoding remains one versioned match surface; #1381 adds terminal-tab kinds 77–79, #1379 adds kind 80 CreateReplacementExecution and maps COMMAND_BLOCK_FLAG_CANVAS_FLOOR into RuntimeBlockRecord, and #1388 adds composer eligibility code 4 (Relay)."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"
@@ -271,3 +271,9 @@ path = "macos/Seyal/Sources/MultiWindowHostController.swift"
 acknowledged_loc = 769
 issue = 1158
 reason = "The macOS host stays one AppKit adapter. #1158 adds CloseWindow forwarding, deferred AppKit destruction, Dock reopen, and hierarchical close on the activation and resize host already owned here. The W5 occlusion-hidden forwarding was restored by this landing."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-runtime/src/runtime/local/ingress.rs"
+acknowledged_loc = 982
+issue = 1388
+reason = "Input admission stays one ingress module. #1388 adds the fenced composer command path and the direct-input hold mapping; SessionConsent decoding lives in session_consent.rs."

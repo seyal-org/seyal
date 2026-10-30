@@ -48,6 +48,7 @@ mod integration_state;
 mod lifecycle;
 mod reactor_io;
 mod registry;
+mod session_overlay;
 mod shell_integration;
 #[cfg(all(test, target_os = "macos"))]
 mod shell_integration_live_tests;

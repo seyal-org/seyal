@@ -72,6 +72,34 @@ pub(in crate::runtime) struct Entry {
     pub(in crate::runtime) published_composer_eligibility: Option<ComposerEligibility>,
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) composer_status_revision: u64,
+    /// ADR-026 F4. `None` until a host Block is a session candidate.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) session: super::session_overlay::SessionOverlay,
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) input_target: super::session_overlay::InputTargetFact,
+    /// Monotonic fence for the input target. Starts at 1; 0 is not a valid generation.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) target_generation: u64,
+    /// Last generation included in a published `ComposerTarget`. 0 means unpublished.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) published_target_generation: u64,
+    /// Type 45 revision. Moves when the derived target changes, including when
+    /// type 23 eligibility does not.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) composer_target_revision: u64,
+    /// Last published `(mode, reason, target generation)`.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) published_target_stamp: Option<(u8, u8, u64)>,
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) direct_input_held: Arc<AtomicBool>,
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) session_revision: u64,
+    /// Allocated by `offer_session`. Slice B's hint path is the hot caller.
+    #[allow(dead_code)]
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) next_offer_generation: u64,
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) offer_presentation_epoch: u64,
 }
 
 #[cfg(target_os = "macos")]

@@ -6,9 +6,9 @@ use seyal_render::RowDamage;
 use seyal_runtime::{
     display::{decode_chunk, decode_chunk_payload},
     local_ipc::framing::{
-        decode_presentation_envelope, BlockTimeline, ComposerResult, ComposerStatus,
-        CreateExecutionResult, FrameHeader, HistoryRangeSnapshot, InputRef, PresentationEnvelope,
-        ResizeResult,
+        decode_presentation_envelope, BlockTimeline, ComposerResult, ComposerResultCode,
+        ComposerStatus, ComposerTarget, CreateExecutionResult, FrameHeader, HistoryRangeSnapshot,
+        InputRef, PresentationEnvelope, ResizeResult, SessionOffer, SessionStatus,
     },
     pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
 };
@@ -132,8 +132,12 @@ impl LocalDisplayClient {
                         } else {
                             &frame[HEADER_LEN..]
                         };
-                        let timeline =
-                            BlockTimeline::decode(payload).map_err(|_| ClientError::Protocol)?;
+                        let timeline = if self.session_bootstrap_negotiated {
+                            BlockTimeline::decode_session(payload)
+                        } else {
+                            BlockTimeline::decode(payload)
+                        }
+                        .map_err(|_| ClientError::Protocol)?;
                         if timeline.revision >= self.block_timeline.revision {
                             metadata_changed = timeline.revision > self.block_timeline.revision;
                             let retained =
@@ -145,12 +149,15 @@ impl LocalDisplayClient {
                     MessageType::ComposerResult => {
                         let result = ComposerResult::decode(&frame[HEADER_LEN..])
                             .map_err(|_| ClientError::Protocol)?;
+                        let relay = self.pending_relay_requests.contains(&result.request_id);
                         if validate_composer_result(
                             result,
                             self.attachment_id,
                             &self.pending_composer_requests,
+                            relay && result.code == ComposerResultCode::Accepted,
                         ) {
                             self.pending_composer_requests.remove(&result.request_id);
+                            self.pending_relay_requests.remove(&result.request_id);
                             self.last_composer_result = Some(result);
                         }
                     }
@@ -163,6 +170,44 @@ impl LocalDisplayClient {
                             self.composer_status,
                         ) {
                             self.composer_status = Some(status);
+                            self.note_composer_projection();
+                        }
+                    }
+                    MessageType::ComposerTarget => {
+                        let target = ComposerTarget::decode(&frame[HEADER_LEN..])
+                            .map_err(|_| ClientError::Protocol)?;
+                        if self.session_bootstrap_negotiated
+                            && target.attachment_id == self.attachment_id
+                            && self
+                                .composer_target
+                                .is_none_or(|current| target.revision > current.revision)
+                        {
+                            self.target_generation = target.target_generation;
+                            self.composer_target = Some(target);
+                            self.note_composer_projection();
+                        }
+                    }
+                    MessageType::SessionOffer => {
+                        let offer = SessionOffer::decode(&frame[HEADER_LEN..])
+                            .map_err(|_| ClientError::Protocol)?;
+                        if self.session_bootstrap_negotiated
+                            && offer.attachment_id == self.attachment_id
+                            && offer.execution_id == self.execution_id
+                        {
+                            self.session_offer = Some(offer);
+                        }
+                    }
+                    MessageType::SessionStatus => {
+                        let status = SessionStatus::decode(&frame[HEADER_LEN..])
+                            .map_err(|_| ClientError::Protocol)?;
+                        if self.session_bootstrap_negotiated
+                            && status.attachment_id == self.attachment_id
+                            && status.execution_id == self.execution_id
+                            && self
+                                .session_status
+                                .is_none_or(|current| status.revision > current.revision)
+                        {
+                            self.session_status = Some(status);
                         }
                     }
                     MessageType::HistoryRangeSnapshot => {
