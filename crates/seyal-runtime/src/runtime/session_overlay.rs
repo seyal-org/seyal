@@ -57,7 +57,11 @@ pub(crate) enum SessionEvent {
     BeginDelivering,
     Trust,
     Fail,
+    /// Trusted-secret session ended. Candidate and Offered do not use this.
     End,
+    /// Drop a non-trusted overlay back to `None` (host completed, or a
+    /// different host Block replaced Declined/Failed/Ended).
+    Clear,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,16 +162,15 @@ impl SessionOverlay {
                 | S::Delivering { host_block, .. },
                 E::Fail,
             ) => Ok(S::Failed { host_block }),
+            (S::Trusted { host_block }, E::End) => Ok(S::Ended { host_block }),
             (
-                S::Candidate { host_block }
-                | S::Offered { host_block, .. }
-                | S::Declined { host_block }
-                | S::Armed { host_block, .. }
-                | S::Delivering { host_block, .. }
-                | S::Trusted { host_block }
-                | S::Failed { host_block },
-                E::End,
-            ) => Ok(S::Ended { host_block }),
+                S::Candidate { .. }
+                | S::Offered { .. }
+                | S::Declined { .. }
+                | S::Failed { .. }
+                | S::Ended { .. },
+                E::Clear,
+            ) => Ok(S::None),
             // Depth one: a trusted session is not a candidate and cannot arm.
             (S::Trusted { .. }, E::MarkCandidate { .. } | E::Accept | E::Offer { .. }) => {
                 Err(SessionReject)
@@ -265,8 +268,8 @@ pub(crate) fn input_target_scope(overlay: SessionOverlay) -> BlockScope {
 }
 
 /// ADR-026 §3.2. Without F9, local-scope Relay opens only after Decline or
-/// Failed (explicit enable). A Trusted session may Relay to its own Running
-/// Block. Armed/Delivering holds every direct route, including relay.
+/// Failed on that same Running host Block. A Trusted session may Relay to
+/// its own Running Block. Armed/Delivering holds every direct route.
 pub(crate) fn derive_composer(facts: ComposerFacts) -> DerivedComposer {
     if facts.overlay.holds_direct_input() {
         return DerivedComposer::Unavailable(ComposerTargetReason::BootstrapHold);
@@ -291,11 +294,13 @@ pub(crate) fn derive_composer(facts: ComposerFacts) -> DerivedComposer {
         ShellFact::Running {
             block: Some(block_id),
         } => {
+            let relay_host = facts.overlay.host_block() == Some(block_id);
             if trusted
-                || matches!(
-                    facts.overlay,
-                    SessionOverlay::Declined { .. } | SessionOverlay::Failed { .. }
-                )
+                || (relay_host
+                    && matches!(
+                        facts.overlay,
+                        SessionOverlay::Declined { .. } | SessionOverlay::Failed { .. }
+                    ))
             {
                 DerivedComposer::Relay { block_id }
             } else {
@@ -415,6 +420,20 @@ mod tests {
                 Err(SessionReject),
             ),
             (S::None, E::Accept, Err(SessionReject)),
+            (S::Candidate { host_block: 4 }, E::End, Err(SessionReject)),
+            (S::Candidate { host_block: 4 }, E::Clear, Ok(S::None)),
+            (
+                S::Offered {
+                    host_block: 4,
+                    offer_generation: 1,
+                },
+                E::Clear,
+                Ok(S::None),
+            ),
+            (S::Declined { host_block: 4 }, E::Clear, Ok(S::None)),
+            (S::Failed { host_block: 4 }, E::Clear, Ok(S::None)),
+            (S::Ended { host_block: 4 }, E::Clear, Ok(S::None)),
+            (S::Trusted { host_block: 4 }, E::Clear, Err(SessionReject)),
             (
                 S::Candidate { host_block: 4 },
                 E::Accept,
@@ -459,6 +478,29 @@ mod tests {
         });
         assert_eq!(derived, DerivedComposer::Relay { block_id: 11 });
         assert_eq!(derived.mode(), ComposerTargetMode::Relay);
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(12) },
+                primary_screen: true,
+                flow: true,
+                controller: true,
+                overlay: SessionOverlay::Declined { host_block: 11 },
+                session_integration: ShellFact::Unproven,
+            }),
+            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt),
+            "Declined Relay stays on the declined host Block"
+        );
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(12) },
+                primary_screen: true,
+                flow: true,
+                controller: true,
+                overlay: SessionOverlay::Failed { host_block: 11 },
+                session_integration: ShellFact::Unproven,
+            }),
+            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
+        );
     }
 
     #[test]

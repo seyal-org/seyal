@@ -47,6 +47,7 @@ pub(crate) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockR
             CommandBlockState::Completed { exit_status } => exit_status,
         },
         canvas_floor: record.flags & COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0,
+        scope: record.scope,
     }
 }
 

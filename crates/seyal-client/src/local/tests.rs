@@ -642,3 +642,80 @@ fn same_generation_and_row_count_conflicting_ids_are_fatal() {
         Err(ClientError::Protocol)
     );
 }
+
+#[test]
+fn negotiated_type_45_projects_submit_relay_and_unavailable() {
+    use seyal_runtime::local_ipc::framing::{
+        BlockScope, ComposerEligibility, ComposerStatus, ComposerTarget, ComposerTargetMode,
+        ComposerTargetReason, InputTargetClass,
+    };
+
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    let attachment = client.attachment_id;
+    client.session_bootstrap_negotiated = true;
+    client.composer_status = Some(ComposerStatus {
+        attachment_id: attachment,
+        eligibility: ComposerEligibility::Busy,
+        revision: 3,
+    });
+    client.note_composer_projection();
+    let (code, revision, _) = client.projected_composer_status().expect("type 23");
+    assert_eq!(code, 2, "no type 45 falls back to type 23 Busy");
+    assert_eq!(revision, 3);
+
+    let mut target = ComposerTarget {
+        attachment_id: attachment,
+        target: InputTargetClass::TrustedShell,
+        scope: BlockScope::Session,
+        mode: ComposerTargetMode::Submit,
+        reason: ComposerTargetReason::None,
+        block_id: 0,
+        target_generation: 1,
+        revision: 3,
+    };
+    client.composer_target = Some(target);
+    client.note_composer_projection();
+    let (code, submit_revision, _) = client.projected_composer_status().expect("submit");
+    assert_eq!(
+        code, 1,
+        "Submit stays available while type 23 is still Busy"
+    );
+    assert!(
+        submit_revision > revision,
+        "projection revision stays monotonic"
+    );
+
+    target.mode = ComposerTargetMode::Unavailable;
+    target.reason = ComposerTargetReason::NotAtPrompt;
+    target.revision = 4;
+    client.composer_target = Some(target);
+    client.note_composer_projection();
+    let (code, unavailable_revision, _) = client.projected_composer_status().expect("unavailable");
+    assert_eq!(code, 2);
+    assert!(unavailable_revision > submit_revision);
+
+    target.mode = ComposerTargetMode::Relay;
+    target.reason = ComposerTargetReason::None;
+    target.block_id = 7;
+    target.revision = 5;
+    client.composer_target = Some(target);
+    client.note_composer_projection();
+    let (code, relay_revision, _) = client.projected_composer_status().expect("relay");
+    assert_eq!(code, 4);
+    assert!(relay_revision > unavailable_revision);
+
+    client.session_bootstrap_negotiated = false;
+    client.composer_status = Some(ComposerStatus {
+        attachment_id: attachment,
+        eligibility: ComposerEligibility::Busy,
+        revision: 9,
+    });
+    client.note_composer_projection();
+    let (code, legacy_revision, _) = client.projected_composer_status().expect("legacy");
+    assert_eq!(
+        code, 2,
+        "without negotiation, type 45 does not override type 23"
+    );
+    assert!(legacy_revision > relay_revision);
+}

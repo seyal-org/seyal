@@ -128,6 +128,20 @@ impl Harness {
             .join("\n")
     }
 
+    fn wait_text(&mut self, needle: &str) {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !self.text().contains(needle) {
+            assert!(
+                Instant::now() < deadline,
+                "missing {needle}\n{}",
+                self.text()
+            );
+            self.runtime
+                .poll_once(Some(Duration::from_millis(10)))
+                .expect("poll");
+        }
+    }
+
     fn secret_hex(&self) -> Option<String> {
         self.runtime.entries[&self.id]
             .session_runtime
@@ -369,4 +383,82 @@ fn request_offer_from_candidate_arms_after_accept() {
     h.pump_until(|runtime, id| {
         matches!(runtime.entries[&id].session, SessionOverlay::Trusted { .. })
     });
+}
+
+#[test]
+fn earlier_local_command_does_not_end_the_next_candidate() {
+    let mut h = spawn("warm-cat");
+    h.pump_until(|runtime, id| runtime.entries[&id].integration == IntegrationState::AtPrompt);
+    h.runtime
+        .submit_composer_command(h.id, "echo warm".into())
+        .expect("echo");
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id].integration == IntegrationState::AtPrompt
+            && runtime.entries[&id].block_timeline.records().any(|record| {
+                record.command == "echo warm"
+                    && matches!(record.lifecycle, CommandBlockLifecycle::Completed { .. })
+            })
+    });
+    assert!(
+        matches!(h.runtime.entries[&h.id].session, SessionOverlay::None),
+        "completing Candidate/Offered is None, not Ended: {:?}",
+        h.runtime.entries[&h.id].session
+    );
+    h.runtime
+        .submit_composer_command(h.id, "cat".into())
+        .expect("cat");
+    h.pump_until(|runtime, id| {
+        matches!(
+            runtime.entries[&id].integration,
+            IntegrationState::Running { block: Some(_) }
+        ) && matches!(
+            runtime.entries[&id].session,
+            SessionOverlay::Candidate { .. }
+        )
+    });
+}
+
+#[test]
+fn decline_stays_declined_while_relayed_lines_arrive() {
+    let mut h = spawn("decline-hold");
+    h.pump_until(|runtime, id| runtime.entries[&id].integration == IntegrationState::AtPrompt);
+    h.runtime
+        .submit_composer_command(h.id, "cat".into())
+        .expect("cat");
+    h.pump_until(|runtime, id| {
+        matches!(
+            runtime.entries[&id].integration,
+            IntegrationState::Running { block: Some(_) }
+        ) && matches!(
+            runtime.entries[&id].session,
+            SessionOverlay::Candidate { .. }
+        )
+    });
+    let host = h.runtime.entries[&h.id].session.host_block().expect("host");
+    h.runtime.offer_session(h.id, host).expect("offer");
+    let generation = h.runtime.entries[&h.id]
+        .session
+        .offer_generation()
+        .expect("generation");
+    h.runtime
+        .apply_session_consent(h.id, host, generation, 0, false)
+        .expect("decline");
+    for line in ["relay-one", "relay-two"] {
+        let generation = h.runtime.entries[&h.id].target_generation;
+        assert_eq!(
+            h.runtime
+                .submit_composer_command_fenced(h.id, line.into(), Some(generation))
+                .expect("relay"),
+            ComposerAdmission::Relayed
+        );
+        h.wait_text(line);
+        assert!(
+            matches!(
+                h.runtime.entries[&h.id].session,
+                SessionOverlay::Declined { .. }
+            ),
+            "output must not clear Declined after {line}: {:?}",
+            h.runtime.entries[&h.id].session
+        );
+    }
 }

@@ -32,7 +32,7 @@ pub(super) enum SessionClose {
     /// exactly N bytes with padding when the payload was not queued, then
     /// grants no trust.
     Fail,
-    /// The session scope ended (local marker or child exit).
+    /// Trusted-secret session ended. Candidate/Offered clear to `None`.
     End,
 }
 
@@ -172,17 +172,40 @@ impl Runtime {
                     )
                 });
                 if active {
-                    // Remove S before this local marker, and before any later one.
+                    // Trusted sessions end. Candidate/Offered return to None
+                    // so a later host Block can become Candidate again.
                     self.close_session(id, SessionClose::End)?;
                 }
-                let entry = self
-                    .entries
-                    .get_mut(&id)
-                    .ok_or(RuntimeError::UnknownExecution)?;
-                Ok(super::shell_integration::apply_local_integration_event(
-                    entry,
-                    integration_event,
-                ))
+                let before = self.entries.get(&id).map(|entry| entry.integration);
+                let changed = {
+                    let entry = self
+                        .entries
+                        .get_mut(&id)
+                        .ok_or(RuntimeError::UnknownExecution)?;
+                    super::shell_integration::apply_local_integration_event(
+                        entry,
+                        integration_event,
+                    )
+                };
+                if let Some(block) =
+                    self.entries
+                        .get(&id)
+                        .and_then(|entry| match (before, entry.integration) {
+                            (
+                                Some(IntegrationState::Running {
+                                    block: Some(previous),
+                                }),
+                                IntegrationState::Running { block: Some(next) },
+                            ) if previous == next => None,
+                            (_, IntegrationState::Running { block: Some(next) }) => {
+                                Some(next.raw())
+                            }
+                            _ => None,
+                        })
+                {
+                    self.note_local_host_block_started(id, block);
+                }
+                Ok(changed)
             }
             MarkerAudience::Session => self.apply_session_marker(id, integration_event),
             MarkerAudience::Untrusted => {
@@ -256,6 +279,36 @@ impl Runtime {
         ))
     }
 
+    /// A new local host Block replaced Declined/Failed/Ended for a different
+    /// host. Reset those to `None`, then consider Candidate only from `None`.
+    pub(super) fn note_local_host_block_started(&mut self, id: ExecutionId, block: u64) {
+        let cleared = {
+            let Some(entry) = self.entries.get_mut(&id) else {
+                return;
+            };
+            let other_host = match entry.session {
+                SessionOverlay::Declined { host_block }
+                | SessionOverlay::Failed { host_block }
+                | SessionOverlay::Ended { host_block } => host_block != block,
+                _ => false,
+            };
+            if !other_host {
+                false
+            } else if let Ok(next) = entry.session.on(SessionEvent::Clear) {
+                entry.session = next;
+                entry.session_revision = entry.session_revision.saturating_add(1);
+                true
+            } else {
+                false
+            }
+        };
+        if cleared {
+            self.note_input_target(id);
+            self.publish_session_frames(id);
+        }
+        self.consider_session_candidate(id);
+    }
+
     pub(super) fn close_session(
         &mut self,
         id: ExecutionId,
@@ -266,22 +319,29 @@ impl Runtime {
         };
         let overlay = entry.session;
         let delivered = entry.session_runtime.delivered;
-        let (pad, event) = match (overlay, kind) {
+        enum CloseStep {
+            Fail {
+                pad: bool,
+            },
+            End,
+            /// Candidate/Offered completing for this host. Not `Ended`.
+            Clear,
+        }
+        let step = match (overlay, kind) {
             (SessionOverlay::Delivering { .. }, _) if delivered != Some(PAYLOAD_LEN) => {
-                (true, SessionEvent::Fail)
+                CloseStep::Fail { pad: true }
             }
             (SessionOverlay::Armed { .. } | SessionOverlay::Delivering { .. }, _) => {
-                (false, SessionEvent::Fail)
+                CloseStep::Fail { pad: false }
             }
+            (SessionOverlay::Trusted { .. }, SessionClose::End) => CloseStep::End,
             (
-                SessionOverlay::Trusted { .. }
-                | SessionOverlay::Candidate { .. }
-                | SessionOverlay::Offered { .. },
+                SessionOverlay::Candidate { .. } | SessionOverlay::Offered { .. },
                 SessionClose::End,
-            ) => (false, SessionEvent::End),
+            ) => CloseStep::Clear,
             _ => return Ok(()),
         };
-        if pad {
+        if matches!(step, CloseStep::Fail { pad: true }) {
             let _ = self.queue_bootstrap(id, padding_bytes());
         }
         let changed = {
@@ -289,8 +349,18 @@ impl Runtime {
                 .entries
                 .get_mut(&id)
                 .ok_or(RuntimeError::UnknownExecution)?;
-            let changed = apply_session_effects(entry, IntegrationEvent::ExecutionEnded);
-            if let Ok(next) = entry.session.on(event) {
+            let (changed, next) = match step {
+                CloseStep::Clear => (false, entry.session.on(SessionEvent::Clear).ok()),
+                CloseStep::End => (
+                    apply_session_effects(entry, IntegrationEvent::ExecutionEnded),
+                    entry.session.on(SessionEvent::End).ok(),
+                ),
+                CloseStep::Fail { .. } => (
+                    apply_session_effects(entry, IntegrationEvent::ExecutionEnded),
+                    entry.session.on(SessionEvent::Fail).ok(),
+                ),
+            };
+            if let Some(next) = next {
                 entry.session = next;
             }
             wipe_token(&mut entry.session_runtime.secret);

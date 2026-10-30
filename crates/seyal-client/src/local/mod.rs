@@ -335,18 +335,20 @@ impl LocalDisplayClient {
                 .map(|target| target.revision)
                 .unwrap_or(0),
         );
-        let code = if self.session_bootstrap_negotiated
-            && self
-                .composer_target
-                .is_some_and(|target| target.mode == ComposerTargetMode::Relay)
-        {
-            4
-        } else {
-            match status.eligibility {
+        // Type 45 is the negotiated composer fact. Type 23 is the legacy
+        // Busy/Available fallback used only when no ComposerTarget has arrived.
+        let code = match (
+            self.session_bootstrap_negotiated,
+            self.composer_target.map(|target| target.mode),
+        ) {
+            (true, Some(ComposerTargetMode::Submit)) => 1,
+            (true, Some(ComposerTargetMode::Relay)) => 4,
+            (true, Some(ComposerTargetMode::Unavailable)) => 2,
+            _ => match status.eligibility {
                 ComposerEligibility::Available => 1,
                 ComposerEligibility::Busy => 2,
                 ComposerEligibility::Unsupported => 3,
-            }
+            },
         };
         if self.composer_projection_revision == 0 {
             self.projected_eligibility = code;

@@ -406,6 +406,7 @@ impl Runtime {
             snapshot.rows,
         );
         self.publish_block_timeline(attach.execution_id);
+        self.consider_session_candidate(attach.execution_id);
         if self.local_connection_supports_command_blocks(token) {
             self.send_composer_status(
                 token,

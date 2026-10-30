@@ -315,7 +315,6 @@ impl Runtime {
         if changed {
             self.publish_block_timeline(id);
         }
-        self.consider_session_candidate(id);
         self.publish_composer_status_if_changed(id);
         Ok(())
     }
@@ -329,7 +328,6 @@ impl Runtime {
             // No Block effects are possible from this event.
             let _ = apply_local_integration_event(entry, IntegrationEvent::DirectInputAdmitted);
         }
-        self.consider_session_candidate(id);
         self.publish_composer_status_if_changed(id);
     }
 
@@ -357,6 +355,9 @@ impl Runtime {
 
     #[cfg(not(target_os = "macos"))]
     pub(super) fn note_direct_input_admitted(&mut self, _id: ExecutionId) {}
+
+    #[cfg(not(target_os = "macos"))]
+    pub(in crate::runtime) fn consider_session_candidate(&mut self, _id: ExecutionId) {}
 
     #[cfg(not(target_os = "macos"))]
     pub(super) fn note_execution_ended(&mut self, _id: ExecutionId) {}
@@ -412,6 +413,11 @@ impl Runtime {
             let IntegrationState::Running { block: Some(block) } = entry.integration else {
                 return;
             };
+            // Automatic Candidate only from None. Declined/Failed stay until
+            // an explicit offer or a different host Block resets them.
+            if !matches!(entry.session, super::session_overlay::SessionOverlay::None) {
+                return;
+            }
             let host_block = block.raw();
             if entry.execution.terminal().modes().alternate_screen
                 || !entry.pending_input.is_empty()
@@ -533,11 +539,13 @@ impl Runtime {
         entry.session = next;
         entry.session_revision = entry.session_revision.saturating_add(1);
         if accept {
-            return self.begin_armed_bootstrap(id);
+            self.begin_armed_bootstrap(id)?;
+        } else {
+            self.note_input_target(id);
+            self.publish_session_frames(id);
+            self.publish_composer_status_if_changed(id);
         }
-        self.note_input_target(id);
-        self.publish_session_frames(id);
-        self.publish_composer_status_if_changed(id);
+        self.consider_session_candidate(id);
         Ok(())
     }
 }

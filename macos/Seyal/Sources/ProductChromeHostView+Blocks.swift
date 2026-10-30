@@ -90,7 +90,8 @@ extension ProductChromeHostView {
                 detail: detail,
                 state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                 cellHeight: cellHeight,
-                lines: lines
+                lines: lines,
+                session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
             card.setAccessibilityIdentifier("seyal-block-\(visibleIndex)")
             card.setBodyAccessibilityIdentifier("seyal-block-\(visibleIndex)-body")
