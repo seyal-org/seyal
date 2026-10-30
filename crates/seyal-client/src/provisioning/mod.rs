@@ -7,6 +7,7 @@
 mod disposition;
 mod intent;
 mod resolution;
+mod terminal_bindings;
 mod unpresented;
 
 #[cfg(test)]
@@ -14,7 +15,7 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, TerminalTabId};
 use seyal_protocol::framing::ErrorCode;
 
 pub use disposition::{DispositionKind, DispositionPlan};
@@ -77,6 +78,11 @@ pub enum ProvisioningEffect {
         pane: PaneId,
         execution: ExecutionId,
     },
+    BindTerminal {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        execution: ExecutionId,
+    },
     SendTerminate {
         owner: ConnectionOwner,
         attachment: AttachmentId,
@@ -106,6 +112,8 @@ enum PendingKind {
 pub struct ProvisioningSession {
     next_owner: u64,
     pane_owners: HashMap<PaneId, ConnectionOwner>,
+    terminal_owners: HashMap<TerminalTabId, ConnectionOwner>,
+    terminal_panes: HashMap<TerminalTabId, PaneId>,
     /// Strictly increasing across every owner: C2 shares one wire connection,
     /// and request ids are connection-scoped (ADR-017 §5.2 / SPEC-004 §18.2).
     next_request_id: u64,
@@ -113,7 +121,10 @@ pub struct ProvisioningSession {
     pending_kind: HashMap<(ConnectionOwner, u64), PendingKind>,
     /// Pane → create request_id while a create intent is outstanding.
     pane_pending: HashMap<PaneId, u64>,
+    terminal_pending: HashMap<TerminalTabId, u64>,
     recorded_bindings: HashMap<PaneId, ExecutionId>,
+    terminal_bindings: HashMap<TerminalTabId, ExecutionId>,
+    terminal_bound_owners: HashMap<TerminalTabId, ConnectionOwner>,
     unreferenced: HashSet<ExecutionId>,
     bound_owners: HashMap<PaneId, ConnectionOwner>,
     awaiting_bootstrap_resize: HashSet<PaneId>,
@@ -155,9 +166,22 @@ impl ProvisioningSession {
     }
 
     pub fn pending_intent(&self, pane: PaneId) -> Option<&PendingIntent> {
-        let request_id = *self.pane_pending.get(&pane)?;
-        let owner = self.pane_owners.get(&pane).copied()?;
-        self.pending_by_key.get(&(owner, request_id))
+        if let Some(request_id) = self.pane_pending.get(&pane).copied()
+            && let Some(owner) = self.pane_owners.get(&pane).copied()
+        {
+            return self.pending_by_key.get(&(owner, request_id));
+        }
+        self.terminal_pending
+            .iter()
+            .find_map(|(terminal, request_id)| {
+                (self.terminal_panes.get(terminal) == Some(&pane))
+                    .then(|| {
+                        self.terminal_owners
+                            .get(terminal)
+                            .and_then(|owner| self.pending_by_key.get(&(*owner, *request_id)))
+                    })
+                    .flatten()
+            })
     }
 
     /// Locate a pending create intent by connection-local `request_id`.
@@ -240,6 +264,12 @@ impl ProvisioningSession {
             })
     }
 
+    pub fn pending_terminal_by_request_id(&self, request_id: u64) -> Option<TerminalTabId> {
+        self.pending_by_key.iter().find_map(|((_, id), intent)| {
+            (*id == request_id).then_some(intent.terminal_tab).flatten()
+        })
+    }
+
     /// Locate a pending terminate intent by connection-local `request_id`.
     pub fn pending_terminate_by_request_id(&self, request_id: u64) -> Option<&PendingIntent> {
         self.pending_by_key
@@ -300,6 +330,7 @@ impl ProvisioningSession {
         };
         let intent = PendingIntent {
             pane: Some(pane),
+            terminal_tab: None,
             owner,
             request_id,
             geometry,
@@ -318,8 +349,6 @@ impl ProvisioningSession {
         })
     }
 
-    /// Mark the requesting Pane closed while a create is outstanding.
-    /// The request record is retained until the result arrives (§7).
     pub fn mark_intent_dead(&mut self, pane: PaneId) {
         let Some(request_id) = self.pane_pending.get(&pane).copied() else {
             return;
@@ -347,6 +376,37 @@ impl ProvisioningSession {
             return Vec::new();
         };
         self.pending_kind.remove(&key);
+        if let Some(terminal_tab) = intent.terminal_tab {
+            if self.terminal_pending.get(&terminal_tab).copied() != Some(request_id) {
+                return Vec::new();
+            }
+            self.terminal_pending.remove(&terminal_tab);
+            let Some(pane) = intent.pane else {
+                return Vec::new();
+            };
+            return match result {
+                CreateOutcome::Created(execution) => {
+                    if !intent.intent_alive {
+                        let mut intent = intent;
+                        intent.phase = IntentPhase::Disposing {
+                            execution,
+                            attached: false,
+                        };
+                        self.insert_pending(owner, request_id, PendingKind::DisposeAttach, intent);
+                    } else {
+                        let mut intent = intent;
+                        intent.phase = IntentPhase::Attaching { execution };
+                        self.insert_pending(owner, request_id, PendingKind::Create, intent);
+                        self.terminal_pending.insert(terminal_tab, request_id);
+                    }
+                    vec![ProvisioningEffect::AttachController { owner, execution }]
+                }
+                CreateOutcome::Failed(code) => {
+                    self.last_failure = Some((pane, ProvisioningFailure::CreateRejected(code)));
+                    Vec::new()
+                }
+            };
+        }
         let Some(pane) = intent.pane else {
             return Vec::new();
         };
@@ -403,7 +463,13 @@ impl ProvisioningSession {
                     }
                     _ => return Vec::new(),
                 };
-                self.queue_terminate(intent.pane, owner, execution, attachment)
+                self.queue_terminate(
+                    intent.pane,
+                    intent.terminal_tab,
+                    owner,
+                    execution,
+                    attachment,
+                )
             }
             PendingKind::Create => {
                 let Some(intent) = self.pending_by_key.get_mut(&key) else {
@@ -420,7 +486,13 @@ impl ProvisioningSession {
                     let intent = self.pending_by_key.remove(&key).expect("checked");
                     self.pending_kind.remove(&key);
                     self.remove_pane_pending_for_intent(&intent);
-                    return self.queue_terminate(intent.pane, owner, execution, attachment);
+                    return self.queue_terminate(
+                        intent.pane,
+                        intent.terminal_tab,
+                        owner,
+                        execution,
+                        attachment,
+                    );
                 }
                 intent.phase = IntentPhase::Attached {
                     execution,
@@ -429,7 +501,15 @@ impl ProvisioningSession {
                 let Some(pane) = intent.pane else {
                     return Vec::new();
                 };
-                vec![ProvisioningEffect::BindPane { pane, execution }]
+                if let Some(terminal_tab) = intent.terminal_tab {
+                    vec![ProvisioningEffect::BindTerminal {
+                        pane,
+                        terminal_tab,
+                        execution,
+                    }]
+                } else {
+                    vec![ProvisioningEffect::BindPane { pane, execution }]
+                }
             }
             PendingKind::Terminate => Vec::new(),
         }
@@ -516,7 +596,9 @@ impl ProvisioningSession {
         self.pane_pending.remove(&pane);
         if !intent.intent_alive {
             return match intent.attachment {
-                Some(attachment) => self.queue_terminate(Some(pane), owner, execution, attachment),
+                Some(attachment) => {
+                    self.queue_terminate(Some(pane), None, owner, execution, attachment)
+                }
                 None => {
                     let mut intent = intent;
                     intent.pane = None;
@@ -558,7 +640,7 @@ impl ProvisioningSession {
                 self.pending_kind.remove(&key);
                 self.pane_pending.remove(&pane);
                 if let Some(attachment) = intent.attachment {
-                    return self.queue_terminate(Some(pane), owner, execution, attachment);
+                    return self.queue_terminate(Some(pane), None, owner, execution, attachment);
                 }
             } else {
                 self.pane_pending.remove(&pane);
@@ -573,6 +655,7 @@ impl ProvisioningSession {
         };
         let intent = PendingIntent {
             pane: Some(pane),
+            terminal_tab: None,
             owner,
             request_id: dispose_id,
             geometry: PaneGeometry {
@@ -621,7 +704,7 @@ impl ProvisioningSession {
             return Err(ProvisioningFailure::AttachFailed);
         };
         self.awaiting_bootstrap_resize.remove(&pane);
-        Ok(self.queue_terminate(Some(pane), owner, execution, attachment))
+        Ok(self.queue_terminate(Some(pane), None, owner, execution, attachment))
     }
 
     /// Undo [`Self::begin_explicit_terminate`] when type 38 was not admitted.
@@ -678,6 +761,18 @@ impl ProvisioningSession {
         match outcome {
             TerminateOutcome::TerminationRequested => {
                 self.unreferenced.remove(&execution);
+                if let Some(terminal_tab) = intent.terminal_tab {
+                    self.terminal_bindings.remove(&terminal_tab);
+                    self.terminal_bound_owners.remove(&terminal_tab);
+                    self.terminal_owners.remove(&terminal_tab);
+                    self.terminal_panes.remove(&terminal_tab);
+                    if let Some(pane) = intent.pane
+                        && self.recorded_bindings.get(&pane) == Some(&execution)
+                    {
+                        self.recorded_bindings.remove(&pane);
+                        self.bound_owners.remove(&pane);
+                    }
+                }
             }
             TerminateOutcome::Failed(_) => {
                 if let Some(pane) = intent.pane {
@@ -791,6 +886,11 @@ impl ProvisioningSession {
         {
             self.pane_pending.remove(&pane);
         }
+        if let Some(terminal_tab) = intent.terminal_tab
+            && self.terminal_pending.get(&terminal_tab).copied() == Some(intent.request_id)
+        {
+            self.terminal_pending.remove(&terminal_tab);
+        }
     }
 
     /// Keep a given execution under one in-flight provisioning/disposition
@@ -804,6 +904,7 @@ impl ProvisioningSession {
     fn queue_terminate(
         &mut self,
         pane: Option<PaneId>,
+        terminal_tab: Option<TerminalTabId>,
         owner: ConnectionOwner,
         execution: ExecutionId,
         attachment: AttachmentId,
@@ -817,6 +918,7 @@ impl ProvisioningSession {
         };
         let intent = PendingIntent {
             pane,
+            terminal_tab,
             owner,
             request_id: terminate_id,
             geometry: PaneGeometry {

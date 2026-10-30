@@ -236,21 +236,27 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   var terminalExecutionIdentity: String? {
-    guard terminalBridgeIsConnected, let bridge else { return nil }
+    guard terminalBridgeIsConnected, let bridge, bridge.selectPresentedClient() else { return nil }
     return Self.identityString((
-      low: bridge.lastRecoveryResult.executionIDLow,
-      high: bridge.lastRecoveryResult.executionIDHigh
+      low: seyal_bridge_execution_id_low(),
+      high: seyal_bridge_execution_id_high()
     ))
   }
 
   var terminalRuntimeIdentity: String? {
-    guard terminalBridgeIsConnected, let bridge else { return nil }
-    return Self.identityString(bridge.runtimeIdentityWords)
+    guard terminalBridgeIsConnected, let bridge, bridge.selectPresentedClient() else { return nil }
+    return Self.identityString((
+      low: seyal_bridge_runtime_id_low(),
+      high: seyal_bridge_runtime_id_high()
+    ))
   }
 
   var terminalAttachmentIdentity: String? {
-    guard terminalBridgeIsConnected, let bridge else { return nil }
-    return Self.identityString(bridge.attachmentIdentityWords)
+    guard terminalBridgeIsConnected, let bridge, bridge.selectPresentedClient() else { return nil }
+    return Self.identityString((
+      low: seyal_bridge_attachment_id_low(),
+      high: seyal_bridge_attachment_id_high()
+    ))
   }
 
   /// Makes the authoritative recovery state observable to VoiceOver and to
@@ -692,7 +698,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// another test can leave on a different client.
   @discardableResult
   func selectTerminalBridge() -> Bool {
-    bridge?.selectClient() ?? false
+    bridge?.selectPresentedClient() ?? false
   }
 
   @discardableResult

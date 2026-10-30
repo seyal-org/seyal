@@ -23,6 +23,11 @@ impl ShellState {
         };
 
         let released = self.window_released_executions(id)?;
+        self.last_released_executions = self.window_released_terminal_bindings(id)?;
+        self.last_released_execution = self
+            .last_released_executions
+            .first()
+            .map(|(pane, _, execution)| (*pane, *execution));
         self.last_removed_tab_panes = self.window_pane_ids(id)?;
         self.last_released_execution = None;
         self.remove_window_record(id)?;
@@ -97,9 +102,27 @@ impl ShellState {
             (removed, successor_focus)
         };
         self.last_removed_tab_panes = removed.panes.keys().copied().collect();
-        self.last_released_execution = None;
+        self.last_released_executions = removed
+            .panes
+            .values()
+            .flat_map(|pane| {
+                pane.terminal_tabs.iter().filter_map(move |terminal| {
+                    terminal
+                        .execution
+                        .map(|execution| (pane.id, terminal.id, execution))
+                })
+            })
+            .collect();
+        self.last_released_execution = self
+            .last_released_executions
+            .first()
+            .map(|(pane, _, execution)| (*pane, *execution));
         for pane in removed.panes.values() {
-            if let Some(execution) = pane.execution {
+            for execution in pane
+                .terminal_tabs
+                .iter()
+                .filter_map(|terminal| terminal.execution)
+            {
                 self.unpresented.insert(execution, workspace_id);
             }
         }
@@ -138,7 +161,11 @@ impl ShellState {
             let Some(pane) = tab.panes.get_mut(&pane_id) else {
                 return Err(ShellError::UnknownPane);
             };
-            let released = pane.execution.take();
+            let released = std::mem::take(&mut pane.terminal_tabs)
+                .into_iter()
+                .filter_map(|terminal| terminal.execution.map(|execution| (terminal.id, execution)))
+                .collect::<Vec<_>>();
+            pane.selected_terminal_tab = None;
             let sibling_successor = tab.root.sibling_first_leaf(pane_id);
             let Some(root) = tab.root.removing(pane_id) else {
                 return Err(ShellError::UnknownPane);
@@ -161,8 +188,12 @@ impl ShellState {
             (released, focus_successor)
         };
         self.last_removed_tab_panes.clear();
-        self.last_released_execution = released.map(|execution| (pane_id, execution));
-        if let Some(execution) = released {
+        self.last_released_executions = released
+            .iter()
+            .map(|(terminal, execution)| (pane_id, *terminal, *execution))
+            .collect();
+        self.last_released_execution = released.first().map(|(_, execution)| (pane_id, *execution));
+        for (_, execution) in released {
             self.unpresented.insert(execution, workspace_id);
         }
         self.purge_missing_panes();
@@ -213,12 +244,36 @@ impl ShellState {
         let mut released = Vec::new();
         for tab in &window_ref.tabs {
             for pane in tab.panes.values() {
-                if let Some(execution) = pane.execution {
+                for execution in pane
+                    .terminal_tabs
+                    .iter()
+                    .filter_map(|terminal| terminal.execution)
+                {
                     released.push((execution, workspace_id));
                 }
             }
         }
         Ok(released)
+    }
+
+    fn window_released_terminal_bindings(
+        &self,
+        window: WindowId,
+    ) -> Result<Vec<(PaneId, seyal_core::TerminalTabId, ExecutionId)>, ShellError> {
+        let workspace = self.find_window(window).ok_or(ShellError::UnknownWindow)?;
+        let window_ref = workspace.window(window).ok_or(ShellError::UnknownWindow)?;
+        Ok(window_ref
+            .tabs
+            .iter()
+            .flat_map(|tab| tab.panes.values())
+            .flat_map(|pane| {
+                pane.terminal_tabs.iter().filter_map(move |terminal| {
+                    terminal
+                        .execution
+                        .map(|execution| (pane.id, terminal.id, execution))
+                })
+            })
+            .collect())
     }
 
     fn window_pane_ids(&self, window: WindowId) -> Result<Vec<PaneId>, ShellError> {

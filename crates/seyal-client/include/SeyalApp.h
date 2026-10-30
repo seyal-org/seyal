@@ -196,13 +196,16 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_EQUALIZE_TAB = 75,
     /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
     SEYAL_APP_ACTION_CLOSE_WINDOW = 76,
+    SEYAL_APP_ACTION_NEW_TERMINAL = 77,
+    SEYAL_APP_ACTION_SELECT_TERMINAL_TAB = 78,
+    SEYAL_APP_ACTION_CLOSE_TERMINAL_TAB = 79,
     /*
      * New shell after an ended Pane (SPEC-004 §18). reserved must be 0.
      * Without FLAG_HAS_EXECUTION: prepare the ended Pane.
      * With FLAG_HAS_EXECUTION and FLAG_HAS_ATTACHMENT: bind target_* onto
      * that Pane. Never selects a sibling by list order.
      */
-    SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION = 77
+    SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION = 80
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
@@ -706,6 +709,17 @@ typedef struct SeyalAppPaneBinding {
     uint64_t display_handle;
 } SeyalAppPaneBinding;
 
+typedef struct SeyalAppTerminalTab {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags; /* bit 0: selected in this Pane */
+    uint16_t reserved;
+    uint64_t terminal_lo;
+    uint64_t terminal_hi;
+    uint64_t execution_lo;
+    uint64_t execution_hi;
+} SeyalAppTerminalTab;
+
 /* Exact Pane-scoped recovery target. size == 0 means none is available. */
 #define SEYAL_APP_PANE_RECOVERY_TARGET_ACTIVE 1u
 #define SEYAL_APP_PANE_RECOVERY_RETRYABLE 2u
@@ -916,6 +930,8 @@ SeyalAppNativeEffect seyal_app_native_effect(uint64_t handle, uint32_t index);
 int32_t seyal_app_record_compatible(uint16_t version, uint16_t size, uint16_t kind);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
 SeyalAppPaneBinding seyal_app_pane_binding(uint64_t handle, uint32_t index);
+uint32_t seyal_app_pane_terminal_tab_count(uint64_t handle, uint64_t pane_lo, uint64_t pane_hi);
+SeyalAppTerminalTab seyal_app_pane_terminal_tab(uint64_t handle, uint64_t pane_lo, uint64_t pane_hi, uint32_t index);
 SeyalAppPaneRecoveryTarget seyal_app_active_pane_recovery_target(uint64_t handle);
 SeyalAppPaneRecoveryTarget seyal_app_pane_recovery_target_for_pane(
     uint64_t handle,

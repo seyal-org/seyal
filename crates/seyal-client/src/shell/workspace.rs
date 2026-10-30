@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::presentation::PresentationMode;
-use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use super::tree::PaneTree;
 use super::ShellError;
@@ -12,9 +12,37 @@ use super::ShellError;
 pub(super) struct Pane {
     pub(super) id: PaneId,
     pub(super) title: String,
-    pub(super) execution: Option<ExecutionId>,
+    pub(super) terminal_tabs: Vec<TerminalTab>,
+    pub(super) selected_terminal_tab: Option<TerminalTabId>,
     pub(super) allows_implicit_execution_bootstrap: bool,
     pub(super) presentation_mode: PresentationMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TerminalTab {
+    pub(super) id: TerminalTabId,
+    pub(super) execution: Option<ExecutionId>,
+}
+
+impl Pane {
+    pub(super) fn selected_terminal(&self) -> Option<&TerminalTab> {
+        let selected = self.selected_terminal_tab?;
+        self.terminal_tabs
+            .iter()
+            .find(|terminal| terminal.id == selected)
+    }
+
+    pub(super) fn selected_terminal_mut(&mut self) -> Option<&mut TerminalTab> {
+        let selected = self.selected_terminal_tab?;
+        self.terminal_tabs
+            .iter_mut()
+            .find(|terminal| terminal.id == selected)
+    }
+
+    pub(super) fn execution(&self) -> Option<ExecutionId> {
+        self.selected_terminal()
+            .and_then(|terminal| terminal.execution)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,10 +151,15 @@ impl Workspace {
                 .tabs
                 .into_iter()
                 .map(|tab| {
+                    let terminal_id = TerminalTabId::new();
                     let pane = Pane {
                         id: tab.pane.id,
                         title: tab.pane.title,
-                        execution: None,
+                        terminal_tabs: vec![TerminalTab {
+                            id: terminal_id,
+                            execution: None,
+                        }],
+                        selected_terminal_tab: Some(terminal_id),
                         allows_implicit_execution_bootstrap: tab
                             .pane
                             .allows_implicit_execution_bootstrap,

@@ -24,9 +24,9 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 917
+acknowledged_loc = 923
 issue = 1379
-reason = "Flow history retention across shell-exit poll loss stays on the Metal surface that already owns historyRanges; #1379 splits hasRetainedHistoryPresentation from hasPreparedState (SPEC-009 Usable) so retained history presents after wipe without false Usable, and AX exposes history-instances/regions/clips."
+reason = "Flow history retention across shell-exit poll loss stays on the Metal surface that already owns historyRanges; #1379 splits hasRetainedHistoryPresentation from hasPreparedState (SPEC-009 Usable) so retained history presents after wipe without false Usable, AX exposes history-instances/regions/clips, and #1382 pane-terminal routing lands on the same thin host surface."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -48,15 +48,15 @@ reason = "Host Pane region/divider projection stays one layout module; #1219 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 865
+acknowledged_loc = 967
 issue = 1379
-reason = "Portable provisioning reducer stays one cold-path authority; #1379 adds release_dead_binding so New shell can Create+Bind an ended Pane without enqueueing terminate or leaving a binding that blocks a later split leaf."
+reason = "Portable provisioning reducer remains the cold-path request/result authority after #1381 moves tab-specific binding operations into terminal_bindings.rs; #1379 adds release_dead_binding so New shell can Create+Bind an ended Pane without enqueueing terminate or leaving a binding that blocks a later split leaf."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 859
-issue = 936
-reason = "The existing create/close/terminate/split adapter now also binds per-Pane recovery state and invalidates it at the pane lifecycle boundary; focused terminate retains authority after registry loss but still fails closed unless the Controller client is live."
+acknowledged_loc = 978
+issue = 1381
+reason = "The create/close/terminate/split adapter also routes terminal-tab requests to their exact Runtime execution and preserves sibling bindings under #1381."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -228,9 +228,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer;
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 958
-issue = 1167
-reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, #1144 adds Tab-to-Window activation lookup, #1218 adds two equalize dispatch arms, and #1167 only declares the PT6 suite module. Snapshot encoding stays in shell/snapshot.rs; equalize dispatch lives in equalize.rs and tree recursion in tree.rs."
+acknowledged_loc = 974
+issue = 1381
+reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1381 moves pane-local terminal-tab operations and queries to terminal_tabs.rs while the shared reducer retains topology and identity invariants."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -241,12 +241,6 @@ reason = "Thin AppKit chrome host stays one cold-path façade; #866/#1218 keep e
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/app/session.rs"
-acknowledged_loc = 723
-issue = 1379
-reason = "ApplicationRoot bind/session façade stays one module; #1379 keeps Flow authority on shell exit, retains the registry client after NoRunningExecution (match seyal_bridge_poll) so final Block history can drain, distinguishes other client loss, and refuses generic Bind while a replacement bootstrap is pending so a focused sibling is not stolen."
-
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/keybinding/tests.rs"
@@ -256,9 +250,15 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 841
+acknowledged_loc = 859
 issue = 1379
-reason = "ABI action decoding remains one versioned match surface; #1379 adds kind 77 CreateReplacementExecution on the existing target execution and attachment fields, drops the DISCONNECT_RECONSTRUCTION reserved overload, and maps COMMAND_BLOCK_FLAG_CANVAS_FLOOR into RuntimeBlockRecord."
+reason = "ABI action decoding remains one versioned match surface; #1381 adds terminal-tab kinds 77–79, #1379 adds kind 80 CreateReplacementExecution and maps COMMAND_BLOCK_FLAG_CANVAS_FLOOR into RuntimeBlockRecord."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/app/session.rs"
+acknowledged_loc = 755
+issue = 1381
+reason = "Session adoption and Runtime attachment reconciliation also register exact terminal-tab bindings under #1381 so portable selected-terminal authority follows the attached execution; #1379 keeps the registry client after shell exit for Flow history drain."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"

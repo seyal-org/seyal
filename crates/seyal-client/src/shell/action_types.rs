@@ -1,6 +1,6 @@
 //! Typed host-to-Rust shell commands and their shared value types.
 
-use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use crate::pane_layout::SplitRatio;
 
@@ -129,6 +129,26 @@ pub enum ShellAction {
     BindExecution {
         pane: PaneId,
         execution: ExecutionId,
+    },
+    NewTerminalTab {
+        pane: PaneId,
+        containment_generation: u64,
+    },
+    SelectTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+    },
+    BindTerminalExecution {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        execution: ExecutionId,
+    },
+    UnbindTerminal(PaneId, TerminalTabId),
+    /// Finalize removal only after the exact execution's terminate result succeeds.
+    CloseTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        containment_generation: u64,
     },
     /// Record a live execution with no Pane binding (tests / Runtime sync).
     RecordUnpresented {

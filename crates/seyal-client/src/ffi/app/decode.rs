@@ -2,7 +2,9 @@
 
 use std::{slice, str, time::Duration};
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{
+    AttachmentId, BlockId, ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId,
+};
 use seyal_protocol::framing::{CommandBlock, CommandBlockState, COMMAND_BLOCK_FLAG_CANVAS_FLOOR};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
@@ -284,34 +286,6 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             })
         }
         57 => Ok(AppAction::DisconnectReconstruction),
-        // New shell: no `reserved` overload. Absent execution prepares the
-        // ended Pane; present target_* binds that exact created ExecutionId.
-        77 => {
-            if action.reserved != 0 {
-                return Err(-6);
-            }
-            if action.flags & FLAG_HAS_EXECUTION == 0 {
-                return Ok(AppAction::CreateReplacementExecution {
-                    execution: None,
-                    attachment: None,
-                    pty_generation: 0,
-                });
-            }
-            if action.flags & FLAG_HAS_ATTACHMENT == 0 {
-                return Err(-6);
-            }
-            Ok(AppAction::CreateReplacementExecution {
-                execution: Some(ExecutionId::from_bytes(id16(
-                    action.target_execution_lo,
-                    action.target_execution_hi,
-                )?)),
-                attachment: Some(AttachmentId::from_bytes(id16(
-                    action.target_attachment_lo,
-                    action.target_attachment_hi,
-                )?)),
-                pty_generation: action.target_generation,
-            })
-        }
         58 => Ok(AppAction::MoveSplitDivider {
             pane: PaneId::from_bytes(id16(
                 action.target_execution_lo,
@@ -439,6 +413,50 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             containment_generation: action.target_generation,
         }),
+        77 => Ok(AppAction::NewTerminal),
+        78 => Ok(AppAction::SelectTerminalTab {
+            pane: fence.pane,
+            terminal_tab: TerminalTabId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        79 => Ok(AppAction::CloseTerminalTab {
+            pane: fence.pane,
+            terminal_tab: TerminalTabId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            containment_generation: action.target_generation,
+        }),
+        // New shell: no `reserved` overload. Absent execution prepares the
+        // ended Pane; present target_* binds that exact created ExecutionId.
+        80 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            if action.flags & FLAG_HAS_EXECUTION == 0 {
+                return Ok(AppAction::CreateReplacementExecution {
+                    execution: None,
+                    attachment: None,
+                    pty_generation: 0,
+                });
+            }
+            if action.flags & FLAG_HAS_ATTACHMENT == 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::CreateReplacementExecution {
+                execution: Some(ExecutionId::from_bytes(id16(
+                    action.target_execution_lo,
+                    action.target_execution_hi,
+                )?)),
+                attachment: Some(AttachmentId::from_bytes(id16(
+                    action.target_attachment_lo,
+                    action.target_attachment_hi,
+                )?)),
+                pty_generation: action.target_generation,
+            })
+        }
         _ => Err(-6),
     }
 }

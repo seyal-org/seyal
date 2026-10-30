@@ -1,6 +1,6 @@
 //! Shell tab/pane and chrome inspector apply paths.
 
-use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use super::*;
 use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
@@ -10,6 +10,45 @@ use crate::presentation::{PresentationAction, PresentationIdentity};
 use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
+    pub(super) fn select_terminal_tab(
+        &mut self,
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+    ) -> Result<(), AppError> {
+        self.shell
+            .apply(ShellAction::SelectTerminalTab { pane, terminal_tab })
+            .map_err(|_| AppError::UnknownPane)?;
+        let execution = self
+            .shell
+            .terminal_execution(pane, terminal_tab)
+            .map_err(|_| AppError::UnknownPane)?;
+        if execution.is_some() {
+            let _ = self
+                .provisioning
+                .select_terminal_binding(pane, terminal_tab);
+        }
+        if let Some(authority) = self.terminal_authorities.get(&terminal_tab).copied()
+            && Some(authority.execution) == execution
+        {
+            self.pane_authorities.insert(pane, authority);
+        } else {
+            self.pane_authorities.remove(&pane);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(raw) = self.terminal_client_raws.get(&terminal_tab).copied() {
+            self.pane_client_raws.insert(pane, raw);
+        } else {
+            self.pane_client_raws.remove(&pane);
+        }
+        if self.shell.snapshot().focused_pane == pane {
+            self.activate_focused_pane_authority();
+        }
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
     pub(super) fn close_pane(
         &mut self,
         id: PaneId,

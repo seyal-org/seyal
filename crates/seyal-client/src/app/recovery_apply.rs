@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, TerminalTabId};
 
 use super::*;
 use crate::composer::RuntimeComposerEligibility;
@@ -294,17 +294,38 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Install or replace per-pane Controller authority and activate it when
-    /// that pane is focused. Portable: display-handle fan-out is macOS-only.
+    /// Install or replace per-pane Controller authority for the selected
+    /// terminal tab; activate when that pane is focused. Portable: display
+    /// refresh / handle fan-out is macOS-only (#1379 Linux compile + #1382 tabs).
     pub(super) fn install_pane_authority(
         &mut self,
         pane: PaneId,
         evidence: BindingEvidence,
     ) -> Result<(), AppError> {
+        let terminal_tab = self
+            .shell
+            .selected_terminal_tab(pane)
+            .map_err(|_| AppError::UnknownPane)?
+            .ok_or(AppError::UnboundUnauthorized)?;
+        self.install_terminal_authority(pane, terminal_tab, evidence)
+    }
+
+    pub(super) fn install_terminal_authority(
+        &mut self,
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        evidence: BindingEvidence,
+    ) -> Result<(), AppError> {
         if evidence.pty_generation == 0 {
             return Err(AppError::ZeroPtyGeneration);
         }
-        if self.shell.pane_execution(pane).ok().flatten() != Some(evidence.execution) {
+        if self
+            .shell
+            .terminal_execution(pane, terminal_tab)
+            .ok()
+            .flatten()
+            != Some(evidence.execution)
+        {
             return Err(AppError::StaleExecution);
         }
         self.bind_pane_recovery(pane, evidence.execution);
@@ -316,10 +337,16 @@ impl ApplicationRoot {
             controller: evidence.controller,
             pty_generation: evidence.pty_generation,
         };
+        self.terminal_authorities.insert(terminal_tab, authority);
+        if self.shell.selected_terminal_tab(pane).ok().flatten() != Some(terminal_tab) {
+            return Ok(());
+        }
         self.pane_authorities.insert(pane, authority);
         if self.shell.snapshot().focused_pane == pane {
             let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
                 .ok_or(AppError::ZeroPtyGeneration)?;
+            // A prior tab may already hold presentation identity; clear then bind
+            // so CreateTab's focused leaf becomes the live SPEC-008 fence.
             let _ = self.presentation.apply(PresentationAction::ClearIdentity);
             self.presentation
                 .apply(PresentationAction::BindIdentity(identity))

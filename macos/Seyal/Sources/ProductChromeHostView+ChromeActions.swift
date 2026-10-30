@@ -35,11 +35,55 @@ extension ProductChromeHostView {
         routeFocus()
     }
 
+    @discardableResult
+    func focusPaneForPaneAction(paneLo: UInt64, paneHi: UInt64) -> Bool {
+        let current = seyal_app_shell(pane.appHandle)
+        if current.focused_pane_lo == paneLo && current.focused_pane_hi == paneHi {
+            return true
+        }
+        focusPaneRegion(lo: paneLo, hi: paneHi)
+        let shell = seyal_app_shell(pane.appHandle)
+        return shell.focused_pane_lo == paneLo && shell.focused_pane_hi == paneHi
+    }
+
     @objc func createTab() {
         // ADR-015: always forward CreateTab. New shell after exit is a separate
         // typed recovery action (`seyal-new-shell`); Swift must not reinterpret
         // "+" / menu New Tab as replacement bootstrap (#1379).
         applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
+    }
+
+    @objc func createTerminal() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_NEW_TERMINAL.rawValue), reserved: 0)
+    }
+
+    func selectTerminalTab(paneLo: UInt64, paneHi: UInt64, terminalLo: UInt64, terminalHi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SELECT_TERMINAL_TAB.rawValue)
+        action.fence_pane_lo = paneLo
+        action.fence_pane_hi = paneHi
+        action.target_execution_lo = terminalLo
+        action.target_execution_hi = terminalHi
+        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
+        reconcileChrome()
+        routeFocus()
+    }
+
+    func closeTerminalTab(paneLo: UInt64, paneHi: UInt64, terminalLo: UInt64, terminalHi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_TERMINAL_TAB.rawValue)
+        action.fence_pane_lo = paneLo
+        action.fence_pane_hi = paneHi
+        action.target_execution_lo = terminalLo
+        action.target_execution_hi = terminalHi
+        action.target_generation = seyal_app_shell(pane.appHandle).containment_generation
+        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
+        reconcileChrome()
+        routeFocus()
     }
 
     /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
@@ -82,8 +126,18 @@ extension ProductChromeHostView {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 1)
     }
 
-    @objc func closeFocusedPane(_ sender: NSButton) {
-        applyIdentity(UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue), button: sender)
+    func closePane(paneLo: UInt64, paneHi: UInt64) {
+        guard focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+        action.target_execution_lo = paneLo
+        action.target_execution_hi = paneHi
+        action.target_generation = seyal_app_shell(pane.appHandle).containment_generation
+        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
+        reconcileChrome()
+        routeFocus()
     }
 
     @objc func openAttention(_ sender: NSButton) {
@@ -162,29 +216,21 @@ extension ProductChromeHostView {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
         newTabButton.setAccessibilityIdentifier("seyal-new-tab")
+        newTabButton.setAccessibilityLabel("New Layout")
+        newTabButton.toolTip = "New Layout"
         newTabButton.target = self
         newTabButton.action = #selector(createTab)
         closeTabButton.setAccessibilityIdentifier("seyal-close-tab")
+        closeTabButton.setAccessibilityLabel("Close Layout")
+        closeTabButton.toolTip = "Close Layout"
         closeTabButton.target = self
         closeTabButton.action = #selector(closeActiveTab(_:))
-        splitRightButton.setAccessibilityIdentifier("seyal-split-right")
-        splitRightButton.target = self
-        splitRightButton.action = #selector(splitFocusedRight)
-        splitDownButton.setAccessibilityIdentifier("seyal-split-down")
-        splitDownButton.target = self
-        splitDownButton.action = #selector(splitFocusedDown)
-        closePaneButton.setAccessibilityIdentifier("seyal-close-pane")
-        closePaneButton.target = self
-        closePaneButton.action = #selector(closeFocusedPane(_:))
     }
 
     func configureCloseButtons(shell: SeyalAppShell) {
         closeTabButton.idLo = shell.active_tab_lo
         closeTabButton.idHi = shell.active_tab_hi
         closeTabButton.containmentGeneration = shell.containment_generation
-        closePaneButton.idLo = shell.focused_pane_lo
-        closePaneButton.idHi = shell.focused_pane_hi
-        closePaneButton.containmentGeneration = shell.containment_generation
     }
 
     /// PT5: name ids only. Rust owns zoom/layout; stale ids fail closed.

@@ -14,10 +14,24 @@ enum IsolatedHostedRuntime {
   /// app under test only sees a variable this launch sets.
   static let forwardCommandEnvironmentKey = "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
 
+  /// UI test runners are sandboxed and cannot create children directly under
+  /// `/tmp`. Its private temporary directory is writable by the runner, and
+  /// the non-sandboxed app under test can still use the explicit path.
+  private static var temporaryRoot: URL {
+    FileManager.default.temporaryDirectory
+  }
+
   static func makeDirectory() -> String {
-    let url = URL(fileURLWithPath: "/tmp").appendingPathComponent(
-      "s860ui-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(8))",
+    let url = temporaryRoot.appendingPathComponent(
+      // Keep the AF_UNIX control socket path below sun_path's limit even
+      // inside XCTest's long sandboxed temporary-directory path.
+      "r\(UUID().uuidString.prefix(8))",
       isDirectory: true
+    )
+    XCTAssertLessThanOrEqual(
+      url.path.utf8.count + 1 + "control.sock".utf8.count,
+      103,
+      "isolated Runtime socket path must fit sockaddr_un.sun_path"
     )
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     try? FileManager.default.setAttributes(
@@ -39,7 +53,7 @@ enum IsolatedHostedRuntime {
   /// A missing file must fail the test; the helper ignores a path that is not on disk
   /// and would otherwise fall back to the account shell.
   static func writeShellConfig() -> String {
-    let url = URL(fileURLWithPath: "/tmp").appendingPathComponent(
+    let url = temporaryRoot.appendingPathComponent(
       "s936-shell-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(8)).toml"
     )
     let text = "[shell]\nprogram = \"/bin/zsh\"\n"

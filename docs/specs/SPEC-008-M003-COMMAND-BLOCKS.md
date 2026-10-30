@@ -1,8 +1,8 @@
 # SPEC-008 — M003 command Blocks, Pane composer and presentation modes
 
-- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`) and the duration / shell-metadata boundary amendment accepted by #686 / PR #1022
-- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686)
-- **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract
+- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`) and the duration / shell-metadata boundary amendment accepted by #686 / PR #1022. Amendments below that cite ADR-026 are normative on merge of the ADR-026 acceptance PR by a non-author maintainer under #1384. An author or agent comment is not that acceptance.
+- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 alignment accepted 2026-10-29 (#1384)
+- **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract. Accepted ADR-026 (#1384) is the authority for the session-bootstrap and input-target amendments in §3.1, §3.2, §3.5, §4, §5.5, §8 and §10.
 - **Depends on:** accepted SPEC-001 through SPEC-007 and completed Pass 7
 
 ## 1. Observable contract
@@ -83,6 +83,11 @@ If the current projection protocol cannot produce the running Block's live tail,
 implementation must refine that projection first. Rendering the full current
 terminal grid behind the Block transcript is not an allowed substitute.
 
+**Accepted ADR-026 (#1384):** Relay is a line-level
+Flow input mode, distinct from Raw. It never routes character-level input.
+When character-level semantics are required, presentation still transitions to
+full-Pane Raw first (ADR-009 invariant 11).
+
 ### 3.2 Raw
 
 Raw is a full-Pane conventional terminal presentation over the same canonical
@@ -99,6 +104,10 @@ Enter Raw when any of the following applies:
 
 Entering Raw yields Flow interaction/composer. Raw is a replacement presentation,
 not another viewport added to Flow.
+
+**Accepted ADR-026 (#1384):** labeled Relay is not
+Raw and does not satisfy this section. Raw remains the full-Pane
+character-level presentation.
 
 Leaving Raw re-evaluates current structured eligibility. Existing trusted Block
 history remains stable; untrusted raw interaction is not retroactively turned
@@ -155,7 +164,13 @@ ExecutionId
 + presentation/input epoch
 + relevant canonical generation and terminal mode state
 + trusted shell-integration generation/state
++ input target            # Accepted ADR-026 (#1384); carried on SPEC-004 type 45 once shipped
++ target generation       # Accepted ADR-026 (#1384); carried on SPEC-004 type 45 once shipped
 ```
+
+A submission is bound to the target and generation the client displayed
+(ADR-026 §3.2); a mismatch is a correlated refusal and the draft is kept.
+Type 45 is allocated by Accepted ADR-026 and is not yet shipped on the wire.
 
 The exact wire/internal representation may differ. The observable requirement is
 that stale evidence cannot authorize a newer execution, attachment or
@@ -190,8 +205,12 @@ snapshot.
 - Shift-Return inserts a newline;
 - failed admission leaves the draft intact and exposes a functional error;
 - successful admission creates the next Block and preserves Pane focus;
-- while a normal foreground command occupies the shell, the composer is
-  disabled or represented by real busy state as specified by product behavior;
+- composer availability follows the Accepted ADR-026 (#1384) §3.2 input
+  target. A `TrustedShell` target, including `TrustedShell(session)`, is
+  composer mode `Submit`. A `ForegroundProgram` target may be labeled
+  `Relay`. Neither mode is implied by Block lifecycle `Running` alone. When
+  the input target is `None`, the composer is disabled or represented by real
+  busy state;
 - supported Pane-level control actions such as an explicit interrupt may route
   through typed input semantics without turning empty Flow space into a raw
   terminal surface;
@@ -308,7 +327,8 @@ M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
 | Interactive Bash | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
 | Interactive fish | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
 | `/bin/sh` and any other shell without an accepted integration | Unsupported → full-Pane Raw; no guessed Blocks |
-| Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
+| Nested shell / SSH child (no consent) | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim. Unsupported for trusted Blocks → Raw, or labeled relay (Accepted ADR-026) |
+| Consented session (SSH / `docker exec -it` / interactive bash or zsh), ADR-026 | Session-trusted `A`/`C`/`D` with a session secret; session-scoped Blocks; composer `Submit` at a session prompt (Accepted ADR-026 #1384). Decline, unsupported shell, or failed bootstrap → labeled relay / Raw. The offer hint never authorizes bootstrap |
 | Startup working directory | Launch/config policy (#676 / related launch-policy Issues) may supply initial CWD; not inferred from terminal output |
 | Live CWD / OSC 7 | **Deferred** for M003 Block semantics; OSC 7 and other terminal-emitted path text remain untrusted and must not populate Block or Workspace authority |
 
@@ -316,9 +336,19 @@ M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
 
 - **Accepted for M003:** zsh trusted integration; Unsupported/Raw for all other
   interactive shells; Runtime-owned completed-Block duration as above.
-- **Deferred for M003:** trusted live CWD; Bash/fish (or other) integrations;
-  remote/SSH Block or live-CWD claims. Any later requirement needs a separate
-  architecture/spec decision before production readiness.
+- **Deferred for M003:** trusted live CWD; Bash/fish (or other) local
+  integrations. Live-CWD claims stay deferred. Remote/SSH Block claims are
+  no longer in this deferred list.
+- **Accepted under ADR-026 (#1384), consent-gated:** remote/SSH Block
+  claims. Decline does not create a trusted remote Block. Local
+  Bash/fish Flow integration and trusted live CWD stay deferred. The
+  contract is normative; production bootstrap is not yet shipped.
+- **Default offer-hint argv (ADR-026 §4.2):**
+  the proactive hint matches a foreground process-group leader whose program
+  basename is `ssh`. Nested `ssh` is excluded: an `ssh` whose host Block is
+  already a session scope is not a proactive hint. The list is
+  user-configurable. The hint never authorizes bootstrap. An explicit "Enable
+  Blocks for this session" action does not require the hint.
 - Evidence disposition and remaining zsh gaps are recorded in
   `docs/evidence/m003-686-shell-metadata-decision.md`.
 
@@ -384,6 +414,12 @@ a different execution, attachment or presentation epoch.
 | secret/interactive child requiring direct input | Pane becomes Raw before arbitrary terminal input is routed |
 | Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
 | unsupported/nested SSH interaction | full-Pane Raw fallback; no simultaneous Flow + raw viewport |
+| consented session (ADR-026) | Discrete session-scoped Blocks under the host Running Block, and a retained composer (`Submit`) at a session-trusted prompt (Accepted ADR-026) |
+| declined session (ADR-026) | Labeled relay; no guessed Block |
+| forged remote `A`/`D` (ADR-026) | Ignored; no secret match, so no trusted session transition |
+| depth-two session (ADR-026) | Relay or Raw; no second session secret. A candidate requires F4 ∈ {None, Declined, Failed}; arming while `Trusted(_)` is forbidden |
+| auth/password prompt (ADR-026) | Local canonical-no-echo: bootstrap is not offered and relay is suppressed when F9 is available. A remote password prompt remains a residual plaintext risk even when F9 is available. Raw is held during `Armed`/`Delivering` and available otherwise |
+| session alternate-screen (ADR-026) | TUI takeover of the Pane; composer hidden |
 | Neovim/htop/full-screen app | TUI owns full Pane; composer/Flow interaction absent |
 | TUI exit | same execution returns to Flow or Raw after eligibility re-evaluation |
 | detach/reattach | Block IDs/anchors and selected presentation recover without duplicate execution |
@@ -423,5 +459,5 @@ This specification does not require:
 - AppKit text reconstruction of terminal output;
 - a portable cross-platform GUI abstraction;
 - prompt/output scraping to recover missing trusted command boundaries;
-- Bash/fish/remote trusted integration or trusted live CWD in M003;
+- Bash/fish local Flow integration or trusted live CWD in M003. Remote trusted integration is consent-gated per Accepted ADR-026 and is not covered by this non-goal; local Bash/fish Flow integration and trusted live CWD remain non-goals;
 - commercial/agent/cloud services on the terminal path.

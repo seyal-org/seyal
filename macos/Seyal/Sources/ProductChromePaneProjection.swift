@@ -48,5 +48,6 @@ extension ProductChromeHostView {
         guard bridge.windowFocusedDisplayHandle != focusedDisplayHandle else { return }
         bridge.windowFocusedDisplayHandle = focusedDisplayHandle
         bridge.publishCurrentFrame()
+        bridge.refreshPresentedTerminalTimeline()
     }
 }

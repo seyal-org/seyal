@@ -370,6 +370,8 @@ The window/tab contract is #1000: [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LI
 
 The pane move/reparent/zoom/equalize/directional-focus contract is #1001: [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Accepted** on merge of PR #1208) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md). Focus-history retention and Resource Addressing are #1004 (ADR-019 / SPEC-022 **Accepted**). Remaining PT/N children are listed in §5.3.
 
+Pane-local terminal tabs are **Proposed, not implementation authority**, under #1381 / [`ADR-025`](../architecture/ADR-025-PANE-LOCAL-TERMINAL-TABS.md) and [`SPEC-031`](../specs/SPEC-031-M003-PANE-LOCAL-TERMINAL-TABS.md). They change the current one-execution-per-Pane model. Do not add terminal tabs to the existing Pane binding until ADR-025 and SPEC-031 are accepted and the session-inventory, provisioning, attachment-capacity, and implementation Issues are reconciled. Proposed lifecycle distinguishes explicit terminal-session termination from detach-only Pane/outer-Tab/Window close; durable layout/session metadata remains M004 under #832 / proposed ADR-023.
+
 ### 6.3 #923 — split-tree projection after #922
 
 Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane hosts the live terminal/Metal/composer surface in that slice. Multiple simultaneous live PTY/Metal surfaces stay #936. The historical Cursor branch has been explicitly abandoned/superseded. #923 does **not** require #922 to merge: once #922 publishes a refreshed/current consumable branch or PR with stable action/snapshot fields, #923 may start stacked on that head and rebase after #922 lands.

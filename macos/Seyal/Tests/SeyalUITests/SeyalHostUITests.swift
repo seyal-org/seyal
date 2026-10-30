@@ -196,10 +196,15 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["seyal-blocks-scroll"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["seyal-blocks"].waitForExistence(timeout: 5))
-        // Core Terminal chrome (#922): left panel, tab strip, and inspector
-        // are visible by default alongside the Flow composer/Blocks surface.
+        // Core chrome: workspace/layout navigation, Pane-local terminal tabs,
+        // and inspector are visible alongside the Flow composer/Blocks surface.
         XCTAssertTrue(app.descendants(matching: .any)["seyal-inspector"].firstMatch.isHittable)
-        XCTAssertTrue(app.descendants(matching: .any)["seyal-tab-strip"].firstMatch.isHittable)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-strip"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
+            ).firstMatch.isHittable
+        )
         XCTAssertTrue(app.descendants(matching: .any)["seyal-left-tabs"].firstMatch.isHittable)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }

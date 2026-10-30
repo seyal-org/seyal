@@ -480,9 +480,19 @@ final class RustDisplayBridge {
             return
           }
           self.onRegistryHandlePolled?(handle)
+          if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
+            self.runtimeBlockMetadata = self.currentBlockMetadata()
+            self.publishHistoryRanges()
+            self.publishComposerResult()
+            self.publishComposerStatus()
+            let revision = seyal_bridge_block_timeline_revision()
+            if revision != self.lastTimelineRevision {
+              self.lastTimelineRevision = revision
+              self.onTimeline()
+            }
+          }
           _ = self.selectClient()
           self.publishCurrentFrame()
-          self.publishComposerStatus()
           self.synchronizeWriteReadinessSource()
         }
       }
