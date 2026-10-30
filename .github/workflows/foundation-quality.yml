@@ -7,17 +7,39 @@ on:
   # schedule/workflow_dispatch for non-PR evidence.
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: foundation-quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  classify-changes:
+    name: classify-pr-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - id: classify
+        name: Classify changed paths (unknown paths fail closed)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/classify-pr-paths.py --base "$BASE_SHA" --head "$HEAD_SHA"
+
   repository-policy:
     name: repository-policy
+    needs: classify-changes
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -26,6 +48,17 @@ jobs:
           fetch-depth: 0
       - name: Shell syntax
         run: bash -n scripts/*.sh
+      - name: Require successful path classification
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        env:
+          CLASSIFIER_RESULT: ${{ needs.classify-changes.result }}
+        run: test "$CLASSIFIER_RESULT" = success
+      - name: Verify PR path classification (fail closed)
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/classify-pr-paths.py --base "$BASE_SHA" --head "$HEAD_SHA"
       - name: Governance structure
         run: make governance-check
       - name: PR Issue contract validator self-test
@@ -35,6 +68,11 @@ jobs:
         env:
           SEYAL_PR_BODY: ${{ github.event.pull_request.body }}
         run: python3 scripts/check-pr-issue-contract.py
+      - name: Independent ADR acceptance review
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/check-adr-acceptance.py
       - name: Local documentation links
         run: python3 scripts/check-doc-links.py
       - name: Architecture layering
@@ -64,9 +102,15 @@ jobs:
         run: python3 scripts/fuzz-smoke.py
       - name: Validator negative fixtures
         run: python3 scripts/test-ci-validators.py
+      - name: PR risk policy self-test
+        run: python3 scripts/test-pr-risk-policy.py
+      - name: ADR acceptance self-test
+        run: python3 scripts/test-adr-acceptance.py
 
   rust-and-harness-quality:
     name: rust-and-harness-quality
+    needs: classify-changes
+    if: (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') && needs.classify-changes.result == 'success' && needs.classify-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -84,6 +128,8 @@ jobs:
 
   native-macos-smoke:
     name: native-macos-smoke
+    needs: classify-changes
+    if: (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') && needs.classify-changes.result == 'success' && needs.classify-changes.outputs.docs_only != 'true'
     runs-on: macos-15
     timeout-minutes: 35
     steps:

@@ -101,11 +101,15 @@ scroll algorithm rewrite; see `crates/seyal-terminal/benches/vt_scroll_state.rs`
 
 ## Public OSS repository CI
 
-The canonical public Seyal repository owns the authoritative GitHub Actions quality gates. The `Foundation Quality` workflow uses minimal `contents: read` permissions, pins external actions by reviewed full commit SHA, cancels superseded runs on the same ref, and keeps fast PR responsibilities explicit.
+The canonical public Seyal repository owns the authoritative GitHub Actions quality gates. The `Foundation Quality` workflow grants read-only `contents` and `pull-requests` permissions, pins external actions by reviewed full commit SHA, cancels superseded runs on the same ref, and keeps fast PR responsibilities explicit.
 
-### Required Foundation Quality jobs (every PR)
+### Required Foundation Quality jobs
 
-These stable job names are the Pass-1 required checks on `master`. Foundation Quality runs on `pull_request` only; post-merge `push` to `master` is intentionally omitted so merge does not re-spend the full suite after the same jobs already gated the PR. A renamed/replaced job must update this document and the ruleset together; a missing check must never be interpreted as a pass.
+These stable job names are the Pass-1 required checks on `master`. The workflow runs on every `pull_request`; post-merge `push` to `master` is intentionally omitted so merge does not re-spend the same suite. It also runs when a PR review is submitted, edited, or dismissed, so ADR acceptance is reevaluated as review state changes. Review events rerun the checks selected for the current diff tier; docs-only PRs stay fast, and product PRs do not receive a skipped success in place of a required product check. A renamed/replaced job must update this document and the ruleset together.
+
+The fast `classify-pr-changes` job reads the complete base-to-head diff with rename detection disabled, so both sides of a rename are classified. Only a non-empty diff made entirely of root Markdown files or Markdown/images/PDFs under `docs/` is `docs-only`. Empty diffs, workflow/scripts/configuration, site code, security-sensitive paths, unknown extensions, mixed changes, and any classification failure fail closed as product changes. `repository-policy` independently reruns the classifier and fails if the classifier job did not succeed. Do not add workflow-level path filters to this required workflow.
+
+For `docs-only` PRs, GitHub conditionally skips `rust-and-harness-quality` and `native-macos-smoke`; all product/configuration changes run both. The job names remain present and their conditional skips satisfy required checks according to [GitHub's skipped-job status-check rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions). Changes to `site/` still run the separate path-filtered Docs workflow. A skipped check does not establish terminal correctness; only policy/docs validation ran for that PR.
 
 - **`repository-policy`** (ubuntu) — shell syntax, governance structure, local documentation links, architecture layering, hot-path/benchmark/UI-test contracts, handwritten production structural-debt ratchet, harness contracts, fuzz-registry smoke, and controlled negative fixtures proving repository validators reject invalid inputs.
 - **`rust-and-harness-quality`** (ubuntu) — pinned Rust bootstrap, production Rust workspace build, `make check` (format, Clippy with warnings denied, unit tests, layering and harness checks), and `make bench` as a **portable harness smoke** (macOS-only native benches are skipped; no performance claim).
@@ -114,6 +118,16 @@ These stable job names are the Pass-1 required checks on `master`. Foundation Qu
   - `SEYAL_CODESIGN_IDENTITY=-` — unsigned CI artifact only, not a release/signing proof.
 
 `SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK=0` is an honesty contract, not a weakened threshold. Interactive/local acceptance and Pass 6/10 headed presentation evidence must run with `SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK=1` (or an equivalent headed host that produces presentation-proxy samples). **Green Foundation CI with display-link off is not Pass 6 presentation proof and must not be cited as such in Pass 10 evidence.**
+
+### ADR acceptance review enforcement
+
+A PR that changes an ADR status from **Proposed** to **Accepted** must have an `APPROVED` review from a different human account on the exact current PR head. Author reviews, bot reviews, comments, dismissed reviews, approvals on older commits, and a later non-approval review from the same reviewer do not qualify. The required `repository-policy` job reads GitHub PR review metadata with read-only `pull-requests` permission and fails closed if review data cannot be retrieved. Foundation Quality reruns on review submission/edit/dismissal and repeats the checks selected for the current diff tier.
+
+Keep ADR acceptance and only the necessary normative companion updates in one coherent docs-only PR. Group the file list by purpose in the PR diff map and explain any broad fanout. Do not change unrelated indexes, status ledgers, or implementation text just for mechanical consistency; if a companion document's normative meaning changes, include it and explain why.
+
+### 30-day risk-tier pilot
+
+The pilot begins when this policy merges. At day 30, review the dated record in [`SDLC-PILOT-30D.md`](SDLC-PILOT-30D.md) before changing tiers or describing the pilot as successful. Record the number of docs-only PRs, elapsed time to first review and merge, review rounds, skipped Rust/macOS CI minutes, failures found in skipped or product tiers, and changed-file counts. These timestamps measure elapsed wait, not active human review time; label any self-reported active time separately. Do not fill missing historical data with estimates presented as measurements.
 
 ### Path-filtered and non-Foundation workflows
 

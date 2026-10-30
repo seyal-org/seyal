@@ -18,6 +18,10 @@ Use `Closes`, `Fixes`, or `Resolves` only when merging this PR will satisfy the 
 
 ## What changed
 
+## Diff map
+
+Group changed files by purpose. Explain cross-document updates and any broad file fanout so reviewers can verify why each group belongs in this PR.
+
 ## What deliberately did not change
 
 ## Tests

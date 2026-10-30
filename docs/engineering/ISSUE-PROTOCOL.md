@@ -222,6 +222,8 @@ Ordinary local implementation choices do not require an ADR.
 
 Any ADR create/amend/reopen/supersede must land in its own Architecture/R&D PR. Implementation PRs that amend ADRs are rejected; stop implementation, accept the ADR separately, update affected specs/Issues, then resume.
 
+An ADR transition from **Proposed** to **Accepted** requires a GitHub `APPROVED` review by a non-author human on the PR's exact current head. Author/agent comments, bot reviews, dismissed reviews, stale approvals, and comments without an `APPROVED` review do not count. Foundation Quality enforces this on each current PR/review event. Keep acceptance and its necessary normative companion-document updates in one coherent docs-only PR; the PR diff map must explain the purpose of each group of files and justify broad fanout. Do not include unrelated index/status churn.
+
 ## Scope changes
 
 An active Issue may not absorb unrelated refactoring. Create/link another Issue. If the new finding invalidates architecture/spec/acceptance criteria, stop and run the architecture/spec change process before continuing.
