@@ -29,6 +29,26 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-close-tab"].firstMatch.exists)
     }
 
+    func testCommandTCreatesTabAndCommandNCreatesWindow() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+
+        app.typeKey("t", modifierFlags: .command)
+        waitForWindowCount(app, 1, timeout: 5)
+        showTabs(in: app)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 12),
+            "⌘T creates a second Tab without opening a Window"
+        )
+
+        app.typeKey("n", modifierFlags: .command)
+        waitForWindowCount(app, 2, timeout: 10)
+
+        app.typeKey("n", modifierFlags: [.command, .shift])
+        waitForWindowCount(app, 3, timeout: 10)
+    }
+
     func testCloseTabRemovesChromeWithoutCrashingTheHost() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
@@ -107,6 +127,19 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+    }
+
+    private func waitForWindowCount(
+        _ app: XCUIApplication,
+        _ count: Int,
+        timeout: TimeInterval
+    ) {
+        let arrived = expectation(
+            for: NSPredicate(format: "count == %d", count),
+            evaluatedWith: app.windows,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [arrived], timeout: timeout), .completed)
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {

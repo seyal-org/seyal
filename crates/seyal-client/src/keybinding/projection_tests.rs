@@ -113,6 +113,26 @@ fn item19_menu_half_projection_disables_non_palette_while_open() {
 }
 
 #[test]
+fn default_tab_and_window_menu_key_equivalents_match_the_bindings() {
+    let table = load_keybinding_table(None);
+    let route = route_context_set(false, PresentationMode::Flow, false);
+    let projection = project_shortcuts(&table, route);
+
+    let new_tab = item_for(WorkspaceCommandId::TabCreate, &projection);
+    assert_eq!(new_tab.key_equivalent_notation.as_deref(), Some("cmd+t"));
+
+    let new_window = item_for(WorkspaceCommandId::WindowNew, &projection);
+    assert_eq!(new_window.key_equivalent_notation.as_deref(), Some("cmd+n"));
+    let hints = new_window
+        .hints
+        .iter()
+        .map(|hint| hint.keys_notation.as_str())
+        .collect::<Vec<_>>();
+    assert!(hints.contains(&"cmd+n"));
+    assert!(hints.contains(&"cmd+shift+n"));
+}
+
+#[test]
 fn accessibility_label_carries_no_terminal_text() {
     let terminal_fixture = "echo seyal-ax-terminal-fixture-9f3a";
     let toml = r#"

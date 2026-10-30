@@ -430,8 +430,31 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     assert!(contexts_for(&table, "cmd+,").is_empty());
     assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::AppCloseFocused).is_some());
     assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TabCloseFocused).is_none());
-    assert!(binding_for(&table, "cmd+n", WorkspaceCommandId::TabCreate).is_some());
+    assert!(binding_for(&table, "cmd+t", WorkspaceCommandId::TabCreate).is_some());
+    assert!(binding_for(&table, "cmd+n", WorkspaceCommandId::WindowNew).is_some());
     assert!(binding_for(&table, "cmd+shift+n", WorkspaceCommandId::WindowNew).is_some());
+}
+
+#[test]
+fn new_tab_and_window_defaults_can_be_rebound_in_toml() {
+    let toml = r#"
+[[keybindings]]
+keys = "cmd+n"
+action = "tab.create"
+
+[[keybindings]]
+keys = "cmd+t"
+action = "window.new"
+
+[[keybindings]]
+keys = "cmd+shift+n"
+action = "none"
+"#;
+    let table = load_keybinding_table(Some(toml));
+
+    assert!(binding_for(&table, "cmd+n", WorkspaceCommandId::TabCreate).is_some());
+    assert!(binding_for(&table, "cmd+t", WorkspaceCommandId::WindowNew).is_some());
+    assert!(binding_for(&table, "cmd+shift+n", WorkspaceCommandId::WindowNew).is_none());
 }
 
 #[test]
