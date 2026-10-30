@@ -179,7 +179,7 @@ impl Runtime {
             return;
         };
         let canvas_floor = entry.block_timeline.canvas_floor();
-        let records = entry
+        let records: Vec<CommandBlock> = entry
             .block_timeline
             .records()
             .map(|record| {
@@ -201,17 +201,27 @@ impl Runtime {
                         } => CommandBlockState::Completed { exit_status },
                     },
                     flags,
-                    scope: framing::BlockScope::Local,
-                    trust: framing::BlockTrust::LocalTrusted,
+                    scope: record.scope,
+                    trust: record.trust,
                 }
             })
             .collect();
-        let timeline = BlockTimeline {
-            revision: entry.block_revision,
-            records,
+        let revision = entry.block_revision;
+        let legacy_records = records
+            .iter()
+            .filter(|record| {
+                record.scope == framing::BlockScope::Local
+                    && record.trust == framing::BlockTrust::LocalTrusted
+            })
+            .cloned()
+            .collect();
+        let legacy = BlockTimeline {
+            revision,
+            records: legacy_records,
         };
+        let session = BlockTimeline { revision, records };
         let (legacy_payload, session_payload) =
-            match (timeline.try_encode(), timeline.try_encode_session()) {
+            match (legacy.try_encode(), session.try_encode_session()) {
                 (Ok(legacy), Ok(session)) => (legacy, session),
                 _ => {
                     // Admission enforces the wire budget; encode failure here means

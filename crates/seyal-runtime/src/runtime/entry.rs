@@ -94,12 +94,15 @@ pub(in crate::runtime) struct Entry {
     pub(in crate::runtime) direct_input_held: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) session_revision: u64,
-    /// Allocated by `offer_session`. Slice B's hint path is the hot caller.
+    /// Incremented by `offer_session`. Proactive F9 hints do not call it.
     #[allow(dead_code)]
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) next_offer_generation: u64,
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) offer_presentation_epoch: u64,
+    /// Session secret S, challenge K, and the session mechanism-5 machine.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) session_runtime: super::session_bootstrap::SessionRuntime,
 }
 
 #[cfg(target_os = "macos")]
@@ -123,10 +126,22 @@ impl Entry {
         [
             self.lifecycle.deadline(),
             self.pty_eof_reap_probe.map(|probe| probe.deadline),
+            self.session_deadline(),
         ]
         .into_iter()
         .flatten()
         .min()
+    }
+
+    fn session_deadline(&self) -> Option<std::time::Instant> {
+        #[cfg(target_os = "macos")]
+        {
+            self.session_runtime.deadline
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
     }
 
     pub(super) fn terminal_io_active(&self) -> bool {

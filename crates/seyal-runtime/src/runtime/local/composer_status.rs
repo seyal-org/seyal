@@ -162,7 +162,7 @@ impl Runtime {
         let target = ComposerTarget {
             attachment_id,
             target: input_target_class(entry.input_target),
-            scope: input_target_scope(entry.input_target),
+            scope: input_target_scope(entry.session),
             mode: derived.mode(),
             reason: derived.reason(),
             block_id: derived.block_id(),

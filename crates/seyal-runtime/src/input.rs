@@ -21,6 +21,10 @@ pub(crate) enum InputKind {
     /// Only the macOS composer route constructs this today.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Composer,
+    /// Consented stager line or the exact-N payload/padding write. Bypasses
+    /// the Armed/Delivering hold and does not close the local prompt gate.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Bootstrap,
 }
 
 pub(crate) struct AcceptedInput {
@@ -165,10 +169,11 @@ impl InputIngress {
         if !self.active.load(Ordering::Acquire) {
             return Err(RuntimeError::ExecutionNotRunning);
         }
-        if self
-            .held
-            .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::Acquire))
+        if kind != InputKind::Bootstrap
+            && self
+                .held
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Acquire))
         {
             return Err(RuntimeError::InputHeld);
         }
