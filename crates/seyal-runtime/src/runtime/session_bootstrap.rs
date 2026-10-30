@@ -515,9 +515,7 @@ fn wipe_token(slot: &mut Option<ShellIntegrationToken>) {
     // ADR does not require a guaranteed zeroize of every copy.
     if let Some(token) = slot.take() {
         let mut bytes = token.as_bytes();
-        for byte in &mut bytes {
-            *byte = 0;
-        }
+        bytes.fill(0);
         std::hint::black_box(bytes);
     }
 }
