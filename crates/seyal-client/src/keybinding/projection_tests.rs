@@ -119,7 +119,10 @@ fn default_terminal_tab_and_window_menu_key_equivalents_match_the_bindings() {
     let projection = project_shortcuts(&table, route);
 
     let new_terminal = item_for(WorkspaceCommandId::TerminalCreate, &projection);
-    assert_eq!(new_terminal.key_equivalent_notation.as_deref(), Some("cmd+t"));
+    assert_eq!(
+        new_terminal.key_equivalent_notation.as_deref(),
+        Some("cmd+t")
+    );
     let new_tab = item_for(WorkspaceCommandId::TabCreate, &projection);
     assert!(new_tab.key_equivalent_notation.is_none());
 
@@ -132,9 +135,14 @@ fn default_terminal_tab_and_window_menu_key_equivalents_match_the_bindings() {
         .collect::<Vec<_>>();
     assert!(hints.contains(&"cmd+n"));
     assert!(hints.contains(&"cmd+shift+n"));
-    assert_eq!(workspace_command_ffi_id(WorkspaceCommandId::TerminalCreate), 43);
     assert_eq!(
-        workspace_command_from_ffi_id(43, 0).expect("terminal-create menu id").id,
+        workspace_command_ffi_id(WorkspaceCommandId::TerminalCreate),
+        43
+    );
+    assert_eq!(
+        workspace_command_from_ffi_id(43, 0)
+            .expect("terminal-create menu id")
+            .id,
         WorkspaceCommandId::TerminalCreate
     );
 }
