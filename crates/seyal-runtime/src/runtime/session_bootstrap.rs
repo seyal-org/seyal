@@ -82,6 +82,22 @@ impl Default for SessionRuntime {
     }
 }
 
+impl SessionRuntime {
+    /// Fresh S and K for one bootstrap attempt. Revokes any earlier S.
+    pub(super) fn armed(
+        secret: ShellIntegrationToken,
+        challenge: ShellIntegrationToken,
+        deadline: Option<Instant>,
+    ) -> Self {
+        Self {
+            secret: Some(secret),
+            challenge: Some(challenge),
+            deadline,
+            ..Self::default()
+        }
+    }
+}
+
 impl Runtime {
     /// Overlay is already `Armed`. Generate S and K, hold direct input, and
     /// admit the one stager line.
@@ -109,14 +125,8 @@ impl Runtime {
                     "session stager must not carry S",
                 ));
             }
-            entry.session_runtime = SessionRuntime {
-                secret: Some(secret),
-                challenge: Some(challenge),
-                integration: IntegrationState::Unproven,
-                pending: None,
-                deadline: Some(Instant::now() + ARMED_DEADLINE),
-                delivered: None,
-            };
+            entry.session_runtime =
+                SessionRuntime::armed(secret, challenge, Some(Instant::now() + ARMED_DEADLINE));
             stager
         };
         self.note_input_target(id);
@@ -205,6 +215,7 @@ impl Runtime {
                 {
                     self.note_local_host_block_started(id, block);
                 }
+                self.end_orphaned_spawn(id)?;
                 Ok(changed)
             }
             MarkerAudience::Session => self.apply_session_marker(id, integration_event),
@@ -331,12 +342,15 @@ impl Runtime {
             (SessionOverlay::Delivering { .. }, _) if delivered != Some(PAYLOAD_LEN) => {
                 CloseStep::Fail { pad: true }
             }
-            (SessionOverlay::Armed { .. } | SessionOverlay::Delivering { .. }, _) => {
+            (SessionOverlay::Armed { .. } | SessionOverlay::Delivering { .. }, _)
+            | (SessionOverlay::SpawnArmed { .. }, SessionClose::Fail) => {
                 CloseStep::Fail { pad: false }
             }
             (SessionOverlay::Trusted { .. }, SessionClose::End) => CloseStep::End,
             (
-                SessionOverlay::Candidate { .. } | SessionOverlay::Offered { .. },
+                SessionOverlay::Candidate { .. }
+                | SessionOverlay::Offered { .. }
+                | SessionOverlay::SpawnArmed { .. },
                 SessionClose::End,
             ) => CloseStep::Clear,
             _ => return Ok(()),
@@ -422,7 +436,8 @@ impl Runtime {
                 .entries
                 .get_mut(&id)
                 .ok_or(RuntimeError::UnknownExecution)?;
-            if !matches!(entry.session, SessionOverlay::Armed { .. })
+            let spawn = matches!(entry.session, SessionOverlay::SpawnArmed { .. });
+            if !(spawn || matches!(entry.session, SessionOverlay::Armed { .. }))
                 || entry.session_runtime.challenge != Some(token)
                 || entry.session_runtime.secret.is_none()
             {
@@ -432,9 +447,15 @@ impl Runtime {
             // K is single-use. A later readiness in this batch cannot match.
             wipe_token(&mut entry.session_runtime.challenge);
             let secret = entry.session_runtime.secret.expect("checked above");
-            (entry.session.on(SessionEvent::BeginDelivering), secret)
+            // The spawn rcfile is bash. A zsh login shell reports itself and
+            // takes no payload; Failed keeps the consented typed path.
+            let next = entry.session.on(SessionEvent::BeginDelivering).ok();
+            (
+                next.filter(|_| !spawn || shell == SessionShellKind::Bash),
+                secret,
+            )
         };
-        let (Ok(delivering), secret) = ready else {
+        let (Some(delivering), secret) = ready else {
             self.close_session(id, SessionClose::Fail)?;
             return Ok(false);
         };
@@ -563,7 +584,7 @@ fn apply_session_effects(entry: &mut Entry, event: IntegrationEvent) -> bool {
     changed
 }
 
-fn fresh_secret(
+pub(super) fn fresh_secret(
     exclude: &[Option<ShellIntegrationToken>],
 ) -> Result<ShellIntegrationToken, RuntimeError> {
     let mut file = std::fs::File::open("/dev/urandom").map_err(RuntimeError::Io)?;

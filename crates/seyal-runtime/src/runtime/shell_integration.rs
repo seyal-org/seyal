@@ -193,7 +193,15 @@ impl Runtime {
         if !eligible {
             return Ok(ComposerAdmission::Busy);
         }
-        let Some(bytes) = encode_submission(&command, modes.bracketed_paste) else {
+        // Only a fenced client negotiated session bootstrap (ADR-026 §4.4).
+        let spawn = target_generation
+            .map(|_| self.prepare_spawn_arm(id, &command))
+            .transpose()?
+            .flatten();
+        let line = spawn
+            .as_ref()
+            .map_or(command.as_str(), |arm| arm.line.as_str());
+        let Some(bytes) = encode_submission(line, modes.bracketed_paste) else {
             return Ok(ComposerAdmission::Invalid);
         };
         self.input_ingress(id)?
@@ -212,6 +220,9 @@ impl Runtime {
         // sampled here: the cursor right now is still on the prompt row.
         entry.pending_composer = Some(PendingComposerCommand { command, block_id });
         entry.integration = entry.integration.submitted();
+        if let Some(arm) = spawn {
+            self.commit_spawn_arm(id, arm, block_id.raw());
+        }
         self.note_input_target(id);
         self.publish_composer_status_if_changed(id);
         Ok(ComposerAdmission::Accepted(block_id))

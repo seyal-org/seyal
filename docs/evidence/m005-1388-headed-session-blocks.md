@@ -2,6 +2,8 @@
 
 **Status:** Implementation evidence for the headed ADR-026 consent path. Does not close #1388. Does not amend ADR-026. F9 argv sampling remains unimplemented.
 
+**Superseded for eligible `ssh` by #1398:** an interactive composer `ssh` now arms spawn-time delivery with no Enable Blocks banner ([m005-1398-spawn-time-ssh-blocks.md](m005-1398-spawn-time-ssh-blocks.md)). The Enable Blocks path below remains for remote zsh (`Failed` re-request), non-rewritten commands, and explicit Request.
+
 | Field | Value |
 |---|---|
 | Issue | #1388 |

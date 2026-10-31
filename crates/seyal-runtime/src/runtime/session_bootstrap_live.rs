@@ -22,13 +22,22 @@ use crate::{
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-struct Harness {
-    runtime: Runtime,
-    id: ExecutionId,
+pub(super) struct Harness {
+    pub(super) runtime: Runtime,
+    pub(super) id: ExecutionId,
     root: PathBuf,
 }
 
 fn spawn(label: &str) -> Harness {
+    spawn_with(label, |_| ("/usr/bin:/bin".into(), Vec::new()))
+}
+
+/// `setup` gets the private test root and returns `PATH` plus extra
+/// environment for the local zsh.
+pub(super) fn spawn_with(
+    label: &str,
+    setup: impl FnOnce(&std::path::Path) -> (String, Vec<(&'static str, String)>),
+) -> Harness {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
@@ -59,13 +68,17 @@ fn spawn(label: &str) -> Harness {
     config.graceful_termination = Duration::from_millis(100);
     config.forced_reap = Duration::from_millis(250);
     let mut runtime = Runtime::new(config).expect("runtime");
-    let command = CommandSpec::new("/bin/zsh")
+    let (path, extra) = setup(&root);
+    let mut command = CommandSpec::new("/bin/zsh")
         .args(["-i"])
         .clear_environment()
         .env("HOME", &home)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", path)
         .env("HISTFILE", home.join(".zsh_history"))
         .env("LANG", "C");
+    for (key, value) in extra {
+        command = command.env(key, value);
+    }
     let id = runtime
         .create_execution(command, WindowSize::cells(80, 24).expect("size"))
         .expect("spawn");
@@ -83,7 +96,7 @@ impl Drop for Harness {
 }
 
 impl Harness {
-    fn pump_until(&mut self, mut done: impl FnMut(&Runtime, ExecutionId) -> bool) {
+    pub(super) fn pump_until(&mut self, mut done: impl FnMut(&Runtime, ExecutionId) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(12);
         while !done(&self.runtime, self.id) {
             assert!(
@@ -99,7 +112,7 @@ impl Harness {
         }
     }
 
-    fn pump_for(&mut self, duration: Duration) {
+    pub(super) fn pump_for(&mut self, duration: Duration) {
         let deadline = Instant::now() + duration;
         while Instant::now() < deadline {
             self.runtime
@@ -108,7 +121,7 @@ impl Harness {
         }
     }
 
-    fn text(&self) -> String {
+    pub(super) fn text(&self) -> String {
         let terminal = self.runtime.entries[&self.id].execution.terminal();
         let cursor = terminal.cursor();
         let end = terminal.line_id(cursor.row).unwrap_or(LineId(1));
@@ -128,7 +141,7 @@ impl Harness {
             .join("\n")
     }
 
-    fn wait_text(&mut self, needle: &str) {
+    pub(super) fn wait_text(&mut self, needle: &str) {
         let deadline = Instant::now() + Duration::from_secs(8);
         while !self.text().contains(needle) {
             assert!(
@@ -142,7 +155,7 @@ impl Harness {
         }
     }
 
-    fn secret_hex(&self) -> Option<String> {
+    pub(super) fn secret_hex(&self) -> Option<String> {
         self.runtime.entries[&self.id]
             .session_runtime
             .secret

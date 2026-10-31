@@ -30,6 +30,12 @@ pub(crate) enum SessionOverlay {
         host_block: u64,
         offer_generation: u64,
     },
+    /// Spawn-time delivery (ADR-026 2026-10-31 amendment, Decision item 4).
+    /// S and K are armed for the host Block's own launch command. Direct
+    /// input is not held: the client may still be authenticating.
+    SpawnArmed {
+        host_block: u64,
+    },
     Trusted {
         host_block: u64,
     },
@@ -54,6 +60,10 @@ pub(crate) enum SessionEvent {
     },
     Decline,
     Accept,
+    /// Arm spawn-time delivery for the host Block a composer `ssh` will start.
+    SpawnArm {
+        host_block: u64,
+    },
     BeginDelivering,
     Trust,
     Fail,
@@ -72,6 +82,15 @@ impl SessionOverlay {
         matches!(self, Self::Armed { .. } | Self::Delivering { .. })
     }
 
+    /// A new host Block may arm spawn-time delivery. Same depth-one gate as
+    /// §4.1(c); `Ended` belongs to an earlier host.
+    pub(crate) fn can_spawn_arm(self) -> bool {
+        matches!(
+            self,
+            Self::None | Self::Declined { .. } | Self::Failed { .. } | Self::Ended { .. }
+        )
+    }
+
     pub(crate) fn host_block(self) -> Option<u64> {
         match self {
             Self::None => None,
@@ -80,6 +99,7 @@ impl SessionOverlay {
             | Self::Declined { host_block }
             | Self::Armed { host_block, .. }
             | Self::Delivering { host_block, .. }
+            | Self::SpawnArmed { host_block }
             | Self::Trusted { host_block }
             | Self::Failed { host_block }
             | Self::Ended { host_block } => Some(host_block),
@@ -110,6 +130,8 @@ impl SessionOverlay {
             Self::Declined { .. } => W::Declined,
             Self::Armed { .. } => W::Armed,
             Self::Delivering { .. } => W::Delivering,
+            // No client affordance: no banner, and input is not held.
+            Self::SpawnArmed { .. } => W::None,
             Self::Trusted { .. } => W::Trusted,
             Self::Failed { .. } => W::Failed,
             Self::Ended { .. } => W::Ended,
@@ -154,12 +176,20 @@ impl SessionOverlay {
                 host_block,
                 offer_generation,
             }),
+            (from, E::SpawnArm { host_block }) if from.can_spawn_arm() && host_block != 0 => {
+                Ok(S::SpawnArmed { host_block })
+            }
+            (S::SpawnArmed { host_block }, E::BeginDelivering) => Ok(S::Delivering {
+                host_block,
+                offer_generation: 0,
+            }),
             (S::Delivering { host_block, .. }, E::Trust) => Ok(S::Trusted { host_block }),
             (
                 S::Candidate { host_block }
                 | S::Offered { host_block, .. }
                 | S::Armed { host_block, .. }
-                | S::Delivering { host_block, .. },
+                | S::Delivering { host_block, .. }
+                | S::SpawnArmed { host_block },
                 E::Fail,
             ) => Ok(S::Failed { host_block }),
             (S::Trusted { host_block }, E::End) => Ok(S::Ended { host_block }),
@@ -167,6 +197,7 @@ impl SessionOverlay {
                 S::Candidate { .. }
                 | S::Offered { .. }
                 | S::Declined { .. }
+                | S::SpawnArmed { .. }
                 | S::Failed { .. }
                 | S::Ended { .. },
                 E::Clear,
@@ -439,6 +470,61 @@ mod tests {
                 E::Accept,
                 Err(SessionReject),
             ),
+            (
+                S::None,
+                E::SpawnArm { host_block: 6 },
+                Ok(S::SpawnArmed { host_block: 6 }),
+            ),
+            (
+                S::Ended { host_block: 4 },
+                E::SpawnArm { host_block: 6 },
+                Ok(S::SpawnArmed { host_block: 6 }),
+            ),
+            (
+                S::Failed { host_block: 4 },
+                E::SpawnArm { host_block: 6 },
+                Ok(S::SpawnArmed { host_block: 6 }),
+            ),
+            (S::None, E::SpawnArm { host_block: 0 }, Err(SessionReject)),
+            (
+                S::Trusted { host_block: 4 },
+                E::SpawnArm { host_block: 6 },
+                Err(SessionReject),
+            ),
+            (
+                S::Candidate { host_block: 4 },
+                E::SpawnArm { host_block: 6 },
+                Err(SessionReject),
+            ),
+            (
+                S::SpawnArmed { host_block: 6 },
+                E::BeginDelivering,
+                Ok(S::Delivering {
+                    host_block: 6,
+                    offer_generation: 0,
+                }),
+            ),
+            (
+                S::SpawnArmed { host_block: 6 },
+                E::Fail,
+                Ok(S::Failed { host_block: 6 }),
+            ),
+            (S::SpawnArmed { host_block: 6 }, E::Clear, Ok(S::None)),
+            (
+                S::SpawnArmed { host_block: 6 },
+                E::MarkCandidate { host_block: 6 },
+                Err(SessionReject),
+            ),
+            (
+                S::SpawnArmed { host_block: 6 },
+                E::Trust,
+                Err(SessionReject),
+            ),
+            (
+                S::SpawnArmed { host_block: 6 },
+                E::Accept,
+                Err(SessionReject),
+            ),
         ];
         for (from, event, expected) in cases {
             assert_eq!(from.on(*event), *expected, "{from:?} + {event:?}");
@@ -464,6 +550,26 @@ mod tests {
         .holds_direct_input());
         assert!(!SessionOverlay::Declined { host_block: 1 }.holds_direct_input());
         assert!(!SessionOverlay::Trusted { host_block: 1 }.holds_direct_input());
+        assert!(!SessionOverlay::SpawnArmed { host_block: 1 }.holds_direct_input());
+    }
+
+    #[test]
+    fn spawn_armed_host_shows_no_banner_and_no_relay_before_trust() {
+        use crate::local_ipc::framing::SessionOverlayWire;
+        let overlay = SessionOverlay::SpawnArmed { host_block: 5 };
+        assert_eq!(overlay.wire(), SessionOverlayWire::None);
+        assert_eq!(overlay.offer_generation(), None);
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(5) },
+                primary_screen: true,
+                flow: true,
+                controller: true,
+                overlay,
+                session_integration: ShellFact::Unproven,
+            }),
+            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
+        );
     }
 
     #[test]

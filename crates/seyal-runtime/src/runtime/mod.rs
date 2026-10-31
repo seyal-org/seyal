@@ -58,6 +58,10 @@ mod session_payload;
 mod shell_integration;
 #[cfg(all(test, target_os = "macos"))]
 mod shell_integration_live_tests;
+#[cfg(target_os = "macos")]
+mod ssh_spawn;
+#[cfg(all(test, target_os = "macos"))]
+mod ssh_spawn_live_tests;
 
 #[cfg(target_os = "macos")]
 mod local;

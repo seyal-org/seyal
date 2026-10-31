@@ -17,7 +17,15 @@ pub(super) const TRAILER: &str = "#E";
 /// POSIX minimum `MAX_CANON`, including the terminating newline.
 pub(super) const MAX_CANON: usize = 255;
 
+/// First line of every real payload. The spawn rcfile evals only a buffer
+/// that starts here, so typeahead read ahead of the payload is never run.
+pub(super) const PAYLOAD_HEAD: &str = "unset p\n";
+
 const READ_TIMEOUT_SECS: u64 = 2;
+
+/// Bound on input the spawn rcfile discards, with echo off, before readiness
+/// and after a misaligned read.
+const DRAIN_LEN: usize = 4096;
 
 pub(super) fn stager_line(challenge: ShellIntegrationToken) -> Result<Vec<u8>, RuntimeError> {
     let mut k = String::with_capacity(32);
@@ -48,6 +56,54 @@ pub(super) fn stager_line(challenge: ShellIntegrationToken) -> Result<Vec<u8>, R
     let mut bytes = line.into_bytes();
     bytes.push(b'\r');
     Ok(bytes)
+}
+
+/// bash rcfile for spawn-time delivery (ADR-026 2026-10-31 amendment,
+/// Decision item 4). It runs the login startup files, then the stager, as
+/// the shell's own startup, so no setup line reaches a live reader. Secret
+/// free. One line with no `'`, `!` or `\\`, so it survives one POSIX, csh or
+/// fish single-quoted word. `read -N` needs bash 4.1; older bash stays silent.
+///
+/// Direct input is not held while ssh authenticates, so typeahead may reach
+/// this reader. It is discarded before readiness; if some still lands ahead
+/// of the payload, the payload tail is discarded too, so S never reaches the
+/// line editor or the screen.
+pub(super) fn spawn_rcfile(challenge: ShellIntegrationToken) -> Result<String, RuntimeError> {
+    let mut k = String::with_capacity(32);
+    challenge.write_hex(&mut k);
+    let head = PAYLOAD_HEAD.trim_end();
+    let rc = format!(
+        "[ -r /etc/profile ]&&. /etc/profile;\
+         if [ -r \"$HOME/.bash_profile\" ];then . \"$HOME/.bash_profile\";\
+         elif [ -r \"$HOME/.bash_login\" ];then . \"$HOME/.bash_login\";\
+         elif [ -r \"$HOME/.profile\" ];then . \"$HOME/.profile\";fi;\
+         if ((BASH_VERSINFO[0]*100+BASH_VERSINFO[1]>=401));then \
+         stty -echo;read -r -t 0.01 -N {drain} p;\
+         printf \"\\033]133;R;%s;b\\007\" {k};\
+         read -r -t {timeout} -N {len} p;\
+         case $p in \"{head}\"*\"{trailer}\"*)eval \"$p\";;\
+         *)read -r -t {timeout} -N {drain} p;stty echo;unset p;;esac;fi",
+        timeout = READ_TIMEOUT_SECS,
+        len = PAYLOAD_LEN,
+        drain = DRAIN_LEN,
+        trailer = TRAILER,
+    );
+    let echo_at = rc.find("stty -echo");
+    let drain_at = rc.find("read -r -t 0.01");
+    let marker_at = rc.find("133;R");
+    if !rc.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+        || rc.contains(['\'', '!'])
+        || rc.contains("\\\\")
+        || !matches!(
+            (echo_at, drain_at, marker_at),
+            (Some(echo), Some(drain), Some(marker)) if echo < drain && drain < marker
+        )
+    {
+        return Err(RuntimeError::ShellIntegration(
+            "spawn rcfile violates the quoting or echo-off rule",
+        ));
+    }
+    Ok(rc)
 }
 
 pub(super) fn payload_bytes(shell: SessionShellKind, secret: ShellIntegrationToken) -> Vec<u8> {

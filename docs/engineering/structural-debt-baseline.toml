@@ -246,9 +246,15 @@ reason = "Local display-client protocol proofs stay one module; #1388 adds the t
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
-acknowledged_loc = 742
-issue = 1388
-reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1388 keeps consider_session_candidate on cold edges only (None, not every PTY read) without moving marker dispatch or the submission byte contract into a second hot-path module."
+acknowledged_loc = 753
+issue = 1398
+reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1388 keeps consider_session_candidate on cold edges only (None, not every PTY read) without moving marker dispatch or the submission byte contract into a second hot-path module. #1398 only hooks the fenced submit to the spawn-time ssh rewrite; parsing and arming live in ssh_spawn.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-runtime/src/runtime/session_overlay.rs"
+acknowledged_loc = 723
+issue = 1398
+reason = "ADR-026 F4 overlay transitions, wire projection, and composer derivation stay one pure state machine with its exhaustive transition table; #1398 adds the Runtime-internal SpawnArmed state and its table cases rather than a second overlay type."
 
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.
