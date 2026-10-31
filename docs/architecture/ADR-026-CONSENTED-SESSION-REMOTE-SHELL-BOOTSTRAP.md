@@ -1,7 +1,7 @@
 # ADR-026 — Consented session-only remote shell bootstrap and orthogonal composer input target
 
-- **Status:** Accepted on merge of the #1384 acceptance PR by a non-author maintainer. An author or agent comment is not that acceptance. **Proposed amendment under #1396** (section “2026-10-31 amendment — consent only for remote install/modify; always SSH Blocks”) is **not normative** until a separate docs-only acceptance PR merges under #1396 by a non-author maintainer.
-- **Date:** 2026-10-29; Proposed product-consent amendment 2026-10-31 (#1396)
+- **Status:** Accepted on merge of the #1384 acceptance PR by a non-author maintainer. An author or agent comment is not that acceptance. **2026-10-31 amendment under #1396 Accepted** on merge of this acceptance PR by maintainer direction under #1396 (product owner Accept of Proposed text from #1397). An author or agent comment alone is not that acceptance. The amendment section is normative; read Decision §2.3 / §2.5 / §5 / §8 / §9 A3 through that amendment.
+- **Date:** 2026-10-29; product-consent amendment Accepted 2026-10-31 (#1396)
 - **Issue:** #1384 (Architecture, Ticket A); amendment #1396
 - **Scope:** (1) Block lifecycle, composer input target and Pane presentation as independent Runtime facts; (2) a consented, session-only, in-band bootstrap of an interactive bash or zsh session reached through a Running Block's foreground job — SSH is the motivating case, not the only one — yielding secret-authenticated session-scoped Blocks and a retained composer; (3) the unverified relay fallback when consent is declined or bootstrap is unsupported or fails.
 - **Depends on:** Accepted ADR-004, ADR-005, ADR-006, ADR-009 (including the #968 shell-integration mechanism, the #686 shell-metadata boundary and the #1355 composed ClientHello fallback), ADR-015; SPEC-004, SPEC-006, SPEC-008, SPEC-009.
@@ -335,7 +335,7 @@ Capture the Warp-plain versus Warp-extension behavior matrix on the same OrbStac
 
 ## 2026-10-31 amendment — consent only for remote install/modify; always SSH Blocks (#1396)
 
-**Status:** Proposed by #1396. This section is **not normative** until a non-author maintainer Accepts it under #1396 (docs-only acceptance merge or explicit APPROVE + merge). An author or agent comment is not acceptance. An implementation PR does not Accept this amendment. Until acceptance, Decision §2.3, §2.5, §5, §8, §9 A3/A4, F-088a, and the consent-gated SPEC-008 rows remain the Accepted authority. Decision §2.4 (mechanism substrate) stays Accepted and is **not** superseded by this amendment.
+**Status:** **Accepted** under #1396 on merge of this acceptance PR. This section is normative. Decision §2.4 (mechanism substrate) stays Accepted and is **not** superseded. An implementation PR does not re-Accept this amendment.
 
 ### Problem
 
@@ -347,7 +347,7 @@ Product authority (Block-based terminal) rejects the Accepted headed end-state t
 
 Accepted ADR-026 Decision §2.3 / §5 and rejected alternative **A3** mis-located F-088: they treat **session-only, non-durable bootstrap** as requiring the same consent bar as **install/modify on the target**. That is wrong for Seyal’s product contract. Separately, removing consent while keeping **typed-into-live-reader** delivery without a readiness gate is also wrong (§1.5: remote prompt readiness is not locally provable).
 
-### Decision (normative on #1396 acceptance)
+### Decision (normative)
 
 1. **Keep** orthogonal facts (Decision §2.1 / §3): Block lifecycle, composer input target, and presentation remain independent. A Running host Block never by itself disables the composer once a session scope is trusted.
 2. **Keep** session-trusted mechanism substrate (Decision §2.4 / §6–§7): secret-authenticated `A`/`C`/`D`, in-memory hooks only, no remote file, no remote program install, no history-option mutation, depth one, `SessionTrusted` presentation-only. Trust still comes only from the authenticated handshake with S — never from argv heuristics alone.
@@ -384,9 +384,9 @@ Accepted ADR-026 Decision §2.3 / §5 and rejected alternative **A3** mis-locate
 - **Treat companion decline as no Blocks.** Rejected: Warp Continue path proves Blocks without companion.
 - **Copy Warp temporary `ZDOTDIR` or histcontrol/HISTIGNORE mutation.** Still rejected: remote file write or persistent shell-option mutation crosses the install/modify consent bar; history side effects are handled by disclosure + prefer history-clean delivery (Decision item 5), not by mutating options.
 
-### Amendments to earlier normative text (apply only on #1396 acceptance)
+### Amendments to earlier normative text
 
-On acceptance, read the Accepted body through this amendment for:
+Read the earlier Accepted body through this amendment for:
 
 | Locus | Change |
 |---|---|
@@ -411,7 +411,7 @@ On acceptance, read the Accepted body through this amendment for:
 - #1388 / closed PR #1391 Enable-Blocks product path is superseded after acceptance; retarget implementation Issues accordingly. Issue #1388 stays open until retargeted/closed by its own process — this amendment text does not close it.
 - Orthogonal Runtime model and secret-authenticated markers remain; the consent gate moves to install/modify and to unsafe typed delivery.
 
-### Evidence required before #1396 Architecture Done
+### Evidence required for Architecture Done / Ready impl
 
 1. R&D notes linked above (screenshot summaries + live Warp footprint) reviewed by a non-author maintainer.
 2. Explicit security note: auto-arm Allowed only under Decision item 4; blind typed auto-arm Rejected; companion consent unchanged; forged markers still require S (T1/T2 unchanged); history side-effect classification per Decision item 5.
