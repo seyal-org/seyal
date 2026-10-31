@@ -23,16 +23,25 @@ Product goal for SSH v1: every completed remote command is a Block; no Enable-Bl
 
 ### 2.1 Consent surface is the companion, not Blocks
 
-Warp Stable UI strings (from the app binary):
+**Competitive reference only.** The strings below are what **Warp’s** UI shows. Seyal does **not** install Warp’s SSH extension, does **not** ship or invoke Warp binaries, and does **not** reuse Warp source. Seyal’s optional durable install (if Accepted) is a **Seyal** remote companion under #1385 / reserved ADR-027 (e.g. under `~/.seyal/…`), never `~/.warp*`.
 
-- “Install Warp's SSH extension”
+Warp Stable UI strings observed (from the Warp app binary / screenshots):
+
+- “Install Warp's SSH extension” ← **Warp product copy; not a Seyal action**
 - “Continue without installing”
 - “You'll still get a Warpified experience just without the coding features.”
 
-Settings schema: `SshExtensionInstallMode` = `always_ask` | `always_install` | `never_install`.  
-`never_install` → “fall back to wrapper-only SSH warpification.”
+Warp settings schema: `SshExtensionInstallMode` = `always_ask` | `always_install` | `never_install`.  
+`never_install` → Warp falls back to wrapper-only SSH warpification.
 
-So declining the extension does **not** mean zero remote cooperation. It means the **legacy SSH wrapper** still bootstraps bash/zsh for Blocks + input editor.
+**Seyal mapping of that UX pattern (product intent, not Warp code):**
+
+| User choice (Seyal wording, TBD in #1385) | What happens on the remote | What the user gets |
+|---|---|---|
+| **Continue without installing** (SSH Blocks v1 / this R&D) | No durable install; session-only non-durable bootstrap only | Always Blocks for completed remote commands; composer retained; interactive incomplete work inside the Running Block; TUI for fullscreen. **No** remote file tree / native file IO / indexing |
+| **Install Seyal remote companion** (#1385, consent required) | Persisted Seyal companion under a user-owned path (e.g. `~/.seyal/remote-…`); user-scoped; no root; over existing SSH | Blocks path above **plus** coding features (file tree, native R/W, editor/review, indexing, etc. — inventory owned by #1385) |
+
+So declining the **companion** does **not** mean zero remote cooperation for Blocks. It means Blocks come from session-only bootstrap only — the Warp “Continue” *pattern*, implemented with Seyal’s own mechanism (no Warp reuse).
 
 ### 2.2 Delivery mechanism (local wrapper → remote command)
 

@@ -1,7 +1,9 @@
 # Warp SSH + Blocks — E2E functionality catalog (R&D evidence)
 
 **Status:** Local R&D evidence only. Not ADR authority. Not an implementation plan.  
-**Purpose:** Prevent another product/architecture mistake by grounding Seyal’s SSH Blocks decision in **observed Warp behavior** (your screenshots + a live Warp process on this machine) plus docs/binary forensics.
+**Purpose:** Prevent another product/architecture mistake by grounding Seyal’s SSH Blocks decision in **observed Warp behavior as competitive reference** (your screenshots + a live Warp process on this machine) plus public docs/binary forensics.
+
+**Hard boundary:** Warp is reference UX/mechanism *shape* only. Seyal must not install Warp’s SSH extension, must not reuse Warp source/binaries, and must not write `~/.warp*`. Optional durable install is a **Seyal** companion (#1385). SSH Blocks v1 needs **no** that install.
 
 | Field | Value |
 |---|---|
@@ -56,7 +58,7 @@ Seyal ADR-026’s **typed in-band stager into an already-running shell** is a *d
 
 | ID | Capture (local, not in-repo) | What it shows (S) |
 |---|---|---|
-| **01** | Warp Oct 29 09:05 — install chooser | After `ssh mahboob@nt-ssh@orb`, inline Block: **“Choose your experience for this remote session”**. Options: **Install Warp's SSH extension (Recommended)** vs **Continue without installing** (“You'll still get a Warpified experience just without the coding features.”). Checkbox “Don't ask me this again”. Continue selected. |
+| **01** | Warp Oct 29 09:05 — install chooser | After `ssh mahboob@nt-ssh@orb`, Warp shows its own chooser (quoted): **“Install Warp's SSH extension”** vs **Continue without installing**. **Not a Seyal string.** Seyal equivalent (if any) is “Install Seyal remote companion” under #1385; Continue maps to Blocks-without-companion. Continue was selected here. |
 | **02** | Warp Oct 29 09:05 — after Continue | Discrete Blocks: `ssh …` with duration + MOTD; separate `pwd` → `/home/mahboob` with duration; retained input editor (not stuck “command running”). |
 | **03** | Warp Oct 29 09:06 — echo/vim | Discrete Blocks for `pwd`, `echo hello`, `vim` with durations; Block action icons; composer available. |
 | **04** | Warp Oct 29 09:06 — python REPL | `python3` REPL banner + `>>>` captured **inside** that command’s interactive surface — not a whole-session Raw pane. |

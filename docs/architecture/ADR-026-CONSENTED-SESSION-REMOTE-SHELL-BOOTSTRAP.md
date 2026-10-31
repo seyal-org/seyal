@@ -341,9 +341,9 @@ Capture the Warp-plain versus Warp-extension behavior matrix on the same OrbStac
 
 Product authority (Block-based terminal) rejects the Accepted headed end-state that requires an **Enable Blocks** / per-session bootstrap consent ceremony and treats decline as Relay/Raw for ordinary SSH. Warp evidence (`docs/evidence/m005-warp-ssh-blocks-e2e-catalog.md`, `docs/evidence/m005-ssh-blocks-rd-warp-forensic.md`) shows:
 
-1. The Warp chooser is **Install SSH extension** vs **Continue without installing** — companion install, not Blocks enable.
+1. Warp’s chooser (competitive reference only — **not** Seyal copy, **no** Warp code reuse) is **Install Warp's SSH extension** vs **Continue without installing** — that chooser is **companion install**, not Blocks enable. Seyal’s durable install, if Accepted, is a **Seyal** companion under #1385 (e.g. `~/.seyal/…`), never Warp’s extension or `~/.warp*`.
 2. After Continue, every completed remote command is its own Block; the input editor stays usable; incomplete interactive work (`python3`) stays inside that Running Block’s surface; full-screen programs (`vim`) use TUI-class takeover.
-3. Live probe: Warp uses a local `ssh` wrapper + remote-command bootstrap (`bash --rcfile /dev/fd/63`); **no** `~/.warp*` companion; no durable install under home.
+3. Live probe: Warp uses a local `ssh` wrapper + remote-command bootstrap (`bash --rcfile /dev/fd/63`); **no** `~/.warp*` companion; no durable install under home. Seyal must achieve the Blocks outcome with its own non-durable substrate — not by installing or invoking Warp.
 
 Accepted ADR-026 Decision §2.3 / §5 and rejected alternative **A3** mis-located F-088: they treat **session-only, non-durable bootstrap** as requiring the same consent bar as **install/modify on the target**. That is wrong for Seyal’s product contract.
 
@@ -357,7 +357,7 @@ Accepted ADR-026 Decision §2.3 / §5 and rejected alternative **A3** mis-locate
    - does **not** edit remote rc/dotfiles or persistent shell settings;
    - leaves hooks only in the remote shell’s memory until that shell exits.
    For SSH (and the same depth-one session class), Runtime **auto-arms** bootstrap when §4.1 candidate conditions hold for an interactive bash/zsh session, without an Enable Blocks banner. Trust still comes only from the authenticated handshake with S — never from argv heuristics alone.
-4. **Consent remains mandatory for install/modify on the target.** Any path that would install a companion, write durable remote files, edit rc/dotfiles, mutate persistent shell options, or otherwise leave an enterprise-visible install/config footprint requires explicit Controller consent (or a Controller-fenced Always/Never policy as already specified for that *install* class). That bar is owned with #1385 / reserved ADR-027 for the companion; this amendment does not weaken it.
+4. **Consent remains mandatory for install/modify on the target.** Any path that would install a **Seyal** companion, write durable remote files, edit rc/dotfiles, mutate persistent shell options, or otherwise leave an enterprise-visible install/config footprint requires explicit Controller consent (or a Controller-fenced Always/Never policy as already specified for that *install* class). That bar is owned with #1385 / reserved ADR-027. Seyal must never install Warp’s SSH extension or reuse Warp binaries/source. This amendment does not weaken the install consent bar.
 5. **Replace Decision §2.5 primary UX.** After successful session trust:
    - every completed remote command is its own session-scoped Block;
    - incomplete interactive non-alternate-screen work (e.g. `python` REPL) stays as live capture **inside that Running Block**;
