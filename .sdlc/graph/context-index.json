@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "f6962664f86a552a0390e9fa6472a4af28b7529e"
+          "fingerprint": "d3655a4be5b3963d432365e9ffba75b93c444f37"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "f6962664f86a552a0390e9fa6472a4af28b7529e"
+          "fingerprint": "d3655a4be5b3963d432365e9ffba75b93c444f37"
         }
       ],
       "relationships": [
@@ -134,7 +134,7 @@
         },
         {
           "path": "docs/specs/SPEC-008-M003-COMMAND-BLOCKS.md",
-          "fingerprint": "2bc592a43c70f984592e89118dbf79204f24c05d"
+          "fingerprint": "9c127fc71353f1d3f5abd65657fac90ceb90536c"
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
@@ -355,7 +355,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-026-CONSENTED-SESSION-REMOTE-SHELL-BOOTSTRAP.md",
-          "fingerprint": "d614b7412c2bad0acd80adc608ddad4ca65f9428"
+          "fingerprint": "53bad4244e03987391bd6ba4e8d8be9213aebc3a"
         }
       ],
       "relationships": []
