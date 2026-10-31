@@ -29,18 +29,16 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-close-tab"].firstMatch.exists)
     }
 
-    func testCommandTCreatesTabAndCommandNCreatesWindow() throws {
+    func testCommandTCreatesPaneTerminalAndCommandNCreatesWindow() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         XCTAssertEqual(app.windows.count, 1)
 
+        XCTAssertEqual(terminalTabButtons(in: app).count, 1)
         app.typeKey("t", modifierFlags: .command)
         waitForWindowCount(app, 1, timeout: 5)
-        showTabs(in: app)
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 12),
-            "⌘T creates a second Tab without opening a Window"
-        )
+        waitForTerminalTabCount(app, 2, timeout: 12)
+        XCTAssertEqual(app.windows.count, 1, "⌘T creates a Pane-local terminal, not a Layout or Window")
 
         app.typeKey("n", modifierFlags: .command)
         waitForWindowCount(app, 2, timeout: 10)
@@ -127,6 +125,33 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+    }
+
+    private func terminalTabButtons(in app: XCUIApplication) -> XCUIElementQuery {
+        app.buttons.matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
+                "seyal-terminal-tab-",
+                "Terminal "
+            )
+        )
+    }
+
+    private func waitForTerminalTabCount(
+        _ app: XCUIApplication,
+        _ count: Int,
+        timeout: TimeInterval
+    ) {
+        let arrived = expectation(
+            for: NSPredicate(format: "count == %d", count),
+            evaluatedWith: terminalTabButtons(in: app),
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [arrived], timeout: timeout),
+            .completed,
+            "Expected \(count) Pane-local terminal tabs after the shortcut"
+        )
     }
 
     private func waitForWindowCount(

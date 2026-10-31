@@ -342,7 +342,7 @@ ordinal = 3
 // --- §14 item 19 keybinding half: palette modal ---
 
 #[test]
-fn item19_palette_open_rejects_cmd_t_match_and_menu_invoke() {
+fn item19_palette_open_rejects_cmd_t_terminal_create_match_and_menu_invoke() {
     let table = load_keybinding_table(None);
     let palette = palette_ctx();
     assert_eq!(palette, BindingContext::PALETTE);
@@ -354,7 +354,7 @@ fn item19_palette_open_rejects_cmd_t_match_and_menu_invoke() {
     );
 
     let create = WorkspaceCommand {
-        id: WorkspaceCommandId::TabCreate,
+        id: WorkspaceCommandId::TerminalCreate,
         ordinal: None,
     };
     assert_eq!(

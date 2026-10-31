@@ -641,7 +641,7 @@ context = ["raw"]
 
 #[test]
 fn conflict_worked_example_disjoint_contexts_both_remain() {
-    // builtin cmd+t → tab.create [app]
+    // builtin cmd+t → terminal.create [app]
     // user cmd+t → pane.split_down [raw]
     // → both remain
     let toml = r#"
@@ -655,7 +655,7 @@ context = ["raw"]
     assert_eq!(rows.len(), 2);
     assert!(rows
         .iter()
-        .any(|(id, ctx)| *id == WorkspaceCommandId::TabCreate && *ctx == BindingContext::APP));
+        .any(|(id, ctx)| *id == WorkspaceCommandId::TerminalCreate && *ctx == BindingContext::APP));
     assert!(rows.iter().any(|(id, ctx)| {
         *id == WorkspaceCommandId::PaneSplitDown && *ctx == BindingContext::RAW
     }));

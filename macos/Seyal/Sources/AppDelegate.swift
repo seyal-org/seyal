@@ -57,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.windowNew, host: host))
+        fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.terminalCreate, host: host))
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.tabCreate, host: host))
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.appCloseFocused, host: host))
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.tabCloseFocused, host: host))

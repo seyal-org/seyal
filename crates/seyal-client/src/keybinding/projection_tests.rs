@@ -113,13 +113,15 @@ fn item19_menu_half_projection_disables_non_palette_while_open() {
 }
 
 #[test]
-fn default_tab_and_window_menu_key_equivalents_match_the_bindings() {
+fn default_terminal_tab_and_window_menu_key_equivalents_match_the_bindings() {
     let table = load_keybinding_table(None);
     let route = route_context_set(false, PresentationMode::Flow, false);
     let projection = project_shortcuts(&table, route);
 
+    let new_terminal = item_for(WorkspaceCommandId::TerminalCreate, &projection);
+    assert_eq!(new_terminal.key_equivalent_notation.as_deref(), Some("cmd+t"));
     let new_tab = item_for(WorkspaceCommandId::TabCreate, &projection);
-    assert_eq!(new_tab.key_equivalent_notation.as_deref(), Some("cmd+t"));
+    assert!(new_tab.key_equivalent_notation.is_none());
 
     let new_window = item_for(WorkspaceCommandId::WindowNew, &projection);
     assert_eq!(new_window.key_equivalent_notation.as_deref(), Some("cmd+n"));
@@ -130,6 +132,11 @@ fn default_tab_and_window_menu_key_equivalents_match_the_bindings() {
         .collect::<Vec<_>>();
     assert!(hints.contains(&"cmd+n"));
     assert!(hints.contains(&"cmd+shift+n"));
+    assert_eq!(workspace_command_ffi_id(WorkspaceCommandId::TerminalCreate), 43);
+    assert_eq!(
+        workspace_command_from_ffi_id(43, 0).expect("terminal-create menu id").id,
+        WorkspaceCommandId::TerminalCreate
+    );
 }
 
 #[test]
@@ -223,34 +230,34 @@ action = "none"
     let table = load_keybinding_table(Some(toml));
     let route = route_context_set(false, PresentationMode::Flow, false);
     let projection = project_shortcuts(&table, route);
-    let new_tab = item_for(WorkspaceCommandId::TabCreate, &projection);
+    let new_terminal = item_for(WorkspaceCommandId::TerminalCreate, &projection);
     assert!(
-        new_tab.key_equivalent.is_none(),
+        new_terminal.key_equivalent.is_none(),
         "unbind removes the menu key equivalent"
     );
     assert!(
-        new_tab.hints.is_empty(),
+        new_terminal.hints.is_empty(),
         "no surviving bindings means no hints"
     );
     assert!(
-        new_tab.enabled,
+        new_terminal.enabled,
         "enabled follows the app route, not binding presence"
     );
     assert_eq!(
-        new_tab.accessibility_label, "New Tab",
+        new_terminal.accessibility_label, "New Terminal",
         "title remains present after unbind"
     );
 
     let palette_open = route_context_set(true, PresentationMode::Flow, false);
     let when_open = project_shortcuts(&table, palette_open);
-    let new_tab_open = item_for(WorkspaceCommandId::TabCreate, &when_open);
+    let new_terminal_open = item_for(WorkspaceCommandId::TerminalCreate, &when_open);
     assert!(
-        !new_tab_open.enabled,
+        !new_terminal_open.enabled,
         "palette modal still disables non-palette menu commands"
     );
 }
 
-/// R6.2.1 specificity: Raw-only rebind of cmd+t wins over builtin app tab.create.
+/// R6.2.1 specificity: Raw-only rebind of cmd+t wins over builtin app terminal.create.
 #[test]
 fn item_specificity_raw_rebind_of_projected_cmd_t() {
     use super::chord::ChordPrefixState;
@@ -284,10 +291,10 @@ context = ["raw"]
                 }
             }
         ),
-        "Raw specificity must beat app tab.create before any menu path: {matched:?}"
+        "Raw specificity must beat app terminal.create before any menu path: {matched:?}"
     );
 
-    // Flow still sees the app New Tab binding (Matched), so the menu path never
+    // Flow still sees the app New Terminal binding (Matched), so the menu path never
     // runs — but the projected ⌘T equivalent remains the steal surface when the
     // route drops `app` (palette). That case is covered below.
     let flow = route_context_set(false, PresentationMode::Flow, false);
@@ -298,12 +305,12 @@ context = ["raw"]
             flow_match,
             RouteOutcome::Matched {
                 command: WorkspaceCommand {
-                    id: WorkspaceCommandId::TabCreate,
+                    id: WorkspaceCommandId::TerminalCreate,
                     ..
                 }
             }
         ),
-        "Flow keeps app tab.create; menu must not be the authority: {flow_match:?}"
+        "Flow keeps app terminal.create; menu must not be the authority: {flow_match:?}"
     );
 }
 
@@ -322,7 +329,7 @@ fn unmatched_command_menu_steal_only_for_inactive_projected_equivalent() {
     let palette = route_context_set(true, PresentationMode::Flow, false);
     assert!(
         projected_menu_steals_unmatched_command(&table, &cmd_t, palette),
-        "palette-open cmd+t equals inactive New Tab projected equivalent"
+        "palette-open cmd+t equals inactive New Terminal projected equivalent"
     );
     assert!(
         !projected_menu_steals_unmatched_command(&table, &cmd_left, palette),
@@ -336,7 +343,7 @@ fn unmatched_command_menu_steal_only_for_inactive_projected_equivalent() {
     let flow = route_context_set(false, PresentationMode::Flow, true);
     assert!(
         !projected_menu_steals_unmatched_command(&table, &cmd_t, flow),
-        "Flow permits New Tab — route would Match, not steal-via-unmatched"
+        "Flow permits New Terminal — route would Match, not steal-via-unmatched"
     );
     assert!(
         !projected_menu_steals_unmatched_command(&table, &cmd_left, flow),

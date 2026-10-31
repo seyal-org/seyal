@@ -94,6 +94,7 @@ impl ApplicationRoot {
             WorkspaceCommandId::CommandPaletteOpen => self.open_palette(fence),
             WorkspaceCommandId::CommandPaletteClose => self.close_palette(fence),
             WorkspaceCommandId::TabCreate => self.create_tab(),
+            WorkspaceCommandId::TerminalCreate => self.new_terminal(),
             WorkspaceCommandId::TabCloseFocused => {
                 let id = self.shell.snapshot().active_tab;
                 self.close_tab(id, self.shell.containment_generation())

@@ -19,6 +19,7 @@ enum KeybindingShortcutRealization {
     static let windowCycleNext: UInt16 = 40
     static let windowCyclePrevious: UInt16 = 41
     static let windowSelectOrdinal: UInt16 = 42
+    static let terminalCreate: UInt16 = 43
 
     static func item(commandId: UInt16) -> SeyalAppShortcutItem? {
         let count = seyal_app_shortcut_count()
@@ -63,6 +64,7 @@ enum KeybindingShortcutRealization {
         switch commandId {
         case commandPaletteOpen: return "Command Palette"
         case tabCreate: return "New Tab"
+        case terminalCreate: return "New Terminal"
         case tabCloseFocused: return "Close Tab"
         case tabSelectPrevious: return "Previous Tab"
         case tabSelectNext: return "Next Tab"

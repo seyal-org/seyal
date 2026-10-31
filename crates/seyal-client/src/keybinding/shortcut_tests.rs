@@ -1,4 +1,4 @@
-//! Regressions for the default new-tab/window shortcuts and TOML overrides.
+//! Regressions for the default terminal/window shortcuts and TOML overrides.
 
 use super::load::load_keybinding_table;
 use super::types::{KeybindingTable, WorkspaceCommandId};
@@ -12,23 +12,28 @@ fn has_binding(table: &KeybindingTable, keys: &str, action: WorkspaceCommandId) 
 }
 
 #[test]
-fn defaults_assign_cmd_t_to_tab_and_cmd_n_to_window() {
+fn defaults_assign_cmd_t_to_terminal_and_cmd_n_to_window() {
     let table = load_keybinding_table(None);
-    assert!(has_binding(&table, "cmd+t", WorkspaceCommandId::TabCreate));
+    assert!(has_binding(&table, "cmd+t", WorkspaceCommandId::TerminalCreate));
+    assert!(!has_binding(&table, "cmd+t", WorkspaceCommandId::TabCreate));
     assert!(has_binding(&table, "cmd+n", WorkspaceCommandId::WindowNew));
     assert!(has_binding(&table, "cmd+shift+n", WorkspaceCommandId::WindowNew));
 }
 
 #[test]
-fn toml_can_rebind_new_tab_and_window_shortcuts() {
+fn toml_can_rebind_terminal_and_window_shortcuts() {
     let toml = r#"
+[[keybindings]]
+keys = "cmd+t"
+action = "none"
+
+[[keybindings]]
+keys = "cmd+shift+t"
+action = "terminal.create"
+
 [[keybindings]]
 keys = "cmd+n"
 action = "tab.create"
-
-[[keybindings]]
-keys = "cmd+t"
-action = "window.new"
 
 [[keybindings]]
 keys = "cmd+shift+n"
@@ -36,7 +41,8 @@ action = "none"
 "#;
     let table = load_keybinding_table(Some(toml));
 
+    assert!(has_binding(&table, "cmd+shift+t", WorkspaceCommandId::TerminalCreate));
     assert!(has_binding(&table, "cmd+n", WorkspaceCommandId::TabCreate));
-    assert!(has_binding(&table, "cmd+t", WorkspaceCommandId::WindowNew));
+    assert!(!has_binding(&table, "cmd+t", WorkspaceCommandId::TerminalCreate));
     assert!(!has_binding(&table, "cmd+shift+n", WorkspaceCommandId::WindowNew));
 }
