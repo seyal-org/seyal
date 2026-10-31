@@ -24,6 +24,8 @@ mod projection_tests;
 #[cfg(test)]
 mod route_tests;
 #[cfg(test)]
+mod shortcut_tests;
+#[cfg(test)]
 mod tests;
 
 pub use chord::{ChordPrefixActive, ChordPrefixState, CHORD_PREFIX_TIMEOUT};

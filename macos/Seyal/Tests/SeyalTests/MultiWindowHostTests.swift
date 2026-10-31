@@ -254,7 +254,8 @@ final class MultiWindowHostTests: XCTestCase {
                     && ($0.representedObject as? UInt16) != KeybindingShortcutRealization.windowSelectOrdinal
             }
 
-        XCTAssertEqual(projectedItems.count, 15)
+        XCTAssertEqual(projectedItems.count, 16)
+        XCTAssertEqual(projectedItems.filter { $0.title == "New Terminal" }.count, 1)
         XCTAssertEqual(
             Set(projectedItems.compactMap { $0.representedObject as? UInt16 }),
             Set((0..<seyal_app_shortcut_count()).compactMap { index in

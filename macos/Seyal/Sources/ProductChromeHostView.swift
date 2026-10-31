@@ -531,7 +531,10 @@ final class ProductChromeHostView: NSView {
             compositionActive: compositionActive
         ) {
         case .consumed:
-            reconcileChrome()
+            // Apply product changes as well as refreshing this Pane. Window
+            // commands enqueue native realization effects in Rust; a direct
+            // chrome refresh can leave the AppKit Window map stale.
+            pane.onProductChanged?()
             routeFocus()
             return true
         case .nativeCommand:

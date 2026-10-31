@@ -25,13 +25,21 @@ final class KeybindingEvidenceTests: XCTestCase {
         XCTAssertEqual(palette.key_is_named, 0)
         XCTAssertEqual(palette.key_base, keyK)
 
-        let newTab = try XCTUnwrap(
+        let newTerminal = try XCTUnwrap(
+            KeybindingShortcutRealization.item(
+                commandId: KeybindingShortcutRealization.terminalCreate
+            )
+        )
+        XCTAssertEqual(newTerminal.has_key_equivalent, 1)
+        XCTAssertEqual(newTerminal.modifier_bits & 1, 1, "CMD bit")
+        XCTAssertEqual(newTerminal.key_base, keyT)
+
+        let layoutTab = try XCTUnwrap(
             KeybindingShortcutRealization.item(
                 commandId: KeybindingShortcutRealization.tabCreate
             )
         )
-        XCTAssertEqual(newTab.has_key_equivalent, 1)
-        XCTAssertEqual(newTab.key_base, keyT)
+        XCTAssertEqual(layoutTab.has_key_equivalent, 0, "⌘T creates a Pane terminal, not a Layout tab")
 
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         KeybindingShortcutRealization.realize(
@@ -40,6 +48,14 @@ final class KeybindingEvidenceTests: XCTestCase {
         XCTAssertEqual(item.keyEquivalent, "k")
         XCTAssertTrue(item.keyEquivalentModifierMask.contains(.command))
         XCTAssertEqual(item.title, "Command Palette")
+
+        let terminalItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        KeybindingShortcutRealization.realize(
+            terminalItem, commandId: KeybindingShortcutRealization.terminalCreate
+        )
+        XCTAssertEqual(terminalItem.keyEquivalent, "t")
+        XCTAssertTrue(terminalItem.keyEquivalentModifierMask.contains(.command))
+        XCTAssertEqual(terminalItem.title, "New Terminal")
     }
 
     /// §14.4 / acceptance: ApplicationCommand match is consumed (zero PTY path).
@@ -114,7 +130,7 @@ final class KeybindingEvidenceTests: XCTestCase {
         )
         XCTAssertEqual(reserved, 2, "reserved cmd+q → native Command handling")
 
-        // Palette owns the route: cmd+t misses, but New Tab's projected ⌘T
+        // Palette owns the route: cmd+t misses, but New Terminal's projected ⌘T
         // would still fire if we returned native — consume that cross-context
         // steal only.
         XCTAssertEqual(
@@ -125,7 +141,7 @@ final class KeybindingEvidenceTests: XCTestCase {
         let menuSteal = seyal_app_route_keystroke(handle, 1, 0, keyT, 0, 0, 0)
         XCTAssertEqual(
             menuSteal, 1,
-            "palette-open cmd+t → consumed (inactive New Tab menu equivalent)"
+            "palette-open cmd+t → consumed (inactive New Terminal menu equivalent)"
         )
         XCTAssertEqual(
             seyal_app_shell(handle).tab_count, 1,
