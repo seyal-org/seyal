@@ -327,8 +327,8 @@ M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
 | Interactive Bash | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
 | Interactive fish | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
 | `/bin/sh` and any other shell without an accepted integration | Unsupported → full-Pane Raw; no guessed Blocks |
-| Nested shell / SSH child (no consent) | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim. Unsupported for trusted Blocks → Raw, or labeled relay (Accepted ADR-026) |
-| Consented session (SSH / `docker exec -it` / interactive bash or zsh), ADR-026 | Session-trusted `A`/`C`/`D` with a session secret; session-scoped Blocks; composer `Submit` at a session prompt (Accepted ADR-026 #1384). Decline, unsupported shell, or failed bootstrap → labeled relay / Raw. The offer hint never authorizes bootstrap |
+| Nested shell / SSH child (no session trust) | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim. Unsupported for trusted Blocks → Raw, or labeled relay (Accepted ADR-026). **Proposed #1396:** auto session trust for eligible depth-one SSH bash/zsh without Enable Blocks consent |
+| Consented session (SSH / `docker exec -it` / interactive bash or zsh), ADR-026 | Session-trusted `A`/`C`/`D` with a session secret; session-scoped Blocks; composer `Submit` at a session prompt (Accepted ADR-026 #1384). Decline, unsupported shell, or failed bootstrap → labeled relay / Raw. The offer hint never authorizes bootstrap. **Proposed #1396:** replace Enable Blocks consent with auto-arm for non-durable bootstrap; decline of *companion install* (#1385) must not disable Blocks; incomplete interactive work stays inside the Running session Block; alternate-screen → TUI; Raw/Relay are degraded fallbacks only |
 | Startup working directory | Launch/config policy (#676 / related launch-policy Issues) may supply initial CWD; not inferred from terminal output |
 | Live CWD / OSC 7 | **Deferred** for M003 Block semantics; OSC 7 and other terminal-emitted path text remain untrusted and must not populate Block or Workspace authority |
 
@@ -343,12 +343,17 @@ M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
   claims. Decline does not create a trusted remote Block. Local
   Bash/fish Flow integration and trusted live CWD stay deferred. The
   contract is normative; production bootstrap is not yet shipped.
+- **Proposed under #1396 (not normative until acceptance):** auto-arm
+  non-durable session bootstrap for eligible depth-one SSH bash/zsh;
+  consent only for remote install/modify (#1385). Withdraw Enable Blocks
+  as the headed SSH Blocks gate. See ADR-026 2026-10-31 amendment.
 - **Default offer-hint argv (ADR-026 §4.2):**
   the proactive hint matches a foreground process-group leader whose program
   basename is `ssh`. Nested `ssh` is excluded: an `ssh` whose host Block is
   already a session scope is not a proactive hint. The list is
   user-configurable. The hint never authorizes bootstrap. An explicit "Enable
-  Blocks for this session" action does not require the hint.
+  Blocks for this session" action does not require the hint. **Proposed #1396:**
+  hint drives auto-arm, not a consent modal, when bootstrap is non-durable.
 - Evidence disposition and remaining zsh gaps are recorded in
   `docs/evidence/m003-686-shell-metadata-decision.md`.
 
@@ -414,8 +419,8 @@ a different execution, attachment or presentation epoch.
 | secret/interactive child requiring direct input | Pane becomes Raw before arbitrary terminal input is routed |
 | Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
 | unsupported/nested SSH interaction | full-Pane Raw fallback; no simultaneous Flow + raw viewport |
-| consented session (ADR-026) | Discrete session-scoped Blocks under the host Running Block, and a retained composer (`Submit`) at a session-trusted prompt (Accepted ADR-026) |
-| declined session (ADR-026) | Labeled relay; no guessed Block |
+| consented session (ADR-026) | Discrete session-scoped Blocks under the host Running Block, and a retained composer (`Submit`) at a session-trusted prompt (Accepted ADR-026). **Proposed #1396:** same after auto-arm (no Enable Blocks) |
+| declined session (ADR-026) | Labeled relay; no guessed Block. **Proposed #1396:** “declined” applies to companion install (#1385) or bootstrap *failure*, not to skipping Enable Blocks — ordinary SSH Continues with Blocks when non-durable bootstrap succeeds |
 | forged remote `A`/`D` (ADR-026) | Ignored; no secret match, so no trusted session transition |
 | depth-two session (ADR-026) | Relay or Raw; no second session secret. A candidate requires F4 ∈ {None, Declined, Failed}; arming while `Trusted(_)` is forbidden |
 | auth/password prompt (ADR-026) | Local canonical-no-echo: bootstrap is not offered and relay is suppressed when F9 is available. A remote password prompt remains a residual plaintext risk even when F9 is available. Raw is held during `Armed`/`Delivering` and available otherwise |

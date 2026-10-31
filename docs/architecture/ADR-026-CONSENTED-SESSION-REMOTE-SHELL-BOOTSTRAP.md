@@ -1,8 +1,8 @@
 # ADR-026 — Consented session-only remote shell bootstrap and orthogonal composer input target
 
-- **Status:** Accepted on merge of this acceptance PR by a non-author maintainer under #1384. An author or agent comment is not that acceptance.
-- **Date:** 2026-10-29
-- **Issue:** #1384 (Architecture, Ticket A)
+- **Status:** Accepted on merge of the #1384 acceptance PR by a non-author maintainer. An author or agent comment is not that acceptance. **Proposed amendment under #1396** (section “2026-10-31 amendment — consent only for remote install/modify; always SSH Blocks”) is **not normative** until a separate docs-only acceptance PR merges under #1396 by a non-author maintainer.
+- **Date:** 2026-10-29; Proposed product-consent amendment 2026-10-31 (#1396)
+- **Issue:** #1384 (Architecture, Ticket A); amendment #1396
 - **Scope:** (1) Block lifecycle, composer input target and Pane presentation as independent Runtime facts; (2) a consented, session-only, in-band bootstrap of an interactive bash or zsh session reached through a Running Block's foreground job — SSH is the motivating case, not the only one — yielding secret-authenticated session-scoped Blocks and a retained composer; (3) the unverified relay fallback when consent is declined or bootstrap is unsupported or fails.
 - **Depends on:** Accepted ADR-004, ADR-005, ADR-006, ADR-009 (including the #968 shell-integration mechanism, the #686 shell-metadata boundary and the #1355 composed ClientHello fallback), ADR-015; SPEC-004, SPEC-006, SPEC-008, SPEC-009.
 - **Amends:** ADR-009, `docs/product/FEATURES.md` F-088 / F-088a, SPEC-008, SPEC-004, SPEC-009, `ui/M001-LIVE-TAIL-BEHAVIOR.md` and the composer UI references listed in §13. Those companion amendments are normative on merge of this acceptance PR by a non-author maintainer under #1384. An author or agent comment is not that acceptance. An implementation PR does not Accept this ADR.
@@ -332,3 +332,73 @@ Recorded under `docs/evidence/m005-1384-phase0-session-bootstrap.md`. ADR-026 is
 6. Performance: bootstrap latency, F9 sampling cost on admission edges, and no per-command regression for non-session executions against the M002 performance contract. The raw keystroke path must show no argv read.
 
 Capture the Warp-plain versus Warp-extension behavior matrix on the same OrbStack/`nt-ssh` host used in the Issue screenshots as comparative evidence, not as a Seyal claim.
+
+## 2026-10-31 amendment — consent only for remote install/modify; always SSH Blocks (#1396)
+
+**Status:** Proposed by #1396. This section is **not normative** until a separate docs-only acceptance PR under #1396 is merged by a non-author maintainer. Merging the proposal PR records the text only. An author or agent comment is not acceptance. An implementation PR does not Accept this amendment. Until acceptance, Decision §2.3–§2.5, §5, §8, §9 A3/A4, F-088a, and the consent-gated SPEC-008 rows remain the Accepted authority.
+
+### Problem
+
+Product authority (Block-based terminal) rejects the Accepted headed end-state that requires an **Enable Blocks** / per-session bootstrap consent ceremony and treats decline as Relay/Raw for ordinary SSH. Warp evidence (`docs/evidence/m005-warp-ssh-blocks-e2e-catalog.md`, `docs/evidence/m005-ssh-blocks-rd-warp-forensic.md`) shows:
+
+1. The Warp chooser is **Install SSH extension** vs **Continue without installing** — companion install, not Blocks enable.
+2. After Continue, every completed remote command is its own Block; the input editor stays usable; incomplete interactive work (`python3`) stays inside that Running Block’s surface; full-screen programs (`vim`) use TUI-class takeover.
+3. Live probe: Warp uses a local `ssh` wrapper + remote-command bootstrap (`bash --rcfile /dev/fd/63`); **no** `~/.warp*` companion; no durable install under home.
+
+Accepted ADR-026 Decision §2.3 / §5 and rejected alternative **A3** mis-located F-088: they treat **session-only, non-durable bootstrap** as requiring the same consent bar as **install/modify on the target**. That is wrong for Seyal’s product contract.
+
+### Decision (normative on #1396 acceptance)
+
+1. **Keep** orthogonal facts (Decision §2.1 / §3): Block lifecycle, composer input target, and presentation remain independent. A Running host Block never by itself disables the composer once a session scope is trusted.
+2. **Keep** session-trusted mechanism substrate (Decision §2.4 / §6–§7): secret-authenticated `A`/`C`/`D`, in-memory hooks only, no remote file, no remote program install, no history-option mutation, depth one, `SessionTrusted` presentation-only. Delivery may use the Accepted stager/payload path or a later accepted non-durable delivery that still writes no durable remote artifact; changing delivery mechanics beyond this amendment needs its own evidence.
+3. **Replace Decision §2.3 (Consent) for session-only Blocks bootstrap.** Controller consent is **not** required to arm session-only bootstrap that:
+   - installs **no** persistent remote program;
+   - writes **no** durable remote file under the user’s home or elsewhere;
+   - does **not** edit remote rc/dotfiles or persistent shell settings;
+   - leaves hooks only in the remote shell’s memory until that shell exits.
+   For SSH (and the same depth-one session class), Runtime **auto-arms** bootstrap when §4.1 candidate conditions hold for an interactive bash/zsh session, without an Enable Blocks banner. Trust still comes only from the authenticated handshake with S — never from argv heuristics alone.
+4. **Consent remains mandatory for install/modify on the target.** Any path that would install a companion, write durable remote files, edit rc/dotfiles, mutate persistent shell options, or otherwise leave an enterprise-visible install/config footprint requires explicit Controller consent (or a Controller-fenced Always/Never policy as already specified for that *install* class). That bar is owned with #1385 / reserved ADR-027 for the companion; this amendment does not weaken it.
+5. **Replace Decision §2.5 primary UX.** After successful session trust:
+   - every completed remote command is its own session-scoped Block;
+   - incomplete interactive non-alternate-screen work (e.g. `python` REPL) stays as live capture **inside that Running Block**;
+   - alternate-screen / full-screen programs (e.g. `vim`) use existing TUI takeover of the Pane;
+   - whole-session Raw is **not** the normal SSH answer and must not be the headed default for a trusted session at a remote shell prompt.
+6. **Fallback.** Unsupported shell, bootstrap failure, depth ≥ 2, or lost reader: labeled Relay and/or Raw remain available as **degraded** paths — not as the product success path after a mere “user did not click Enable Blocks.”
+7. **Remove Enable Blocks as product end-state.** SPEC/UI “Enable Blocks for this session” offer copy is withdrawn for the auto-arm SSH path. Protocol types for offer/consent may remain for **install/modify** (#1385) and for explicit re-request after `Failed`, but must not gate ordinary SSH Blocks.
+8. **F-088 / F-088a restatement (on acceptance).** F-088 Rejected = silent **install or durable modify** of the remote target (companion, rc edits, durable files, persistent settings). Session-only non-durable bootstrap without that footprint is **Allowed** under amended F-088a and does not require a per-session permission prompt. F-088 continues to reject silent companion install.
+
+### Rejected alternatives (this amendment)
+
+- **Keep Enable Blocks consent for in-memory session bootstrap.** Rejected: misreads product consent (install/modify only) and forces Raw/Relay as the headed SSH path.
+- **Heuristic zero-remote-code Blocks as SSH default.** Still rejected (original A1-only): cannot trust boundaries/exit status.
+- **Treat companion decline as no Blocks.** Rejected: Warp Continue path proves Blocks without companion.
+- **Copy Warp temporary `ZDOTDIR` / histcontrol mutation.** Still rejected (original): durable-ish or settings mutation crosses the install/modify consent bar Seyal keeps.
+
+### Amendments to earlier normative text (apply only on #1396 acceptance)
+
+On acceptance, read the Accepted body through this amendment for:
+
+| Locus | Change |
+|---|---|
+| Decision §2.3 | Auto-arm session-only non-durable bootstrap; consent reserved for install/modify |
+| Decision §2.5 / §8 | Relay/Raw are degraded fallbacks, not the success path after skipping Enable Blocks |
+| §5 Consent UX | No Enable Blocks ceremony for ordinary SSH Blocks; disclosure of non-durable bootstrap may appear in docs/settings, not as a blocking chooser |
+| §9 A3 | **Accepted** for session-only non-durable bootstrap; remains Rejected for silent install/modify |
+| §9 A4 | Remains Rejected as primary UX |
+| §10 T4/T5 | Reinterpret: T5 forbids silent **install/modify**; auto session-only arming is in-scope. Install consent bypass (companion) stays T4-class under #1385 |
+| §14 / #1385 | Companion still consent-gated; does not own Blocks enable |
+| F-088 / F-088a | As Decision item 8 above |
+| SPEC-008 §5.5 / §8 | Remote/SSH Blocks = auto session bootstrap when non-durable; not consent-gated Enable Blocks |
+| ADR-009 cross-link | Mechanism 5 session case is auto for eligible depth-one sessions under this amendment; typed stager remains the local delivery exception without a consent modal when non-durable |
+
+### Consequences
+
+- Headed SSH matches Block-based product intent: always Blocks for completed remote commands; interactive capture inside Running Block; TUI for fullscreen; no install on target for that path.
+- #1388 / closed PR #1391 Enable-Blocks product path is superseded; retarget implementation Issues only after this amendment is Accepted.
+- Orthogonal Runtime model and secret-authenticated markers remain; only the consent gate moves.
+
+### Evidence required before #1396 Architecture Done
+
+1. R&D notes linked above (screenshot summaries + live Warp footprint) reviewed by a non-author maintainer.
+2. Explicit security note: auto session-only arming vs companion consent; forged markers still require S (T1/T2 unchanged).
+3. Follow-on Ready implementation Issue(s) after acceptance — no production code in the ADR acceptance PR.
