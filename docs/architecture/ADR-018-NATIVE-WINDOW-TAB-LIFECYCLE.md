@@ -744,10 +744,12 @@ Conflicts resolved here, with the higher authority named:
 
 No other mockup conflict with ADR-015, ADR-007 or ADR-009 was found.
 
-**Product keybinding defaults (PO decision for PR #1208 / #1000 / #1002):**
-default New Tab is `⌘N` and `⌘T`; default New Window is `⌘⇧N`. SPEC-024 owns
-those builtin rows and the TOML `[[keybindings]]` override path; this ADR owns
-only the CreateWindow / zero-Window re-entry semantics those strokes dispatch.
+**Product keybinding assignment (clarified by the product-owner decision in #1392):**
+default New Terminal is `⌘T`; default New Window is `⌘N`, with `⌘⇧N` retained
+as an alias. `terminal.create` creates a terminal tab in the focused Pane; it is
+distinct from `tab.create`, which adds a Layout tab to the Window. SPEC-024 owns
+the builtin rows and TOML `[[keybindings]]` override path; this ADR owns only the
+CreateWindow / zero-Window re-entry semantics those strokes dispatch.
 
 ## 12. Not in this ADR
 
