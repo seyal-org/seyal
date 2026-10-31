@@ -269,7 +269,7 @@ when §4.2 / §7 permit:
 | keys | action | context |
 |---|---|---|
 | `cmd+k` | `command_palette.open` | `app` |
-| `cmd+t` | `tab.create` | `app` |
+| `cmd+t` | `terminal.create` | `app` |
 | `cmd+n` | `window.new` | `app`, `zero_window` |
 | `cmd+w` | `app.close_focused` | `app` |
 | `cmd+shift+n` | `window.new` | `app`, `zero_window` |
@@ -291,9 +291,11 @@ when §4.2 / §7 permit:
 | `cmd+0` | `chrome.toggle_left_panel` | `app` |
 | `cmd+opt+0` | `chrome.toggle_inspector` | `app` |
 
-**Product defaults (updated by the product-owner decision in #1392):** `cmd+t`
-creates a Tab (`tab.create`); `cmd+n` and `cmd+shift+n` create a Window
-(`window.new`, including zero-Window re-entry via the `zero_window` context).
+**Product defaults (clarified by the product-owner decision in #1392):** `cmd+t`
+creates a new terminal tab in the focused Pane (`terminal.create`); `cmd+n` and
+`cmd+shift+n` create a Window (`window.new`, including zero-Window re-entry via
+the `zero_window` context). `tab.create` creates a Layout tab in the Window;
+that Layout is a Pane arrangement, and each Pane owns its own terminal tabs.
 Users may override these builtins with `[[keybindings]]` entries in the
 canonical TOML config (§2 / §3); native must not invent a second default table.
 
@@ -393,6 +395,7 @@ Parameterless / focus-relative commands (M003):
 command_palette.open
 command_palette.close
 tab.create
+terminal.create
 tab.close_focused
 tab.select_previous
 tab.select_next
@@ -479,6 +482,7 @@ Naming compatibility with master (informational, not authority):
 |---|---|
 | `command_palette.open` | palette `PaletteAction::Open` / menu ⌘K |
 | `tab.create` | `ShellAction::CreateTab` / `PaletteCommand::CreateTab` |
+| `terminal.create` | `AppAction::NewTerminal` (focused Pane; creates and selects a Pane-local terminal tab) |
 | `pane.split_right` / `pane.split_down` | `ShellAction::SplitFocused` |
 | `presentation.set_*` | `PresentationAction` / mode transition |
 | `composer.history_search.open` | `ComposerAction::OpenHistory { pane }` (#933) |
@@ -699,8 +703,8 @@ For one physical/native key event on the active presentation route:
 R6.2.1 **Command strokes reach the Rust keybinding table before AppKit
 main-menu `performKeyEquivalent`.** Native must not let the main menu accept a
 projected `WorkspaceCommand` key equivalent before §6.2 step 2b has run. Builtin
-`cmd+t` is the projected New Tab equivalent only because Rust already decided
-`tab.create` (R11.1); `cmd+n` and `cmd+shift+n` are projected New Window
+`cmd+t` is the projected New Terminal equivalent only because Rust already decided
+`terminal.create` (R11.1); `cmd+n` and `cmd+shift+n` are projected New Window
 equivalents only because Rust decided `window.new`. The menu path must not
 accept a projected command before the specificity result of a more specific
 binding for the same stroke.
@@ -758,8 +762,8 @@ a projected shortcut, §11). Rust re-validates every menu-invoked
 exactly as for a keybinding match. While the palette is open that set is
 `{palette}`, so any command other than a `palette`-context command is rejected
 with `ActionUnavailable`: no state change, no PTY write. Pressing ⌘T while the
-palette is open therefore creates no Tab, whether the stroke reaches Rust as a
-keybinding match or as the "New Tab" menu item's key equivalent.
+palette is open therefore creates no Terminal, whether the stroke reaches Rust as a
+keybinding match or as the "New Terminal" menu item's key equivalent.
 
 R6.4.2 The menu projection (§11) marks every non-`palette`-context
 `WorkspaceCommand` item disabled while the palette is open, and re-enables it
@@ -818,7 +822,7 @@ Worked examples:
 |---|---|---|
 | builtin `cmd+k` → `command_palette.open` `[app]` | user `cmd+k` → `tab.create` `[app, raw]` | user owns `app` and `raw`; builtin loses its only bit and is dropped; one `DuplicateSequence` (`app`) |
 | user `ctrl+b>n` → `tab.create` `[flow, raw]` | user `ctrl+b>n` → `pane.split_down` `[raw]` | first keeps `[flow]`; second owns `[raw]`; one `DuplicateSequence` (`raw`) |
-| builtin `cmd+t` → `tab.create` `[app]` | user `cmd+t` → `pane.split_down` `[raw]` | disjoint; both remain; in Raw, `pane.split_down` wins by specificity (§6.1); in Flow/TUI, `tab.create` |
+| builtin `cmd+t` → `terminal.create` `[app]` | user `cmd+t` → `pane.split_down` `[raw]` | disjoint; both remain; in Raw, `pane.split_down` wins by specificity (§6.1); in Flow/TUI, `terminal.create` |
 
 ### 7.2 Diagnostics (non-secret)
 
@@ -1072,8 +1076,8 @@ Production Issues derived from this specification must include measurable cases:
     resolution of `pane.focus_*`, `pane.zoom_toggle`, `pane.swap_*`,
     `pane.move_*`; no neighbor → `NoDirectionalNeighbor`, state unchanged.
 19. Palette modal (R6.4.1–R6.4.2): with the palette open, ⌘T delivered as a
-    keybinding match **and** as the "New Tab" menu item action creates no Tab
-    and returns `ActionUnavailable`; the projection reports that item disabled
+    keybinding match **and** as the "New Terminal" menu item action creates no
+    terminal and returns `ActionUnavailable`; the projection reports that item disabled
     while open and enabled after close; Escape still closes the palette.
 20. Composer history search (§5.4): `ctrl+r` with the composer first responder
     opens history for the focused Pane; the same stroke in Raw/TUI reaches the

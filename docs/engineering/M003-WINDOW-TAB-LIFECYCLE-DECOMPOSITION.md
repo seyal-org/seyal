@@ -223,7 +223,7 @@ stays off in the headed composition.
   is never consulted as authority.
 - The host holds no writable window/tab/pane model; only a derived copy plus
   disposable view/GPU state.
-- `⌥⌘1…9` window selection, `⌘T` / `⌘N` New Tab, `⌘⇧N` New Window, and window cycling route
+- `⌥⌘1…9` window selection, `⌘T` New Terminal, `⌘N` New Window, `⌘⇧N` New Window alias, and window cycling route
   through typed actions via `NSMenuItem` key equivalents, never `keyDown`
   interception; the host never constructs an `NSWindow` without a Rust effect.
 
@@ -259,7 +259,7 @@ headed window/tab creation admission.
   and applies `CreateWindow`); it
   never depends on AppKit key-window state and never raises a miniaturized
   Window instead of creating when the app is inactive. Per SPEC-024, default
-  New Tab is `⌘T` and default New Window is `⌘N` / `⌘⇧N` (TOML-customizable).
+  New Terminal is `⌘T` and default New Window is `⌘N` / `⌘⇧N` (TOML-customizable).
 - Dock reopen / `applicationShouldHandleReopen` with zero Windows forwards
   `ActivateWorkspace { workspace: last_active_workspace }` (ADR-018 §3.3a).
 
@@ -437,7 +437,7 @@ candidate now.
    Alternative E (release the attachment on hide).
 5. **Default New Tab / New Window keybindings.** The earlier product-owner
    decision for PR #1208 / #1000 / #1002 was superseded by Issue #1392:
-   default New Tab is `⌘T`; default New Window is `⌘N`, with `⌘⇧N` retained
+   default New Terminal is `⌘T`; default New Window is `⌘N`, with `⌘⇧N` retained
    as an alias. SPEC-024 owns the builtin rows and `[[keybindings]]` TOML
    override path; ADR-018 owns only CreateWindow / zero-Window re-entry
    semantics.

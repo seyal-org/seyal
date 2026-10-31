@@ -204,8 +204,8 @@ reads `FocusSeq` from the same snapshot, so it never self-rejects as stale.
 
 **Outcome:** SPEC-024 §5.0 catalog ids and builtins:
 `app.close_focused` (`cmd+w`, hierarchical Pane→Tab→Window), `window.new`
-(`cmd+n` / `cmd+shift+n`, including `zero_window` context; New Tab default
-`cmd+t` → `tab.create`), `window.close`,
+(`cmd+n` / `cmd+shift+n`, including `zero_window` context; New Terminal default
+`cmd+t` → `terminal.create`; Layout creation stays `tab.create`), `window.close`,
 `window.cycle_next` / `window.cycle_previous` (`` cmd+` `` / `` cmd+shift+` ``),
 and `window.select_ordinal` (`cmd+opt+1`…`cmd+opt+9`).
 
