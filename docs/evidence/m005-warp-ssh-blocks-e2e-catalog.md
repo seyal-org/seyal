@@ -1,7 +1,7 @@
 # Warp SSH + Blocks — E2E functionality catalog (R&D evidence)
 
-**Status:** Local R&D evidence only. Not ADR authority. Not an implementation plan.  
-**Purpose:** Prevent another product/architecture mistake by grounding Seyal’s SSH Blocks decision in **observed Warp behavior as competitive reference** (your screenshots + a live Warp process on this machine) plus public docs/binary forensics.
+**Status:** R&D evidence for Architecture Issue #1396 / PR #1397. Not ADR authority by itself. Not an implementation plan.  
+**Purpose:** Prevent another product/architecture mistake by grounding Seyal’s SSH Blocks decision in **observed Warp behavior as competitive reference** (product-owner screenshots + a live Warp process) plus public docs/binary forensics.
 
 **Hard boundary:** Warp is reference UX/mechanism *shape* only. Seyal must not install Warp’s SSH extension, must not reuse Warp source/binaries, and must not write `~/.warp*`. Optional durable install is a **Seyal** companion (#1385). SSH Blocks v1 needs **no** that install.
 

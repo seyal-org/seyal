@@ -1,11 +1,11 @@
 # R&D evidence — Warp-like SSH Blocks (no Enable Blocks / no companion)
 
-**Status:** Local R&D only. Not architecture authority. Does **not** amend ADR-026. Does **not** authorize implementation. No GitHub Issue/PR created from this note.
+**Status:** R&D evidence for Architecture Issue #1396 / PR #1397. Not architecture authority by itself. Does **not** authorize production implementation. Supports the Proposed ADR-026 2026-10-31 amendment only.
 
 | Field | Value |
 |---|---|
-| Context | Product conflict with Accepted ADR-026; worktree #1388; closed PR #1391 discarded as product path |
-| Related | ADR-026, ADR-009, SPEC-008 §5.5, F-088 / F-088a, #1384, #1385 (companion, separate) |
+| Context | Product conflict with Accepted ADR-026; worktree #1388; closed PR #1391 discarded as product path; amendment Proposed under #1396 |
+| Related | ADR-026, ADR-009, SPEC-008 §5.5, F-088 / F-088a, #1384, #1385 (companion, separate), #1396 / #1397 |
 | Host | OrbStack `nt-ssh` (`ssh nt-ssh@orb`), Ubuntu noble, login shell `/bin/bash`, `xxd` present, **no zsh installed** |
 | Warp client | `/Applications/Warp.app` (Stable); bootstrap text recovered from binary strings + public docs / published `bash_body.sh` |
 | Recorded | 2026-10-31 |
@@ -168,19 +168,21 @@ Orthogonal Runtime facts (Block lifecycle ≠ input target ≠ presentation) fro
 | Class-A Busy generalization (`docker exec -it`, nested shells) | Optional later; do not block SSH v1 |
 | #1388 / PR #1391 ADR-026 Enable-Blocks impl | Not the product destination |
 
-## 9. Next research steps (local, still no GitHub)
+## 9. Next research steps (evidence follow-ons; not this PR’s production scope)
 
 1. Headed Warp.app → `nt-ssh` with `never_install`: capture Blocks for `pwd`/`echo`, unfinished `python`, `vim`, nested `ssh`, password prompt; `find`/`lsof` during connect for `warptmp`.
 2. Install zsh on `nt-ssh` (needs sudo) and measure Warp-class / Seyal-class zsh temp-dir and history behavior.
-3. Spike (non-mergeable): auto-arm ADR-026 payload over real SSH without consent UI; measure history, process list, fail-closed forgery.
-4. Spike (non-mergeable): remote-command delivery of in-memory hooks **without** typed stager; compare enterprise signal vs H1 typed.
-5. Only after answers: Architecture Issue → ADR amend/supersede PR → then impl Issues.
+3. Spike (non-mergeable): spawn-time / remote-command delivery of in-memory hooks **without** typing into an unproven live reader (ADR-026 Decision item 4); measure history, process list, `RemoteCommand` interaction, fail-closed forgery.
+4. Spike (non-mergeable): typed stager only under consent or a future readiness-gated amend — do **not** blind auto-arm typed inject.
+5. After #1396 acceptance: Ready impl Issue(s) with Decision item 4 evidence — not Enable Blocks.
 
-## 10. Open questions still blocking ADR draft
+## 10. Open questions (resolved for #1396 Proposed amend; remain for Ready impl)
 
-See chat R&D plan. Highest leverage remaining:
+Product/architecture answers for the Proposed ADR-026 2026-10-31 amendment:
 
-1. Is any session-only remote cooperation acceptable if disclosed once in settings (not per-session Enable Blocks)?
-2. Prefer typed in-memory (history pollution) vs remote-command (forced-command audit) vs transient zsh temp dir?
-3. Must Blocks be `SessionTrusted` or is labeled Unverified enough for v1? (Product language says Warp-like — implies trusted boundaries.)
-4. How does F-088 get restated without reopening silent companion install (#1385)?
+1. Session-only non-durable bootstrap: Allowed without Enable Blocks when Decision item 4 holds; consent reserved for install/modify and typed-into-unproven-reader delivery.
+2. Prefer spawn-time / remote-command-class auto-arm; reject blind typed auto-arm; reject Warp `ZDOTDIR` / histcontrol mutation; disclose history when typed path is used.
+3. Blocks remain `SessionTrusted` after authenticated handshake (not heuristic Unverified as default).
+4. F-088 Rejected narrows to silent install/durable modify + blind typed inject; companion install stays #1385.
+
+Impl still owes Decision item 4 evidence and ADR-009 mechanism-4 compatibility before Ready.

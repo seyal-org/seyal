@@ -335,7 +335,7 @@ Capture the Warp-plain versus Warp-extension behavior matrix on the same OrbStac
 
 ## 2026-10-31 amendment — consent only for remote install/modify; always SSH Blocks (#1396)
 
-**Status:** Proposed by #1396. This section is **not normative** until a separate docs-only acceptance PR under #1396 is merged by a non-author maintainer. Merging the proposal PR records the text only. An author or agent comment is not acceptance. An implementation PR does not Accept this amendment. Until acceptance, Decision §2.3–§2.5, §5, §8, §9 A3/A4, F-088a, and the consent-gated SPEC-008 rows remain the Accepted authority.
+**Status:** Proposed by #1396. This section is **not normative** until a non-author maintainer Accepts it under #1396 (docs-only acceptance merge or explicit APPROVE + merge). An author or agent comment is not acceptance. An implementation PR does not Accept this amendment. Until acceptance, Decision §2.3, §2.5, §5, §8, §9 A3/A4, F-088a, and the consent-gated SPEC-008 rows remain the Accepted authority. Decision §2.4 (mechanism substrate) stays Accepted and is **not** superseded by this amendment.
 
 ### Problem
 
@@ -343,36 +343,46 @@ Product authority (Block-based terminal) rejects the Accepted headed end-state t
 
 1. Warp’s chooser (competitive reference only — **not** Seyal copy, **no** Warp code reuse) is **Install Warp's SSH extension** vs **Continue without installing** — that chooser is **companion install**, not Blocks enable. Seyal’s durable install, if Accepted, is a **Seyal** companion under #1385 (e.g. `~/.seyal/…`), never Warp’s extension or `~/.warp*`.
 2. After Continue, every completed remote command is its own Block; the input editor stays usable; incomplete interactive work (`python3`) stays inside that Running Block’s surface; full-screen programs (`vim`) use TUI-class takeover.
-3. Live probe: Warp uses a local `ssh` wrapper + remote-command bootstrap (`bash --rcfile /dev/fd/63`); **no** `~/.warp*` companion; no durable install under home. Seyal must achieve the Blocks outcome with its own non-durable substrate — not by installing or invoking Warp.
+3. Live probe: Warp’s no-prompt Blocks path uses a local `ssh` wrapper + **remote-command** bootstrap (`bash --rcfile /dev/fd/63`) so setup is **not** typed into an already-running remote reader; **no** `~/.warp*` companion. Warp paths that type into a live shell (subshell / SSH-detection) show a confirmation. Seyal must achieve the Blocks outcome with its own non-durable substrate — not by installing or invoking Warp — and must not treat Warp’s no-prompt UX as a license to blind-type a stager into an unproven reader.
 
-Accepted ADR-026 Decision §2.3 / §5 and rejected alternative **A3** mis-located F-088: they treat **session-only, non-durable bootstrap** as requiring the same consent bar as **install/modify on the target**. That is wrong for Seyal’s product contract.
+Accepted ADR-026 Decision §2.3 / §5 and rejected alternative **A3** mis-located F-088: they treat **session-only, non-durable bootstrap** as requiring the same consent bar as **install/modify on the target**. That is wrong for Seyal’s product contract. Separately, removing consent while keeping **typed-into-live-reader** delivery without a readiness gate is also wrong (§1.5: remote prompt readiness is not locally provable).
 
 ### Decision (normative on #1396 acceptance)
 
 1. **Keep** orthogonal facts (Decision §2.1 / §3): Block lifecycle, composer input target, and presentation remain independent. A Running host Block never by itself disables the composer once a session scope is trusted.
-2. **Keep** session-trusted mechanism substrate (Decision §2.4 / §6–§7): secret-authenticated `A`/`C`/`D`, in-memory hooks only, no remote file, no remote program install, no history-option mutation, depth one, `SessionTrusted` presentation-only. Delivery may use the Accepted stager/payload path or a later accepted non-durable delivery that still writes no durable remote artifact; changing delivery mechanics beyond this amendment needs its own evidence.
-3. **Replace Decision §2.3 (Consent) for session-only Blocks bootstrap.** Controller consent is **not** required to arm session-only bootstrap that:
+2. **Keep** session-trusted mechanism substrate (Decision §2.4 / §6–§7): secret-authenticated `A`/`C`/`D`, in-memory hooks only, no remote file, no remote program install, no history-option mutation, depth one, `SessionTrusted` presentation-only. Trust still comes only from the authenticated handshake with S — never from argv heuristics alone.
+3. **Replace Decision §2.3 (Consent) for session-only Blocks bootstrap — product bar.** Controller consent is **not** required for session-only bootstrap that:
    - installs **no** persistent remote program;
-   - writes **no** durable remote file under the user’s home or elsewhere;
-   - does **not** edit remote rc/dotfiles or persistent shell settings;
+   - writes **no** durable remote file under the user’s home or elsewhere (rc/dotfiles, companion binaries, persistent settings files);
+   - does **not** edit remote rc/dotfiles or mutate persistent shell options;
    - leaves hooks only in the remote shell’s memory until that shell exits.
-   For SSH (and the same depth-one session class), Runtime **auto-arms** bootstrap when §4.1 candidate conditions hold for an interactive bash/zsh session, without an Enable Blocks banner. Trust still comes only from the authenticated handshake with S — never from argv heuristics alone.
-4. **Consent remains mandatory for install/modify on the target.** Any path that would install a **Seyal** companion, write durable remote files, edit rc/dotfiles, mutate persistent shell options, or otherwise leave an enterprise-visible install/config footprint requires explicit Controller consent (or a Controller-fenced Always/Never policy as already specified for that *install* class). That bar is owned with #1385 / reserved ADR-027. Seyal must never install Warp’s SSH extension or reuse Warp binaries/source. This amendment does not weaken the install consent bar.
-5. **Replace Decision §2.5 primary UX.** After successful session trust:
+   **Enable Blocks is withdrawn** as the headed SSH gate. Ordinary SSH must become session Blocks after successful trust without that ceremony.
+4. **Auto-arm delivery gate (readiness).** Auto-arm (no modal, no Always fence) is **Allowed only** when bootstrap delivery **does not type a setup line into an already-running, unproven remote reader**. The Warp-analog class is spawn-time / remote-command (or equivalent) delivery that establishes the interactive bash/zsh already bootstrapped before its line editor owns the session. That Seyal-owned delivery is in-scope for this product decision; concrete invoke/wrapper/`ControlMaster`/`RemoteCommand` interaction details and ADR-009 mechanism-4 compatibility need Ready-impl evidence and must not reuse Warp code.  
+   **Blind typed auto-arm is Rejected.** The Accepted in-band stager/payload path (§6) remains valid substrate but **must not** be auto-armed into an unproven live reader. Typed delivery requires either (a) explicit Controller offer/consent or Controller-fenced Always as in Accepted §5, or (b) a later amendment that defines a non-human readiness proof plus adversarial threat rows (remote password/2FA, bastion menu, attached tmux/screen, DB/REPL client, nested menus) and a bounded settle / per-host failure cache / opt-out. Until (a) or (b) or spawn-time delivery lands, Runtime fails closed to labeled Relay/Raw rather than typing blindly.
+5. **History vs durable-modify bar.** Seyal writing no remote file and not mutating history *options* remains required. A setup line that the **remote shell’s own history** records (e.g. `~/.bash_history`) is **not** classified as Seyal durable modify for the install/modify consent bar, but it **is** an enterprise-visible side effect:  
+   - spawn-time / remote-command auto-arm **should prefer** delivery that does not leave a user-visible typed command in remote history;  
+   - typed stager (consent or future readiness-gated path) **must disclose** that the line may enter remote shell history (§5.2 disclosure content stays; the blocking Enable Blocks chooser does not);  
+   - mutating `HISTCONTROL` / `HISTIGNORE` / zsh equivalents remains **Rejected** (settings mutation; not adopted from Warp).
+6. **Consent remains mandatory for install/modify on the target.** Any path that would install a **Seyal** companion, write durable remote files Seyal owns, edit rc/dotfiles, mutate persistent shell options, or otherwise leave an enterprise-visible install/config footprint requires explicit Controller consent. Install Always/Never semantics are owned by #1385 / reserved ADR-027; this amendment states only that Blocks must not wait on that chooser. Seyal must never install Warp’s SSH extension or reuse Warp binaries/source.
+7. **Replace Decision §2.5 primary UX.** After successful session trust:
    - every completed remote command is its own session-scoped Block;
    - incomplete interactive non-alternate-screen work (e.g. `python` REPL) stays as live capture **inside that Running Block**;
+   - for that Running session Block, **Block-scoped line input to the foreground program** (composer target `ForegroundProgram(b)` / §8 Relay contract) is the **primary success path** for line-oriented interactive programs — not a degraded fallback;
    - alternate-screen / full-screen programs (e.g. `vim`) use existing TUI takeover of the Pane;
-   - whole-session Raw is **not** the normal SSH answer and must not be the headed default for a trusted session at a remote shell prompt.
-6. **Fallback.** Unsupported shell, bootstrap failure, depth ≥ 2, or lost reader: labeled Relay and/or Raw remain available as **degraded** paths — not as the product success path after a mere “user did not click Enable Blocks.”
-7. **Remove Enable Blocks as product end-state.** SPEC/UI “Enable Blocks for this session” offer copy is withdrawn for the auto-arm SSH path. Protocol types for offer/consent may remain for **install/modify** (#1385) and for explicit re-request after `Failed`, but must not gate ordinary SSH Blocks.
-8. **F-088 / F-088a restatement (on acceptance).** F-088 Rejected = silent **install or durable modify** of the remote target (companion, rc edits, durable files, persistent settings). Session-only non-durable bootstrap without that footprint is **Allowed** under amended F-088a and does not require a per-session permission prompt. F-088 continues to reject silent companion install.
+   - character-level needs (arrow history, tab completion inside a REPL) remain full-Pane Raw under ADR-009 until a separate amendment defines in-Block key forwarding;
+   - whole-session Raw is **not** the normal SSH answer for a trusted session at a remote shell prompt.
+8. **Fallback (truly degraded).** Unsupported shell, bootstrap failure, depth ≥ 2, lost reader, or auto-arm unavailable under Decision item 4: labeled Relay and/or Raw remain available. These are **not** the success path merely because the user skipped an Enable Blocks click or declined the **companion** (#1385).
+9. **Remove Enable Blocks as product end-state.** SPEC/UI “Enable Blocks for this session” is withdrawn for the auto-arm SSH path. Offer/consent protocol types may remain for **install/modify** (#1385), for typed-stager consent when that path is used, and for explicit re-request after `Failed`, but must not gate ordinary SSH Blocks when spawn-time auto-arm succeeds.
+10. **Opt-out (not consent).** A Rust-owned local setting may disable session bootstrap globally or per host (denylist). A setting is not consent and must not reintroduce Enable Blocks as the default ceremony.
+11. **F-088 / F-088a restatement (on acceptance).** F-088 Rejected = silent **install or durable modify** of the remote target (companion, rc edits, durable files Seyal writes, persistent settings mutation) **and** blind typed inject into an unproven live reader. Session-only non-durable bootstrap that satisfies Decision items 3–5 is **Allowed** under amended F-088a without an Enable Blocks prompt. F-088 continues to reject silent companion install.
 
 ### Rejected alternatives (this amendment)
 
-- **Keep Enable Blocks consent for in-memory session bootstrap.** Rejected: misreads product consent (install/modify only) and forces Raw/Relay as the headed SSH path.
+- **Keep Enable Blocks consent for all session-only bootstrap.** Rejected: misreads product consent (install/modify only) and forces Raw/Relay as the headed SSH path when a safe auto-arm delivery exists.
+- **Auto-arm the typed stager into every §4.1 candidate without readiness proof.** Rejected: no Warp precedent on the no-prompt path; adversarial readers (password/2FA, menus, attached multiplexers) can be harmed; `Armed` input hold would black out input the user never authorized.
 - **Heuristic zero-remote-code Blocks as SSH default.** Still rejected (original A1-only): cannot trust boundaries/exit status.
 - **Treat companion decline as no Blocks.** Rejected: Warp Continue path proves Blocks without companion.
-- **Copy Warp temporary `ZDOTDIR` / histcontrol mutation.** Still rejected (original): durable-ish or settings mutation crosses the install/modify consent bar Seyal keeps.
+- **Copy Warp temporary `ZDOTDIR` or histcontrol/HISTIGNORE mutation.** Still rejected: remote file write or persistent shell-option mutation crosses the install/modify consent bar; history side effects are handled by disclosure + prefer history-clean delivery (Decision item 5), not by mutating options.
 
 ### Amendments to earlier normative text (apply only on #1396 acceptance)
 
@@ -380,25 +390,29 @@ On acceptance, read the Accepted body through this amendment for:
 
 | Locus | Change |
 |---|---|
-| Decision §2.3 | Auto-arm session-only non-durable bootstrap; consent reserved for install/modify |
-| Decision §2.5 / §8 | Relay/Raw are degraded fallbacks, not the success path after skipping Enable Blocks |
-| §5 Consent UX | No Enable Blocks ceremony for ordinary SSH Blocks; disclosure of non-durable bootstrap may appear in docs/settings, not as a blocking chooser |
-| §9 A3 | **Accepted** for session-only non-durable bootstrap; remains Rejected for silent install/modify |
+| Decision §2.3 | Consent reserved for install/modify and for typed-into-live-reader delivery; auto-arm Allowed only under Decision item 4 |
+| Decision §2.4 | Unchanged (substrate kept) |
+| Decision §2.5 / §8 | After trust, Block-scoped line relay into a Running session Block is primary for line-oriented interactive work; Relay/Raw after bootstrap *failure*/unsupported/no-auto-arm remain degraded; skipping Enable Blocks is not a degrade reason |
+| §4.2 hint | Default `ssh` argv hint may select auto-arm *eligibility* for spawn-time delivery; hint never grants trust; hint never authorizes typed inject |
+| §5 Consent UX | No Enable Blocks ceremony for ordinary SSH Blocks on the auto-arm path; typed-path disclosure (§5.2 history text) retained when typed delivery is used; install chooser is #1385 |
+| §6 stager | Remains the typed substrate; not auto-armed into unproven readers |
+| §9 A3 | **Accepted** for session-only non-durable bootstrap under Decision items 3–5; remains Rejected for silent install/modify and for blind typed inject |
 | §9 A4 | Remains Rejected as primary UX |
-| §10 T4/T5 | Reinterpret: T5 forbids silent **install/modify**; auto session-only arming is in-scope. Install consent bypass (companion) stays T4-class under #1385 |
-| §14 / #1385 | Companion still consent-gated; does not own Blocks enable |
-| F-088 / F-088a | As Decision item 8 above |
-| SPEC-008 §5.5 / §8 | Remote/SSH Blocks = auto session bootstrap when non-durable; not consent-gated Enable Blocks |
-| ADR-009 cross-link | Mechanism 5 session case is auto for eligible depth-one sessions under this amendment; typed stager remains the local delivery exception without a consent modal when non-durable |
+| §10 T4/T5 | T5 forbids silent **install/modify** and blind typed inject; spawn-time auto-arm is in-scope. Companion consent bypass stays T4-class under #1385 |
+| §14 / #1385 | Companion still consent-gated; does not own Blocks enable; install Always/Never owned there |
+| F-088 / F-088a | As Decision item 11 above |
+| SPEC-008 §5.5 / §8 | Remote/SSH Blocks = auto session bootstrap when Decision item 4 holds; not consent-gated Enable Blocks |
+| ADR-009 cross-link | Mechanism 5 session case is auto for eligible depth-one sessions when delivery satisfies Decision item 4; typed stager remains the local typed-input exception and stays consent- or readiness-gated |
 
 ### Consequences
 
-- Headed SSH matches Block-based product intent: always Blocks for completed remote commands; interactive capture inside Running Block; TUI for fullscreen; no install on target for that path.
-- #1388 / closed PR #1391 Enable-Blocks product path is superseded; retarget implementation Issues only after this amendment is Accepted.
-- Orthogonal Runtime model and secret-authenticated markers remain; only the consent gate moves.
+- Headed SSH matches Block-based product intent: always Blocks for completed remote commands once a safe auto-arm delivery is implemented; interactive capture inside Running Block; TUI for fullscreen; no install on target for that path; no Warp extension/code.
+- Impl must land Seyal-owned spawn-time / remote-command-class delivery (or a later readiness-gated typed amend) before the no-ceremony promise is shippable; Enable Blocks is not the interim product answer.
+- #1388 / closed PR #1391 Enable-Blocks product path is superseded after acceptance; retarget implementation Issues accordingly. Issue #1388 stays open until retargeted/closed by its own process — this amendment text does not close it.
+- Orthogonal Runtime model and secret-authenticated markers remain; the consent gate moves to install/modify and to unsafe typed delivery.
 
 ### Evidence required before #1396 Architecture Done
 
 1. R&D notes linked above (screenshot summaries + live Warp footprint) reviewed by a non-author maintainer.
-2. Explicit security note: auto session-only arming vs companion consent; forged markers still require S (T1/T2 unchanged).
-3. Follow-on Ready implementation Issue(s) after acceptance — no production code in the ADR acceptance PR.
+2. Explicit security note: auto-arm Allowed only under Decision item 4; blind typed auto-arm Rejected; companion consent unchanged; forged markers still require S (T1/T2 unchanged); history side-effect classification per Decision item 5.
+3. Follow-on Ready implementation Issue(s) after acceptance — no production code in the ADR acceptance PR; spawn-time delivery evidence and ADR-009 mechanism-4 compatibility recorded before Ready.
