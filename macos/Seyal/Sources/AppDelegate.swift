@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.windowNew, host: host))
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.terminalCreate, host: host))
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.tabCreate, host: host))
-        fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.appCloseFocused, host: host))
+        fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.terminalCloseFocused, host: host))
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.tabCloseFocused, host: host))
         fileMenu.addItem(NSMenuItem.separator())
         fileMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.tabSelectPrevious, host: host))

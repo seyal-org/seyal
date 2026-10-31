@@ -428,7 +428,7 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     );
 
     assert!(contexts_for(&table, "cmd+,").is_empty());
-    assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::AppCloseFocused).is_some());
+    assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TerminalCloseFocused).is_some());
     assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TabCloseFocused).is_none());
 }
 

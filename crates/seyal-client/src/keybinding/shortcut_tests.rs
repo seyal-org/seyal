@@ -20,11 +20,44 @@ fn defaults_assign_cmd_t_to_terminal_and_cmd_n_to_window() {
         WorkspaceCommandId::TerminalCreate
     ));
     assert!(!has_binding(&table, "cmd+t", WorkspaceCommandId::TabCreate));
+    assert!(has_binding(
+        &table,
+        "cmd+w",
+        WorkspaceCommandId::TerminalCloseFocused
+    ));
     assert!(has_binding(&table, "cmd+n", WorkspaceCommandId::WindowNew));
     assert!(has_binding(
         &table,
         "cmd+shift+n",
         WorkspaceCommandId::WindowNew
+    ));
+}
+
+#[test]
+fn toml_can_bind_focused_terminal_close() {
+    let toml = r#"
+[[keybindings]]
+keys = "cmd+w"
+action = "none"
+
+[[keybindings]]
+keys = "cmd+shift+w"
+action = "terminal.close_focused"
+"#;
+    let table = load_keybinding_table(Some(toml));
+    assert!(
+        has_binding(
+            &table,
+            "cmd+shift+w",
+            WorkspaceCommandId::TerminalCloseFocused
+        ),
+        "diagnostics: {:?}",
+        table.diagnostics
+    );
+    assert!(!has_binding(
+        &table,
+        "cmd+w",
+        WorkspaceCommandId::TerminalCloseFocused
     ));
 }
 

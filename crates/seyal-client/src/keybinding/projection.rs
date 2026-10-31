@@ -43,6 +43,7 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         WorkspaceCommandId::CommandPaletteOpen
         | WorkspaceCommandId::TabCreate
         | WorkspaceCommandId::TerminalCreate
+        | WorkspaceCommandId::TerminalCloseFocused
         | WorkspaceCommandId::TabCloseFocused
         | WorkspaceCommandId::TabSelectPrevious
         | WorkspaceCommandId::TabSelectNext
@@ -95,6 +96,7 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::CommandPaletteOpen => "Command Palette",
         WorkspaceCommandId::TabCreate => "New Tab",
         WorkspaceCommandId::TerminalCreate => "New Terminal",
+        WorkspaceCommandId::TerminalCloseFocused => "Close Terminal",
         WorkspaceCommandId::TabCloseFocused => "Close Tab",
         WorkspaceCommandId::TabSelectPrevious => "Previous Tab",
         WorkspaceCommandId::TabSelectNext => "Next Tab",
@@ -127,7 +129,7 @@ fn menu_visible_commands() -> impl Iterator<Item = WorkspaceCommand> {
         WorkspaceCommandId::PresentationToggleRaw,
         WorkspaceCommandId::PresentationToggleTui,
         WorkspaceCommandId::GotoOpen,
-        WorkspaceCommandId::AppCloseFocused,
+        WorkspaceCommandId::TerminalCloseFocused,
         WorkspaceCommandId::WindowNew,
         WorkspaceCommandId::WindowClose,
         WorkspaceCommandId::WindowCycleNext,
@@ -294,6 +296,7 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::WindowCyclePrevious => 41,
         WorkspaceCommandId::WindowSelectOrdinal => 42,
         WorkspaceCommandId::TerminalCreate => 43,
+        WorkspaceCommandId::TerminalCloseFocused => 44,
     }
 }
 
@@ -343,6 +346,7 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         41 => WorkspaceCommandId::WindowCyclePrevious,
         42 => WorkspaceCommandId::WindowSelectOrdinal,
         43 => WorkspaceCommandId::TerminalCreate,
+        44 => WorkspaceCommandId::TerminalCloseFocused,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {

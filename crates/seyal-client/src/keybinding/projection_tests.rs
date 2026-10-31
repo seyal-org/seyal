@@ -123,6 +123,11 @@ fn default_terminal_tab_and_window_menu_key_equivalents_match_the_bindings() {
         new_terminal.key_equivalent_notation.as_deref(),
         Some("cmd+t")
     );
+    let close_terminal = item_for(WorkspaceCommandId::TerminalCloseFocused, &projection);
+    assert_eq!(
+        close_terminal.key_equivalent_notation.as_deref(),
+        Some("cmd+w")
+    );
     let new_tab = item_for(WorkspaceCommandId::TabCreate, &projection);
     assert!(new_tab.key_equivalent_notation.is_none());
 
@@ -144,6 +149,16 @@ fn default_terminal_tab_and_window_menu_key_equivalents_match_the_bindings() {
             .expect("terminal-create menu id")
             .id,
         WorkspaceCommandId::TerminalCreate
+    );
+    assert_eq!(
+        workspace_command_ffi_id(WorkspaceCommandId::TerminalCloseFocused),
+        44
+    );
+    assert_eq!(
+        workspace_command_from_ffi_id(44, 0)
+            .expect("terminal-close menu id")
+            .id,
+        WorkspaceCommandId::TerminalCloseFocused
     );
 }
 

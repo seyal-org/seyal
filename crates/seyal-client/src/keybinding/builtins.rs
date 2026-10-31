@@ -55,7 +55,7 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
         },
         BuiltinRow {
             keys_notation: "cmd+w",
-            id: WorkspaceCommandId::AppCloseFocused,
+            id: WorkspaceCommandId::TerminalCloseFocused,
             ordinal: None,
             context: APP,
         },

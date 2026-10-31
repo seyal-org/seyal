@@ -51,6 +51,25 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         waitForWindowCount(app, 3, timeout: 10)
     }
 
+    func testCommandWClosesOnlySelectedPaneTerminal() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+        clickNewTerminal(in: app)
+        waitForTerminalTabCount(app, 2, timeout: 12)
+        waitForUsablePty(in: app, timeout: 12)
+
+        app.typeKey("w", modifierFlags: .command)
+
+        waitForTerminalTabCount(app, 1, timeout: 12)
+        XCTAssertEqual(app.windows.count, 1, "⌘W closes the selected terminal, not its Window")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch.exists,
+            "⌘W keeps the Pane present after removing its selected terminal"
+        )
+        waitForUsablePty(in: app, timeout: 12)
+    }
+
     func testCloseTabRemovesChromeWithoutCrashingTheHost() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
@@ -101,6 +120,16 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
         XCTAssertTrue(newTab.waitForExistence(timeout: 8), "production composition shows New Tab")
         newTab.click()
+    }
+
+    private func clickNewTerminal(in app: XCUIApplication) {
+        let newTerminal = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "seyal-pane-")
+        ).matching(
+            NSPredicate(format: "identifier ENDSWITH %@", "-new-terminal")
+        ).firstMatch
+        XCTAssertTrue(newTerminal.waitForExistence(timeout: 8), "New Terminal action must be available")
+        newTerminal.click()
     }
 
     private func showTabs(in app: XCUIApplication) {

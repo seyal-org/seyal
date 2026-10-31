@@ -42,6 +42,17 @@ impl ApplicationRoot {
         self.release_terminal_after_terminate(terminal_tab);
         self.terminal_authorities.remove(&terminal_tab);
         self.pane_authorities.remove(&pane);
+        let containment_generation = self.shell.containment_generation();
+        let closed = self
+            .shell
+            .apply(crate::shell::ShellAction::CloseTerminalTab {
+                pane,
+                terminal_tab,
+                containment_generation,
+            });
+        if closed.is_ok() {
+            self.finish_terminal_tab_close(pane, terminal_tab);
+        }
         if self
             .authority
             .is_some_and(|authority| authority.pane == pane && authority.execution == execution)
@@ -52,7 +63,7 @@ impl ApplicationRoot {
                 .apply(crate::presentation::PresentationAction::ClearIdentity);
             self.sync_composer_presentation();
         }
-        if self.shell.snapshot().focused_pane == pane {
+        if closed.is_err() && self.shell.snapshot().focused_pane == pane {
             self.activate_focused_pane_authority();
         }
     }
