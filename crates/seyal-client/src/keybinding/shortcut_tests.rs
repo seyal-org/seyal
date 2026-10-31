@@ -54,11 +54,7 @@ action = "none"
         "cmd+shift+t",
         WorkspaceCommandId::TerminalCreate
     ));
-    assert!(has_binding(
-        &table,
-        "cmd+n",
-        WorkspaceCommandId::TabCreate
-    ));
+    assert!(has_binding(&table, "cmd+n", WorkspaceCommandId::TabCreate));
     assert!(!has_binding(
         &table,
         "cmd+t",
