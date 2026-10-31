@@ -5,7 +5,7 @@ use std::{
 };
 
 use seyal_core::BlockId;
-use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+use seyal_protocol::framing::{BlockScope, BlockTrust, CommandBlock, CommandBlockState};
 
 use crate::app::AppAction;
 use crate::composer::RuntimeBlockRecord;
@@ -514,6 +514,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         running: false,
                         exit_status: Some(0),
                         canvas_floor: false,
+                        scope: seyal_protocol::framing::BlockScope::Local,
                     },
                     RuntimeBlockRecord {
                         id: BlockId::from_bytes([0x61; 16]),
@@ -523,6 +524,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         running: true,
                         exit_status: None,
                         canvas_floor: false,
+                        scope: seyal_protocol::framing::BlockScope::Local,
                     },
                 ]),
             })
@@ -672,6 +674,8 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
         end_line: None,
         state: CommandBlockState::Running,
         flags: 0,
+        scope: BlockScope::Local,
+        trust: BlockTrust::LocalTrusted,
     };
     let projected = runtime_block_from_command(&running);
     assert_eq!(projected.command, "echo hi");
@@ -681,6 +685,7 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
     let mut expected = [0u8; 16];
     expected[..8].copy_from_slice(&7u64.to_le_bytes());
     assert_eq!(projected.id, BlockId::from_bytes(expected));
+    assert_eq!(projected.scope, BlockScope::Local);
 
     let failed = CommandBlock {
         id: 8,
@@ -691,11 +696,28 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
             exit_status: Some(1),
         },
         flags: 0,
+        scope: BlockScope::Local,
+        trust: BlockTrust::LocalTrusted,
     };
     let projected = runtime_block_from_command(&failed);
     assert!(!projected.running);
     assert_eq!(projected.exit_status, Some(1));
     assert_eq!(projected.end_line, Some(4));
+
+    let session = CommandBlock {
+        id: 9,
+        command: "echo session-ok".into(),
+        start_line: 30,
+        end_line: None,
+        state: CommandBlockState::Running,
+        flags: 0,
+        scope: BlockScope::Session,
+        trust: BlockTrust::SessionTrusted,
+    };
+    assert_eq!(
+        runtime_block_from_command(&session).scope,
+        BlockScope::Session
+    );
 }
 
 #[test]

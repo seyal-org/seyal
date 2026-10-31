@@ -78,6 +78,15 @@ fn resize_client() -> (LocalDisplayClient, UnixStream) {
             last_terminate_result: None,
             viewport_line_ids: Vec::new(),
             viewport_line_ids_generation: 0,
+            session_bootstrap_negotiated: false,
+            composer_target: None,
+            target_generation: 0,
+            session_offer: None,
+            session_status: None,
+            pending_relay_requests: std::collections::HashSet::new(),
+            projected_eligibility: 0,
+            projected_wire_revision: 0,
+            composer_projection_revision: 0,
         },
         peer,
     )
@@ -479,12 +488,13 @@ fn composer_result_quarantines_cross_attachment_and_unknown_requests() {
         request_id: 41,
     };
     assert!(super::super::validate_composer_result(
-        accepted, attachment, &pending
+        accepted, attachment, &pending, false
     ));
     assert!(!super::super::validate_composer_result(
         accepted,
         other_attachment,
-        &pending
+        &pending,
+        false
     ));
     assert!(!super::super::validate_composer_result(
         ComposerResult {
@@ -492,7 +502,8 @@ fn composer_result_quarantines_cross_attachment_and_unknown_requests() {
             ..accepted
         },
         attachment,
-        &pending
+        &pending,
+        false
     ));
 }
 
@@ -508,7 +519,19 @@ fn composer_result_requires_code_specific_block_identity() {
             request_id: 5,
         },
         attachment,
-        &pending
+        &pending,
+        false
+    ));
+    assert!(super::super::validate_composer_result(
+        ComposerResult {
+            attachment_id: attachment,
+            code: ComposerResultCode::Accepted,
+            block_id: 0,
+            request_id: 5,
+        },
+        attachment,
+        &pending,
+        true
     ));
     assert!(!super::super::validate_composer_result(
         ComposerResult {
@@ -518,7 +541,8 @@ fn composer_result_requires_code_specific_block_identity() {
             request_id: 5,
         },
         attachment,
-        &pending
+        &pending,
+        false
     ));
     assert!(super::super::validate_composer_result(
         ComposerResult {
@@ -528,6 +552,7 @@ fn composer_result_requires_code_specific_block_identity() {
             request_id: 5,
         },
         attachment,
-        &pending
+        &pending,
+        false
     ));
 }

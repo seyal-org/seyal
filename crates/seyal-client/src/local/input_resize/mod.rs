@@ -37,33 +37,6 @@ impl LocalDisplayClient {
         self.resize_failure
     }
 
-    pub fn submit_composer_command(&mut self, command: &str) -> Result<(), ClientError> {
-        self.require_controller()?;
-        if !self.command_blocks_supported {
-            return Err(ClientError::UnsupportedInteractiveCapability);
-        }
-        let request_id = self.next_composer_request_id;
-        self.next_composer_request_id = request_id.checked_add(1).unwrap_or(1);
-        let payload = seyal_runtime::local_ipc::framing::ComposerCommandRef {
-            attachment_id: self.attachment_id,
-            request_id,
-            command,
-        }
-        .encode();
-        let frame = encode_frame(MessageType::ComposerCommand, &payload);
-        if let Err(error) = self.admit_frame(frame, OutboundKind::ComposerCommand) {
-            self.input_failure = Some(InputAdmissionFailure::ClientBackpressure);
-            return Err(error);
-        }
-        self.pending_composer_requests.insert(request_id);
-        self.input_failure = None;
-        let result = self.flush_control_write();
-        if result.is_err() {
-            self.pending_composer_requests.remove(&request_id);
-        }
-        result
-    }
-
     pub fn outbound_wire_bytes(&self) -> usize {
         self.outbound_wire_bytes
     }

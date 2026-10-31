@@ -6,7 +6,7 @@
 
 use std::collections::VecDeque;
 
-use seyal_protocol::framing::MAX_FRAME_PAYLOAD;
+use seyal_protocol::framing::{BlockScope, BlockTrust, MAX_FRAME_PAYLOAD};
 
 /// Per-command text admission limit (matches wire `MAX_COMPOSER_COMMAND_BYTES`).
 pub(crate) const MAX_COMMAND_BYTES: usize = 16 * 1024;
@@ -17,6 +17,9 @@ pub(crate) const MAX_BLOCKS_PER_EXECUTION: usize = 128;
 
 const TIMELINE_HEADER_BYTES: usize = 16;
 const RECORD_HEADER_BYTES: usize = 36;
+/// Session-schema scope/trust suffix. Counted for every record so a
+/// negotiated timeline cannot exceed the frame the legacy size allowed.
+const SCOPE_TRUST_BYTES: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct CommandBlockId(u64);
@@ -49,6 +52,10 @@ pub(crate) struct CommandBlockRecord {
     pub(crate) start_line: u64,
     pub(crate) end_line: Option<u64>,
     pub(crate) lifecycle: CommandBlockLifecycle,
+    pub(crate) scope: BlockScope,
+    pub(crate) trust: BlockTrust,
+    /// Host Block this session Block is nested under. `None` for local Blocks.
+    pub(crate) host_block: Option<u64>,
 }
 
 /// Bounded, append-only logical timeline for one `ExecutionId`.
@@ -96,8 +103,31 @@ impl CommandBlockTimeline {
             start_line,
             end_line: None,
             lifecycle: CommandBlockLifecycle::Running,
+            scope: BlockScope::Local,
+            trust: BlockTrust::LocalTrusted,
+            host_block: None,
         });
         debug_assert!(self.encoded_len() <= MAX_FRAME_PAYLOAD as usize);
+        Ok(())
+    }
+
+    /// Session Block nested under `host_block`. Trust is presentation-only.
+    pub(crate) fn start_session(
+        &mut self,
+        id: CommandBlockId,
+        command: String,
+        start_line: u64,
+        host_block: u64,
+    ) -> Result<(), CommandBlockTimelineError> {
+        self.start(id, command, start_line)?;
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == id)
+            .expect("start just inserted this id");
+        record.scope = BlockScope::Session;
+        record.trust = BlockTrust::SessionTrusted;
+        record.host_block = Some(host_block);
         Ok(())
     }
 
@@ -165,12 +195,12 @@ impl CommandBlockTimeline {
             + self
                 .records
                 .iter()
-                .map(|record| RECORD_HEADER_BYTES + record.command.len())
+                .map(|record| RECORD_HEADER_BYTES + SCOPE_TRUST_BYTES + record.command.len())
                 .sum::<usize>()
     }
 
     fn make_room_for(&mut self, command_len: usize) -> Result<(), CommandBlockTimelineError> {
-        let needed = RECORD_HEADER_BYTES + command_len;
+        let needed = RECORD_HEADER_BYTES + SCOPE_TRUST_BYTES + command_len;
         if TIMELINE_HEADER_BYTES + needed > MAX_FRAME_PAYLOAD as usize {
             return Err(CommandBlockTimelineError::Capacity);
         }

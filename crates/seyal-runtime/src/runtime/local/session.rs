@@ -70,6 +70,7 @@ impl Runtime {
                     | MessageType::ResizeRequest
                     | MessageType::ComposerCommand
                     | MessageType::HistoryRangeRequest
+                    | MessageType::SessionConsent
             );
         let delivery_control_attach = current_state == LocalIpcConnState::Attached
             && kind == MessageType::Attach
@@ -104,6 +105,7 @@ impl Runtime {
             MessageType::TerminalKey => self.handle_terminal_key(token, payload),
             MessageType::TerminalKeyV2 => self.handle_terminal_key_v2(token, payload),
             MessageType::ComposerCommand => self.handle_composer_command(token, payload),
+            MessageType::SessionConsent => self.handle_session_consent(token, payload),
             MessageType::HistoryRangeRequest => self.handle_history_range_request(token, payload),
             MessageType::Resize => self.handle_resize(token, payload),
             MessageType::ResizeRequest => self.handle_resize_request(token, payload),
@@ -135,8 +137,11 @@ impl Runtime {
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_EXECUTION_PROVISIONING
                 | framing::CAP_VIEWPORT_LINE_IDS
-                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL)
+                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL
+                | framing::CAP_SESSION_BOOTSTRAP)
             != 0
+            || (hello.client_capabilities & framing::CAP_SESSION_BOOTSTRAP != 0
+                && hello.client_capabilities & CAP_COMMAND_BLOCKS == 0)
         {
             self.send_error(
                 token,
@@ -157,7 +162,8 @@ impl Runtime {
                 | framing::CAP_GRAPHEME_DISPLAY
                 | CAP_EXECUTION_PROVISIONING
                 | framing::CAP_VIEWPORT_LINE_IDS
-                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL,
+                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL
+                | framing::CAP_SESSION_BOOTSTRAP,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };
@@ -400,6 +406,7 @@ impl Runtime {
             snapshot.rows,
         );
         self.publish_block_timeline(attach.execution_id);
+        self.consider_session_candidate(attach.execution_id);
         if self.local_connection_supports_command_blocks(token) {
             self.send_composer_status(
                 token,
@@ -419,6 +426,9 @@ impl Runtime {
             );
             return;
         };
+        let was_controller = self.local_ipc.as_ref().is_some_and(|state| {
+            state.attachments.role_of(detach.attachment_id).ok() == Some(Role::Controller)
+        });
         let execution_id = match self.local_ipc.as_ref().map(|state| {
             state
                 .attachments
@@ -465,6 +475,15 @@ impl Runtime {
         }
         if let Some(entry) = self.entries.get_mut(&execution_id) {
             entry.attachments.remove(&detach.attachment_id);
+        }
+        if was_controller {
+            let still = self
+                .local_ipc
+                .as_ref()
+                .is_some_and(|state| state.attachments.has_controller(execution_id));
+            if !still {
+                let _ = self.abort_bootstrap_on_detach(execution_id);
+            }
         }
         let response = framing::Detached {
             attachment_id: detach.attachment_id,

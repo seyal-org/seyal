@@ -15,6 +15,6 @@ mod tests;
 
 pub use resize::PreparedResize;
 pub use state::{
-    Diagnostics, ShellIntegrationEvent, ShellIntegrationToken, TerminalState, MAX_TERMINAL_COLUMNS,
-    MAX_TERMINAL_ROWS,
+    Diagnostics, SessionShellKind, ShellIntegrationEvent, ShellIntegrationToken, TerminalState,
+    MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS,
 };

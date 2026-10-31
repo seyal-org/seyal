@@ -3,7 +3,7 @@ use seyal_exec::{Color, HistoryRangeError, LineId};
 use crate::{
     local_ipc::framing::{
         self, BlockTimeline, CommandBlock, CommandBlockState, ErrorCode, MessageType,
-        CAP_COMMAND_BLOCKS,
+        CAP_COMMAND_BLOCKS, CAP_SESSION_BOOTSTRAP,
     },
     ExecutionId,
 };
@@ -179,7 +179,7 @@ impl Runtime {
             return;
         };
         let canvas_floor = entry.block_timeline.canvas_floor();
-        let records = entry
+        let records: Vec<CommandBlock> = entry
             .block_timeline
             .records()
             .map(|record| {
@@ -201,55 +201,68 @@ impl Runtime {
                         } => CommandBlockState::Completed { exit_status },
                     },
                     flags,
+                    scope: record.scope,
+                    trust: record.trust,
                 }
             })
             .collect();
-        let payload = match (BlockTimeline {
-            revision: entry.block_revision,
-            records,
-        })
-        .try_encode()
-        {
-            Ok(payload) => payload,
-            Err(_) => {
-                // Admission enforces the wire budget; encode failure here means
-                // an invariant break. Never leave clients on a silently stale
-                // replacement timeline — drop the frame and surface capacity
-                // on every attached block-capable connection.
-                let tokens = self
-                    .local_ipc
-                    .as_ref()
-                    .map(|state| {
-                        state
-                            .connections
-                            .iter()
-                            .filter_map(|(&token, meta)| {
-                                let supports_blocks =
-                                    meta.client_capabilities & CAP_COMMAND_BLOCKS != 0;
-                                let attached_here = state
-                                    .attachments
-                                    .attachments_on_connection(token)
-                                    .into_iter()
-                                    .any(|attachment| {
-                                        state.attachments.execution_of(attachment).ok()
-                                            == Some(execution_id)
-                                    });
-                                (supports_blocks && attached_here).then_some(token)
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                for token in tokens {
-                    self.send_error(
-                        token,
-                        ErrorCode::CapacityExceeded,
-                        MessageType::BlockTimeline as u16,
-                    );
-                }
-                return;
-            }
+        let revision = entry.block_revision;
+        let legacy_records = records
+            .iter()
+            .filter(|record| {
+                record.scope == framing::BlockScope::Local
+                    && record.trust == framing::BlockTrust::LocalTrusted
+            })
+            .cloned()
+            .collect();
+        let legacy = BlockTimeline {
+            revision,
+            records: legacy_records,
         };
-        let frame = framing::encode_frame(MessageType::BlockTimeline, &payload);
+        let session = BlockTimeline { revision, records };
+        let (legacy_payload, session_payload) =
+            match (legacy.try_encode(), session.try_encode_session()) {
+                (Ok(legacy), Ok(session)) => (legacy, session),
+                _ => {
+                    // Admission enforces the wire budget; encode failure here means
+                    // an invariant break. Never leave clients on a silently stale
+                    // replacement timeline — drop the frame and surface capacity
+                    // on every attached block-capable connection.
+                    let tokens = self
+                        .local_ipc
+                        .as_ref()
+                        .map(|state| {
+                            state
+                                .connections
+                                .iter()
+                                .filter_map(|(&token, meta)| {
+                                    let supports_blocks =
+                                        meta.client_capabilities & CAP_COMMAND_BLOCKS != 0;
+                                    let attached_here = state
+                                        .attachments
+                                        .attachments_on_connection(token)
+                                        .into_iter()
+                                        .any(|attachment| {
+                                            state.attachments.execution_of(attachment).ok()
+                                                == Some(execution_id)
+                                        });
+                                    (supports_blocks && attached_here).then_some(token)
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    for token in tokens {
+                        self.send_error(
+                            token,
+                            ErrorCode::CapacityExceeded,
+                            MessageType::BlockTimeline as u16,
+                        );
+                    }
+                    return;
+                }
+            };
+        let legacy_frame = framing::encode_frame(MessageType::BlockTimeline, &legacy_payload);
+        let session_frame = framing::encode_frame(MessageType::BlockTimeline, &session_payload);
         let targets = self
             .local_ipc
             .as_ref()
@@ -262,6 +275,7 @@ impl Runtime {
                         if !supports_blocks {
                             return Vec::new();
                         }
+                        let session_schema = meta.client_capabilities & CAP_SESSION_BOOTSTRAP != 0;
                         state
                             .attachments
                             .attachments_on_connection(token)
@@ -274,14 +288,19 @@ impl Runtime {
                                             crate::local_ipc::attachment::DeliveryState::Delivering,
                                         )
                             })
-                            .map(|attachment| (token, attachment))
+                            .map(|attachment| (token, attachment, session_schema))
                             .collect::<Vec<_>>()
                     })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        for (token, attachment_id) in targets {
-            let _ = self.send_attachment_after_display_frame(token, attachment_id, frame.clone());
+        for (token, attachment_id, session_schema) in targets {
+            let frame = if session_schema {
+                session_frame.clone()
+            } else {
+                legacy_frame.clone()
+            };
+            let _ = self.send_attachment_after_display_frame(token, attachment_id, frame);
         }
     }
 }
