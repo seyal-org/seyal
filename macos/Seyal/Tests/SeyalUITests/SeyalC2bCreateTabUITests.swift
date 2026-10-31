@@ -34,7 +34,11 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         waitForUsablePty(in: app)
         XCTAssertEqual(app.windows.count, 1)
 
-        XCTAssertEqual(terminalTabButtons(in: app).count, 1)
+        XCTAssertEqual(
+            terminalTabButtons(in: app).count,
+            1,
+            "Expected one visible Pane terminal tab before ⌘T:\n\(app.debugDescription)"
+        )
         app.typeKey("t", modifierFlags: .command)
         waitForWindowCount(app, 1, timeout: 5)
         waitForTerminalTabCount(app, 2, timeout: 12)
@@ -128,7 +132,7 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func terminalTabButtons(in app: XCUIApplication) -> XCUIElementQuery {
-        app.buttons.matching(
+        app.descendants(matching: .any).matching(
             NSPredicate(
                 format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
                 "seyal-terminal-tab-",
