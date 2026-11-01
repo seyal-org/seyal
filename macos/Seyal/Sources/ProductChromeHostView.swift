@@ -233,7 +233,9 @@ final class ProductChromeHostView: NSView {
         pane.setContentHuggingPriority(.defaultLow, for: .vertical)
         pane.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         composer.setContentHuggingPriority(.required, for: .vertical)
-        sessionBootstrap.setContentHuggingPriority(.required, for: .vertical)
+        // SessionBootstrapBanner owns its vertical hugging: required only while
+        // offered, fittingSizeCompression while collapsed so it cannot steal
+        // transcript/composer space or fight early liveContent height ≈ 1.
         transcript.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
         transcript.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 

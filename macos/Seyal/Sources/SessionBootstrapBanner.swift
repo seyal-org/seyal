@@ -8,22 +8,32 @@ final class SessionBootstrapBanner: NSView {
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
     private let primary = NSButton(title: "", target: nil, action: nil)
     private let dismiss = NSButton(title: "", target: nil, action: nil)
+    private let stack: NSStackView
     private var lastKind: UInt8 = 0
     private var lastRevision: UInt64 = 0
-    /// Hidden banners must not steal vertical space from the Metal/transcript
-    /// column (`isHidden` alone does not collapse Auto Layout).
-    private lazy var collapsedHeight: NSLayoutConstraint = heightAnchor.constraint(
-        equalToConstant: 0
-    )
+    /// Content pins stay off while collapsed so an empty/hidden banner has no
+    /// intrinsic height and cannot steal Metal/transcript space. Never use a
+    /// required `height == 0` pin: early `liveContent` layout (height ≈ 1)
+    /// then fights transcript ≥ 240 + composer height and AppKit breaks the
+    /// composer, which cascades into menu/tab chrome failures.
+    private var contentPins: [NSLayoutConstraint] = []
 
     override init(frame frameRect: NSRect) {
+        let buttons = NSStackView(views: [])
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+        let stack = NSStackView(views: [])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        self.stack = stack
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
-        isHidden = true
-        collapsedHeight.isActive = true
         setAccessibilityIdentifier("seyal-session-bootstrap")
         setAccessibilityRole(.group)
         setAccessibilityElement(true)
@@ -43,23 +53,16 @@ final class SessionBootstrapBanner: NSView {
         dismiss.bezelStyle = .rounded
         dismiss.setAccessibilityIdentifier("seyal-session-bootstrap-dismiss")
 
-        let buttons = NSStackView(views: [primary, dismiss])
-        buttons.orientation = .horizontal
-        buttons.spacing = 8
-        buttons.translatesAutoresizingMaskIntoConstraints = false
-
-        let stack = NSStackView(views: [titleLabel, bodyLabel, buttons])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        buttons.setViews([primary, dismiss], in: .leading)
+        stack.setViews([titleLabel, bodyLabel, buttons], in: .leading)
         addSubview(stack)
-        NSLayoutConstraint.activate([
+        contentPins = [
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
-        ])
+        ]
+        setCollapsed(true)
     }
 
     @available(*, unavailable)
@@ -82,12 +85,10 @@ final class SessionBootstrapBanner: NSView {
         lastKind = surface.kind
         lastRevision = surface.revision
         guard surface.kind != 0 else {
-            isHidden = true
-            collapsedHeight.isActive = true
+            setCollapsed(true)
             return
         }
-        isHidden = false
-        collapsedHeight.isActive = false
+        setCollapsed(false)
         titleLabel.stringValue = copyString(0)
         if surface.kind == 2 {
             bodyLabel.stringValue = copyString(1)
@@ -102,6 +103,20 @@ final class SessionBootstrapBanner: NSView {
             dismiss.isHidden = true
         }
         setAccessibilityLabel(titleLabel.stringValue)
+    }
+
+    private func setCollapsed(_ collapsed: Bool) {
+        isHidden = collapsed
+        stack.isHidden = collapsed
+        if collapsed {
+            NSLayoutConstraint.deactivate(contentPins)
+            setContentHuggingPriority(.fittingSizeCompression, for: .vertical)
+            setContentCompressionResistancePriority(.fittingSizeCompression, for: .vertical)
+        } else {
+            NSLayoutConstraint.activate(contentPins)
+            setContentHuggingPriority(.required, for: .vertical)
+            setContentCompressionResistancePriority(.required, for: .vertical)
+        }
     }
 
     private func copyString(_ kind: UInt8) -> String {
