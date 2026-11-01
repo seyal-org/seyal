@@ -228,13 +228,13 @@ extension ProductChromeHostView {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
         newTabButton.setAccessibilityIdentifier("seyal-new-tab")
-        newTabButton.setAccessibilityLabel("New Layout")
-        newTabButton.toolTip = "New Layout"
+        newTabButton.setAccessibilityLabel("New Tab")
+        newTabButton.toolTip = "New Tab"
         newTabButton.target = self
         newTabButton.action = #selector(createTab)
         closeTabButton.setAccessibilityIdentifier("seyal-close-tab")
-        closeTabButton.setAccessibilityLabel("Close Layout")
-        closeTabButton.toolTip = "Close Layout"
+        closeTabButton.setAccessibilityLabel("Close Tab")
+        closeTabButton.toolTip = "Close Tab"
         closeTabButton.target = self
         closeTabButton.action = #selector(closeActiveTab(_:))
     }
@@ -308,10 +308,31 @@ extension ProductChromeHostView {
         button.setButtonType(.toggle)
         button.bezelStyle = .inline
         button.isBordered = false
-        button.font = .systemFont(ofSize: 11, weight: .semibold)
+        button.font = .systemFont(ofSize: 12, weight: .semibold)
         button.setAccessibilityIdentifier(identifier)
         button.target = self
         button.action = action
+    }
+
+    /// Active mode is semibold label; idle mode is regular secondary.
+    func applyLeftModeSwitcher(leftPanel: UInt16) {
+        let workspacesOn = leftPanel == 0
+        workspacesButton.state = workspacesOn ? .on : .off
+        tabsButton.state = workspacesOn ? .off : .on
+        styleModeLabel(workspacesButton, title: "Workspaces", active: workspacesOn)
+        styleModeLabel(tabsButton, title: "Tabs", active: !workspacesOn)
+    }
+
+    private func styleModeLabel(_ button: NSButton, title: String, active: Bool) {
+        let font = NSFont.systemFont(ofSize: 12, weight: active ? .semibold : .regular)
+        let color: NSColor = active ? .labelColor : .secondaryLabelColor
+        button.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+            ]
+        )
     }
 
     func borderlessButton(title: String, action: Selector) -> NSButton {
@@ -345,6 +366,114 @@ extension ProductChromeHostView {
         button.setAccessibilityIdentifier(identifier)
         button.state = selected ? .on : .off
         return button
+    }
+
+    /// C04 dense context row matching mockup anatomy:
+    /// `[dot] primary` / secondary on the next line; selected fill + 3px accent.
+    func contextRow(
+        primary: String,
+        secondary: String?,
+        identifier: String,
+        selected: Bool,
+        action: Selector,
+        kind: UInt16,
+        idLo: UInt64,
+        idHi: UInt64
+    ) -> NSView {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.wantsLayer = true
+        // NSTextField intrinsic width must not shrink the row or pin it trailing.
+        row.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        row.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        if selected {
+            row.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            let accent = NSView()
+            accent.translatesAutoresizingMaskIntoConstraints = false
+            accent.wantsLayer = true
+            accent.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+            accent.setAccessibilityElement(false)
+            row.addSubview(accent)
+            NSLayoutConstraint.activate([
+                accent.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+                accent.topAnchor.constraint(equalTo: row.topAnchor),
+                accent.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+                accent.widthAnchor.constraint(equalToConstant: 3),
+            ])
+        }
+
+        // C16 status glyph: filled disc + ring so status is not colour-only.
+        let dot = NSView()
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 4
+        dot.layer?.backgroundColor = NSColor.systemGreen.cgColor
+        dot.layer?.borderWidth = 1
+        dot.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.35).cgColor
+        dot.setAccessibilityElement(false)
+
+        let primaryLabel = NSTextField(labelWithString: primary)
+        primaryLabel.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .medium)
+        primaryLabel.lineBreakMode = .byTruncatingTail
+        primaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        primaryLabel.setAccessibilityElement(false)
+        primaryLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        primaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let secondaryLabel = NSTextField(labelWithString: secondary ?? "")
+        secondaryLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        secondaryLabel.textColor = .secondaryLabelColor
+        secondaryLabel.tag = 2
+        secondaryLabel.lineBreakMode = .byTruncatingMiddle
+        secondaryLabel.isHidden = secondary == nil || secondary?.isEmpty == true
+        secondaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        secondaryLabel.setAccessibilityElement(false)
+        secondaryLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        secondaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let hit = IdentityButton(title: "", target: self, action: action)
+        hit.idLo = idLo
+        hit.idHi = idHi
+        hit.kind = kind
+        hit.bezelStyle = .inline
+        hit.isBordered = false
+        hit.imagePosition = .noImage
+        hit.setAccessibilityIdentifier(identifier)
+        hit.setAccessibilityTitle(primary)
+        hit.setAccessibilityLabel(
+            [primary, secondary].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+        )
+        hit.state = selected ? .on : .off
+        hit.translatesAutoresizingMaskIntoConstraints = false
+        hit.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        hit.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        row.addSubview(dot)
+        row.addSubview(primaryLabel)
+        row.addSubview(secondaryLabel)
+        row.addSubview(hit)
+
+        let hasSecondary = !(secondary?.isEmpty ?? true)
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: hasSecondary ? 46 : 36),
+            dot.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            dot.centerYAnchor.constraint(
+                equalTo: hasSecondary ? primaryLabel.centerYAnchor : row.centerYAnchor
+            ),
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
+            primaryLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
+            primaryLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            primaryLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: hasSecondary ? 8 : 10),
+            secondaryLabel.leadingAnchor.constraint(equalTo: primaryLabel.leadingAnchor),
+            secondaryLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            secondaryLabel.topAnchor.constraint(equalTo: primaryLabel.bottomAnchor, constant: 2),
+            hit.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            hit.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            hit.topAnchor.constraint(equalTo: row.topAnchor),
+            hit.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        return row
     }
 
     func expose(_ view: NSView, identifier: String) {

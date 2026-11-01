@@ -9,6 +9,14 @@ final class IdentityButton: NSButton {
     var idLo: UInt64 = 0
     var idHi: UInt64 = 0
     var containmentGeneration: UInt64 = 0
+
+    /// Transparent hit target for C04 rows that paint their own labels.
+    override func draw(_ dirtyRect: NSRect) {
+        if title.isEmpty, image == nil, !isBordered {
+            return
+        }
+        super.draw(dirtyRect)
+    }
 }
 
 /// Accessibility stand-in for Metal-painted Block output. It is not in Auto
