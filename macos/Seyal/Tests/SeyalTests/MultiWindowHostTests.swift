@@ -283,7 +283,10 @@ final class MultiWindowHostTests: XCTestCase {
             $0.action == #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:))
         })
 
-        let close = projectedItems.first { $0.representedObject as? UInt16 == 37 }
+        // #1395: ⌘W closes the focused Pane terminal, not AppCloseFocused (37).
+        let close = projectedItems.first {
+            $0.representedObject as? UInt16 == KeybindingShortcutRealization.terminalCloseFocused
+        }
         XCTAssertEqual(close?.keyEquivalent, "w")
         XCTAssertTrue(close?.keyEquivalentModifierMask.contains(.command) == true)
     }
