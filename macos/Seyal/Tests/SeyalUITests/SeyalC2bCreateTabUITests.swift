@@ -9,6 +9,15 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    override func tearDown() {
+        // Ensure multi-window cases (⌘N×2) do not leave a shutting-down host
+        // for the next test's isolated Runtime bootstrap.
+        let leftover = XCUIApplication()
+        leftover.terminate()
+        _ = leftover.wait(for: .notRunning, timeout: 8)
+        super.tearDown()
+    }
+
     private func hostedApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchIsolatedHost()
