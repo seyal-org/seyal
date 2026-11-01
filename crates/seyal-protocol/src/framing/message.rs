@@ -2,8 +2,8 @@
 
 use super::envelope::{FrameHeader, FramingError, HEADER_LEN, MAX_FRAME_PAYLOAD};
 use super::execution::{
-    CreateExecutionRequest, CreateExecutionResult, TerminateExecutionRequest,
-    TerminateExecutionResult,
+    CreateExecutionRequest, CreateExecutionResult, MintWorkspaceRequest, MintWorkspaceResult,
+    TerminateExecutionRequest, TerminateExecutionResult,
 };
 use super::payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList, HostSearch,
@@ -82,6 +82,10 @@ pub enum MessageType {
     SessionStatus = 44,
     /// ADR-026 type 45: input target and target generation. Not a longer type 23.
     ComposerTarget = 45,
+    /// ADR-028 interim: mint an opaque WorkspaceId (cold control path).
+    MintWorkspaceRequest = 46,
+    /// ADR-028 interim: mint-workspace result.
+    MintWorkspaceResult = 47,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -130,6 +134,8 @@ impl MessageType {
             43 => Self::SessionConsent,
             44 => Self::SessionStatus,
             45 => Self::ComposerTarget,
+            46 => Self::MintWorkspaceRequest,
+            47 => Self::MintWorkspaceResult,
             _ => return None,
         })
     }
@@ -181,6 +187,8 @@ pub enum Message<'a> {
     SessionConsent(SessionConsent),
     SessionStatus(SessionStatus),
     ComposerTarget(ComposerTarget),
+    MintWorkspaceRequest(MintWorkspaceRequest),
+    MintWorkspaceResult(MintWorkspaceResult),
 }
 
 pub fn decode_message<'a>(
@@ -261,6 +269,12 @@ pub fn decode_message<'a>(
         MessageType::SessionConsent => Message::SessionConsent(SessionConsent::decode(payload)?),
         MessageType::SessionStatus => Message::SessionStatus(SessionStatus::decode(payload)?),
         MessageType::ComposerTarget => Message::ComposerTarget(ComposerTarget::decode(payload)?),
+        MessageType::MintWorkspaceRequest => {
+            Message::MintWorkspaceRequest(MintWorkspaceRequest::decode(payload)?)
+        }
+        MessageType::MintWorkspaceResult => {
+            Message::MintWorkspaceResult(MintWorkspaceResult::decode(payload)?)
+        }
     })
 }
 

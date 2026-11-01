@@ -54,9 +54,9 @@ reason = "Portable provisioning reducer remains the cold-path request/result aut
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 978
-issue = 1381
-reason = "The create/close/terminate/split adapter also routes terminal-tab requests to their exact Runtime execution and preserves sibling bindings under #1381."
+acknowledged_loc = 990
+issue = 1413
+reason = "Create/close/terminate/split adapter retains terminal-tab routing (#1381) and now encodes ADR-028 active-workspace wire ids for CreateExecution."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -228,9 +228,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer;
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 974
-issue = 1381
-reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1381 moves pane-local terminal-tab operations and queries to terminal_tabs.rs while the shared reducer retains topology and identity invariants."
+acknowledged_loc = 996
+issue = 1413
+reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1413 adds InvalidWorkspaceRoot/DuplicateWorkspace errors for ADR-028 CreateWorkspace while create/bind ops live in workspace_ops.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -274,9 +274,9 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 861
-issue = 1388
-reason = "ABI action decoding remains one versioned match surface; #1381 adds terminal-tab kinds 77–79, #1379 maps the canvas-floor flag, and #1388 copies BlockTimeline scope onto RuntimeBlockRecord in the same decoder."
+acknowledged_loc = 873
+issue = 1413
+reason = "ABI action decoding remains one versioned match surface; #1413 adds CreateWorkspace/SetWorkspaceRoot kinds 81–82 after ADR-026 session kinds, on the same decode table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"

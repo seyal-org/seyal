@@ -242,3 +242,118 @@ impl TerminateExecutionResult {
         Ok(())
     }
 }
+
+/// ADR-028 interim: mint an opaque WorkspaceId (types 46–47).
+/// Shares CAP_EXECUTION_PROVISIONING and the type-36/38 request-id space.
+/// Types 42–45 remain ADR-026 session bootstrap / ComposerTarget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MintWorkspaceRequest {
+    pub request_id: u64,
+}
+
+impl MintWorkspaceRequest {
+    pub const WIRE_LEN: usize = 16;
+
+    pub fn encode(&self) -> Vec<u8> {
+        debug_assert!(self.validate().is_ok());
+        let mut out = Vec::with_capacity(Self::WIRE_LEN);
+        out.extend_from_slice(&self.request_id.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes());
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, FramingError> {
+        exact_len(bytes, Self::WIRE_LEN)?;
+        if u64::from_le_bytes(bytes[8..16].try_into().unwrap()) != 0 {
+            return Err(FramingError::MalformedPayload);
+        }
+        let value = Self {
+            request_id: u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    fn validate(&self) -> Result<(), FramingError> {
+        if self.request_id == 0 {
+            return Err(FramingError::MalformedPayload);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MintWorkspaceResultCode {
+    Minted,
+    Error(ErrorCode),
+}
+
+impl MintWorkspaceResultCode {
+    pub const fn wire_value(self) -> u16 {
+        match self {
+            Self::Minted => 0,
+            Self::Error(error) => error as u16,
+        }
+    }
+
+    fn from_u16(value: u16) -> Result<Self, FramingError> {
+        if value == 0 {
+            return Ok(Self::Minted);
+        }
+        ErrorCode::from_u16(value)
+            .map(Self::Error)
+            .ok_or(FramingError::MalformedPayload)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MintWorkspaceResult {
+    pub workspace_id: u128,
+    pub request_id: u64,
+    pub result_code: MintWorkspaceResultCode,
+}
+
+impl MintWorkspaceResult {
+    pub const WIRE_LEN: usize = 32;
+
+    pub fn encode(&self) -> Vec<u8> {
+        debug_assert!(self.validate().is_ok());
+        let mut out = Vec::with_capacity(Self::WIRE_LEN);
+        write_u128(&mut out, self.workspace_id);
+        out.extend_from_slice(&self.request_id.to_le_bytes());
+        out.extend_from_slice(&self.result_code.wire_value().to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, FramingError> {
+        exact_len(bytes, Self::WIRE_LEN)?;
+        if u16::from_le_bytes(bytes[26..28].try_into().unwrap()) != 0
+            || u32::from_le_bytes(bytes[28..32].try_into().unwrap()) != 0
+        {
+            return Err(FramingError::MalformedPayload);
+        }
+        let value = Self {
+            workspace_id: read_u128(&bytes[0..16]),
+            request_id: u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
+            result_code: MintWorkspaceResultCode::from_u16(u16::from_le_bytes(
+                bytes[24..26].try_into().unwrap(),
+            ))?,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    fn validate(&self) -> Result<(), FramingError> {
+        if self.request_id == 0 {
+            return Err(FramingError::MalformedPayload);
+        }
+        let zero = self.workspace_id == 0;
+        match self.result_code {
+            MintWorkspaceResultCode::Minted if !zero => Ok(()),
+            MintWorkspaceResultCode::Error(_) if zero => Ok(()),
+            _ => Err(FramingError::MalformedPayload),
+        }
+    }
+}

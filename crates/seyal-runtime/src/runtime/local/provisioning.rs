@@ -10,10 +10,11 @@ use crate::{
         connection::ConnectionState as LocalIpcConnState,
         framing::{
             self, CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode,
-            ErrorCode, MessageType, CAP_EXECUTION_PROVISIONING,
+            ErrorCode, MessageType, MintWorkspaceRequest, MintWorkspaceResult,
+            MintWorkspaceResultCode, CAP_EXECUTION_PROVISIONING,
         },
     },
-    ExecutionId, RuntimeError,
+    ExecutionId, RuntimeError, WorkspaceId,
 };
 
 use super::super::Runtime;
@@ -29,6 +30,7 @@ pub(in crate::runtime) struct PendingCreate {
     pub(in crate::runtime) request_id: u64,
     pub(in crate::runtime) rows: u16,
     pub(in crate::runtime) columns: u16,
+    pub(in crate::runtime) workspace_id: WorkspaceId,
 }
 
 impl Runtime {
@@ -123,17 +125,23 @@ impl Runtime {
             return;
         }
 
-        // Rule 6: M003 accepts only workspace_id == 0 (implicit default Workspace).
-        if request.workspace_id != 0 {
-            self.send_create_execution_result(
-                token,
-                request.request_id,
-                CreateExecutionResultCode::Error(ErrorCode::InvalidWorkspace),
-                ExecutionId::from_bytes([0; 16]),
-                0,
-            );
-            return;
-        }
+        // Rule 6 (ADR-028 §2.5): workspace_id 0 = default; nonzero must be admitted.
+        let workspace_id = if request.workspace_id == 0 {
+            self.default_workspace
+        } else {
+            let candidate = WorkspaceId::from_u128(request.workspace_id);
+            if !self.is_workspace_admitted(candidate) {
+                self.send_create_execution_result(
+                    token,
+                    request.request_id,
+                    CreateExecutionResultCode::Error(ErrorCode::InvalidWorkspace),
+                    ExecutionId::from_bytes([0; 16]),
+                    0,
+                );
+                return;
+            }
+            candidate
+        };
 
         // Rule 7: profile 0 only; reserved values fail closed.
         if request.launch_profile != 0 {
@@ -177,6 +185,7 @@ impl Runtime {
             request_id: request.request_id,
             rows: request.rows,
             columns: request.columns,
+            workspace_id,
         };
         if self.provisioning_created_this_turn {
             if let Some(state) = self.local_ipc.as_mut() {
@@ -267,7 +276,11 @@ impl Runtime {
 
         // Profile 0: EffectiveLaunchPolicy via create_interactive_execution (ADR-020 / L2).
         // Never invent argv from process $SHELL on this wire path.
-        match self.create_interactive_execution_with_detail_cap(size, detail_cap) {
+        match self.create_interactive_execution_with_detail_cap_in_workspace(
+            size,
+            detail_cap,
+            pending.workspace_id,
+        ) {
             Ok(outcome) => {
                 // Confirm the connection still exists before publishing a result;
                 // a disconnect during create leaves the live enumerable execution.
@@ -367,6 +380,87 @@ impl Runtime {
         let _ = self.send_mandatory_frame(
             token,
             framing::encode_frame(MessageType::CreateExecutionResult, &message.encode()),
+        );
+    }
+
+    pub(super) fn handle_mint_workspace_request(&mut self, token: u64, payload: &[u8]) {
+        let negotiated = self.local_ipc.as_ref().is_some_and(|state| {
+            state
+                .connections
+                .get(&token)
+                .is_some_and(|meta| meta.client_capabilities & CAP_EXECUTION_PROVISIONING != 0)
+        });
+        if !negotiated {
+            self.send_error(
+                token,
+                ErrorCode::UnknownMessage,
+                MessageType::MintWorkspaceRequest as u16,
+            );
+            return;
+        }
+
+        let Some(current_state) = self
+            .local_ipc
+            .as_ref()
+            .and_then(|state| state.server.state_of(token))
+        else {
+            return;
+        };
+        if !matches!(
+            current_state,
+            LocalIpcConnState::Ready | LocalIpcConnState::Attached
+        ) {
+            self.send_error(
+                token,
+                ErrorCode::InvalidState,
+                MessageType::MintWorkspaceRequest as u16,
+            );
+            return;
+        }
+
+        let Ok(request) = MintWorkspaceRequest::decode(payload) else {
+            self.send_error(
+                token,
+                ErrorCode::MalformedPayload,
+                MessageType::MintWorkspaceRequest as u16,
+            );
+            return;
+        };
+
+        // Share the type-36/38 request-id space (ADR-028 cold path).
+        let id_ok = self.local_ipc.as_mut().is_some_and(|state| {
+            let Some(meta) = state.connections.get_mut(&token) else {
+                return false;
+            };
+            if request.request_id <= meta.last_provisioning_request_id {
+                false
+            } else {
+                meta.last_provisioning_request_id = request.request_id;
+                true
+            }
+        });
+        if !id_ok {
+            let message = MintWorkspaceResult {
+                workspace_id: 0,
+                request_id: request.request_id,
+                result_code: MintWorkspaceResultCode::Error(ErrorCode::MalformedPayload),
+            };
+            let _ = self.send_mandatory_frame(
+                token,
+                framing::encode_frame(MessageType::MintWorkspaceResult, &message.encode()),
+            );
+            return;
+        }
+
+        let workspace = self.mint_workspace();
+        let message = MintWorkspaceResult {
+            workspace_id: workspace.to_u128(),
+            request_id: request.request_id,
+            result_code: MintWorkspaceResultCode::Minted,
+        };
+        let _ = self.send_mandatory_frame(
+            token,
+            framing::encode_frame(MessageType::MintWorkspaceResult, &message.encode()),
         );
     }
 }

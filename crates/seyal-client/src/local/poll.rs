@@ -307,6 +307,14 @@ impl LocalDisplayClient {
                             .map_err(|_| ClientError::Protocol)?;
                         self.accept_terminate_result(result)?;
                     }
+                    MessageType::MintWorkspaceResult => {
+                        let result =
+                            seyal_runtime::local_ipc::framing::MintWorkspaceResult::decode(
+                                &frame[HEADER_LEN..],
+                            )
+                            .map_err(|_| ClientError::Protocol)?;
+                        self.accept_mint_result(result)?;
+                    }
                     MessageType::ViewportLineIds => {
                         // Copy off the read buffer before mutating attachment state.
                         let envelope_len = if has_presentation_envelope {

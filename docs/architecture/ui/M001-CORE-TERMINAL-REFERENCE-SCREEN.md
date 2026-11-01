@@ -110,7 +110,7 @@ The left panel remains compact and stable while its content reflects product con
 Show known Workspaces with only useful metadata:
 
 - name;
-- project/root path when helpful (bound workspace root attribute per Proposed ADR-028 under #1409 — path is display/policy metadata, never `WorkspaceId`);
+- project/root path when helpful (bound workspace root attribute per Accepted ADR-028 — path is display/policy metadata, never `WorkspaceId`);
 - tab count;
 - compact status/attention where backed by real state.
 

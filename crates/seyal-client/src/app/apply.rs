@@ -142,6 +142,8 @@ impl ApplicationRoot {
                     .map_err(chrome_error)
             }
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
+            AppAction::CreateWorkspace { root_path } => self.create_workspace(root_path),
+            AppAction::SetWorkspaceRoot { id, root_path } => self.set_workspace_root(id, root_path),
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => {
                 // R6.4.1: menu/key-equivalent New Tab cannot bypass the palette modal.

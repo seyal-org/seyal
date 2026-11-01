@@ -121,6 +121,15 @@ pub enum AppAction {
     SelectWorkspace {
         id: WorkspaceId,
     },
+    /// ADR-028: create a Workspace with an explicit root; Runtime mints the id.
+    CreateWorkspace {
+        root_path: String,
+    },
+    /// ADR-028: bind or update root on an existing Workspace.
+    SetWorkspaceRoot {
+        id: WorkspaceId,
+        root_path: String,
+    },
     SelectTab {
         id: TabId,
     },

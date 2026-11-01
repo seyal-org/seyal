@@ -62,6 +62,8 @@ mod terminal_tabs_tests;
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
+#[cfg(test)]
+mod workspace_create_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]

@@ -431,6 +431,18 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             containment_generation: action.target_generation,
         }),
+        // ADR-028: CreateWorkspace — payload is UTF-8 root path.
+        81 => Ok(AppAction::CreateWorkspace {
+            root_path: read_payload(action.payload, action.payload_len)?,
+        }),
+        // ADR-028: SetWorkspaceRoot — target = WorkspaceId, payload = root path.
+        82 => Ok(AppAction::SetWorkspaceRoot {
+            id: WorkspaceId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            root_path: read_payload(action.payload, action.payload_len)?,
+        }),
         // New shell: no `reserved` overload. Absent execution prepares the
         // ended Pane; present target_* binds that exact created ExecutionId.
         80 => {

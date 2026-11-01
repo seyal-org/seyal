@@ -76,6 +76,9 @@ pub(super) struct Window {
 pub(super) struct Workspace {
     pub(super) id: WorkspaceId,
     pub(super) name: String,
+    /// Bound root path attribute (ADR-028). Display detail is derived from this
+    /// when helpful; identity is never derived from the path.
+    pub(super) root_path: Option<String>,
     pub(super) detail: Option<String>,
     pub(super) attention: bool,
     pub(super) windows: Vec<Window>,
@@ -188,11 +191,22 @@ impl Workspace {
         Ok(Self {
             id: seed.id,
             name: seed.name,
+            // Seeds historically carried path-ish detail; treat as bound root
+            // when present so ADR-028 leave matching has a root attribute.
+            root_path: seed.detail.clone(),
             detail: seed.detail,
             attention: seed.attention,
             active_window,
             windows,
         })
+    }
+
+    pub(super) fn bind_root_path(&mut self, root_path: String) {
+        let normalized = normalize_workspace_root(&root_path);
+        let name = workspace_name_from_root(&normalized);
+        self.root_path = Some(normalized.clone());
+        self.detail = helpful_workspace_detail(&name, &normalized);
+        self.name = name;
     }
 
     pub(super) fn tab_count(&self) -> usize {
@@ -336,6 +350,39 @@ impl Workspace {
             .iter()
             .find(|window| window.id == id)
             .map(|window| window.workspace_id)
+    }
+}
+
+pub(super) fn normalize_workspace_root_for_match(path: &str) -> String {
+    normalize_workspace_root(path)
+}
+
+fn normalize_workspace_root(path: &str) -> String {
+    let trimmed = path.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // Keep absolute paths stable; collapse trivial `./` noise without a crate.
+    if let Ok(canonical) = std::fs::canonicalize(trimmed) {
+        return canonical.to_string_lossy().into_owned();
+    }
+    trimmed.to_owned()
+}
+
+fn workspace_name_from_root(root: &str) -> String {
+    std::path::Path::new(root)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Workspace")
+        .to_owned()
+}
+
+fn helpful_workspace_detail(name: &str, root: &str) -> Option<String> {
+    if root.is_empty() || name.eq_ignore_ascii_case(root) {
+        None
+    } else {
+        Some(root.to_owned())
     }
 }
 

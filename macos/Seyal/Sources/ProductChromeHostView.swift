@@ -25,6 +25,7 @@ final class ProductChromeHostView: NSView {
     /// Global command palette overlay (#932); internal for component tests.
     let commandPalette: CommandPaletteOverlayView
     let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
+    let createWorkspaceButton = NSButton(title: "+", target: nil, action: nil)
     let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
     let recoveryLabel = NSTextField(labelWithString: "")
     /// #1379 Defect B: single clear recovery action after primary shell exit.
@@ -117,6 +118,7 @@ final class ProductChromeHostView: NSView {
         modeSpacer.translatesAutoresizingMaskIntoConstraints = false
         modeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         leftModeRow.addArrangedSubview(workspacesButton)
+        leftModeRow.addArrangedSubview(createWorkspaceButton)
         leftModeRow.addArrangedSubview(tabsButton)
         leftModeRow.addArrangedSubview(modeSpacer)
         leftModeRow.addArrangedSubview(newTabButton)
@@ -497,6 +499,7 @@ final class ProductChromeHostView: NSView {
         applyShellChrome(chrome)
         let shell = seyal_app_shell(pane.appHandle)
         applyLeftModeSwitcher(leftPanel: chrome.left_panel)
+        createWorkspaceButton.isHidden = chrome.left_panel != 0
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildLayoutActions(shell: shell, leftPanel: chrome.left_panel)
