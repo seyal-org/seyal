@@ -783,6 +783,13 @@ typedef struct SeyalAppPaneDivider {
 #define SEYAL_APP_ROW_WORKSPACE 0u
 #define SEYAL_APP_ROW_TAB 1u
 #define SEYAL_APP_ROW_PANE 2u
+/*
+ * Left C03 Tabs navigation map (#1412 / ADR-025 §2.8): one row per pane-local
+ * TerminalTab in the active Workspace Tab. id_lo/hi = TerminalTabId.
+ * address_bytes[0..16] = owning PaneId (address_len = 16); title/detail are
+ * Rust-authored. flags bit 0 = selected terminal of the focused Pane.
+ */
+#define SEYAL_APP_ROW_TERMINAL_TAB 3u
 #define SEYAL_APP_ROW_INSPECTOR 0u
 #define SEYAL_APP_ROW_AGENT 1u
 #define SEYAL_APP_ROW_ATTENTION 2u

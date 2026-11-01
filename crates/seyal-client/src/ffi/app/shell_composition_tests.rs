@@ -188,6 +188,42 @@ fn terminate_execution_action_decodes_as_kind_59() {
 }
 
 #[test]
+fn left_tabs_terminal_tab_rows_project_pane_fence_and_selection() {
+    let handle = seyal_app_create();
+    let snap = seyal_app_snapshot(handle);
+    assert_eq!(
+        unsafe { seyal_app_apply(handle, &identity_fence(77, &snap)) },
+        0,
+        "NewTerminal admits a second pane-local terminal"
+    );
+    let shell = seyal_app_shell(handle);
+    assert_eq!(shell.pane_count, 1);
+    let first = seyal_app_shell_row(handle, 3, 0);
+    let second = seyal_app_shell_row(handle, 3, 1);
+    assert_eq!(first.kind, 3);
+    assert_eq!(second.kind, 3);
+    assert_eq!(first.address_len, 16);
+    assert_eq!(second.address_len, 16);
+    assert_eq!(
+        &first.address_bytes[..16],
+        &second.address_bytes[..16],
+        "both terminals share the focused Pane fence"
+    );
+    assert_ne!((first.id_lo, first.id_hi), (second.id_lo, second.id_hi));
+    let title = unsafe {
+        str::from_utf8(slice::from_raw_parts(second.title, second.title_len as usize)).unwrap()
+    };
+    assert_eq!(title, "Terminal 2");
+    assert_ne!(
+        second.flags & 1,
+        0,
+        "newest terminal is selected on the focused Pane"
+    );
+    assert_eq!(first.flags & 1, 0);
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
 fn close_window_action_uses_observed_containment_generation() {
     let handle = seyal_app_create();
     let mut ack = identity_fence(5, &seyal_app_snapshot(handle));

@@ -209,8 +209,8 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }
 
-    /// #1401: left C03 mode switcher is Workspaces ↔ Tabs; Workspaces omits
-    /// empty AGENTS and Pane dumps; Tabs lists Workspace Tab inventory only.
+    /// #1401/#1412: left C03 mode switcher is Workspaces ↔ Tabs; Workspaces omits
+    /// empty AGENTS and Pane dumps; Tabs lists pane-local TerminalTabs.
     func testLeftContextWorkspacesAndTabsModeFollowC03Contracts() throws {
         let app = hostedApp()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
@@ -246,9 +246,28 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["seyal-tabs-heading"].firstMatch.waitForExistence(timeout: 5)
         )
-        XCTAssertTrue(app.descendants(matching: .any)["seyal-tab-0"].firstMatch.exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-terminal-tab-left-0"].firstMatch.waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-0"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["seyal-pane-0"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["seyal-workspaces-heading"].exists)
+    }
+
+    /// #1412: left Tabs mode lists pane-local terminals, not outer Layout rows.
+    func testLeftTabsModeListsPaneLocalTerminalTabs() throws {
+        let app = hostedApp()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        waitForUsablePty(in: app)
+        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
+        XCTAssertEqual(tabs.label.isEmpty ? tabs.title : tabs.label, "Tabs")
+        tabs.click()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-terminal-tab-left-0"].firstMatch.waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-pane-0"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-0"].exists)
     }
 
     /// #923: the Tab's Rust PaneTree is projected into Pane regions. Before a

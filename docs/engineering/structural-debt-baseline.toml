@@ -234,9 +234,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 874
-issue = 1401
-reason = "Thin AppKit chrome host stays one cold-path façade; #1401 keeps C03 mode-row layout, helpful workspace-detail suppression, and left-stack rebuild on this host without moving Workspace/Tab inventory authority into Swift (ADR-015). Prefer later responsibility extraction over partN splits if this façade grows again."
+acknowledged_loc = 920
+issue = 1412
+reason = "Thin AppKit chrome host stays one cold-path façade; #1412 projects Rust-authored left Tabs TerminalTab rows and mode-dependent + (NewTerminal vs CreateTab) on the #1401 C03 chrome without moving inventory or selection authority into Swift (ADR-015 / ADR-025 §2.8). Prefer later responsibility extraction over partN splits if this façade grows again."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
@@ -261,6 +261,10 @@ path = "crates/seyal-runtime/src/runtime/session_bootstrap.rs"
 acknowledged_loc = 703
 issue = 1398
 reason = "Spawn-time SSH session payload assembly stays one Runtime cold-path module; #1398 adds the remote TERM fallback assertion beside the existing OSC 133 / stty echo payload proofs without a second bootstrap test authority."
+||||||| parent of bc08f052 (feat(1412): project pane-local terminals in left C03 Tabs)
+acknowledged_loc = 788
+issue = 1379
+reason = "Thin AppKit chrome host stays one cold-path façade; #866/#1218 keep eligibility-driven focus and recovery presentation on this host, and #1379 wires New shell recovery, retain-history rebuild pruning, and scroll-republish comments into the existing composer slot without moving product authority into Swift."
 
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.
