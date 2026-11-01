@@ -290,15 +290,17 @@ impl ProvisioningSession {
         &self,
         terminal_tab: TerminalTabId,
     ) -> Option<&PendingIntent> {
-        self.pending_by_key.iter().find_map(|((owner, id), intent)| {
-            if intent.terminal_tab == Some(terminal_tab)
-                && self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Terminate)
-            {
-                Some(intent)
-            } else {
-                None
-            }
-        })
+        self.pending_by_key
+            .iter()
+            .find_map(|((owner, id), intent)| {
+                if intent.terminal_tab == Some(terminal_tab)
+                    && self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Terminate)
+                {
+                    Some(intent)
+                } else {
+                    None
+                }
+            })
     }
 
     /// Drop a pending Dispose terminate for `terminal_tab` after loss-path close.
