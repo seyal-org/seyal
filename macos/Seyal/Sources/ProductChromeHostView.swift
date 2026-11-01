@@ -43,6 +43,8 @@ final class ProductChromeHostView: NSView {
     /// Held across adopt so frame → reconcile → `driveRecovery` cannot start a
     /// second open while PerformAttempt remains the pending Rust effect.
     var recoveryAttemptInFlight: RecoveryAttemptIdentity?
+    /// ADR-028: avoid re-presenting the same leave-offer path until Rust clears it.
+    var presentedLeaveOfferPath: String?
     /// Blocking hello/attach runs here so the AppKit actor never becomes the
     /// lifecycle I/O executor.
     let recoveryLifecycleQueue = DispatchQueue(
@@ -485,6 +487,7 @@ final class ProductChromeHostView: NSView {
         tabsButton.state = chrome.left_panel == 1 ? .on : .off
         createWorkspaceButton.isHidden = chrome.left_panel != 0
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
+        presentLeaveOfferIfNeeded()
         rebuildInspector(chrome)
         rebuildLayoutActions(shell: shell)
         reconcilePaneHosts(paneCount: Int(shell.pane_count))

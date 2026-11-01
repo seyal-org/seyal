@@ -10,6 +10,34 @@ extension ProductChromeHostView {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue), reserved: 1)
     }
 
+    /// Thin host confirm for ADR-028 leave offer. Rust owns create/jump; No is dismiss-only.
+    func presentLeaveOfferIfNeeded() {
+        let offer = seyal_app_leave_offer(pane.appHandle)
+        guard offer.kind != UInt16(SEYAL_APP_LEAVE_OFFER_NONE.rawValue) else {
+            presentedLeaveOfferPath = nil
+            return
+        }
+        let path = productChromeCopyUTF8(offer.path, UInt32(offer.path_len)) ?? ""
+        guard !path.isEmpty, presentedLeaveOfferPath != path else { return }
+        presentedLeaveOfferPath = path
+        let isJump = offer.kind == UInt16(SEYAL_APP_LEAVE_OFFER_JUMP.rawValue)
+        let alert = NSAlert()
+        alert.messageText = isJump ? "Open existing workspace?" : "Create workspace?"
+        alert.informativeText = isJump
+            ? "Current directory left this workspace root.\nJump to the workspace for:\n\(path)"
+            : "Current directory left this workspace root.\nCreate a workspace for:\n\(path)"
+        alert.addButton(withTitle: "Yes")
+        alert.addButton(withTitle: "No")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            applyChromeKind(UInt16(SEYAL_APP_ACTION_CONFIRM_LEAVE_OFFER.rawValue), reserved: 0)
+        } else {
+            applyChromeKind(UInt16(SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER.rawValue), reserved: 0)
+        }
+        presentedLeaveOfferPath = nil
+        reconcileChrome()
+    }
+
     /// Thin host picker for CreateWorkspace (ADR-028). Path is the only host input;
     /// Rust owns minting, shell recording, and left-rail projection.
     @objc func createWorkspace() {

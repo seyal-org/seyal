@@ -144,6 +144,11 @@ impl ApplicationRoot {
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
             AppAction::CreateWorkspace { root_path } => self.create_workspace(root_path),
             AppAction::SetWorkspaceRoot { id, root_path } => self.set_workspace_root(id, root_path),
+            AppAction::ObserveTrustedForegroundCwd { path } => {
+                self.observe_trusted_foreground_cwd(path)
+            }
+            AppAction::ConfirmLeaveOffer => self.confirm_leave_offer(),
+            AppAction::DismissLeaveOffer => self.dismiss_leave_offer(),
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => {
                 // R6.4.1: menu/key-equivalent New Tab cannot bypass the palette modal.
