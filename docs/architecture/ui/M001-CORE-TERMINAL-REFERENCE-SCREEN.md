@@ -110,11 +110,11 @@ The left panel remains compact and stable while its content reflects product con
 Show known Workspaces with only useful metadata:
 
 - name;
-- project/root path when helpful;
+- project/root path when helpful (bound workspace root attribute per Proposed ADR-028 under #1409 — path is display/policy metadata, never `WorkspaceId`);
 - tab count;
 - compact status/attention where backed by real state.
 
-Do not use oversized cards when a dense list communicates the same information better.
+Do not use oversized cards when a dense list communicates the same information better. Leave-parent create/jump offers (ADR-028) are Rust-owned confirmations; denying an offer continues shell navigation only and must not invent a workspace or move PTYs.
 
 ### 5.2 Agents
 
