@@ -48,9 +48,9 @@ reason = "Host Pane region/divider projection stays one layout module; #1219 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 967
-issue = 1379
-reason = "Portable provisioning reducer remains the cold-path request/result authority after #1381 moves tab-specific binding operations into terminal_bindings.rs; #1379 adds release_dead_binding so New shell can Create+Bind an ended Pane without enqueueing terminate or leaving a binding that blocks a later split leaf."
+acknowledged_loc = 999
+issue = 1398
+reason = "Portable provisioning reducer remains the cold-path request/result authority after #1381 moves tab-specific binding operations into terminal_bindings.rs; #1379 adds release_dead_binding so New shell can Create+Bind an ended Pane without enqueueing terminate or leaving a binding that blocks a later split leaf; #1398 adds pending-terminate lookup/take by TerminalTabId so Close Terminal can finish a Pane terminal tab when Lifecycle::Finalized races the type-39 absorb path."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
@@ -280,9 +280,15 @@ reason = "ABI action decoding remains one versioned match surface; #1381 adds te
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"
-acknowledged_loc = 755
-issue = 1381
-reason = "Session adoption and Runtime attachment reconciliation also register exact terminal-tab bindings under #1381 so portable selected-terminal authority follows the attached execution; #1379 keeps the registry client after shell exit for Flow history drain."
+acknowledged_loc = 760
+issue = 1398
+reason = "Session adoption and Runtime attachment reconciliation also register exact terminal-tab bindings under #1381 so portable selected-terminal authority follows the attached execution; #1379 keeps the registry client after shell exit for Flow history drain; #1398 absorbs wire terminate before bailing on NoRunningExecution so Close Terminal can remove the focused Pane terminal tab."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/app/live_attach_apply.rs"
+acknowledged_loc = 704
+issue = 1398
+reason = "Live attach/loss remains the registry-client fan-out for extra Pane terminal Controllers; #1398 absorbs pending terminate and finishes Close Terminal on client loss before note_ended bookkeeping so Lifecycle::Finalized cannot leave a zombie Pane terminal tab."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"
