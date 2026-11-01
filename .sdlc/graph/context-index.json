@@ -126,7 +126,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "dc5a60021274cb0b22579a88bc4919e90a552c40"
+          "fingerprint": "651e9a52cd14f0f9ee91fdd2cb2fce432bcf7202"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "dc5a60021274cb0b22579a88bc4919e90a552c40"
+          "fingerprint": "651e9a52cd14f0f9ee91fdd2cb2fce432bcf7202"
         }
       ],
       "relationships": [
