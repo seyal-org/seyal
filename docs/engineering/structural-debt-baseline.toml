@@ -234,9 +234,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 788
-issue = 1388
-reason = "Thin AppKit chrome host stays one cold-path façade; #1388 mounts the ADR-026 SessionBootstrapBanner above the composer and reconciles it from Rust session surface without moving product authority into Swift."
+acknowledged_loc = 874
+issue = 1401
+reason = "Thin AppKit chrome host stays one cold-path façade; #1401 keeps C03 mode-row layout, helpful workspace-detail suppression, and left-stack rebuild on this host without moving Workspace/Tab inventory authority into Swift (ADR-015). Prefer later responsibility extraction over partN splits if this façade grows again."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
