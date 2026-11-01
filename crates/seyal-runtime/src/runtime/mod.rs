@@ -52,6 +52,7 @@ mod registry;
 mod session_bootstrap;
 #[cfg(all(test, target_os = "macos"))]
 mod session_bootstrap_live;
+#[cfg(target_os = "macos")]
 mod session_overlay;
 #[cfg(target_os = "macos")]
 mod session_payload;

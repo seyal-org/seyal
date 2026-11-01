@@ -27,6 +27,12 @@ const READ_TIMEOUT_SECS: u64 = 2;
 /// and after a misaligned read.
 const DRAIN_LEN: usize = 4096;
 
+/// Remote-only TERM repair. Local children keep `seyal-m001` (ADR-008).
+/// OpenSSH forwards that name; hosts without Seyal's terminfo then break
+/// `clear` / `vim`. If `tput` cannot resolve `$TERM`, fall back to a widely
+/// installed 256-color entry. No `!` / `'` so the spawn rcfile quoting holds.
+const REMOTE_TERM_FALLBACK: &str = "tput longname >/dev/null 2>&1||export TERM=xterm-256color";
+
 pub(super) fn stager_line(challenge: ShellIntegrationToken) -> Result<Vec<u8>, RuntimeError> {
     let mut k = String::with_capacity(32);
     challenge.write_hex(&mut k);
@@ -77,6 +83,7 @@ pub(super) fn spawn_rcfile(challenge: ShellIntegrationToken) -> Result<String, R
          if [ -r \"$HOME/.bash_profile\" ];then . \"$HOME/.bash_profile\";\
          elif [ -r \"$HOME/.bash_login\" ];then . \"$HOME/.bash_login\";\
          elif [ -r \"$HOME/.profile\" ];then . \"$HOME/.profile\";fi;\
+         {REMOTE_TERM_FALLBACK};\
          if ((BASH_VERSINFO[0]*100+BASH_VERSINFO[1]>=401));then \
          stty -echo;read -r -t 0.01 -N {drain} p;\
          printf \"\\033]133;R;%s;b\\007\" {k};\
@@ -167,6 +174,7 @@ fn zsh_script(secret: &str) -> String {
     format!(
         "unset p\n\
          stty echo\n\
+         {REMOTE_TERM_FALLBACK}\n\
          _seyal_s={secret}\n\
          _seyal_x(){{builtin printf '\\033]133;C;%s\\007' $_seyal_s;_seyal_o=1;}}\n\
          _seyal_p(){{local c=$?;[ -n \"${{_seyal_o-}}\" ]&&builtin printf '\\033]133;D;%s;%s\\007' $_seyal_s $c;_seyal_o=;builtin printf '\\033]133;A;%s\\007' $_seyal_s;}}\n\
@@ -181,6 +189,7 @@ fn bash_script(secret: &str) -> String {
     format!(
         "unset p\n\
          stty echo\n\
+         {REMOTE_TERM_FALLBACK}\n\
          _seyal_s={secret}\n\
          _seyal_x(){{ case \"$BASH_COMMAND\" in _seyal_p)return;;esac;printf '\\033]133;C;%s\\007' $_seyal_s;_seyal_o=1;}}\n\
          _seyal_p(){{ local c=$?;if [ -n \"${{_seyal_o-}}\" ];then printf '\\033]133;D;%s;%s\\007' $_seyal_s $c;_seyal_o=;fi;printf '\\033]133;A;%s\\007' $_seyal_s;}}\n\

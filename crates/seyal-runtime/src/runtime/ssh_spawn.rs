@@ -345,10 +345,20 @@ mod tests {
             rc.find("/etc/profile").unwrap() < echo,
             "login files run before the hooks"
         );
+        let term = rc
+            .find("tput longname >/dev/null 2>&1||export TERM=xterm-256color")
+            .expect("remote TERM fallback");
+        assert!(
+            rc.find("/etc/profile").unwrap() < term && term < echo,
+            "remote TERM fallback runs after login files and before echo-off"
+        );
         assert!(!rc.contains('\'') && !rc.contains('\n'));
 
         let payload = payload_bytes(SessionShellKind::Bash, token(0x11));
         assert!(payload.starts_with(PAYLOAD_HEAD.as_bytes()));
+        assert!(payload
+            .windows(b"TERM=xterm-256color".len())
+            .any(|w| w == b"TERM=xterm-256color"));
         assert!(!padding_bytes().starts_with(PAYLOAD_HEAD.as_bytes()));
     }
 }

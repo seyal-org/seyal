@@ -287,10 +287,13 @@ final class ProductChromeHostView: NSView {
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
             sessionBootstrap.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
             sessionBootstrap.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
-            sessionBootstrap.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 8),
+            // When collapsed (height 0), this matches master: composer sits
+            // 12pt below transcript. When the banner is visible it grows in
+            // place without shifting Metal/PTY geometry for the idle path.
+            sessionBootstrap.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
             composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
             composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
-            composer.topAnchor.constraint(equalTo: sessionBootstrap.bottomAnchor, constant: 8),
+            composer.topAnchor.constraint(equalTo: sessionBootstrap.bottomAnchor),
             composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
             newShellButton.centerXAnchor.constraint(equalTo: composer.centerXAnchor),
             newShellButton.centerYAnchor.constraint(equalTo: composer.centerYAnchor),

@@ -678,6 +678,10 @@ mod tests {
                 .windows(b"stty echo".len())
                 .any(|window| window == b"stty echo"));
             let text = String::from_utf8(payload).unwrap();
+            assert!(
+                text.contains("tput longname >/dev/null 2>&1||export TERM=xterm-256color"),
+                "remote TERM fallback must land in the session payload"
+            );
             assert!(text.contains("133;A") && text.contains("133;C") && text.contains("133;D"));
             let mut secret_hex = String::new();
             secret.write_hex(&mut secret_hex);

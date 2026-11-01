@@ -172,9 +172,14 @@ impl CommandBlockTimeline {
             record.start_line = start;
             // ED2 reminted this Block's start: collapse earlier cards from the
             // active Flow canvas while retaining them in the timeline.
-            match self.canvas_floor {
-                Some(floor) if floor.raw() > id.raw() => {}
-                _ => self.canvas_floor = Some(id),
+            // Local `clear` floors the live canvas (#1379). Session `clear`
+            // must not: headed SSH expects prior session Blocks to remain
+            // scrollable under the still-Running host (#1398).
+            if record.scope == BlockScope::Local {
+                match self.canvas_floor {
+                    Some(floor) if floor.raw() > id.raw() => {}
+                    _ => self.canvas_floor = Some(id),
+                }
             }
         }
         record.end_line = Some(end_line.max(record.start_line));
@@ -261,6 +266,34 @@ mod tests {
             Some(first),
             "pre-clear Block stays ordered in the timeline"
         );
+    }
+
+    #[test]
+    fn session_clear_ed2_keeps_prior_blocks_on_the_live_canvas() {
+        let mut timeline = CommandBlockTimeline::default();
+        let host = timeline.allocate_id().unwrap();
+        timeline.start(host, "ssh host".into(), 1).unwrap();
+        let before = timeline.allocate_id().unwrap();
+        timeline
+            .start_session(before, "echo before".into(), 10, host.raw())
+            .unwrap();
+        timeline.complete(before, 11, Some(0)).unwrap();
+        let clear = timeline.allocate_id().unwrap();
+        timeline
+            .start_session(clear, "clear".into(), 12, host.raw())
+            .unwrap();
+        timeline
+            .complete_span(clear, Some(40), 41, Some(0))
+            .unwrap();
+        assert_eq!(
+            timeline.canvas_floor(),
+            None,
+            "remote clear must leave prior session Blocks scrollable"
+        );
+        assert!(timeline
+            .records()
+            .any(|r| r.id == host && r.lifecycle == CommandBlockLifecycle::Running));
+        assert!(timeline.records().any(|r| r.id == before));
     }
 
     #[test]

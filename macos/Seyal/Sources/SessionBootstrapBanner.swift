@@ -10,6 +10,11 @@ final class SessionBootstrapBanner: NSView {
     private let dismiss = NSButton(title: "", target: nil, action: nil)
     private var lastKind: UInt8 = 0
     private var lastRevision: UInt64 = 0
+    /// Hidden banners must not steal vertical space from the Metal/transcript
+    /// column (`isHidden` alone does not collapse Auto Layout).
+    private lazy var collapsedHeight: NSLayoutConstraint = heightAnchor.constraint(
+        equalToConstant: 0
+    )
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -18,6 +23,7 @@ final class SessionBootstrapBanner: NSView {
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
         isHidden = true
+        collapsedHeight.isActive = true
         setAccessibilityIdentifier("seyal-session-bootstrap")
         setAccessibilityRole(.group)
         setAccessibilityElement(true)
@@ -77,9 +83,11 @@ final class SessionBootstrapBanner: NSView {
         lastRevision = surface.revision
         guard surface.kind != 0 else {
             isHidden = true
+            collapsedHeight.isActive = true
             return
         }
         isHidden = false
+        collapsedHeight.isActive = false
         titleLabel.stringValue = copyString(0)
         if surface.kind == 2 {
             bodyLabel.stringValue = copyString(1)

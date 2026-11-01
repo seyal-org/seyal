@@ -256,6 +256,12 @@ acknowledged_loc = 723
 issue = 1398
 reason = "ADR-026 F4 overlay transitions, wire projection, and composer derivation stay one pure state machine with its exhaustive transition table; #1398 adds the Runtime-internal SpawnArmed state and its table cases rather than a second overlay type."
 
+[[cohesion_acknowledgement]]
+path = "crates/seyal-runtime/src/runtime/session_bootstrap.rs"
+acknowledged_loc = 703
+issue = 1398
+reason = "Spawn-time SSH session payload assembly stays one Runtime cold-path module; #1398 adds the remote TERM fallback assertion beside the existing OSC 133 / stty echo payload proofs without a second bootstrap test authority."
+
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.
 

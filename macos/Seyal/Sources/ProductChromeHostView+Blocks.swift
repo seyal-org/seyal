@@ -70,12 +70,20 @@ extension ProductChromeHostView {
                 retained.insert(blockID)
             }
             // Rust owns the clear canvas floor; Swift only omits cards at/below
-            // it so `clear` leaves a fully empty live canvas (no clear card).
+            // it so local `clear` leaves a fully empty live canvas (no clear
+            // card). Defense for #1398: never omit a Local Running host if a
+            // floor is present (session clear must not floor; host must stay).
             if floorLo != 0 || floorHi != 0 {
-                if row.id_hi < floorHi
+                let atOrBelowFloor = row.id_hi < floorHi
                     || (row.id_hi == floorHi && row.id_lo <= floorLo)
-                {
-                    continue
+                if atOrBelowFloor {
+                    let state = row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK)
+                    let isSession = row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
+                    let keepLocalRunningHost = !isSession
+                        && state == UInt16(SEYAL_APP_BLOCK_STATE_RUNNING)
+                    if !keepLocalRunningHost {
+                        continue
+                    }
                 }
             }
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
