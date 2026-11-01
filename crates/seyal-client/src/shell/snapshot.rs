@@ -281,6 +281,8 @@ impl ShellError {
             Self::WindowCreationUnavailable => 23,
             Self::UnknownTerminalTab => 24,
             Self::NoSelectedTerminalTab => 25,
+            Self::InvalidWorkspaceRoot => 26,
+            Self::DuplicateWorkspace => 27,
         }
     }
 }

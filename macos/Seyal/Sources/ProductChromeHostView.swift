@@ -23,6 +23,7 @@ final class ProductChromeHostView: NSView {
     /// Global command palette overlay (#932); internal for component tests.
     let commandPalette: CommandPaletteOverlayView
     let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
+    let createWorkspaceButton = NSButton(title: "+", target: nil, action: nil)
     let tabsButton = NSButton(title: "Layouts", target: nil, action: nil)
     let recoveryLabel = NSTextField(labelWithString: "")
     /// #1379 Defect B: single clear recovery action after primary shell exit.
@@ -112,11 +113,13 @@ final class ProductChromeHostView: NSView {
         leftItems.spacing = 2
         leftItems.translatesAutoresizingMaskIntoConstraints = false
         left.addSubview(workspacesButton)
+        left.addSubview(createWorkspaceButton)
         left.addSubview(tabsButton)
         left.addSubview(newTabButton)
         left.addSubview(closeTabButton)
         left.addSubview(leftItems)
         workspacesButton.translatesAutoresizingMaskIntoConstraints = false
+        createWorkspaceButton.translatesAutoresizingMaskIntoConstraints = false
         tabsButton.translatesAutoresizingMaskIntoConstraints = false
 
         inspector.orientation = .vertical
@@ -251,7 +254,11 @@ final class ProductChromeHostView: NSView {
             left.widthAnchor.constraint(equalToConstant: 220),
             workspacesButton.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
             workspacesButton.topAnchor.constraint(equalTo: left.topAnchor, constant: 10),
-            tabsButton.leadingAnchor.constraint(equalTo: workspacesButton.trailingAnchor, constant: 8),
+            createWorkspaceButton.leadingAnchor.constraint(
+                equalTo: workspacesButton.trailingAnchor, constant: 2),
+            createWorkspaceButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
+            tabsButton.leadingAnchor.constraint(
+                equalTo: createWorkspaceButton.trailingAnchor, constant: 8),
             tabsButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
             newTabButton.leadingAnchor.constraint(equalTo: tabsButton.trailingAnchor, constant: 2),
             newTabButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
@@ -476,6 +483,7 @@ final class ProductChromeHostView: NSView {
         let shell = seyal_app_shell(pane.appHandle)
         workspacesButton.state = chrome.left_panel == 0 ? .on : .off
         tabsButton.state = chrome.left_panel == 1 ? .on : .off
+        createWorkspaceButton.isHidden = chrome.left_panel != 0
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildLayoutActions(shell: shell)

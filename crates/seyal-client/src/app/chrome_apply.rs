@@ -170,6 +170,71 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    pub(super) fn create_workspace(&mut self, root_path: String) -> Result<(), AppError> {
+        if root_path.trim().is_empty() {
+            return Err(AppError::InvalidPayload);
+        }
+        let id = self.mint_workspace_id()?;
+        self.shell
+            .create_workspace(id, root_path, self.shell.containment_generation())
+            .map_err(|error| match error {
+                crate::shell::ShellError::InvalidWorkspaceRoot => AppError::InvalidPayload,
+                crate::shell::ShellError::DuplicateWorkspace => AppError::UnknownChromeWorkspace,
+                _ => AppError::UnknownChromeWorkspace,
+            })?;
+        self.drain_shell_effects();
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn set_workspace_root(
+        &mut self,
+        id: WorkspaceId,
+        root_path: String,
+    ) -> Result<(), AppError> {
+        self.shell
+            .set_workspace_root(id, root_path)
+            .map_err(|error| match error {
+                crate::shell::ShellError::InvalidWorkspaceRoot => AppError::InvalidPayload,
+                _ => AppError::UnknownChromeWorkspace,
+            })?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn mint_workspace_id(&mut self) -> Result<WorkspaceId, AppError> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        self.with_wire_client_mut(|client| client.mint_workspace_blocking(deadline))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn mint_workspace_id(&mut self) -> Result<WorkspaceId, AppError> {
+        Err(AppError::NoLiveClient)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn create_workspace_with_minted_id_for_test(
+        &mut self,
+        id: WorkspaceId,
+        root_path: String,
+    ) -> Result<(), AppError> {
+        self.shell
+            .create_workspace(id, root_path, self.shell.containment_generation())
+            .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.drain_shell_effects();
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), AppError> {
         self.shell
             .apply(ShellAction::SelectTab {

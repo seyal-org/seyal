@@ -34,7 +34,7 @@ impl ApplicationRoot {
             self.dispatch_wire_effects(
                 effects,
                 WireDispatchContext {
-                    workspace_id: 0,
+                    workspace_id: self.wire_workspace_id(),
                     launch_profile: 0,
                 },
             )?;
@@ -229,7 +229,7 @@ impl ApplicationRoot {
         self.dispatch_wire_effects(
             effects,
             WireDispatchContext {
-                workspace_id: 0,
+                workspace_id: self.wire_workspace_id(),
                 launch_profile: 0,
             },
         )?;

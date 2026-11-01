@@ -3,9 +3,11 @@
 //! Never called from the display/frame hot path. Payloads are fixed-width and
 //! carry no program, argv, environment, cwd, or terminal content.
 
+use seyal_core::WorkspaceId;
 use seyal_runtime::{
     local_ipc::framing::{
         encode_frame, CreateExecutionRequest, CreateExecutionResult, MessageType,
+        MintWorkspaceRequest, MintWorkspaceResult, MintWorkspaceResultCode,
         TerminateExecutionRequest, TerminateExecutionResult, CAP_EXECUTION_PROVISIONING,
     },
     AttachmentId, ExecutionId,
@@ -186,6 +188,59 @@ impl LocalDisplayClient {
 
     pub fn take_terminate_result(&mut self) -> Option<TerminateExecutionResult> {
         self.last_terminate_result.take()
+    }
+
+    /// Queue a type-42 mint-workspace request (ADR-028 §2.5 cold path).
+    pub fn submit_mint_workspace(&mut self) -> Result<u64, ClientError> {
+        if !self.execution_provisioning_negotiated {
+            return Err(ClientError::UnsupportedInteractiveCapability);
+        }
+        let request_id = self.allocate_provisioning_request_id()?;
+        let payload = MintWorkspaceRequest { request_id }.encode();
+        let frame = encode_frame(MessageType::MintWorkspaceRequest, &payload);
+        self.admit_frame(frame, OutboundKind::MintWorkspace { request_id })?;
+        self.pending_mint_requests.insert(request_id);
+        let _ = self.flush_control_write();
+        Ok(request_id)
+    }
+
+    pub fn take_mint_result(&mut self) -> Option<MintWorkspaceResult> {
+        self.last_mint_result.take()
+    }
+
+    pub(crate) fn accept_mint_result(
+        &mut self,
+        result: MintWorkspaceResult,
+    ) -> Result<(), ClientError> {
+        if result.request_id == 0 || !self.pending_mint_requests.remove(&result.request_id) {
+            return Ok(());
+        }
+        self.last_mint_result = Some(result);
+        Ok(())
+    }
+
+    /// Cold-path sync mint: submit type 42 and wait for the correlated result.
+    pub fn mint_workspace_blocking(
+        &mut self,
+        deadline: std::time::Instant,
+    ) -> Result<WorkspaceId, ClientError> {
+        let request_id = self.submit_mint_workspace()?;
+        while std::time::Instant::now() < deadline {
+            let _ = self.poll_prepare()?;
+            if let Some(result) = self.take_mint_result() {
+                if result.request_id != request_id {
+                    continue;
+                }
+                return match result.result_code {
+                    MintWorkspaceResultCode::Minted => {
+                        Ok(WorkspaceId::from_u128(result.workspace_id))
+                    }
+                    MintWorkspaceResultCode::Error(_) => Err(ClientError::Protocol),
+                };
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        Err(ClientError::StartupDeadlineExceeded)
     }
 
     pub(crate) fn accept_create_result(

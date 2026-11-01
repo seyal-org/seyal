@@ -15,7 +15,8 @@ use seyal_runtime::{
     local_ipc::framing::{
         encode_frame, Attach, Attached, ClientHello, CreateExecutionRequest, CreateExecutionResult,
         CreateExecutionResultCode, ErrorCode, ErrorMessage, ExecutionList, FrameHeader, InputRef,
-        MessageType, Role, ServerHello, CAP_EXECUTION_PROVISIONING, HEADER_LEN,
+        MessageType, MintWorkspaceRequest, MintWorkspaceResult, MintWorkspaceResultCode, Role,
+        ServerHello, CAP_EXECUTION_PROVISIONING, HEADER_LEN,
     },
     m001_term_name, ExecutionId, LocalIpcMode, Runtime, RuntimeConfig, WorkspaceId,
 };
@@ -832,4 +833,42 @@ fn injected_registration_and_publication_failure_leave_no_partial_state() {
     let ok = h.create(7, 24, 80);
     assert_eq!(ok.result_code, CreateExecutionResultCode::Created);
     assert_eq!(h.runtime.execution_count(), 1);
+}
+
+#[test]
+fn mint_workspace_admits_nonzero_create() {
+    let mut h = Harness::empty();
+    h.hello(CAP_EXECUTION_PROVISIONING);
+    h.send(
+        MessageType::MintWorkspaceRequest,
+        &MintWorkspaceRequest { request_id: 1 }.encode(),
+    );
+    let (kind, payload) = h.expect_frame(Instant::now() + Duration::from_secs(2));
+    assert_eq!(kind, MessageType::MintWorkspaceResult as u16);
+    let minted = MintWorkspaceResult::decode(&payload).unwrap();
+    assert_eq!(minted.result_code, MintWorkspaceResultCode::Minted);
+    assert_ne!(minted.workspace_id, 0);
+    assert!(h
+        .runtime
+        .is_workspace_admitted(WorkspaceId::from_u128(minted.workspace_id)));
+
+    h.send(
+        MessageType::CreateExecutionRequest,
+        &CreateExecutionRequest {
+            workspace_id: minted.workspace_id,
+            request_id: 2,
+            launch_profile: 0,
+            rows: 24,
+            columns: 80,
+        }
+        .encode(),
+    );
+    let (kind, payload) = h.expect_frame(Instant::now() + Duration::from_secs(2));
+    assert_eq!(kind, MessageType::CreateExecutionResult as u16);
+    let result = CreateExecutionResult::decode(&payload).unwrap();
+    assert_eq!(result.result_code, CreateExecutionResultCode::Created);
+    assert_eq!(
+        h.runtime.lookup(result.execution_id).unwrap().workspace_id,
+        WorkspaceId::from_u128(minted.workspace_id)
+    );
 }

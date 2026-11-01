@@ -162,15 +162,17 @@ pub struct LocalDisplayClient {
     pub(crate) resume_sequence: u64,
     /// True until a complete snapshot commits for the current resume sequence.
     pub(crate) resume_fenced: bool,
-    /// Shared connection-local request-id space for types 36 and 38.
+    /// Shared connection-local request-id space for types 36, 38, and 42.
     pub(crate) next_provisioning_request_id: u64,
     /// In-process harness probe (`UnixStream::pair`); never drives live
     /// `connect_execution` for AttachController (C2b / #1175).
     pub(crate) harness_probe: bool,
     pub(crate) pending_create_requests: std::collections::HashSet<u64>,
     pub(crate) pending_terminate_requests: std::collections::HashSet<u64>,
+    pub(crate) pending_mint_requests: std::collections::HashSet<u64>,
     pub(crate) last_create_result: VecDeque<CreateExecutionResult>,
     pub(crate) last_terminate_result: Option<TerminateExecutionResult>,
+    pub(crate) last_mint_result: Option<seyal_runtime::local_ipc::framing::MintWorkspaceResult>,
     pub(crate) viewport_line_ids: Vec<u64>,
     pub(crate) viewport_line_ids_generation: u64,
 }
@@ -462,8 +464,10 @@ fn reconstruction_probe_client_with_stream(
         harness_probe: true,
         pending_create_requests: std::collections::HashSet::new(),
         pending_terminate_requests: std::collections::HashSet::new(),
+        pending_mint_requests: std::collections::HashSet::new(),
         last_create_result: VecDeque::new(),
         last_terminate_result: None,
+        last_mint_result: None,
         viewport_line_ids: Vec::new(),
         viewport_line_ids_generation: 0,
     }

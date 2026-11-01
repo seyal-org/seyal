@@ -10,6 +10,23 @@ extension ProductChromeHostView {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue), reserved: 1)
     }
 
+    /// Thin host picker for CreateWorkspace (ADR-028). Path is the only host input;
+    /// Rust owns minting, shell recording, and left-rail projection.
+    @objc func createWorkspace() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Create Workspace"
+        panel.message = "Choose a folder to bind as the workspace root."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        applyPayload(
+            UInt16(SEYAL_APP_ACTION_CREATE_WORKSPACE.rawValue),
+            text: url.path
+        )
+        routeFocus()
+    }
+
     @objc func selectWorkspace(_ sender: NSButton) {
         applyIdentity(UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue), button: sender)
     }
@@ -215,6 +232,11 @@ extension ProductChromeHostView {
     func configureChromeButtons() {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
+        createWorkspaceButton.setAccessibilityIdentifier("seyal-create-workspace")
+        createWorkspaceButton.setAccessibilityLabel("Create Workspace")
+        createWorkspaceButton.toolTip = "Create Workspace"
+        createWorkspaceButton.target = self
+        createWorkspaceButton.action = #selector(createWorkspace)
         newTabButton.setAccessibilityIdentifier("seyal-new-tab")
         newTabButton.setAccessibilityLabel("New Layout")
         newTabButton.toolTip = "New Layout"

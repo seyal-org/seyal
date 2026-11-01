@@ -205,7 +205,14 @@ enum SeyalAppActionKind {
      * With FLAG_HAS_EXECUTION and FLAG_HAS_ATTACHMENT: bind target_* onto
      * that Pane. Never selects a sibling by list order.
      */
-    SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION = 80
+    SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION = 80,
+    /*
+     * ADR-028 CreateWorkspace / SetWorkspaceRoot.
+     * CREATE_WORKSPACE: payload = UTF-8 absolute root path; Runtime mints id.
+     * SET_WORKSPACE_ROOT: target_execution_lo/hi = WorkspaceId; payload = root.
+     */
+    SEYAL_APP_ACTION_CREATE_WORKSPACE = 81,
+    SEYAL_APP_ACTION_SET_WORKSPACE_ROOT = 82
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
