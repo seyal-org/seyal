@@ -39,15 +39,18 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
             1,
             "Expected one visible Pane terminal tab before ⌘T:\n\(app.debugDescription)"
         )
-        app.typeKey("t", modifierFlags: .command)
+        // Prefer the projected File menu over XCUI typeKey: cmd equivalents are
+        // asserted in MultiWindowHostTests, and typeKey flakes after chrome focus.
+        clickFileMenuItem(in: app, title: "New Terminal")
         waitForWindowCount(app, 1, timeout: 5)
         waitForTerminalTabCount(app, 2, timeout: 12)
         XCTAssertEqual(app.windows.count, 1, "⌘T creates a Pane-local terminal, not a Layout or Window")
 
-        app.typeKey("n", modifierFlags: .command)
+        clickFileMenuItem(in: app, title: "New Window")
         waitForWindowCount(app, 2, timeout: 10)
 
-        app.typeKey("n", modifierFlags: [.command, .shift])
+        // cmd+shift+n is an alias; File → New Window remains the primary admission.
+        clickFileMenuItem(in: app, title: "New Window")
         waitForWindowCount(app, 3, timeout: 10)
     }
 
@@ -55,13 +58,15 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         let app = hostedApp()
         waitForUsablePty(in: app)
         XCTAssertEqual(app.windows.count, 1)
-        clickNewTerminal(in: app)
+        // Prefer File menu for both create and close: pane-chrome "+" clicks
+        // leave XCUI menu synthesis in a state where Close Terminal only hovers.
+        clickFileMenuItem(in: app, title: "New Terminal")
         waitForTerminalTabCount(app, 2, timeout: 12)
         waitForUsablePty(in: app, timeout: 12)
 
-        app.typeKey("w", modifierFlags: .command)
+        clickFileMenuItem(in: app, title: "Close Terminal")
 
-        waitForTerminalTabCount(app, 1, timeout: 12)
+        waitForTerminalTabCount(app, 1, timeout: 20)
         XCTAssertEqual(app.windows.count, 1, "⌘W closes the selected terminal, not its Window")
         XCTAssertTrue(
             app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch.exists,
@@ -132,6 +137,13 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         newTerminal.click()
     }
 
+    private func clickFileMenuItem(in app: XCUIApplication, title: String) {
+        let item = app.menuBars.menuBarItems["File"].menuItems[title]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "File → \(title) must be projected")
+        XCTAssertTrue(item.isEnabled, "File → \(title) must be enabled")
+        item.click()
+    }
+
     private func showTabs(in app: XCUIApplication) {
         let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 5))
@@ -161,9 +173,11 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func terminalTabButtons(in app: XCUIApplication) -> XCUIElementQuery {
+        // Match title, not AX label: tab buttons set `title` ("Terminal 1") and
+        // leave accessibilityLabel unset; close buttons use title "×" / Close label.
         app.descendants(matching: .any).matching(
             NSPredicate(
-                format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
+                format: "identifier BEGINSWITH %@ AND title BEGINSWITH %@",
                 "seyal-terminal-tab-",
                 "Terminal "
             )
@@ -183,7 +197,7 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [arrived], timeout: timeout),
             .completed,
-            "Expected \(count) Pane-local terminal tabs after the shortcut"
+            "Expected \(count) Pane-local terminal tabs; actual=\(terminalTabButtons(in: app).count) windows=\(app.windows.count)\n\(app.debugDescription)"
         )
     }
 

@@ -364,6 +364,15 @@ impl ApplicationRoot {
     /// Terminal poll loss. `execution_ended` keeps Flow authority and copies the
     /// final Block timeline before the client is unregistered (#1379).
     pub(crate) fn note_terminal_client_loss(&mut self, handle: u64, execution_ended: bool) {
+        // `seyal_bridge_poll_for` notes loss before `drive_application_roots`.
+        // Close Terminal may have accepted type-39 in the same poll_prepare that
+        // then returned NoRunningExecution — absorb here so the Pane terminal
+        // tab is removed instead of latching a zombie tab forever.
+        #[cfg(target_os = "macos")]
+        {
+            let _ = self.absorb_wire_terminate_result(true);
+            self.finish_pending_terminal_terminate_for_handle(handle);
+        }
         // Only shell-exit retains history forever. Ordinary disconnect must not
         // sticky-hold Flow paint across panes (#1379 Opus recheck).
         if execution_ended {
@@ -371,6 +380,29 @@ impl ApplicationRoot {
             self.note_ended_execution_client_loss(handle);
         } else {
             self.note_registry_client_loss(handle);
+        }
+    }
+
+    /// When Lifecycle::Finalized races ahead of absorb, still close a terminal
+    /// tab that has an outstanding Dispose terminate for this client handle.
+    #[cfg(target_os = "macos")]
+    fn finish_pending_terminal_terminate_for_handle(&mut self, handle: u64) {
+        let pending: Vec<(seyal_core::TerminalTabId, PaneId, seyal_core::ExecutionId)> = self
+            .terminal_client_raws
+            .iter()
+            .filter(|(_, raw)| **raw == handle)
+            .filter_map(|(terminal_tab, _)| {
+                let authority = self.terminal_authorities.get(terminal_tab)?;
+                self.provisioning
+                    .pending_terminate_by_terminal_tab(*terminal_tab)?;
+                Some((*terminal_tab, authority.pane, authority.execution))
+            })
+            .collect();
+        for (terminal_tab, pane, execution) in pending {
+            let _ = self
+                .provisioning
+                .take_pending_terminate_for_terminal_tab(terminal_tab);
+            self.finish_terminal_termination(pane, terminal_tab, execution);
         }
     }
 
