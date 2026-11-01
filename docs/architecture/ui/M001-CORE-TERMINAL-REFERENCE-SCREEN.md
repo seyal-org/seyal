@@ -110,11 +110,11 @@ The left panel remains compact and stable while its content reflects product con
 Show known Workspaces with only useful metadata:
 
 - name;
-- project/root path when helpful;
+- project/root path when helpful (bound workspace root attribute per Proposed ADR-028 under #1409 — path is display/policy metadata, never `WorkspaceId`);
 - tab count;
 - compact status/attention where backed by real state.
 
-Do not use oversized cards when a dense list communicates the same information better.
+Do not use oversized cards when a dense list communicates the same information better. Leave-parent create/jump offers (ADR-028) are Rust-owned confirmations; denying an offer continues shell navigation only and must not invent a workspace or move PTYs.
 
 ### 5.2 Agents
 
@@ -130,12 +130,16 @@ This is the primary compact agent inventory on the Core Terminal screen. The ins
 
 ### 5.3 Tabs — active Workspace
 
-Show a persistent active-Workspace tab inventory with compact activity/attention state.
+Show a persistent active-Workspace **pane-local terminal** inventory with compact activity/attention state.
 
-This complements the top strip:
+Left **Tabs** mode is a Workspace-scoped navigation map of the same `TerminalTabId` identities that appear on each Pane's terminal-tab strip (ADR-025 / SPEC-031). It is not a second tab model and must not list Pane-tree rows.
 
-- top strip = immediate active tabs;
-- left list = stable Workspace-local inventory/navigation.
+This complements the in-pane strips:
+
+- pane strip = the only in-pane terminal-looking strip for that Pane;
+- left list = stable Workspace-local map/navigation across Panes' terminal tabs (grouped by Pane when helpful).
+
+Outer Seyal Workspace Tabs remain layout containers. Their create/close affordances stay in the navigation rail; they are not the primary left Tabs inventory.
 
 ### 5.4 Runtime/connection status
 
@@ -168,23 +172,25 @@ This section documents the runtime/state inputs that drive *visible* left-pane r
 - Selected row emphasis: the selected agent identity (`selectedAgentID`) when an agent is explicitly focused/selected.
 
 #### 5.5.3 Tabs — active Workspace rows (C04 rows under C03)
-- Row set scope: active workspace only.
-- Tab label: tab title (`Tab.title`).
-- Compact meta: pane count (`Tab.paneCount`), expressed as `1 pane` vs `N panes`.
-- Attention marker: may show a semantic marker when the tab has attention (`Tab.attention`), but must not recolor the whole row.
-- Selected row emphasis: active tab identity (`activeTabID`).
+- Row set scope: active workspace only; rows are pane-local `TerminalTab` entries projected by Rust (ADR-025), optionally grouped under Pane headers when the active Workspace Tab has more than one Pane.
+- Primary label: terminal tab title (`TerminalTab.title` / display name).
+- Compact meta: optional Pane label or compact position when grouping is collapsed; do not invent Swift-side pane/terminal inventories.
+- Attention marker: may show a semantic marker when that terminal tab has attention, but must not recolor the whole row.
+- Selected row emphasis: the selected `TerminalTabId` of the focused Pane (and matching pane-strip selection). Selecting a left row focuses that Pane and selects that terminal through Rust-owned actions.
 
 #### 5.5.4 Left panel mode switcher and collapse/hide (C03 container)
 - Left panel mode switcher:
   - `Workspaces` mode shows the Workspace inventory plus the current-Workspace compact agent inventory.
-  - `Tabs` mode shows the active-Workspace tab inventory.
+  - `Tabs` mode shows the active-Workspace pane-local terminal inventory (navigation map).
 - Collapse/hide:
   - Hiding the left context panel must reclaim the center Pane width (no empty gutter).
   - Hiding/reopening must not change Workspace/Tab/Pane focus, drafts, selection identities, or execution identity.
   - The selected mode and selection emphasis must be preserved across hide/reopen operations.
 
-### 5.6 C05 shared Tab identity rule (top strip <-> left list)
-The “Tabs — active Workspace” rows in the left panel (`C03`) and the active tab selection in the top tab strip (`C05`) represent the same Tab identity.
+### 5.6 Shared terminal identity rule (pane strip <-> left Tabs list)
+The “Tabs — active Workspace” rows in the left panel (`C03`) and each Pane's terminal-tab strip represent the same `TerminalTabId` identities. Selecting either surface updates focus/selection through the same Rust reducer; the host must not create a second terminal-tab model.
+
+Outer Seyal Workspace Tab identity (layout container) remains distinct from `TerminalTabId`. When a product surface still exposes outer Tab chrome (for example create/close in the navigation rail), it must not be presented as a competing terminal-looking strip above Pane content (SPEC-031 §11).
 
 Selecting a Tab in either location must update the same underlying tab selection identity (active tab) and must not create a second, parallel tab model.
 

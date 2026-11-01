@@ -154,6 +154,8 @@ Visual styling follows Seyal's current product design system. The cmux screensho
 
 The Pane-local strip is the only visible terminal-tab strip. The outer Seyal Tab is a layout container, so its title and create/close actions must not occupy a second terminal-looking strip above the Pane content. Keep outer layout navigation/actions in the navigation rail. Put each Pane's Split Right and Split Down actions at the trailing edge of that Pane's terminal-tab strip as compact icon buttons with visible hover labels and accessible names. Keep Close Pane in that Pane's contextual menu rather than the always-visible icon row. Each action first focuses its Pane, then applies to that exact Pane. The New Terminal affordance stays with the Pane's terminal tabs.
 
+Left C03 **Tabs** mode is a Workspace-scoped navigation map of those same `TerminalTabId`s (ADR-025 §2.8, Proposed under #1408). It may group rows by Pane. Selecting a left row focuses that Pane and selects that terminal through the same Rust reducer as the strip. It must not invent a second terminal-tab model, list Pane-tree rows as the inventory, or present as a second terminal-looking strip above Pane content.
+
 ## 12. Required implementation tests and evidence
 
 Reducer tests first for the contract's success and rejection cases. Required classes:

@@ -1253,11 +1253,13 @@ These ADR-026 seams are recorded here by reference only. They are not inserted i
 - target-generation fence (ADR-026 §3.2);
 - session-scoped Blocks (`scope` / `trust` on `BlockTimeline`).
 
-## 2026-11-01 proposed amendment — Raw is system-selected, not user-selectable (#1404)
+## 2026-11-01 accepted amendment — Raw is system-selected, not user-selectable (#1404)
 
-**Status:** Proposed; not normative unless accepted by a non-author maintainer
-in a separate Architecture/R&D PR. The accepted Flow/Raw/TUI contract above
-remains authoritative while this proposal is under review.
+**Status:** Accepted by the product owner following the merge of PR #1405 on
+2026-11-01. The product owner explicitly directs that this merge constitutes
+approval of the amendment. This section is normative. PR #1405 had no submitted
+reviews; its required implementation evidence remains a gate for the separate
+production implementation PR.
 
 ### Problem
 
@@ -1268,7 +1270,7 @@ to a conventional Raw presentation manually. This does not remove the safety
 fallback: a Pane still needs a usable direct-terminal presentation when trusted
 Flow eligibility is absent or arbitrary character-level input is required.
 
-### Proposed decision
+### Accepted decision
 
 Keep `Flow | Raw | TUI` as mutually exclusive presentations, but make Raw
 system-selected only:
@@ -1324,11 +1326,11 @@ contracts. There is no Raw viewport or input route beneath Flow.
 - **Remove Raw entirely.** Rejected: unsupported shells and programs requiring
   direct character-level input would lose a safe usable presentation, or would
   require a separate replacement interaction contract.
-- **Keep Raw only as an automatic fallback, retaining TUI.** Proposed: it
+- **Keep Raw only as an automatic fallback, retaining TUI.** Accepted: it
   preserves existing terminal safety and compatibility while removing the
   manual presentation choice.
 
-### Required evidence before acceptance
+### Required implementation evidence
 
 - Confirm all manual Raw entry points and custom-keybinding paths are covered,
   and define legacy-config and old Pane-state behavior precisely.
@@ -1340,12 +1342,11 @@ contracts. There is no Raw viewport or input route beneath Flow.
   manual-action removal; preserve the existing direct-terminal acceptance for
   Raw/TUI.
 
-### Follow-up after acceptance
+### Follow-up for implementation
 
 Update SPEC-008 and SPEC-024, and update SPEC-006 only where needed to clarify
 that direct-terminal input remains available in automatic Raw/TUI. Update the
 User Guide. Reconcile #867 / PR #1286 without expanding or changing their
-in-review state silently. Only after those changes are accepted and the owning
-implementation Issue is Ready may production implementation remove the manual
-Raw actions and add regression coverage.
+in-review state silently. The owning implementation Issue must be Ready, and
+the required evidence above must be attached to its implementation PR.
 
