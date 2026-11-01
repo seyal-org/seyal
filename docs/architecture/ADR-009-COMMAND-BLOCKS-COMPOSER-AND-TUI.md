@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384 (Accepted on merge of this acceptance PR by a non-author maintainer; normative; read through ADR-026; an author or agent comment is not acceptance)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384 (Accepted on merge of this acceptance PR by a non-author maintainer; normative; read through ADR-026; an author or agent comment is not acceptance); Raw-choice amendment proposed by #1404 (not normative until a separate acceptance PR)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment proposed 2026-11-01 (#1404)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1252,4 +1252,100 @@ These ADR-026 seams are recorded here by reference only. They are not inserted i
 - at most one session secret beside the execution nonce;
 - target-generation fence (ADR-026 §3.2);
 - session-scoped Blocks (`scope` / `trust` on `BlockTimeline`).
+
+## 2026-11-01 proposed amendment — Raw is system-selected, not user-selectable (#1404)
+
+**Status:** Proposed; not normative unless accepted by a non-author maintainer
+in a separate Architecture/R&D PR. The accepted Flow/Raw/TUI contract above
+remains authoritative while this proposal is under review.
+
+### Problem
+
+The accepted contract allows a user to select Raw explicitly and return to Flow
+from the command palette. The product direction is that normal command work
+should remain in Flow/Blocks and that users should not switch a supported Pane
+to a conventional Raw presentation manually. This does not remove the safety
+fallback: a Pane still needs a usable direct-terminal presentation when trusted
+Flow eligibility is absent or arbitrary character-level input is required.
+
+### Proposed decision
+
+Keep `Flow | Raw | TUI` as mutually exclusive presentations, but make Raw
+system-selected only:
+
+- A newly created Pane starts in Flow, as it already does under the accepted
+  pane-creation contract.
+- Rust selects Raw when current trusted Flow eligibility cannot be established,
+  shell integration is unsupported/quarantined, or direct-terminal semantics
+  are required. Raw remains a full-Pane, fully usable direct-terminal fallback
+  over the same execution and canonical terminal state.
+- Remove user-facing actions that explicitly select or toggle Raw, including
+  the “Use Raw Terminal” and “Return to Flow” palette choices, the
+  `presentation.set_raw` / `presentation.toggle_raw` workspace commands, and
+  their default binding. Existing custom bindings to removed commands must be
+  rejected with an actionable configuration diagnostic; they must not silently
+  become another command or route.
+- A user request to enter Flow may take effect only when Rust can prove current
+  Flow eligibility under the existing execution/attachment/presentation fence.
+  It cannot override an automatic Raw fallback. When eligibility later becomes
+  valid, Rust may return the Pane to Flow through the existing fenced
+  presentation transition; it does not wait for a user command.
+- TUI remains a full-Pane takeover on canonical alternate-screen state. On TUI
+  exit, Rust re-evaluates current eligibility and restores Flow or automatic
+  Raw without recreating the execution.
+
+The automatic Raw renderer, direct-terminal input, IME, mouse, focus,
+accessibility and resize behavior remain governed by the accepted Raw/TUI
+contracts. There is no Raw viewport or input route beneath Flow.
+
+### Consequences
+
+- Users cannot force a conventional terminal view for debugging while a Pane is
+  safely eligible for Flow. Diagnostic workflows must use existing logs,
+  inspections or a separately accepted diagnostic action that does not create a
+  second input owner.
+- Unsupported shells and interactive programs continue to work through
+  automatic Raw; they do not gain guessed Blocks or composer eligibility.
+- Returning from automatic Raw is based on fresh Rust-owned eligibility. A
+  manual “Return to Flow” action cannot override unsupported or stale state.
+- Keybinding configuration changes: the default Raw toggle and Raw command
+  identifiers cease to be supported. Compatibility behavior for legacy
+  configuration and any per-Pane explicit-Raw latch must be settled before
+  acceptance; removed commands must never fail open to direct input or Flow.
+- #867 / PR #1286 currently include explicit Raw selection in their scope and
+  evidence. They require explicit reconciliation after this proposal is
+  accepted and are not changed by this proposal.
+
+### Alternatives considered
+
+- **Keep explicit Raw selection.** Rejected for the requested product direction;
+  it permits a supported Flow Pane to leave its Blocks/composer presentation
+  by user choice.
+- **Remove Raw entirely.** Rejected: unsupported shells and programs requiring
+  direct character-level input would lose a safe usable presentation, or would
+  require a separate replacement interaction contract.
+- **Keep Raw only as an automatic fallback, retaining TUI.** Proposed: it
+  preserves existing terminal safety and compatibility while removing the
+  manual presentation choice.
+
+### Required evidence before acceptance
+
+- Confirm all manual Raw entry points and custom-keybinding paths are covered,
+  and define legacy-config and old Pane-state behavior precisely.
+- Prove unsupported-shell and failure/quarantine states still select a usable
+  Raw direct-input route, with no composer admission or hidden Flow input.
+- Prove TUI entry/exit still returns to current Flow eligibility or Raw
+  fallback over the same `ExecutionId`, PTY and `TerminalState`.
+- Review route fencing, IME, accessibility, resize and security behavior for
+  manual-action removal; preserve the existing direct-terminal acceptance for
+  Raw/TUI.
+
+### Follow-up after acceptance
+
+Update SPEC-008 and SPEC-024, and update SPEC-006 only where needed to clarify
+that direct-terminal input remains available in automatic Raw/TUI. Update the
+User Guide. Reconcile #867 / PR #1286 without expanding or changing their
+in-review state silently. Only after those changes are accepted and the owning
+implementation Issue is Ready may production implementation remove the manual
+Raw actions and add regression coverage.
 
