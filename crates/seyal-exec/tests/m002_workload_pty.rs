@@ -152,7 +152,10 @@ fn ssh_probe(host: &str) -> bool {
 struct NestedSshFixture {
     container: String,
     key_dir: PathBuf,
-    inner_ip: String,
+    /// Reachable from `nt-ssh@orb`. Prefer `{container}.orb.local` (OrbStack
+    /// VIP) over the docker-bridge IP: bridge addresses are ICMP-visible from
+    /// Orb Linux machines but TCP to published container ports times out.
+    inner_host: String,
 }
 
 impl NestedSshFixture {
@@ -255,32 +258,14 @@ printf '\nPort 2222\nPasswordAuthentication no\nKbdInteractiveAuthentication no\
                 .status();
             return Err("sshd setup failed".into());
         }
-        let ip = Command::new("docker")
-            .args([
-                "inspect",
-                "-f",
-                "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
-                &container,
-            ])
-            .output()
-            .map_err(|e| e.to_string())?;
-        if !ip.status.success() {
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container])
-                .status();
-            return Err("docker inspect ip failed".into());
-        }
-        let inner_ip = String::from_utf8_lossy(&ip.stdout).trim().to_string();
-        if inner_ip.is_empty() {
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container])
-                .status();
-            return Err("empty container ip".into());
-        }
+        // OrbStack publishes each container at `{name}.orb.local`. Nested SSH
+        // from `nt-ssh@orb` must use that VIP; the docker-bridge IP answers
+        // ping but drops TCP to the inner sshd (ConnectTimeout).
+        let inner_host = format!("{container}.orb.local");
         Ok(Self {
             container,
             key_dir,
-            inner_ip,
+            inner_host,
         })
     }
 
@@ -320,7 +305,7 @@ fn live_ssh_and_nested_ssh_use_one_pty_vt_when_orbstack_present() {
     let remote = format!(
         "printf 'seyal-ssh-ok\\n'; vim -Nu NONE -c qa >/dev/null 2>&1; printf 'seyal-ssh-vim\\n'; ssh -i '{}' -p 2222 -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null seyal@{} \"printf 'seyal-nested-ok\\n'\"",
         fixture.nt_key_path(),
-        fixture.inner_ip
+        fixture.inner_host
     );
     let command = seyal_term(CommandSpec::new(&ssh).args([
         "-o",
