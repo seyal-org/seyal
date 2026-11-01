@@ -130,6 +130,14 @@ pub enum AppAction {
         id: WorkspaceId,
         root_path: String,
     },
+    /// ADR-028: trusted foreground cwd observation (never OSC 7).
+    ObserveTrustedForegroundCwd {
+        path: String,
+    },
+    /// ADR-028: Yes on leave offer → create or jump.
+    ConfirmLeaveOffer,
+    /// ADR-028: No on leave offer → dismiss; navigation-only.
+    DismissLeaveOffer,
     SelectTab {
         id: TabId,
     },

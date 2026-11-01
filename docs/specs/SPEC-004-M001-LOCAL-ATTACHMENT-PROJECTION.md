@@ -886,8 +886,8 @@ Rules, validated in this order before any process or terminal mutation:
    sent explicitly); otherwise fail closed with `InvalidWorkspace`. Runtime
    never invents a Workspace as a side effect of create. Clients obtain
    admitted ids via the cold `MintWorkspaceRequest`/`MintWorkspaceResult` path
-   (types 42/43) before `CreateWorkspace` product recording; durable
-   cross-restart minting remains ADR-023;
+   (types 46/47; 42–45 remain ADR-026) before `CreateWorkspace` product
+   recording; durable cross-restart minting remains ADR-023;
 7. `launch_profile` is implemented by this Runtime, otherwise
    `UnsupportedLaunchProfile`. `0` is the default interactive shell profile;
    all other values are reserved and must fail closed rather than fall back;

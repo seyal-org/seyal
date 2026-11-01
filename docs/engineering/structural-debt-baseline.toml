@@ -72,9 +72,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1100
-issue = 1388
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs, #1379 publishes canvas_floor_block_id on SeyalAppComposer for Flow clear presentation, and #1388 adds the Relay composer mode constant beside the existing Available/Busy mapping."
+ceiling_loc = 1104
+issue = 1414
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi extraction; #1414 adds leave_offer_path scratch on AppHandle while leave-offer encode lives in leave_offer_ffi.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -274,9 +274,9 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 873
-issue = 1413
-reason = "ABI action decoding remains one versioned match surface; #1413 adds CreateWorkspace/SetWorkspaceRoot kinds 81–82 after ADR-026 session kinds, on the same decode table."
+acknowledged_loc = 879
+issue = 1414
+reason = "ABI action decoding remains one versioned match surface; #1414 adds ObserveTrustedForegroundCwd/Confirm/DismissLeaveOffer kinds 83–85 after ADR-026 session kinds and #1413 CreateWorkspace."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"

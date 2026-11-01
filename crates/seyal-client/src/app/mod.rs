@@ -16,6 +16,8 @@ mod errors;
 mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
+mod leave_offer;
+mod leave_offer_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
 mod native_effect;
@@ -40,12 +42,15 @@ use errors::{
 };
 
 pub use action_types::{AppAction, WindowNativeEvent};
+pub use leave_offer::{LeaveOffer, LeaveOfferKind};
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
 #[cfg(test)]
 mod focus_history_tests;
 #[cfg(test)]
 mod keybinding_apply_tests;
+#[cfg(test)]
+mod leave_offer_apply_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod pane_provisioning_tests;
 #[cfg(test)]
@@ -359,6 +364,8 @@ pub struct ApplicationRoot {
     /// Extra live display attachments and probe peers owned through quit cleanup.
     #[cfg(target_os = "macos")]
     live_attachments: Vec<session::QuitProbeAttachment>,
+    /// ADR-028 leave-parent create/jump offer (trusted observe path only).
+    leave_offer: Option<LeaveOffer>,
 }
 
 impl Default for ApplicationRoot {
@@ -456,6 +463,7 @@ impl ApplicationRoot {
             quit_deadline: None,
             #[cfg(target_os = "macos")]
             live_attachments: Vec::new(),
+            leave_offer: None,
         }
     }
 

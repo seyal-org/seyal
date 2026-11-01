@@ -443,6 +443,12 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             root_path: read_payload(action.payload, action.payload_len)?,
         }),
+        // ADR-028: trusted cwd observation — payload UTF-8 path (never OSC 7).
+        83 => Ok(AppAction::ObserveTrustedForegroundCwd {
+            path: read_payload(action.payload, action.payload_len)?,
+        }),
+        84 => Ok(AppAction::ConfirmLeaveOffer),
+        85 => Ok(AppAction::DismissLeaveOffer),
         // New shell: no `reserved` overload. Absent execution prepares the
         // ended Pane; present target_* binds that exact created ExecutionId.
         80 => {

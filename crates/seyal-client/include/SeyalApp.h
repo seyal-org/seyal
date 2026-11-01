@@ -212,8 +212,31 @@ enum SeyalAppActionKind {
      * SET_WORKSPACE_ROOT: target_execution_lo/hi = WorkspaceId; payload = root.
      */
     SEYAL_APP_ACTION_CREATE_WORKSPACE = 81,
-    SEYAL_APP_ACTION_SET_WORKSPACE_ROOT = 82
+    SEYAL_APP_ACTION_SET_WORKSPACE_ROOT = 82,
+    /*
+     * ADR-028 leave offer. OBSERVE payload = trusted UTF-8 cwd (never OSC 7).
+     * CONFIRM = Yes (create or jump). DISMISS = No (navigation-only).
+     */
+    SEYAL_APP_ACTION_OBSERVE_TRUSTED_FOREGROUND_CWD = 83,
+    SEYAL_APP_ACTION_CONFIRM_LEAVE_OFFER = 84,
+    SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER = 85
 };
+
+enum SeyalAppLeaveOfferKind {
+    SEYAL_APP_LEAVE_OFFER_NONE = 0,
+    SEYAL_APP_LEAVE_OFFER_CREATE = 1,
+    SEYAL_APP_LEAVE_OFFER_JUMP = 2
+};
+
+typedef struct SeyalAppLeaveOffer {
+    uint16_t version;
+    uint16_t size;
+    uint16_t kind;
+    uint16_t path_len;
+    const uint8_t *path;
+    uint64_t jump_workspace_lo;
+    uint64_t jump_workspace_hi;
+} SeyalAppLeaveOffer;
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
 #define SEYAL_APP_WINDOW_EVENT_RESIGNED_KEY 1u
@@ -927,6 +950,7 @@ SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
 uint64_t seyal_app_focus_history_seq(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
+SeyalAppLeaveOffer seyal_app_leave_offer(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppWindow seyal_app_window(uint64_t handle, uint32_t index);
