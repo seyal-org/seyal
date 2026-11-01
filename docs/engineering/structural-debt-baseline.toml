@@ -48,9 +48,9 @@ reason = "Host Pane region/divider projection stays one layout module; #1219 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 999
+acknowledged_loc = 967
 issue = 1398
-reason = "Portable provisioning reducer remains the cold-path request/result authority after #1381 moves tab-specific binding operations into terminal_bindings.rs; #1379 adds release_dead_binding so New shell can Create+Bind an ended Pane without enqueueing terminate or leaving a binding that blocks a later split leaf; #1398 adds pending-terminate lookup/take by TerminalTabId so Close Terminal can finish a Pane terminal tab when Lifecycle::Finalized races the type-39 absorb path."
+reason = "Portable provisioning reducer remains the cold-path request/result authority after #1381 moves tab-specific binding operations into terminal_bindings.rs; #1379 adds release_dead_binding so New shell can Create+Bind an ended Pane without enqueueing terminate or leaving a binding that blocks a later split leaf; #1398 keeps Close Terminal pending-terminate lookup/take on the terminal_bindings sibling so this reducer stays under the 1,000 LOC production ceiling."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"

@@ -285,40 +285,6 @@ impl ProvisioningSession {
             })
     }
 
-    /// True when a Dispose terminate is outstanding for this Pane terminal tab.
-    pub fn pending_terminate_by_terminal_tab(
-        &self,
-        terminal_tab: TerminalTabId,
-    ) -> Option<&PendingIntent> {
-        self.pending_by_key
-            .iter()
-            .find_map(|((owner, id), intent)| {
-                if intent.terminal_tab == Some(terminal_tab)
-                    && self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Terminate)
-                {
-                    Some(intent)
-                } else {
-                    None
-                }
-            })
-    }
-
-    /// Drop a pending Dispose terminate for `terminal_tab` after loss-path close.
-    pub fn take_pending_terminate_for_terminal_tab(
-        &mut self,
-        terminal_tab: TerminalTabId,
-    ) -> Option<PendingIntent> {
-        let key = self.pending_by_key.keys().copied().find(|(owner, id)| {
-            self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Terminate)
-                && self
-                    .pending_by_key
-                    .get(&(*owner, *id))
-                    .is_some_and(|intent| intent.terminal_tab == Some(terminal_tab))
-        })?;
-        self.pending_kind.remove(&key);
-        self.pending_by_key.remove(&key)
-    }
-
     /// Assign per-pane connection ownership. Hosts cannot choose an execution.
     pub fn claim_connection(&mut self, pane: PaneId) -> ConnectionOwner {
         if let Some(owner) = self.pane_owners.get(&pane).copied() {
