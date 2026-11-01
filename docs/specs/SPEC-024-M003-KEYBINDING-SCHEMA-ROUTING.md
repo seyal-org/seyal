@@ -269,9 +269,9 @@ when §4.2 / §7 permit:
 | keys | action | context |
 |---|---|---|
 | `cmd+k` | `command_palette.open` | `app` |
-| `cmd+t` | `tab.create` | `app` |
-| `cmd+n` | `tab.create` | `app` |
-| `cmd+w` | `app.close_focused` | `app` |
+| `cmd+t` | `terminal.create` | `app` |
+| `cmd+n` | `window.new` | `app` |
+| `cmd+w` | `terminal.close_focused` | `app` |
 | `cmd+shift+n` | `window.new` | `app`, `zero_window` |
 | `` cmd+` `` / `` cmd+shift+` `` | `window.cycle_next` / `window.cycle_previous` | `app` |
 | `cmd+opt+1`…`cmd+opt+9` | `window.select_ordinal` with `ordinal` 1…9 (nine rows) | `app` |
@@ -291,8 +291,8 @@ when §4.2 / §7 permit:
 | `cmd+0` | `chrome.toggle_left_panel` | `app` |
 | `cmd+opt+0` | `chrome.toggle_inspector` | `app` |
 
-**Product defaults (PO decision for PR #1208 / #1000 / #1002):** `cmd+n`
-and `cmd+t` both create a Tab (`tab.create`); `cmd+shift+n` creates a Window
+**Product defaults (shortcut behavior):** `cmd+t` creates a Pane-local
+terminal (`terminal.create`); `cmd+n` and `cmd+shift+n` create a Window
 (`window.new`, including zero-Window re-entry via the `zero_window` context).
 Users may override these builtins with `[[keybindings]]` entries in the
 canonical TOML config (§2 / §3); native must not invent a second default table.
@@ -428,6 +428,7 @@ window.cycle_next
 window.cycle_previous
 window.select_ordinal          # requires `ordinal` 1..=9 (§5.0)
 app.close_focused              # hierarchical Pane→Tab→Window (§5.0)
+terminal.close_focused        # selected terminal in focused Pane (§5.0)
 composer.history_search.open   # focus-relative (§5.4)
 focus_history.back             # SPEC-022 gated (§5.5)
 focus_history.forward          # SPEC-022 gated (§5.5)
@@ -437,15 +438,16 @@ chrome.toggle_inspector        # visibility toggle (§5.6)
 app.quit                    # still subject to reserved Cmd-Q path; explicit bind of app.quit to non-reserved keys is allowed
 ```
 
-### 5.0 ADR-018 window and hierarchical-close bindings (owned here)
+### 5.0 Window lifecycle and close-shortcut bindings (owned here)
 
 ADR-018 (#1000) is Accepted (PR #1085). This specification owns key assignment
-for the window lifecycle and hierarchical-close keyboard policy ADR-018 §8 /
-§11 item 3 retain; ADR-018 owns the reducer semantics.
+for the window lifecycle and close shortcuts. ADR-018 owns layout-close reducer
+semantics; ADR-025 owns the explicit selected-terminal close used by `cmd+w`.
 
 | WorkspaceCommandId | ADR-018 action at invoke time | Builtin key (M003) |
 |---|---|---|
-| `app.close_focused` | hierarchical close: focused Pane if the active Tab has more than one Pane; else active Tab if the Window has more than one Tab; else Window (ADR-018 §8 / scaffold Pane→Tab→Window) | `cmd+w` |
+| `terminal.close_focused` | explicitly close the selected terminal tab in the focused Pane using the exact terminal termination path (ADR-025 §2.4); if there is no selected terminal, return `ActionUnavailable` without closing a Pane, Tab, or Window | `cmd+w` |
+| `app.close_focused` | hierarchical close: focused Pane if the active Tab has more than one Pane; else active Tab if the Window has more than one Tab; else Window (ADR-018 §8 / scaffold Pane→Tab→Window) | none |
 | `window.new` | `CreateWindow` / zero-Window re-entry (File → New Window / `cmd+shift+n`; Dock reopen uses `ActivateWorkspace`, ADR-018 §3.3a) | `cmd+shift+n` (`app`, `zero_window`) |
 | `window.close` | `CloseWindow` of the product-active Window | none |
 | `window.cycle_next` / `window.cycle_previous` | cycle product-active Window forward / backward in Rust-owned Window order | `` cmd+` `` / `` cmd+shift+` `` |
@@ -456,8 +458,9 @@ enters the production catalog only in the same or a later PR that lands its
 typed Rust action (ADR-018 decomposition / K9). Before that the id is
 `UnknownAction` at load and its builtin stroke is an ordinary unbound Command
 stroke (§6.2 step 2c). `tab.close_focused` / `pane.close_focused` remain
-separate non-hierarchical catalog ids (no `cmd+w` builtin); they do not replace
-`app.close_focused`.
+separate non-hierarchical catalog ids. `app.close_focused` retains the layout
+hierarchy as a configurable command; `cmd+w` is Pane-local terminal close under
+ADR-025 and never falls back to layout close.
 
 R5.0.2 `tab.select_next` / `tab.select_previous` move one position in the
 focused window's tab order and wrap cyclically. `pane.focus_next` /

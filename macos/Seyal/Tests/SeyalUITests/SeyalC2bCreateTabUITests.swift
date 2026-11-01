@@ -29,6 +29,47 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-close-tab"].firstMatch.exists)
     }
 
+    func testCommandTCreatesPaneTerminalAndCommandNCreatesWindow() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+
+        XCTAssertEqual(
+            terminalTabButtons(in: app).count,
+            1,
+            "Expected one visible Pane terminal tab before ⌘T:\n\(app.debugDescription)"
+        )
+        app.typeKey("t", modifierFlags: .command)
+        waitForWindowCount(app, 1, timeout: 5)
+        waitForTerminalTabCount(app, 2, timeout: 12)
+        XCTAssertEqual(app.windows.count, 1, "⌘T creates a Pane-local terminal, not a Layout or Window")
+
+        app.typeKey("n", modifierFlags: .command)
+        waitForWindowCount(app, 2, timeout: 10)
+
+        app.typeKey("n", modifierFlags: [.command, .shift])
+        waitForWindowCount(app, 3, timeout: 10)
+    }
+
+    func testCommandWClosesOnlySelectedPaneTerminal() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+        clickNewTerminal(in: app)
+        waitForTerminalTabCount(app, 2, timeout: 12)
+        waitForUsablePty(in: app, timeout: 12)
+
+        app.typeKey("w", modifierFlags: .command)
+
+        waitForTerminalTabCount(app, 1, timeout: 12)
+        XCTAssertEqual(app.windows.count, 1, "⌘W closes the selected terminal, not its Window")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch.exists,
+            "⌘W keeps the Pane present after removing its selected terminal"
+        )
+        waitForUsablePty(in: app, timeout: 12)
+    }
+
     func testCloseTabRemovesChromeWithoutCrashingTheHost() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
@@ -81,6 +122,16 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         newTab.click()
     }
 
+    private func clickNewTerminal(in app: XCUIApplication) {
+        let newTerminal = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "seyal-pane-")
+        ).matching(
+            NSPredicate(format: "identifier ENDSWITH %@", "-new-terminal")
+        ).firstMatch
+        XCTAssertTrue(newTerminal.waitForExistence(timeout: 8), "New Terminal action must be available")
+        newTerminal.click()
+    }
+
     private func showTabs(in app: XCUIApplication) {
         let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 5))
@@ -107,6 +158,46 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+    }
+
+    private func terminalTabButtons(in app: XCUIApplication) -> XCUIElementQuery {
+        app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
+                "seyal-terminal-tab-",
+                "Terminal "
+            )
+        )
+    }
+
+    private func waitForTerminalTabCount(
+        _ app: XCUIApplication,
+        _ count: Int,
+        timeout: TimeInterval
+    ) {
+        let arrived = expectation(
+            for: NSPredicate(format: "count == %d", count),
+            evaluatedWith: terminalTabButtons(in: app),
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [arrived], timeout: timeout),
+            .completed,
+            "Expected \(count) Pane-local terminal tabs after the shortcut"
+        )
+    }
+
+    private func waitForWindowCount(
+        _ app: XCUIApplication,
+        _ count: Int,
+        timeout: TimeInterval
+    ) {
+        let arrived = expectation(
+            for: NSPredicate(format: "count == %d", count),
+            evaluatedWith: app.windows,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [arrived], timeout: timeout), .completed)
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {

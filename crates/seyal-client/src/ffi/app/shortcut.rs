@@ -284,11 +284,11 @@ mod tests {
     }
 
     #[test]
-    fn cold_projection_includes_palette_and_new_tab() {
+    fn cold_projection_includes_palette_and_new_terminal() {
         let count = seyal_app_shortcut_count();
         assert!(count >= 2);
         let mut saw_palette = false;
-        let mut saw_tab = false;
+        let mut saw_terminal = false;
         for index in 0..count {
             let item = seyal_app_shortcut_item(index);
             assert_eq!(
@@ -302,12 +302,12 @@ mod tests {
                 assert_eq!(item.key_is_named, 0);
                 assert_eq!(item.key_base, u32::from(b'k'));
             }
-            if item.command_id == workspace_command_ffi_id(WorkspaceCommandId::TabCreate) {
-                saw_tab = true;
+            if item.command_id == workspace_command_ffi_id(WorkspaceCommandId::TerminalCreate) {
+                saw_terminal = true;
                 assert_eq!(item.has_key_equivalent, 1);
                 assert_eq!(item.key_base, u32::from(b't'));
             }
         }
-        assert!(saw_palette && saw_tab);
+        assert!(saw_palette && saw_terminal);
     }
 }

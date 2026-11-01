@@ -10,7 +10,7 @@ use crate::shell::ShellAction;
 use seyal_core::{PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 impl ApplicationRoot {
-    fn close_terminal_tab(
+    pub(super) fn close_terminal_tab(
         &mut self,
         pane: PaneId,
         terminal_tab: TerminalTabId,

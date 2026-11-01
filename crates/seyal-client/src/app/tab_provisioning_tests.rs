@@ -546,6 +546,11 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
         .expect("terminate result present");
     assert_eq!(root.shell.pane_execution(pane).unwrap(), None);
     assert_eq!(
+        root.shell.selected_terminal_tab(pane).unwrap(),
+        None,
+        "confirmed terminal termination removes its terminal-tab chrome"
+    );
+    assert_eq!(
         root.snapshot().eligibility,
         PresentationEligibility::Unbound
     );

@@ -348,6 +348,8 @@ pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
         WorkspaceCommandId::CommandPaletteClose => BindingContext::PALETTE,
         WorkspaceCommandId::CommandPaletteOpen
         | WorkspaceCommandId::TabCreate
+        | WorkspaceCommandId::TerminalCreate
+        | WorkspaceCommandId::TerminalCloseFocused
         | WorkspaceCommandId::TabCloseFocused
         | WorkspaceCommandId::TabSelectPrevious
         | WorkspaceCommandId::TabSelectNext
