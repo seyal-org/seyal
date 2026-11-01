@@ -98,6 +98,22 @@ The current one-binding Pane is represented as one terminal tab without spawning
 - Capacity is bounded by accepted SPEC-003/SPEC-004 limits. A rejected create leaves all existing tabs and executions unchanged. Scaling measures distinguish Pane count, terminal-tab count, live ExecutionId count, attachment count, and visible renderer count.
 - Terminal content and process output are untrusted data, never authority. Same-UID peer authentication, Runtime capability checks, one Controller lease per execution, and terminal input fencing remain in force.
 
+### 2.8 Left C03 Tabs mode — Workspace-scoped TerminalTab navigation map
+
+**Amendment under #1408.** This subsection is Proposed with the rest of ADR-025 until independently accepted; it does not authorize production code by itself.
+
+Left context **Tabs** mode projects a Workspace-scoped navigation map of pane-local `TerminalTabId`s for the active Workspace. Rows may be grouped by Pane. Selecting a row focuses that Pane and selects that `TerminalTabId` through the same Rust-owned focus/selection transitions as the in-pane strip.
+
+Rules:
+
+1. The Pane-local strip remains the only in-pane terminal-looking strip (SPEC-031 §11). Left Tabs is inventory/navigation chrome, not a second strip above Pane content.
+2. Left rows use the same `TerminalTabId` identities as pane strips. Display labels are never identity. Swift must not invent a parallel terminal inventory (ADR-015).
+3. Outer Seyal Workspace `TabId` remains a layout-container identity. Left Tabs mode does not list outer Workspace Tabs as the primary inventory once this amendment is Accepted.
+4. The left New Terminal affordance, when shown in Tabs mode, routes to `NewTerminal` on the focused Pane (not a silent outer-only CreateTab substitute).
+5. No PTY, VT, ExecutionId, or attachment is chosen by the host; selection remains Rust-fenced.
+
+UI authority for C03/C04 presentation of this map lives in `docs/architecture/ui/M001-CORE-TERMINAL-REFERENCE-SCREEN.md` §5.3 / §5.5.3 and `M001-LEFT-CONTEXT-IMAGE-TO-CODE.md`, amended under the same Issue.
+
 ## 3. Alternatives considered
 
 1. **Put several tab labels on the existing one-execution Pane.** Rejected: it cannot preserve independent processes, PTYs, scrollback, and identities; it is decorative chrome, not the requested behavior.
@@ -106,6 +122,7 @@ The current one-binding Pane is represented as one terminal tab without spawning
 4. **Let Swift own per-pane terminal selection or layout.** Rejected by ADR-015.
 5. **Terminate sessions whenever a Pane/outer Tab closes.** Rejected: it contradicts ADR-007/018 and breaks detached live-session continuity. Explicit Close Terminal remains a separate exact-session operation.
 6. **Persist/recreate live processes across Runtime restart.** Rejected: a process/PTY cannot be resurrected. Durable metadata is M004 and must never claim a dead process is live.
+7. **Keep left C03 Tabs as outer Workspace Tab inventory only.** Rejected for daily navigation after headed evidence (#1401 / #1408): users switch pane-local terminal sessions; projecting only the layout container leaves left Tabs empty of purpose while SPEC-031 already demotes outer Tab from a second terminal-looking strip. Outer Tab create/close remains available in the navigation rail.
 
 ## 4. Consequences and implementation gates
 
