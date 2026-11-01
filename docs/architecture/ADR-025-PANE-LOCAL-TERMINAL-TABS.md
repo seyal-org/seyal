@@ -100,7 +100,7 @@ The current one-binding Pane is represented as one terminal tab without spawning
 
 ### 2.8 Left C03 Tabs mode — Workspace-scoped TerminalTab navigation map
 
-**Amendment under #1408.** This subsection is Proposed with the rest of ADR-025 until independently accepted; it does not authorize production code by itself.
+**Amendment under #1408.** This subsection is **Accepted** for C03 Tabs navigation-map projection on merge of the #1409 acceptance PR that records product-owner Accept of the #1410 UI/ADR text (implementation #1412). The broader ADR-025 umbrella under #1381 may remain Proposed for other pane-local lifecycle clauses until that combined candidate is independently Accepted.
 
 Left context **Tabs** mode projects a Workspace-scoped navigation map of pane-local `TerminalTabId`s for the active Workspace. Rows may be grouped by Pane. Selecting a row focuses that Pane and selects that `TerminalTabId` through the same Rust-owned focus/selection transitions as the in-pane strip.
 
