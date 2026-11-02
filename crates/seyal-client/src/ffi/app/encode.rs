@@ -123,20 +123,20 @@ pub(super) fn split_id(bytes: [u8; 16]) -> (u64, u64) {
     )
 }
 
-struct RowDraft<'a> {
-    kind: u16,
-    index: u32,
-    id: [u8; 16],
-    flags: u16,
-    title: &'a str,
-    detail: &'a str,
-    address: Option<crate::navigation::ResourceAddress>,
+pub(super) struct RowDraft<'a> {
+    pub(super) kind: u16,
+    pub(super) index: u32,
+    pub(super) id: [u8; 16],
+    pub(super) flags: u16,
+    pub(super) title: &'a str,
+    pub(super) detail: &'a str,
+    pub(super) address: Option<crate::navigation::ResourceAddress>,
     /// Opaque 16-byte fence payload (PaneId for TERMINAL_TAB rows). Mutually
     /// exclusive with `address` ResourceAddress encoding.
-    raw_address: Option<[u8; 16]>,
+    pub(super) raw_address: Option<[u8; 16]>,
 }
 
-fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: RowDraft<'_>) {
+pub(super) fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: RowDraft<'_>) {
     let title_off = push_text(text, draft.title);
     let detail_off = push_text(text, draft.detail);
     let (id_lo, id_hi) = split_id(draft.id);
@@ -460,7 +460,7 @@ pub(super) fn encode_palette_rows(state: &mut AppHandle) {
     relocate_row_pointers(&mut state.palette_rows, state.palette_text.as_ptr());
 }
 
-fn relocate_row_pointers(rows: &mut [SeyalAppRow], base: *const u8) {
+pub(super) fn relocate_row_pointers(rows: &mut [SeyalAppRow], base: *const u8) {
     for row in rows {
         let title_off = row.title as usize;
         let detail_off = row.detail as usize;

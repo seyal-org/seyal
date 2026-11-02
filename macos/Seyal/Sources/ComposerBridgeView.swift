@@ -25,8 +25,14 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     /// A table match changed product chrome (palette, tabs, presentation).
     var onCommandConsumed: (() -> Void)?
     var onFocusEligibilityChanged: (() -> Void)?
+    /// Host focuses this Pane before draft/submit when it is not already focused.
+    var onEnsureFocused: (() -> Void)?
 
     private let appHandle: UInt64
+    /// When set, this bridge reads the named Pane's composer and focuses that
+    /// Pane before mutating (ADR-009 multipane / fence authority).
+    private let boundPaneLo: UInt64?
+    private let boundPaneHi: UInt64?
     private let textView = ComposerTextView()
     private let placeholder = NSTextField(labelWithString: "")
     private let execute = NSButton(title: "", target: nil, action: nil)
@@ -42,8 +48,10 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         hasReconciledComposerState && !isHidden && textView.isEditable && window != nil
     }
 
-    init(appHandle: UInt64) {
+    init(appHandle: UInt64, paneLo: UInt64? = nil, paneHi: UInt64? = nil) {
         self.appHandle = appHandle
+        self.boundPaneLo = paneLo
+        self.boundPaneHi = paneHi
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -51,7 +59,13 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
         focusRingType = .none
-        setAccessibilityIdentifier("seyal-composer")
+        if let boundPaneLo, let boundPaneHi {
+            setAccessibilityIdentifier(
+                String(format: "seyal-composer-%016llx-%016llx", boundPaneHi, boundPaneLo)
+            )
+        } else {
+            setAccessibilityIdentifier("seyal-composer")
+        }
         // Group, not a leaf textArea: XCUI must see both the dock and the
         // execute control. A leaf role hid `seyal-composer-execute`.
         setAccessibilityRole(.group)
@@ -156,12 +170,32 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         paintChrome()
     }
 
+    private func readComposer() -> SeyalAppComposer {
+        if let lo = boundPaneLo, let hi = boundPaneHi {
+            return seyal_app_composer_for_pane(appHandle, lo, hi)
+        }
+        return seyal_app_composer(appHandle)
+    }
+
+    /// Focus this Pane when bound and not already the fence authority, then
+    /// return a fresh focused snapshot for mutating actions.
+    @discardableResult
+    private func prepareFocusedMutation() -> SeyalAppSnapshot {
+        if boundPaneLo != nil {
+            onEnsureFocused?()
+        }
+        return seyal_app_snapshot(appHandle)
+    }
+
     func reconcile() {
-        let composer = seyal_app_composer(appHandle)
+        let composer = readComposer()
         let snapshot = seyal_app_snapshot(appHandle)
         let wasFocusEligible = isFocusEligibleForRecovery
-        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
-            || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        // Focused bridge follows snapshot eligibility; pane-bound bridges use
+        // only that Pane's composer mode so a sibling TUI/Raw does not hide them.
+        let direct = boundPaneLo == nil
+            && (snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+                || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue))
         let hidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
         // Presentation/epoch transitions revoke composer IME ownership: cancel
         // uncommitted marked text without submitting (SPEC-008 / #866).
@@ -233,7 +267,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         placeholder.isHidden = !textView.string.isEmpty
         pushDraft()
-        let composer = seyal_app_composer(appHandle)
+        let composer = readComposer()
         execute.isEnabled = composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0
         expandToDraft()
     }
@@ -306,7 +340,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     /// open leaves the composer untouched.
     private func openHistory() {
         pushDraft()
-        let snapshot = seyal_app_snapshot(appHandle)
+        let snapshot = prepareFocusedMutation()
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
@@ -359,8 +393,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     }
 
     private func pushDraft() {
-        let composer = seyal_app_composer(appHandle)
-        let snapshot = seyal_app_snapshot(appHandle)
+        let snapshot = prepareFocusedMutation()
+        let composer = readComposer()
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
@@ -377,10 +411,10 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
 
     private func submit() {
         pushDraft()
-        let composer = seyal_app_composer(appHandle)
+        let composer = readComposer()
         guard composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0 else { return }
         let command = textView.string
-        let snapshot = seyal_app_snapshot(appHandle)
+        let snapshot = prepareFocusedMutation()
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
@@ -394,7 +428,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             status = onSubmitRaw?(payload) ?? -10
         }
         if status == 0 {
-            let submitted = seyal_app_composer(appHandle)
+            let submitted = readComposer()
             if submitted.request_id != 0 {
                 applyComposerResult(requestID: submitted.request_id, accepted: true)
             }
@@ -403,7 +437,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     }
 
     func applyComposerResult(requestID: UInt64, accepted: Bool) {
-        let snapshot = seyal_app_snapshot(appHandle)
+        let snapshot = prepareFocusedMutation()
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)

@@ -6,8 +6,9 @@ import AppKit
 /// Geometry, focus, ratios and live-surface placement come from Rust
 /// (`seyal_app_pane_region` / `seyal_app_pane_divider`); this view only
 /// positions frames. The focused chrome container (`liveContent`) hosts
-/// composer/transcript/primary Metal. Additional LIVE leaves host secondary
-/// Metal surfaces via `installSecondaryLive`. Every leaf is a focusable region
+/// composer/transcript/primary Metal. Additional leaves host secondary Flow
+/// presentation (Blocks + composer + Metal) via `reconcileSecondaryLiveHosts`.
+/// Every leaf is a focusable region
 /// bound to its real PaneId; focusing dispatches Rust `FOCUS_PANE` through
 /// `onFocusPane`. Dividers sit on the Rust-projected line; dragging one
 /// forwards the raw pointer position in Tab unit space as `MOVE_SPLIT_DIVIDER`,
@@ -186,19 +187,20 @@ final class PaneLayoutView: NSView {
         secondaryLiveHosts.values.first { $0.displayHandle == displayHandle }
     }
 
-    /// Ensure non-focused LIVE leaves with a display handle have Metal hosts.
+    /// All non-focused Flow presentation hosts currently installed.
+    var secondaryHosts: [SecondaryLivePaneHost] {
+        Array(secondaryLiveHosts.values)
+    }
+
+    /// Ensure every non-focused Pane leaf keeps a Flow presentation host
+    /// (Blocks + composer + Metal when LIVE). Focus must not replace a Flow
+    /// leaf with the absence of chrome (#1424). LIVE only gates Metal frames.
     func reconcileSecondaryLiveHosts(
         bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)]
     ) {
         var keep = Set<PaneKey>()
         for binding in bindings {
             let key = PaneKey(lo: binding.paneLo, hi: binding.paneHi)
-            guard binding.live else {
-                if let host = secondaryLiveHosts.removeValue(forKey: key) {
-                    host.removeFromSuperview()
-                }
-                continue
-            }
             guard !binding.focused else {
                 if let host = secondaryLiveHosts.removeValue(forKey: key) {
                     host.removeFromSuperview()
@@ -437,6 +439,7 @@ final class PaneLayoutView: NSView {
         self.theme = theme
         regionViews.forEach { $0.apply(theme: theme) }
         dividerViews.forEach { $0.apply(theme: theme) }
+        secondaryLiveHosts.values.forEach { $0.apply(theme: theme) }
     }
 
     override func layout() {

@@ -37,7 +37,7 @@ pub struct SeyalAppBlockProjection {
 }
 
 impl SeyalAppBlockProjection {
-    const fn fail_closed() -> Self {
+    pub(super) const fn fail_closed() -> Self {
         Self {
             kind: SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED,
             reserved0: 0,

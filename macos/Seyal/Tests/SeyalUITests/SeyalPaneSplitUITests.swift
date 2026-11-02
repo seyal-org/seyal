@@ -104,6 +104,53 @@ final class SeyalPaneSplitUITests: XCTestCase {
         }
     }
 
+    /// #1424: Split Right keeps Block transcript + composer on both Flow panes.
+    func testSplitProjectsBlocksAndComposerOnFocusedAndSecondaryPanes() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(app, "seyal-blocks").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "seyal-blocks-scroll").waitForExistence(timeout: 5))
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        XCTAssertTrue(element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 12))
+        XCTAssertTrue(element(app, "seyal-composer").exists, "focused Pane keeps seyal-composer")
+        XCTAssertTrue(element(app, "seyal-blocks").exists, "focused Pane keeps Blocks")
+        XCTAssertTrue(
+            element(app, "seyal-secondary-blocks").waitForExistence(timeout: 8),
+            "unfocused Flow pane must present Blocks, not Metal-only chrome"
+        )
+        XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").exists)
+        let secondaryComposers = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
+        )
+        let appeared = expectation(
+            for: NSPredicate(format: "count >= 1"),
+            evaluatedWith: secondaryComposers,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [appeared], timeout: 8),
+            .completed,
+            "inactive Pane projects a subdued pane-scoped composer"
+        )
+
+        let other = (try focusedRegionIndex(app, count: 2)) == 0 ? 1 : 0
+        element(app, "seyal-pane-region-\(other)").click()
+        waitForFocus(app, region: other)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "seyal-blocks").exists)
+        XCTAssertTrue(element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "seyal-secondary-blocks").exists)
+
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1424-dual-flow-blocks-composers"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     func testPaneLocalTerminalTabsSelectIndependentlyAndNewTerminalDoesNotSplit() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)

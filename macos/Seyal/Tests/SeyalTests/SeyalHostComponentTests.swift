@@ -789,6 +789,105 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(live.frame, terminalContentFrame(focusedRegion.frame, splitInset: 1))
     }
 
+    /// #1424: every visible Flow leaf keeps Block transcript + composer, not
+    /// Metal-only secondary chrome. Focus must not replace presentation.
+    @MainActor
+    func testSplitFlowPanesEachExposeBlocksAndComposer() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let handle = view.pane.appHandle
+
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks-scroll"))
+
+        // LIVE secondary hosts require a bound Controller (same as #936 multipane).
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1111_1111_1111_1111
+        bind.target_attachment_lo = 0x2222_2222_2222_2222
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let first = seyal_app_pane_region(handle, 0)
+        let second = seyal_app_pane_region(handle, 1)
+        XCTAssertNotEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0)
+        XCTAssertNotEqual(second.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0)
+
+        XCTAssertEqual(seyal_app_shell(handle).pane_count, 2)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-0"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-secondary-live-pane"),
+            "unfocused leaf keeps a presentation host"
+        )
+
+        // Focused Flow chrome remains.
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks-scroll"))
+
+        // Unfocused Flow leaf must also expose Block transcript + composer —
+        // Metal-only secondary surfaces fail this gate.
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-secondary-blocks"),
+            "unfocused Flow pane must present Blocks, not a raw Metal-only surface"
+        )
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-secondary-blocks-scroll"),
+            "unfocused Flow pane owns an independent transcript scroll view"
+        )
+        let secondaryComposers = accessibilityChildren(view) { id in
+            id.hasPrefix("seyal-composer-")
+        }
+        XCTAssertFalse(
+            secondaryComposers.isEmpty,
+            "unfocused Flow pane must project a pane-scoped composer"
+        )
+
+        // Focus churn must not strip either pane's Block presentation.
+        for _ in 0..<20 {
+            let unfocusedIndex = (0..<2).first { index in
+                seyal_app_pane_region(handle, UInt32(index)).flags
+                    & UInt16(SEYAL_APP_PANE_REGION_FOCUSED) == 0
+            }!
+            let target = seyal_app_pane_region(handle, UInt32(unfocusedIndex))
+            var focus = SeyalAppAction()
+            focus.version = UInt16(SEYAL_APP_ABI_VERSION)
+            focus.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            focus.kind = UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue)
+            focus.target_execution_lo = target.pane_lo
+            focus.target_execution_hi = target.pane_hi
+            XCTAssertEqual(seyal_app_apply(handle, &focus), 0)
+            view.reconcileChrome()
+            view.layoutSubtreeIfNeeded()
+            XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+            XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
+            XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-secondary-live-pane"))
+            XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-secondary-blocks"))
+            XCTAssertFalse(
+                accessibilityChildren(view) { $0.hasPrefix("seyal-composer-") }.isEmpty
+            )
+        }
+    }
+
     @MainActor
     func testSecondaryLiveSurfaceHasVisibleFrameAndOwnsPaneHitTarget() throws {
         let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
@@ -3978,6 +4077,21 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
         }
     }
     return nil
+}
+
+@MainActor
+private func accessibilityChildren(
+    _ root: NSView,
+    matching: (String) -> Bool
+) -> [NSView] {
+    var found: [NSView] = []
+    if matching(root.accessibilityIdentifier() ?? "") {
+        found.append(root)
+    }
+    for child in root.subviews {
+        found.append(contentsOf: accessibilityChildren(child, matching: matching))
+    }
+    return found
 }
 
 extension SeyalHostComponentTests {

@@ -949,6 +949,12 @@ SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
 /* SPEC-022 R6.8 cursor for HISTORY_BACK/FORWARD; 0 = empty or invalid handle. */
 uint64_t seyal_app_focus_history_seq(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);
+/* Pane-addressed composer read; empty when Pane unknown. Draft ptr is
+ * invalidated by the next composer encode on this handle (#1424). */
+SeyalAppComposer seyal_app_composer_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppLeaveOffer seyal_app_leave_offer(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
@@ -1016,6 +1022,11 @@ int32_t seyal_app_propose_pane_geometry(
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
+SeyalAppRow seyal_app_block_row_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    uint32_t index);
 SeyalAppRow seyal_app_copy(uint64_t handle, uint16_t kind);
 SeyalAppComposerHistory seyal_app_composer_history(uint64_t handle);
 SeyalAppRow seyal_app_history_row(uint64_t handle, uint32_t index);
@@ -1045,6 +1056,21 @@ typedef struct SeyalAppBlockProjection {
 } SeyalAppBlockProjection;
 
 SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
+SeyalAppBlockProjection seyal_app_block_projection_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    uint32_t index);
+/* Sync Candidate-D Block timeline into a Pane's composer without focused fence. */
+int32_t seyal_app_sync_pane_runtime_blocks(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
+/* 0 unbound, 1 Flow, 2 Raw, 3 Tui — pane-scoped presentation proxy (#1424). */
+uint16_t seyal_app_eligibility_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 
 /** 1 when New shell has prepared an ended Pane and is waiting for Create+Bind. */

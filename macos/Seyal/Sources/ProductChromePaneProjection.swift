@@ -33,6 +33,9 @@ extension ProductChromeHostView {
             self.reconcilePaneHosts(paneCount: Int(seyal_app_shell(self.pane.appHandle).pane_count))
         }
         centerColumn.reconcileSecondaryLiveHosts(bindings: bindings)
+        for host in centerColumn.secondaryHosts {
+            host.reconcileFlowPresentation()
+        }
         let focusedDisplayHandle =
             bindings.first { $0.focused && $0.displayHandle != 0 }?.displayHandle ?? 0
         wireRegistryFrameRouting(focusedDisplayHandle: focusedDisplayHandle)
