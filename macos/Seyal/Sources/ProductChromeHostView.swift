@@ -664,15 +664,14 @@ final class ProductChromeHostView: NSView {
                     let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace"
                     let path = productChromeCopyUTF8(row.detail, row.detail_len)
                     let selected = row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0
-                    // C04 secondary: helpful path; when the active Workspace has
-                    // multiple outer Tabs, keep a tab-count hint even if a root
-                    // is bound (#1413 CreateWorkspace + #1412 Tabs retarget).
+                    // C04 secondary: helpful path; on the active Workspace also
+                    // keep outer Tab count when a root is bound (#1413 + #1412).
                     let pathSecondary = Self.helpfulWorkspaceDetail(title: title, detail: path)
                     let tabSecondary = selected
                         ? "\(shell.tab_count) tab\(shell.tab_count == 1 ? "" : "s")"
                         : nil
                     let secondary: String?
-                    if let pathSecondary, let tabSecondary, shell.tab_count > 1 {
+                    if let pathSecondary, let tabSecondary {
                         secondary = "\(pathSecondary) · \(tabSecondary)"
                     } else {
                         secondary = pathSecondary ?? tabSecondary
