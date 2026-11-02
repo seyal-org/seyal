@@ -231,6 +231,16 @@ final class PaneLayoutView: NSView {
         for binding in bindings {
             let key = PaneKey(lo: binding.paneLo, hi: binding.paneHi)
             keep.insert(key)
+            let region = regions.first(where: { $0.paneLo == key.lo && $0.paneHi == key.hi })
+            let occluded = region?.occluded ?? false
+            let coveredByInteractiveLive =
+                binding.focused && focusedNeedsInteractiveLiveContent
+            let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
+            let targetFrame: CGRect = {
+                guard let region, !occluded else { return .zero }
+                return contentFrame(region.rect, inset: inset)
+            }()
+
             let host: SecondaryLivePaneHost
             if let existing = secondaryLiveHosts[key] {
                 host = existing
@@ -251,15 +261,17 @@ final class PaneLayoutView: NSView {
                     self?.onRetryPaneRecovery?(target)
                 }
                 secondaryLiveHosts[key] = host
+                // Frame before install: a zero-size host activates AutoresizingMask
+                // width/height==0 against Flow composer/transcript constraints and
+                // can stall the main thread during multipane split (#1424).
+                if targetFrame.width > 1, targetFrame.height > 1 {
+                    host.frame = targetFrame
+                }
                 addSubview(host, positioned: .above, relativeTo: liveContent)
                 // Always sync pane Blocks after install. Init may have rebuilt
                 // before Runtime projections/history were ready (#1424).
                 host.noteRegistryPolled()
             }
-            let region = regions.first(where: { $0.paneLo == key.lo && $0.paneHi == key.hi })
-            let occluded = region?.occluded ?? false
-            let coveredByInteractiveLive =
-                binding.focused && focusedNeedsInteractiveLiveContent
             // Zoom/occlusion must remove the leaf's surface; Raw/TUI covers the
             // focused host with liveContent without destroying it (#1424).
             host.isHidden = coveredByInteractiveLive || occluded
@@ -267,9 +279,8 @@ final class PaneLayoutView: NSView {
             // Publish the target frame in the same reconciliation turn that
             // installs the host. Waiting for a later parent layout pass leaves
             // the AX target at its initial zero frame and unhittable to XCUI.
-            if let region, !occluded {
-                let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
-                host.frame = contentFrame(region.rect, inset: inset)
+            if targetFrame.width > 1, targetFrame.height > 1 {
+                host.frame = targetFrame
             }
         }
         for key in secondaryLiveHosts.keys where !keep.contains(key) {

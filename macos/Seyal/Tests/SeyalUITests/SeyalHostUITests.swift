@@ -569,10 +569,8 @@ final class SeyalHostUITests: XCTestCase {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(previous, forType: .string)
             }
-            // Force NSTextViewDelegate pushDraft so CAN_SUBMIT enables submit.
-            editor.typeKey(.rightArrow, modifierFlags: [])
-            editor.typeText(" ")
-            editor.typeKey(.delete, modifierFlags: [])
+            // Paste can clear keyboard focus; re-click before waiting on execute.
+            editor.click()
             let draftMatchesCommand = expectation(
                 for: NSPredicate(format: "value CONTAINS %@", probeScript.lastPathComponent),
                 evaluatedWith: editor,
@@ -588,11 +586,19 @@ final class SeyalHostUITests: XCTestCase {
                 return nil
             }
             let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
-            if execute.exists, execute.isEnabled {
-                execute.click()
-            } else {
-                editor.typeKey("\r", modifierFlags: [])
+            let executeReady = expectation(
+                for: NSPredicate(format: "isEnabled == true"),
+                evaluatedWith: execute,
+                handler: nil
+            )
+            guard XCTWaiter.wait(for: [executeReady], timeout: 8) == .completed else {
+                XCTFail(
+                    "composer execute stayed disabled after paste; "
+                        + "draft=\(editor.value ?? "nil") composer=\(composer.value ?? "nil")"
+                )
+                return nil
             }
+            execute.click()
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
                 if FileManager.default.fileExists(atPath: startedFile.path),

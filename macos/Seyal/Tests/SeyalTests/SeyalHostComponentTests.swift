@@ -1222,6 +1222,11 @@ final class SeyalHostComponentTests: XCTestCase {
             (paneLo: 1, paneHi: 1, displayHandle: 0, focused: true, live: true),
             (paneLo: 2, paneHi: 2, displayHandle: 42, focused: false, live: true),
         ])
+        // Frame must be published in the same reconcile turn that installs the
+        // host — before a later layout pass — so Auto Layout never sees width=0.
+        let hostBeforeLayout = try XCTUnwrap(layout.secondaryHost(displayHandle: 42))
+        XCTAssertGreaterThan(hostBeforeLayout.frame.width, 1)
+        XCTAssertGreaterThan(hostBeforeLayout.frame.height, 1)
         layout.layoutSubtreeIfNeeded()
 
         let host = try XCTUnwrap(layout.secondaryHost(displayHandle: 42))

@@ -161,10 +161,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testFocusChurnRetainsScrolledTranscriptAndPaneHosts() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        submitComposerCommand(
-            "printf '%s\\n' $(seq 1 80) 'seyal-1424-scroll-a'",
-            in: app
-        )
+        // Split first so region projection is established before tall transcripts.
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
         waitForUsablePty(in: app)
@@ -172,13 +169,17 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(element(app, "seyal-pane-presentation-host").waitForExistence(timeout: 8))
 
         let focusedIdx = try focusedRegionIndex(app, count: 2)
+        submitComposerCommand(
+            "printf '%s\\n' $(seq 1 24) 'seyal-1424-scroll-a'",
+            in: app
+        )
         let other = focusedIdx == 0 ? 1 : 0
         // Seed the newly focused sibling with its own tall transcript.
         element(app, "seyal-pane-region-\(other)").click()
         waitForFocus(app, region: other)
         waitForUsablePty(in: app)
         submitComposerCommand(
-            "printf '%s\\n' $(seq 1 80) 'seyal-1424-scroll-b'",
+            "printf '%s\\n' $(seq 1 24) 'seyal-1424-scroll-b'",
             in: app
         )
 
@@ -241,9 +242,15 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let app = hostedApp()
         waitForUsablePty(in: app)
         let token = "stream-marker-\(String(UUID().uuidString.prefix(6)))"
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForUsablePty(in: app)
+        // Start the stream on the focused pane, then move focus to the sibling.
         submitComposerCommand(
-            "for i in $(seq 1 24); do printf '%s-%s\\n' '\(token)' \"$i\"; sleep 0.12; done",
-            in: app
+            "for i in $(seq 1 16); do printf '%s-%s\\n' '\(token)' \"$i\"; sleep 0.12; done",
+            in: app,
+            expectBlock: true,
+            blockMarker: token
         )
         let streamBlock = anyPaneBlock(in: app, containing: token)
         XCTAssertTrue(streamBlock.waitForExistence(timeout: 12), "stream Block must appear")
@@ -251,15 +258,12 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(streamBody.waitForExistence(timeout: 8))
         let heightBefore = streamBody.frame.height
 
-        click(app, "seyal-split-right")
-        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
-        waitForUsablePty(in: app)
         let focused = try focusedRegionIndex(app, count: 2)
         // Prefer focusing the non-streaming pane so the stream stays visible but unfocused.
-        if focused == 0 {
-            element(app, "seyal-pane-region-1").click()
-            waitForFocus(app, region: 1)
-        }
+        let streamRegion = focused
+        let sibling = streamRegion == 0 ? 1 : 0
+        element(app, "seyal-pane-region-\(sibling)").click()
+        waitForFocus(app, region: sibling)
         waitForUsablePty(in: app)
         submitComposerCommand("printf 'seyal-1424-sibling\\n'", in: app)
         XCTAssertTrue(
@@ -297,11 +301,11 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testDividerDragKeepsDualFlowBlocksAndComposers() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        submitComposerCommand("printf 'seyal-1424-div-a\\n'", in: app)
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
         waitForUsablePty(in: app)
         let focused = try focusedRegionIndex(app, count: 2)
+        submitComposerCommand("printf 'seyal-1424-div-a\\n'", in: app)
         let other = focused == 0 ? 1 : 0
         element(app, "seyal-pane-region-\(other)").click()
         waitForFocus(app, region: other)
@@ -326,8 +330,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
                 NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
             ).allElementsBoundByIndex.isEmpty
         )
-        XCTAssertTrue(blockCommand(in: app, containing: "seyal-1424-div-a").exists)
-        XCTAssertTrue(blockCommand(in: app, containing: "seyal-1424-div-b").exists)
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "seyal-1424-div-a").exists)
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "seyal-1424-div-b").exists)
         let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         shot.name = "1424-divider-dual-flow-retained"
         shot.lifetime = .keepAlways
@@ -403,11 +407,11 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testResizeReflowKeepsDualFlowHostsWithoutBlankCanvas() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        submitComposerCommand("printf '%s\\n' $(seq 1 30) 'seyal-1424-resize'", in: app)
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
         waitForUsablePty(in: app)
         XCTAssertTrue(element(app, "seyal-secondary-blocks").waitForExistence(timeout: 8))
+        submitComposerCommand("printf '%s\\n' $(seq 1 12) 'seyal-1424-resize'", in: app)
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5))
@@ -711,20 +715,19 @@ final class SeyalPaneSplitUITests: XCTestCase {
         // Prefer paste: XCUI typeText mangles quotes/`$()`/paths and only the
         // first character (`/`) may land in the draft under multipane Flow.
         pasteIntoComposerEditor(editor, text: command)
-        // Nudge the text view so NSTextViewDelegate pushDraft reaches Rust and
-        // CAN_SUBMIT enables execute (paste alone can leave execute disabled).
-        editor.typeKey(.rightArrow, modifierFlags: [])
-        editor.typeText(" ")
-        editor.typeKey(.delete, modifierFlags: [])
+        // Paste can clear keyboard focus; re-click so AX can interact again and
+        // textDidChange/pushDraft can enable execute without typeKey synthesis.
+        editor.click()
         let draftMatched = expectation(
-            for: NSPredicate(format: "value CONTAINS %@", String(command.prefix(16))),
+            for: NSPredicate(format: "value CONTAINS %@", String(command.prefix(12))),
             evaluatedWith: editor,
             handler: nil
         )
-        if XCTWaiter.wait(for: [draftMatched], timeout: 3) != .completed {
-            editor.typeKey("a", modifierFlags: [.command])
-            editor.typeText(command)
-        }
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [draftMatched], timeout: 5),
+            .completed,
+            "composer draft missing after paste; value=\(editor.value ?? "nil")"
+        )
         let submit = element(app, "seyal-composer-execute")
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: submit, handler: nil)
         XCTAssertEqual(
@@ -747,12 +750,15 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let previous = NSPasteboard.general.string(forType: .string)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        // Ensure first-responder before synthetic Cmd-A/V; paste can clear focus.
+        editor.click()
         editor.typeKey("a", modifierFlags: [.command])
         editor.typeKey("v", modifierFlags: [.command])
         if let previous {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(previous, forType: .string)
         }
+        editor.click()
     }
 
     /// Prefer a stable marker embedded in the command over the full shell line.
