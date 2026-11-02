@@ -7,6 +7,8 @@ description: Seyal adapter for AI-SDLC review-stage remediation, adding GitHub P
 
 Follow the canonical generic procedure in `.sdlc/framework/skills/process-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
+After the approved one-batch remediation plan, use `python3 scripts/seyal-ai-sdlc-claim.py begin --repo seyal-org/seyal --phase process-review --number <PR>`; require `verify` before every state/edit/push/comment write and `release` after the complete handoff. The wrapper uses the **same** PR lock as `pr-review`; `AI_SDLC_WORKER_ID` must be unique to each live worker. No lock is held while waiting for human approval.
+
 Use this for an existing Seyal PR whose candidate lifecycle stage is `IN_REVIEW` or `CLOSED_UNMERGED`. Reopen or rebase a closed unmerged head on that same pull request. Unfinished accepted-scope implementation remains under `implement-issue`. A decision blocker keeps this pull request and names the other one.
 
 Apply only these Seyal-specific deltas:
