@@ -170,7 +170,8 @@ final class CommandBlockView: NSView {
 
     private static func accessibilitySummary(for text: String, limit: Int = 240) -> String {
         guard text.count > limit else { return text }
-        return String(text.prefix(limit)) + "…"
+        // Prefer the live tail so streaming Blocks keep late lines AX-visible.
+        return "…" + String(text.suffix(limit))
     }
 
     override func layout() {

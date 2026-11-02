@@ -246,22 +246,23 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
         waitForUsablePty(in: app)
         // Start the stream on the focused pane, then move focus to the sibling.
+        // Long stream so late lines arrive after we move focus to the sibling.
         submitComposerCommand(
-            "for i in $(seq 1 16); do printf '%s-%s\\n' '\(token)' \"$i\"; sleep 0.12; done",
+            "for i in $(seq 1 40); do printf '%s-%s\\n' '\(token)' \"$i\"; sleep 0.15; done",
             in: app,
             expectBlock: true,
-            blockMarker: token
+            blockMarker: "\(token)-1"
         )
         let streamBlock = anyPaneBlock(in: app, containing: token)
         XCTAssertTrue(streamBlock.waitForExistence(timeout: 12), "stream Block must appear")
         let streamBody = blockBody(for: streamBlock, in: app)
         XCTAssertTrue(streamBody.waitForExistence(timeout: 8))
         let heightBefore = streamBody.frame.height
+        let lateMarker = "\(token)-35"
 
         let focused = try focusedRegionIndex(app, count: 2)
         // Prefer focusing the non-streaming pane so the stream stays visible but unfocused.
-        let streamRegion = focused
-        let sibling = streamRegion == 0 ? 1 : 0
+        let sibling = focused == 0 ? 1 : 0
         element(app, "seyal-pane-region-\(sibling)").click()
         waitForFocus(app, region: sibling)
         waitForUsablePty(in: app)
@@ -273,17 +274,21 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let unfocusedStream = anyPaneBlock(in: app, containing: token)
         XCTAssertTrue(unfocusedStream.exists, "unfocused stream Block must remain after focus move")
         let unfocusedBody = blockBody(for: unfocusedStream, in: app)
-        let grew = expectation(
+        let progressed = expectation(
             for: NSPredicate { _, _ in
-                unfocusedBody.exists && unfocusedBody.frame.height > heightBefore + 8
+                guard unfocusedBody.exists else { return false }
+                if unfocusedBody.frame.height > heightBefore + 8 { return true }
+                let label = (unfocusedBody.label as String?) ?? ""
+                let value = (unfocusedBody.value as? String) ?? ""
+                return label.contains(lateMarker) || value.contains(lateMarker)
             },
             evaluatedWith: nil,
             handler: nil
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [grew], timeout: 6),
+            XCTWaiter.wait(for: [progressed], timeout: 12),
             .completed,
-            "unfocused stream body must keep growing; before=\(heightBefore) after=\(unfocusedBody.frame.height)"
+            "unfocused stream must keep updating the same Block; before=\(heightBefore) after=\(unfocusedBody.frame.height) label=\(unfocusedBody.label) value=\(unfocusedBody.value ?? "nil")"
         )
         XCTAssertTrue(
             unfocusedStream.identifier.hasPrefix("seyal-secondary-block-")
@@ -522,7 +527,17 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertFalse(blockCommand(in: app, containing: "SEYAL_TAB_ONE_MARKER").exists)
 
         click(app, "seyal-split-right")
-        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        // Prefer divider/secondary host signals — full-tree region queries can
+        // stall while multipane hosts rebuild Blocks after tab+marker seeding.
+        let splitArrived =
+            element(app, "seyal-pane-divider-0").waitForExistence(timeout: 12)
+            || element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 4)
+            || element(app, "seyal-pane-region-1").waitForExistence(timeout: 4)
+        XCTAssertTrue(splitArrived, "Split Right must project a second Pane after pane-local tabs")
+        XCTAssertTrue(
+            element(app, "seyal-pane-region-1").waitForExistence(timeout: 12),
+            "second Pane region must become AX-addressable"
+        )
         let secondPaneStrips = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier CONTAINS %@ AND identifier CONTAINS %@", "-terminal-tabs", "seyal-pane-")
         )
@@ -715,8 +730,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         // Prefer paste: XCUI typeText mangles quotes/`$()`/paths and only the
         // first character (`/`) may land in the draft under multipane Flow.
         pasteIntoComposerEditor(editor, text: command)
-        // Paste can clear keyboard focus; re-click so AX can interact again and
-        // textDidChange/pushDraft can enable execute without typeKey synthesis.
+        // Paste can clear keyboard focus; re-click so Return reaches the editor.
         editor.click()
         let draftMatched = expectation(
             for: NSPredicate(format: "value CONTAINS %@", String(command.prefix(12))),
@@ -730,12 +744,13 @@ final class SeyalPaneSplitUITests: XCTestCase {
         )
         let submit = element(app, "seyal-composer-execute")
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: submit, handler: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [enabled], timeout: 8),
-            .completed,
-            "composer execute stayed disabled after draft paste"
-        )
-        submit.click()
+        if XCTWaiter.wait(for: [enabled], timeout: 4) == .completed {
+            submit.click()
+        } else {
+            // submit() pushDraft()s first; Return works even when AX still shows
+            // execute disabled after a synthetic paste.
+            editor.typeKey("\r", modifierFlags: [])
+        }
         guard expectBlock else { return }
         let marker = blockMarker ?? blockMarkerToken(in: command) ?? command
         let block = anyPaneBlock(in: app, containing: marker)

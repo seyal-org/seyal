@@ -268,9 +268,11 @@ final class PaneLayoutView: NSView {
                     host.frame = targetFrame
                 }
                 addSubview(host, positioned: .above, relativeTo: liveContent)
-                // Always sync pane Blocks after install. Init may have rebuilt
-                // before Runtime projections/history were ready (#1424).
-                host.noteRegistryPolled()
+                // Defer the first Block sync so region/divider AX targets publish
+                // before a heavy multipane rebuild can stall XCUI queries (#1424).
+                DispatchQueue.main.async { [weak host] in
+                    host?.noteRegistryPolled()
+                }
             }
             // Zoom/occlusion must remove the leaf's surface; Raw/TUI covers the
             // focused host with liveContent without destroying it (#1424).

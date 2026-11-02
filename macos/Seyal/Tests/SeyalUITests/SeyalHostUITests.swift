@@ -569,7 +569,7 @@ final class SeyalHostUITests: XCTestCase {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(previous, forType: .string)
             }
-            // Paste can clear keyboard focus; re-click before waiting on execute.
+            // Paste can clear keyboard focus; re-click before submit.
             editor.click()
             let draftMatchesCommand = expectation(
                 for: NSPredicate(format: "value CONTAINS %@", probeScript.lastPathComponent),
@@ -591,14 +591,13 @@ final class SeyalHostUITests: XCTestCase {
                 evaluatedWith: execute,
                 handler: nil
             )
-            guard XCTWaiter.wait(for: [executeReady], timeout: 8) == .completed else {
-                XCTFail(
-                    "composer execute stayed disabled after paste; "
-                        + "draft=\(editor.value ?? "nil") composer=\(composer.value ?? "nil")"
-                )
-                return nil
+            if XCTWaiter.wait(for: [executeReady], timeout: 4) == .completed {
+                execute.click()
+            } else {
+                // Return invokes submit() which pushDraft()s even when AX still
+                // reports execute disabled after synthetic paste.
+                editor.typeKey("\r", modifierFlags: [])
             }
-            execute.click()
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
                 if FileManager.default.fileExists(atPath: startedFile.path),

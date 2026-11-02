@@ -13,6 +13,13 @@ private final class ComposerTextView: NSTextView {
         }
         super.keyDown(with: event)
     }
+
+    /// XCUI Cmd-V paste can update `string` without a delegate `textDidChange`
+    /// turn; push the draft so CAN_SUBMIT / execute enable stay in sync (#1424).
+    override func paste(_ sender: Any?) {
+        super.paste(sender)
+        delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
+    }
 }
 
 /// Native IME/editor bridge only. Draft, submit, and C09 copy stay Rust-owned.

@@ -240,9 +240,9 @@ reason = "Thin AppKit chrome host stays one cold-path façade; #1424 themes seco
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
-acknowledged_loc = 708
+acknowledged_loc = 710
 issue = 1424
-reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1424 publishes SecondaryLivePaneHost frames before install so multipane Flow AutoresizingMask never fights composer/transcript constraints, without inventing a second layout authority."
+reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1424 publishes SecondaryLivePaneHost frames before install and defers the first Block sync so multipane AutoresizingMask never fights composer constraints and region AX stays responsive."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
