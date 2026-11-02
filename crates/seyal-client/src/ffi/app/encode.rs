@@ -140,20 +140,21 @@ fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: RowDraft<'_>
     let title_off = push_text(text, draft.title);
     let detail_off = push_text(text, draft.detail);
     let (id_lo, id_hi) = split_id(draft.id);
-    let (address_version, address_kind, address_bytes, address_len) = match (draft.address, draft.raw_address)
-    {
-        (Some(address), None) => {
-            let (version, kind, bytes, len) = crate::navigation::encode_resource_address(address);
-            (version, kind, bytes, len)
-        }
-        (None, Some(raw)) => {
-            let mut bytes = [0u8; 48];
-            bytes[..16].copy_from_slice(&raw);
-            (0, 0, bytes, 16)
-        }
-        (None, None) => (0, 0, [0; 48], 0),
-        (Some(_), Some(_)) => (0, 0, [0; 48], 0),
-    };
+    let (address_version, address_kind, address_bytes, address_len) =
+        match (draft.address, draft.raw_address) {
+            (Some(address), None) => {
+                let (version, kind, bytes, len) =
+                    crate::navigation::encode_resource_address(address);
+                (version, kind, bytes, len)
+            }
+            (None, Some(raw)) => {
+                let mut bytes = [0u8; 48];
+                bytes[..16].copy_from_slice(&raw);
+                (0, 0, bytes, 16)
+            }
+            (None, None) => (0, 0, [0; 48], 0),
+            (Some(_), Some(_)) => (0, 0, [0; 48], 0),
+        };
     rows.push(SeyalAppRow {
         kind: draft.kind,
         flags: draft.flags,

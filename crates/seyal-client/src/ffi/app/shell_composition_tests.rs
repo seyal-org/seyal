@@ -211,7 +211,11 @@ fn left_tabs_terminal_tab_rows_project_pane_fence_and_selection() {
     );
     assert_ne!((first.id_lo, first.id_hi), (second.id_lo, second.id_hi));
     let title = unsafe {
-        str::from_utf8(slice::from_raw_parts(second.title, second.title_len as usize)).unwrap()
+        str::from_utf8(slice::from_raw_parts(
+            second.title,
+            second.title_len as usize,
+        ))
+        .unwrap()
     };
     assert_eq!(title, "Terminal 2");
     assert_ne!(
