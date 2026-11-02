@@ -89,6 +89,14 @@ def ensure_claim_store(db: Path) -> None:
     """
     parent = db.parent
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if str(FRAMEWORK_ROOT) not in sys.path:
+        sys.path.insert(0, str(FRAMEWORK_ROOT))
+    from tools import work_claims
+    if getattr(work_claims, "COLD_INIT_LOCKED", False):
+        # Upstream #31 owns the *same* .init.lock. Do not acquire it twice
+        # through different file descriptors: POSIX flock can self-deadlock.
+        work_claims.LocalClaimStore(db)
+        return
     lock_path = parent / ".init.lock"
     with open(lock_path, "a+b") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
@@ -96,10 +104,7 @@ def ensure_claim_store(db: Path) -> None:
             os.chmod(lock_path, 0o600)
         except OSError:
             pass
-        if str(FRAMEWORK_ROOT) not in sys.path:
-            sys.path.insert(0, str(FRAMEWORK_ROOT))
-        from tools.work_claims import LocalClaimStore  # noqa: WPS433
-        LocalClaimStore(db)
+        work_claims.LocalClaimStore(db)
 
 
 def main(argv=None):
