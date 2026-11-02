@@ -339,7 +339,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let app = hostedApp()
         waitForUsablePty(in: app)
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
-        submitComposerCommand("vim -Nu NONE -n", in: app)
+        // TUI entry can fence Flow Blocks immediately; do not require a Block card.
+        submitComposerCommand("vim -Nu NONE -n", in: app, expectBlock: false)
 
         let composer = element(app, "seyal-composer")
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
@@ -607,12 +608,22 @@ final class SeyalPaneSplitUITests: XCTestCase {
         return try XCTUnwrap(focused.first)
     }
 
-    /// One live terminal surface exists, and it sits inside the focused region.
+    /// Focused Flow presentation sits inside the focused region. Multipane
+    /// Flow (#1424) owns chrome through durable pane hosts; Raw/TUI may still
+    /// expose a single `terminal-input` inside liveContent.
     private func assertSingleLiveSurface(in app: XCUIApplication, focusedRegion index: Int) {
+        let region = element(app, "seyal-pane-region-\(index)").frame
+        let host = element(app, "seyal-pane-presentation-host")
+        if host.waitForExistence(timeout: 4) {
+            XCTAssertTrue(
+                region.insetBy(dx: -1, dy: -1).contains(host.frame),
+                "presentation host \(host.frame) must sit inside focused region \(region)"
+            )
+            return
+        }
         let terminals = app.descendants(matching: .any).matching(identifier: "terminal-input")
         let live = expectation(for: NSPredicate(format: "count == 1"), evaluatedWith: terminals, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [live], timeout: 12), .completed, "exactly one live terminal surface")
-        let region = element(app, "seyal-pane-region-\(index)").frame
         let terminal = terminals.firstMatch.frame
         XCTAssertTrue(
             region.insetBy(dx: -1, dy: -1).contains(terminal),
@@ -643,6 +654,17 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        // Multipane Flow hides liveContent/`terminal-input`; readiness is the
+        // focused presentation host + composer (#1424).
+        let presentation = element(app, "seyal-pane-presentation-host")
+        if presentation.waitForExistence(timeout: 2) {
+            XCTAssertTrue(
+                element(app, "seyal-composer").waitForExistence(timeout: timeout),
+                "focused Flow presentation host must expose a composer"
+            )
+            XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for multipane Flow")
+            return
+        }
         let terminal = app.descendants(matching: .any)["terminal-input"]
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
@@ -660,14 +682,20 @@ final class SeyalPaneSplitUITests: XCTestCase {
         return String(accessibilityValue[range.upperBound..<end])
     }
 
-    private func submitComposerCommand(_ command: String, in app: XCUIApplication) {
+    private func submitComposerCommand(
+        _ command: String,
+        in app: XCUIApplication,
+        expectBlock: Bool = true
+    ) {
         let editor = element(app, "seyal-composer-editor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer editor missing")
         editor.click()
         editor.typeText(command)
         let submit = element(app, "seyal-composer-execute")
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: submit, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
         submit.click()
+        guard expectBlock else { return }
         let block = anyPaneBlock(in: app, containing: command)
         XCTAssertTrue(block.waitForExistence(timeout: 10), "the selected execution records its own submitted command")
     }

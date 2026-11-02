@@ -186,9 +186,15 @@ final class DividerDragProjectionTests: XCTestCase {
         XCTAssertEqual(window.frame, windowBefore, "live content must not grow the window")
         XCTAssertEqual(layout.bounds, layoutBefore, "live content must not grow the Pane layout")
         try assertLiveSurfaceInFocusedRegion(view, count: 2)
-        let live = try XCTUnwrap(view.pane.superview)
-        XCTAssertEqual(live.frame.width, (layout.bounds.width * 0.1).rounded() - 2, accuracy: 1, "live width follows Rust")
-        XCTAssertTrue(live.clipsToBounds, "oversized live content is clipped to its region")
+        let shell = seyal_app_shell(view.pane.appHandle)
+        let host = try XCTUnwrap(
+            view.centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            )
+        )
+        XCTAssertEqual(host.frame.width, (layout.bounds.width * 0.1).rounded() - 2, accuracy: 1, "live width follows Rust")
+        XCTAssertTrue(host.clipsToBounds, "oversized live content is clipped to its region")
     }
 
     func testStaleDividerTargetFailsClosedAndLastPaneRulesHold() throws {
@@ -262,18 +268,33 @@ final class DividerDragProjectionTests: XCTestCase {
         try (0..<count).map { try XCTUnwrap(element(view, "seyal-pane-region-\($0)")).frame }
     }
 
-    /// The single live surface stays inside the focused region (inset by the
-    /// 1pt split border) after any resize.
+    /// The focused presentation host stays inside the focused region (inset by
+    /// the 1pt split border) after any resize. Multipane Flow hides
+    /// `liveContent` and keeps durable pane hosts (#1424).
     private func assertLiveSurfaceInFocusedRegion(_ view: ProductChromeHostView, count: Int) throws {
         let focused = try XCTUnwrap(
             (0..<count).first { element(view, "seyal-pane-region-\($0)")?.accessibilityValue() as? String == "focused" }
         )
-        let region = try XCTUnwrap(element(view, "seyal-pane-region-\(focused)")).frame
-        let live = try XCTUnwrap(view.pane.superview)
+        let regionView = try XCTUnwrap(element(view, "seyal-pane-region-\(focused)"))
+        let region = regionView.frame
         var contentFrame = region.insetBy(dx: 1, dy: 1)
         contentFrame.origin.y += 30
         contentFrame.size.height = max(0, contentFrame.height - 30)
-        XCTAssertEqual(live.frame, contentFrame)
+        if count > 1 {
+            XCTAssertTrue(view.centerColumn.liveContent.isHidden)
+            let shell = seyal_app_shell(view.pane.appHandle)
+            let host = try XCTUnwrap(
+                view.centerColumn.presentationHost(
+                    paneLo: shell.focused_pane_lo,
+                    paneHi: shell.focused_pane_hi
+                )
+            )
+            XCTAssertFalse(host.isHidden)
+            XCTAssertEqual(host.frame, contentFrame)
+        } else {
+            let live = try XCTUnwrap(view.pane.superview)
+            XCTAssertEqual(live.frame, contentFrame)
+        }
     }
 
     private func click(_ view: NSView, _ identifier: String) throws {

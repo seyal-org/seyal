@@ -256,14 +256,18 @@ final class PaneLayoutView: NSView {
                 // before Runtime projections/history were ready (#1424).
                 host.noteRegistryPolled()
             }
+            let region = regions.first(where: { $0.paneLo == key.lo && $0.paneHi == key.hi })
+            let occluded = region?.occluded ?? false
             let coveredByInteractiveLive =
                 binding.focused && focusedNeedsInteractiveLiveContent
-            host.isHidden = coveredByInteractiveLive
-            host.setInputOwned(binding.focused && !coveredByInteractiveLive)
+            // Zoom/occlusion must remove the leaf's surface; Raw/TUI covers the
+            // focused host with liveContent without destroying it (#1424).
+            host.isHidden = coveredByInteractiveLive || occluded
+            host.setInputOwned(binding.focused && !coveredByInteractiveLive && !occluded)
             // Publish the target frame in the same reconciliation turn that
             // installs the host. Waiting for a later parent layout pass leaves
             // the AX target at its initial zero frame and unhittable to XCUI.
-            if let region = regions.first(where: { $0.paneLo == key.lo && $0.paneHi == key.hi }) {
+            if let region, !occluded {
                 let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
                 host.frame = contentFrame(region.rect, inset: inset)
             }
@@ -501,9 +505,14 @@ final class PaneLayoutView: NSView {
         for (view, region) in zip(regionViews, regions) {
             view.frame = scaled(region.rect)
         }
-        for region in regions where !region.occluded {
+        for region in regions {
             let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
-            guard let host = secondaryLiveHosts[key], !host.isHidden else { continue }
+            guard let host = secondaryLiveHosts[key] else { continue }
+            if region.occluded {
+                host.isHidden = true
+                continue
+            }
+            guard !host.isHidden else { continue }
             host.frame = contentFrame(region.rect, inset: inset)
         }
         for region in regions where !region.occluded {

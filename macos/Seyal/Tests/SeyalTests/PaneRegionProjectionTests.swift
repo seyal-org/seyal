@@ -185,14 +185,46 @@ final class PaneRegionProjectionTests: XCTestCase {
             file: file,
             line: line
         )
-        let live = try XCTUnwrap(view.pane.superview, file: file, line: line)
-        XCTAssertFalse(live.isHidden, file: file, line: line)
-        // In a split the live surface sits inside the region's 1pt border.
         let inset: CGFloat = count > 1 ? 1 : 0
         var contentFrame = frames[focused].insetBy(dx: inset, dy: inset)
         contentFrame.origin.y += 30
         contentFrame.size.height = max(0, contentFrame.height - 30)
-        XCTAssertEqual(live.frame, contentFrame, "live surface leaves room for the Pane-local strip", file: file, line: line)
+        if count > 1 {
+            // #1424: multipane Flow keeps liveContent hidden; durable pane hosts
+            // own presentation. Focus only changes input ownership.
+            XCTAssertTrue(
+                view.centerColumn.liveContent.isHidden,
+                "multipane Flow must not relocate liveContent",
+                file: file,
+                line: line
+            )
+            let focusedHost = try XCTUnwrap(
+                view.centerColumn.presentationHost(
+                    paneLo: focusedRegion.pane_lo,
+                    paneHi: focusedRegion.pane_hi
+                ),
+                file: file,
+                line: line
+            )
+            XCTAssertFalse(focusedHost.isHidden, file: file, line: line)
+            XCTAssertEqual(
+                focusedHost.frame,
+                contentFrame,
+                "focused presentation host leaves room for the Pane-local strip",
+                file: file,
+                line: line
+            )
+        } else {
+            let live = try XCTUnwrap(view.pane.superview, file: file, line: line)
+            XCTAssertFalse(live.isHidden, file: file, line: line)
+            XCTAssertEqual(
+                live.frame,
+                contentFrame,
+                "live surface leaves room for the Pane-local strip",
+                file: file,
+                line: line
+            )
+        }
     }
 
     /// C03 no longer dumps Pane rows into the left rail (#1401). Focus chrome is

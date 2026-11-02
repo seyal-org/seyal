@@ -122,6 +122,17 @@ final class SecondaryLivePaneHost: NSView {
         composer.onEnsureFocused = { [weak self] in
             self?.onFocus?()
         }
+        // Bridgeless surfaces borrow the window bridge; submit must still reach
+        // the focused Controller so Flow commands and TUI entry work (#1424).
+        composer.onSubmitComposer = { [weak self] command in
+            self?.historyBridge?.submitComposerCommand(command) ?? -10
+        }
+        composer.onSubmitRaw = { [weak self] command in
+            self?.historyBridge?.submitCommittedText(command) ?? -10
+        }
+        composer.onCommandConsumed = { [weak self] in
+            self?.reconcileFlowPresentation()
+        }
 
         blocks.orientation = .vertical
         blocks.alignment = .width

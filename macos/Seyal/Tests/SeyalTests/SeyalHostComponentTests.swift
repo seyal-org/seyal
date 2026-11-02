@@ -781,12 +781,18 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED), 0)
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-0"))
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-1"))
-        // Focused chrome container follows the focused LIVE region.
+        // #1424: multipane Flow keeps liveContent hidden; focused presentation
+        // host follows the focused LIVE region.
         let focusedRegion = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
         XCTAssertTrue(focusedRegion.isAccessibilityEnabled())
-        let live = try XCTUnwrap(view.pane.superview)
-        XCTAssertFalse(live.isHidden)
-        XCTAssertEqual(live.frame, terminalContentFrame(focusedRegion.frame, splitInset: 1))
+        XCTAssertTrue(view.centerColumn.liveContent.isHidden)
+        let focusedHost = try XCTUnwrap(
+            view.centerColumn.presentationHost(paneLo: second.pane_lo, paneHi: second.pane_hi)
+        )
+        XCTAssertFalse(focusedHost.isHidden)
+        XCTAssertEqual(focusedHost.frame, terminalContentFrame(focusedRegion.frame, splitInset: 1))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-presentation-host"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-secondary-live-pane"))
     }
 
     /// #1424: every visible Flow leaf keeps Block transcript + composer, not
@@ -1370,14 +1376,21 @@ final class SeyalHostComponentTests: XCTestCase {
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
 
-        let live = try XCTUnwrap(view.pane.superview)
-        let layout = try XCTUnwrap(live.superview)
+        let layout = try XCTUnwrap(view.centerColumn)
         let splitFrame = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
-        XCTAssertEqual(live.frame, terminalContentFrame(splitFrame, splitInset: 1))
-
         let shell = seyal_app_shell(handle)
+        let focusedHost = try XCTUnwrap(
+            view.centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            )
+        )
+        XCTAssertTrue(view.centerColumn.liveContent.isHidden)
+        XCTAssertEqual(focusedHost.frame, terminalContentFrame(splitFrame, splitInset: 1))
+
         view.zoomPane(lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
+        view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
         let zoomed = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
         XCTAssertTrue(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
@@ -1385,14 +1398,43 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
         XCTAssertEqual(zoomed.frame.width, layout.bounds.width, accuracy: 1)
         XCTAssertEqual(zoomed.frame.height, layout.bounds.height, accuracy: 1)
-        XCTAssertEqual(live.frame, terminalContentFrame(zoomed.frame), "zoomed leaf reserves its Pane-local strip")
+        let zoomedHost = try XCTUnwrap(
+            view.centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            )
+        )
+        XCTAssertFalse(zoomedHost.isHidden)
+        XCTAssertEqual(
+            zoomedHost.frame,
+            terminalContentFrame(zoomed.frame),
+            "zoomed leaf reserves its Pane-local strip"
+        )
+        let occludedHost = accessibilityChild(view, identifier: "seyal-secondary-live-pane")
+        XCTAssertTrue(
+            occludedHost == nil || occludedHost!.isHidden,
+            "occluded leaf presents no surface while zoomed"
+        )
 
         view.unzoomPane()
+        view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
         XCTAssertFalse(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
         XCTAssertEqual(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame, splitFrame)
-        XCTAssertEqual(live.frame, terminalContentFrame(splitFrame, splitInset: 1))
+        XCTAssertEqual(
+            try XCTUnwrap(
+                view.centerColumn.presentationHost(
+                    paneLo: shell.focused_pane_lo,
+                    paneHi: shell.focused_pane_hi
+                )
+            ).frame,
+            terminalContentFrame(splitFrame, splitInset: 1)
+        )
+        let restoredSecondary = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-secondary-live-pane")
+        )
+        XCTAssertFalse(restoredSecondary.isHidden)
     }
 
     @MainActor

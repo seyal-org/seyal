@@ -390,8 +390,10 @@ final class SeyalHostUITests: XCTestCase {
             return
         }
         XCTAssertNotEqual(firstRegion.value as? String, "focused")
-        let primarySurface = app.descendants(matching: .any)["terminal-input"].firstMatch
-        XCTAssertTrue(primarySurface.waitForExistence(timeout: 8))
+        // #1424: multipane Flow hides liveContent/`terminal-input`; geometry
+        // projections live on durable pane presentation hosts.
+        let primarySurface = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
+        XCTAssertTrue(primarySurface.waitForExistence(timeout: 8), "focused Flow presentation host missing")
         let secondaryHost = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
         XCTAssertTrue(secondaryHost.waitForExistence(timeout: 12))
         XCTAssertTrue(secondaryHost.isEnabled, "secondary Pane focus target must be an enabled AX button")
@@ -744,9 +746,12 @@ final class SeyalHostUITests: XCTestCase {
             return
         }
 
-        let primarySurfaceAfterFocus = app.descendants(matching: .any)["terminal-input"].firstMatch
+        let primarySurfaceAfterFocus = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
         let secondaryHostAfterFocus = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
-        XCTAssertTrue(primarySurfaceAfterFocus.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            primarySurfaceAfterFocus.waitForExistence(timeout: 5),
+            "focused Flow presentation host missing after focus restore"
+        )
         XCTAssertTrue(secondaryHostAfterFocus.waitForExistence(timeout: 5))
         guard let secondAtPane1Focus = waitForMatchingSize(
             from: secondFile,
@@ -1210,20 +1215,28 @@ final class SeyalHostUITests: XCTestCase {
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        let terminal = app.descendants(matching: .any)["terminal-input"]
-        XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
-        let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
-        let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
-        let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
+        let presentation = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
+        if presentation.waitForExistence(timeout: 2) {
+            XCTAssertTrue(
+                app.descendants(matching: .any)["seyal-composer"].firstMatch.waitForExistence(timeout: timeout),
+                "focused Flow presentation host must expose a composer"
+            )
+        } else {
+            let terminal = app.descendants(matching: .any)["terminal-input"]
+            XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
+            let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
+            let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
+            let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
+            XCTAssertEqual(
+                result,
+                .completed,
+                "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
+            )
+        }
         XCTAssertEqual(
             app.state,
             .runningForeground,
             "Seyal.app crashed while waiting for the PTY/runtime attach"
-        )
-        XCTAssertEqual(
-            result,
-            .completed,
-            "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
         )
         // #1065: Rust RecoveryCoordinator owns reconnect policy; the host only
         // executes effects (driveRecovery PerformAttempt/adopt) and projects
