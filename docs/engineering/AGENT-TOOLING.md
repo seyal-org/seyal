@@ -84,6 +84,12 @@ Do not migrate skills mechanically. A procedure belongs in AI-SDLC only when it 
 
 AI-SDLC is pinned by exact commit in `scripts/bootstrap-dev.sh`; `.sdlc/framework/` is local generated developer state and is not committed. Updating the pin requires a normal Seyal Issue/PR. The generic framework is never a product/runtime dependency.
 
+### Cursor pre-tool claim enforcement
+
+`.cursor/hooks.json` configures a fail-closed Cursor `preToolUse` hook (`.cursor/hooks/claim-gate.py`). A stable Cursor `conversation_id` determines the agent worker identity, rather than a human GitHub username. A strict `begin` invocation is permitted before ownership; read-only inspection commands remain possible. Before a write-capable Cursor tool (file edits, arbitrary shell, GitHub/MCP mutations) the hook re-verifies the worker's active issue/PR token against the pinned SQLite backend. Missing/invalid/released claims deny the tool. Release happens only after the documented handoff. The active resource record is stored privately outside the repository; a different issue/PR requires a release first.
+
+**Boundary:** This is a Cursor project hook, not an OS sandbox or GitHub-side policy. It cannot constrain manual shell processes, other IDEs, untrusted collaborators who modify/disable project hooks, tools outside Cursor's hook dispatch, or distinct cloud workers lacking a shared database. Project hooks require a trusted workspace. Before calling this fully verified, test the actual installed Cursor client with a no-claim `Write`/MCP/Shell attempt and a two-agent collision; tests of the Python hook alone do not prove Cursor executed it. Keep human merge approval and independent review separate.
+
 Reference-consumer evidence for this integration is recorded in `docs/engineering/AI-SDLC-REFERENCE-CONSUMER.md`.
 
 ## Approved MCP/tool matrix
