@@ -5,7 +5,7 @@ description: Seyal adapter for AI-SDLC review-stage remediation, adding GitHub P
 
 # Address PR review
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/address-pr-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
+Follow the canonical generic procedure in `.sdlc/framework/skills/process-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
 Use this for an existing Seyal PR whose candidate lifecycle stage is `IN_REVIEW` or `CLOSED_UNMERGED`. Reopen or rebase a closed unmerged head on that same pull request. Unfinished accepted-scope implementation remains under `implement-issue`. A decision blocker keeps this pull request and names the other one.
 
@@ -17,6 +17,6 @@ Apply only these Seyal-specific deltas:
 4. Preserve Seyal architecture and hot-path invariants. A remediation that requires a new product/architecture/security authority decision stops and routes to that authority instead of being improvised in code.
 5. Re-run the narrow affected checks and then all invalidated repository/domain evidence, including `make check` and any applicable conformance/fuzz/performance/security/native/docs gates.
 6. Re-fetch comments, checks and exact head before handoff. Known material findings must be resolved or explicitly blocked with evidence.
-7. Confirm the recorded findings against the diff since the reviewed head, and rerun the checks this fix invalidated. When those findings are resolved and the diff adds no new material blocker, record that confirmation on the same pull request. Do not start another full `pr-review`. Start a new full `pr-review` only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the previous review relied on. If the stage is `IMPLEMENTATION_IN_PROGRESS`, return to `implement-issue`. If `UNKNOWN`, stop and reconcile.
+7. Confirm that the full recorded root-cause set is addressed, re-fetch exact head/reviews/CI, then hand off the **same PR** for a full fresh `pr-review` (generic rule). Review is independent, not a self-approval. If the stage is `IMPLEMENTATION_IN_PROGRESS`, return to `implement-issue`. If `UNKNOWN`, stop and reconcile.
 
 Human Issue ownership remains authoritative throughout remediation. Coding agents may assist but never become Seyal work owners or independent human reviewers.
