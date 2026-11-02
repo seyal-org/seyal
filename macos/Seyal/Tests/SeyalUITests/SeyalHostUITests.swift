@@ -220,9 +220,14 @@ final class SeyalHostUITests: XCTestCase {
         let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
         XCTAssertTrue(workspaces.waitForExistence(timeout: 5))
         XCTAssertTrue(tabs.waitForExistence(timeout: 5))
-        XCTAssertEqual(workspaces.label, "Workspaces")
-        XCTAssertEqual(tabs.label, "Tabs")
-        XCTAssertNotEqual(tabs.label, "Layouts")
+        XCTAssertTrue(workspaces.isHittable)
+        XCTAssertTrue(tabs.isHittable)
+        // Prefer AX label; fall back to title — attributed mode labels can vary by OS.
+        let workspacesName = (workspaces.label.isEmpty ? workspaces.title : workspaces.label)
+        let tabsName = (tabs.label.isEmpty ? tabs.title : tabs.label)
+        XCTAssertEqual(workspacesName, "Workspaces")
+        XCTAssertEqual(tabsName, "Tabs")
+        XCTAssertNotEqual(tabsName, "Layouts")
 
         XCTAssertTrue(
             app.descendants(matching: .any)["seyal-workspaces-heading"].firstMatch.waitForExistence(timeout: 5)

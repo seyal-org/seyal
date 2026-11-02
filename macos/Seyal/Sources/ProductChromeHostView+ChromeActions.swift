@@ -333,6 +333,9 @@ extension ProductChromeHostView {
                 .foregroundColor: color,
             ]
         )
+        // XCUI reads accessibilityLabel; attributedTitle alone often surfaces empty.
+        button.setAccessibilityLabel(title)
+        button.title = title
     }
 
     func borderlessButton(title: String, action: Selector) -> NSButton {

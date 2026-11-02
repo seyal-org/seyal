@@ -195,8 +195,8 @@ final class PaneRegionProjectionTests: XCTestCase {
         XCTAssertEqual(live.frame, contentFrame, "live surface leaves room for the Pane-local strip", file: file, line: line)
     }
 
-    /// The left panel's Pane rows follow Rust selection: exactly the focused
-    /// PaneId's row is selected.
+    /// C03 no longer dumps Pane rows into the left rail (#1401). Focus chrome is
+    /// the pane-region AX value plus Rust `SEYAL_APP_ROW_SELECTED` on shell rows.
     private func assertChromeSelectsFocusedPane(
         _ view: ProductChromeHostView,
         file: StaticString = #filePath,
@@ -214,9 +214,12 @@ final class PaneRegionProjectionTests: XCTestCase {
                 file: file,
                 line: line
             )
-            let rowButton = button(view, "seyal-pane-\(index)")
-            XCTAssertNotNil(rowButton, "Pane row \(index) is shown", file: file, line: line)
-            XCTAssertEqual(rowButton?.state, isFocused ? .on : .off, "row \(index) selection", file: file, line: line)
+            XCTAssertNil(
+                button(view, "seyal-pane-\(index)"),
+                "C03 must not list Pane row \(index) in the left rail",
+                file: file,
+                line: line
+            )
         }
     }
 
