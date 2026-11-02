@@ -434,9 +434,12 @@ final class SeyalHostComponentTests: XCTestCase {
             view.newTabButton.isDescendant(of: view.leftModeRow),
             "New Tab stays with the left mode row; pane terminal tabs stay pane-local"
         )
+        // Prefer helpful root when Rust projects one; otherwise tab count.
         XCTAssertTrue(
-            workspaceLabel.localizedCaseInsensitiveContains("tab"),
-            "active workspace secondary carries tab count when path is redundant: \(workspaceLabel)"
+            workspaceLabel.localizedCaseInsensitiveContains("tab")
+                || workspaceLabel.contains("/")
+                || workspaceLabel.contains("~"),
+            "active workspace secondary is helpful root or tab count: \(workspaceLabel)"
         )
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(
