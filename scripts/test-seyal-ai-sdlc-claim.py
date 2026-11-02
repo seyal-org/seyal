@@ -95,6 +95,33 @@ class SeyalClaimTests(unittest.TestCase):
                             self.assertIn("seyal-ai-sdlc/tokens/",
                                           command[command.index("--token-file") + 1])
 
+    def test_begin_records_private_scope_and_release_clears_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "seyal-ai-sdlc"
+            worker = "cursor-same-session"
+            fake_cli = Path(directory) / "workflow_claims.py"
+            fake_cli.write_text("# fixture\n")
+            with patch.dict(os.environ, {
+                "AI_SDLC_WORKER_ID": worker, "XDG_STATE_HOME": directory
+            }):
+                with patch.object(module, "FRAMEWORK_CLI", fake_cli):
+                    with patch.object(module, "ensure_claim_store"):
+                        with patch.object(module.subprocess, "run",
+                                          return_value=SimpleNamespace(returncode=0)):
+                            args = ["--repo", "seyal-org/seyal",
+                                    "--phase", "implement", "--number", "58"]
+                            self.assertEqual(module.main(["begin"] + args), 0)
+                            self.assertEqual(module.read_active(root, worker),
+                                             {"repo": "seyal-org/seyal",
+                                              "phase": "issue", "number": 58})
+                            self.assertEqual(module.active_path(root, worker).stat().st_mode & 0o777,
+                                             0o600)
+                            # A held resource cannot silently authorize a different issue.
+                            self.assertEqual(module.main(["verify", "--repo", "seyal-org/seyal",
+                                                          "--phase", "implement", "--number", "59"]), 2)
+                            self.assertEqual(module.main(["release"] + args), 0)
+                            self.assertIsNone(module.read_active(root, worker))
+
     def test_relative_state_home_is_rejected(self):
         with self.assertRaises(ValueError):
             module.paths_for("a/b", "implement", 1, "worker", Path("relative"))
