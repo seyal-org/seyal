@@ -331,6 +331,11 @@ impl ApplicationRoot {
             // socket loss (same set as `seyal_bridge_poll_for`).
             Err(error) if is_terminal_registry_loss(&error) => {
                 let ended = matches!(error, crate::local::ClientError::NoRunningExecution);
+                // Close Terminal / P4: poll_prepare may accept type-39 and then
+                // return NoRunningExecution on Lifecycle::Finalized in the same
+                // turn. Absorb before bail so finish_terminal_termination can
+                // remove the Pane terminal tab; otherwise the tab stays forever.
+                let _ = self.absorb_wire_terminate_result(true);
                 self.note_terminal_client_loss(handle, ended);
                 // Match `seyal_bridge_poll`: keep the registry entry after shell
                 // exit so Flow can still drain final Block history (#1379).

@@ -70,7 +70,8 @@ final class CommandBlockView: NSView {
         detail: String,
         state: UInt16,
         cellHeight: CGFloat,
-        lines: Int
+        lines: Int,
+        session: Bool
     ) {
         self.state = state
         super.init(frame: .zero)
@@ -113,8 +114,10 @@ final class CommandBlockView: NSView {
         bodyHeight = body.heightAnchor.constraint(
             equalToConstant: max(cellHeight, 1) * CGFloat(max(lines, 1))
         )
+        // Rust sets SEYAL_APP_BLOCK_SESSION. Swift only indents; it does not choose copy.
+        let inset: CGFloat = session ? 16 : 0
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.topAnchor.constraint(equalTo: topAnchor),
             header.heightAnchor.constraint(greaterThanOrEqualToConstant: 22),

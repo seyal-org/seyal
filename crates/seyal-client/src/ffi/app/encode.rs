@@ -22,6 +22,8 @@ pub(crate) const ROW_SELECTED: u16 = 1;
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
 pub(crate) const BLOCK_STATE_MASK: u16 = 7;
 pub(crate) const BLOCK_SELECTED: u16 = 8;
+/// Session-scoped Block. Hosts may indent; they do not choose product copy.
+pub(crate) const BLOCK_SESSION: u16 = 16;
 
 pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnapshot {
     let pane = snap.pane.to_bytes();
@@ -307,6 +309,9 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
         debug_assert_eq!(flags & BLOCK_STATE_MASK, flags);
         if selected == Some(block.id) {
             flags |= BLOCK_SELECTED;
+        }
+        if block.scope == seyal_protocol::framing::BlockScope::Session {
+            flags |= BLOCK_SESSION;
         }
         push_row(
             &mut state.block_rows,

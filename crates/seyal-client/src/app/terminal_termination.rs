@@ -66,5 +66,8 @@ impl ApplicationRoot {
         if closed.is_err() && self.shell.snapshot().focused_pane == pane {
             self.activate_focused_pane_authority();
         }
+        // Loss-path finish runs before poll_client can bump generation; chrome
+        // reconcile early-outs on a stale generation and leaves zombie tab buttons.
+        self.snapshot_generation = self.snapshot_generation.saturating_add(1);
     }
 }

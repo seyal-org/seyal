@@ -9,7 +9,7 @@ use seyal_core::{AttachmentId, ExecutionId};
 
 use crate::app::PresentationEligibility;
 use crate::composer::BlockPresentationState;
-use crate::live_tail::{project_block_output, LiveTailProjection};
+use crate::live_tail::{project_block_output_until, LiveTailProjection};
 use crate::presentation::PresentationMode;
 use crate::LocalDisplayClient;
 
@@ -65,6 +65,7 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
             return SeyalAppBlockProjection::fail_closed();
         };
         let running = block.state == BlockPresentationState::Running;
+        let exclusive_end = following_session_start(snapshot.composer.as_ref(), index as usize);
         let mode = match snapshot.eligibility {
             PresentationEligibility::Flow => PresentationMode::Flow,
             PresentationEligibility::Raw => PresentationMode::Raw,
@@ -84,17 +85,18 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
         // ambient ACTIVE_HANDLE. History/fail-closed paths need no client.
         let projection = if running {
             with_fence_matched_client(fence.execution, fence.attachment, |client| {
-                project_block_output(
+                project_block_output_until(
                     mode,
                     block.start_line,
                     block.end_line,
                     true,
                     paired_viewport_line_ids(client),
+                    exclusive_end,
                 )
             })
             .unwrap_or(LiveTailProjection::FailClosed)
         } else {
-            project_block_output(mode, block.start_line, block.end_line, false, &[])
+            project_block_output_until(mode, block.start_line, block.end_line, false, &[], None)
         };
         match projection {
             LiveTailProjection::PrimaryFrame(clip) => SeyalAppBlockProjection {
@@ -144,6 +146,25 @@ fn with_fence_matched_client<R>(
 
 /// Borrow the client's LineIds only when they pair with the committed display
 /// by generation and row count; otherwise the running clip fails closed.
+/// First session Block after a local Running host. Its start line is the
+/// exclusive end of the host live clip so one terminal line is one card.
+fn following_session_start(
+    composer: Option<&crate::composer::ComposerSnapshot>,
+    index: usize,
+) -> Option<u64> {
+    use crate::composer::BlockPresentationState;
+    use seyal_protocol::framing::BlockScope;
+    let composer = composer?;
+    let host = composer.blocks.get(index)?;
+    if host.scope != BlockScope::Local || host.state != BlockPresentationState::Running {
+        return None;
+    }
+    composer.blocks[index + 1..]
+        .iter()
+        .find(|block| block.scope == BlockScope::Session)
+        .map(|block| block.start_line)
+}
+
 fn paired_viewport_line_ids(client: &LocalDisplayClient) -> &[u64] {
     let ids = client.viewport_line_ids();
     let cache = client.cache();
@@ -252,6 +273,7 @@ mod tests {
                             running: false,
                             exit_status: Some(0),
                             canvas_floor: false,
+                            scope: seyal_protocol::framing::BlockScope::Local,
                         },
                         RuntimeBlockRecord {
                             id: BlockId::from_bytes([0x22; 16]),
@@ -261,6 +283,7 @@ mod tests {
                             running: true,
                             exit_status: None,
                             canvas_floor: false,
+                            scope: seyal_protocol::framing::BlockScope::Local,
                         },
                     ]),
                 })
@@ -344,6 +367,7 @@ mod tests {
                             running: false,
                             exit_status: Some(0),
                             canvas_floor: false,
+                            scope: seyal_protocol::framing::BlockScope::Local,
                         },
                         RuntimeBlockRecord {
                             id: BlockId::from_bytes([0x32; 16]),
@@ -353,6 +377,7 @@ mod tests {
                             running: true,
                             exit_status: None,
                             canvas_floor: false,
+                            scope: seyal_protocol::framing::BlockScope::Local,
                         },
                     ]),
                 })
@@ -414,6 +439,97 @@ mod tests {
         assert_eq!(settled_unbound.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
         assert_eq!(settled_unbound.start_line, 20);
         assert_eq!(settled_unbound.end_line, 20);
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn session_blocks_under_a_running_host_do_not_share_a_terminal_line() {
+        use seyal_protocol::framing::BlockScope;
+
+        use super::super::encode::BLOCK_SESSION;
+        use super::super::seyal_app_block_row;
+
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let bind = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 1,
+            flags: FLAG_TARGET_CONTROLLER,
+            fence_pane_lo: snap.pane_lo,
+            fence_pane_hi: snap.pane_hi,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: snap.epoch,
+            target_execution_lo: 3,
+            target_execution_hi: 0,
+            target_attachment_lo: 4,
+            target_attachment_hi: 0,
+            target_generation: 1,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: Some(vec![
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x41; 16]),
+                            command: "ssh host".into(),
+                            start_line: 10,
+                            end_line: None,
+                            running: true,
+                            exit_status: None,
+                            canvas_floor: false,
+                            scope: BlockScope::Local,
+                        },
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x42; 16]),
+                            command: "echo session-ok".into(),
+                            start_line: 30,
+                            end_line: None,
+                            running: true,
+                            exit_status: None,
+                            canvas_floor: false,
+                            scope: BlockScope::Session,
+                        },
+                    ]),
+                })
+                .unwrap();
+        });
+        let ids = vec![10_u64, 11, 30, 31, 32];
+        let owner = owned_client(3, 4, 7, ids.clone());
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
+
+        let host = seyal_app_block_projection(handle, 0);
+        let session = seyal_app_block_projection(handle, 1);
+        assert_eq!(host.kind, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP);
+        assert_eq!(session.kind, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP);
+        assert_eq!((host.reserved0, host.reserved1), (0, 2));
+        assert_eq!((session.reserved0, session.reserved1), (2, 3));
+        let host_lines = &ids[host.reserved0 as usize..][..host.reserved1 as usize];
+        let session_lines = &ids[session.reserved0 as usize..][..session.reserved1 as usize];
+        assert!(
+            host_lines.iter().all(|line| !session_lines.contains(line)),
+            "a terminal line must not appear in two cards"
+        );
+        let session_row = seyal_app_block_row(handle, 1);
+        assert_ne!(session_row.flags & BLOCK_SESSION, 0);
+        assert_eq!(seyal_app_block_row(handle, 0).flags & BLOCK_SESSION, 0);
+
+        crate::ffi::CLIENTS.with(|clients| {
+            clients.borrow_mut().remove(&owner);
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

@@ -35,6 +35,7 @@ fn runtime_block_from_timeline(
             seyal_protocol::framing::CommandBlockState::Completed { exit_status } => exit_status,
         },
         canvas_floor: record.flags & seyal_protocol::framing::COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0,
+        scope: record.scope,
     }
 }
 
@@ -363,6 +364,15 @@ impl ApplicationRoot {
     /// Terminal poll loss. `execution_ended` keeps Flow authority and copies the
     /// final Block timeline before the client is unregistered (#1379).
     pub(crate) fn note_terminal_client_loss(&mut self, handle: u64, execution_ended: bool) {
+        // `seyal_bridge_poll_for` notes loss before `drive_application_roots`.
+        // Close Terminal may have accepted type-39 in the same poll_prepare that
+        // then returned NoRunningExecution — absorb here so the Pane terminal
+        // tab is removed instead of latching a zombie tab forever.
+        #[cfg(target_os = "macos")]
+        {
+            let _ = self.absorb_wire_terminate_result(true);
+            self.finish_pending_terminal_terminate_for_handle(handle);
+        }
         // Only shell-exit retains history forever. Ordinary disconnect must not
         // sticky-hold Flow paint across panes (#1379 Opus recheck).
         if execution_ended {
@@ -370,6 +380,29 @@ impl ApplicationRoot {
             self.note_ended_execution_client_loss(handle);
         } else {
             self.note_registry_client_loss(handle);
+        }
+    }
+
+    /// When Lifecycle::Finalized races ahead of absorb, still close a terminal
+    /// tab that has an outstanding Dispose terminate for this client handle.
+    #[cfg(target_os = "macos")]
+    fn finish_pending_terminal_terminate_for_handle(&mut self, handle: u64) {
+        let pending: Vec<(seyal_core::TerminalTabId, PaneId, seyal_core::ExecutionId)> = self
+            .terminal_client_raws
+            .iter()
+            .filter(|(_, raw)| **raw == handle)
+            .filter_map(|(terminal_tab, _)| {
+                let authority = self.terminal_authorities.get(terminal_tab)?;
+                self.provisioning
+                    .pending_terminate_by_terminal_tab(*terminal_tab)?;
+                Some((*terminal_tab, authority.pane, authority.execution))
+            })
+            .collect();
+        for (terminal_tab, pane, execution) in pending {
+            let _ = self
+                .provisioning
+                .take_pending_terminate_for_terminal_tab(terminal_tab);
+            self.finish_terminal_termination(pane, terminal_tab, execution);
         }
     }
 
@@ -633,7 +666,7 @@ fn map_client_error(error: ClientError) -> AppError {
 #[cfg(test)]
 mod ended_timeline_tests {
     use super::runtime_block_from_ended_timeline;
-    use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+    use seyal_protocol::framing::{BlockScope, BlockTrust, CommandBlock, CommandBlockState};
 
     #[test]
     fn ended_timeline_stops_presenting_a_still_running_block() {
@@ -644,6 +677,8 @@ mod ended_timeline_tests {
             end_line: Some(4),
             state: CommandBlockState::Running,
             flags: 0,
+            scope: BlockScope::Local,
+            trust: BlockTrust::LocalTrusted,
         };
         let mapped = runtime_block_from_ended_timeline(&running);
         assert!(!mapped.running);
@@ -659,6 +694,8 @@ mod ended_timeline_tests {
                 exit_status: Some(0),
             },
             flags: 0,
+            scope: BlockScope::Local,
+            trust: BlockTrust::LocalTrusted,
         };
         let kept = runtime_block_from_ended_timeline(&completed);
         assert!(!kept.running);

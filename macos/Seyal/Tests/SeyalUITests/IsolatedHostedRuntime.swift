@@ -72,19 +72,45 @@ enum IsolatedHostedRuntime {
 extension XCUIApplication {
   @discardableResult
   func launchIsolatedHost(environment: [String: String] = [:]) -> XCUIApplication {
+    // Multi-window / multi-PTY cases can leave the previous Seyal.app shutting
+    // down for >1s. Launching the next isolated host before `.notRunning`
+    // races Runtime bootstrap and surfaces as `connection=disconnected
+    // runtime=none` on the first waitForUsablePty (C2b ⌘W after ⌘N×2 on CI).
     terminate()
-    if !launchArguments.contains(IsolatedHostedRuntime.flag) {
-      launchArguments += IsolatedHostedRuntime.makeLaunchArguments()
-    }
+    XCTAssertTrue(
+      wait(for: .notRunning, timeout: 8),
+      "prior Seyal.app must exit before the next isolated Runtime launch"
+    )
+    // Always mint a fresh `--runtime-dir`. Reconnect-without-kill cases reuse
+    // arguments via `terminate()` + `launch()` and must not call this helper.
+    stripIsolatedRuntimeLaunchArguments()
+    launchArguments += IsolatedHostedRuntime.makeLaunchArguments()
     for (key, value) in environment {
       launchEnvironment[key] = value
     }
     launchEnvironment[IsolatedHostedRuntime.forwardCommandEnvironmentKey] = "1"
-    if launchEnvironment[IsolatedHostedRuntime.runtimeConfigEnvironmentKey] == nil {
+    // Refresh the shell fixture each isolated launch so a prior env entry
+    // cannot point at a deleted temp path after suite cleanup.
+    if environment[IsolatedHostedRuntime.runtimeConfigEnvironmentKey] == nil {
       launchEnvironment[IsolatedHostedRuntime.runtimeConfigEnvironmentKey] =
         IsolatedHostedRuntime.writeShellConfig()
     }
     launch()
     return self
+  }
+
+  private func stripIsolatedRuntimeLaunchArguments() {
+    guard let flagIndex = launchArguments.firstIndex(of: IsolatedHostedRuntime.flag) else {
+      return
+    }
+    // `--runtime-dir <dir> [/bin/zsh]`
+    var end = flagIndex + 1
+    if end < launchArguments.count {
+      end += 1
+    }
+    if end < launchArguments.count, launchArguments[end].hasPrefix("/") {
+      end += 1
+    }
+    launchArguments.removeSubrange(flagIndex..<end)
   }
 }

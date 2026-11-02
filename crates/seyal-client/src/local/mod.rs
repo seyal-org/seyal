@@ -1,4 +1,5 @@
 mod attach;
+mod composer_submit;
 mod delivery_state;
 mod delivery_wire;
 mod discovery;
@@ -20,9 +21,10 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::DisplayCache,
     local_ipc::framing::{
-        encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus,
-        CreateExecutionResult, ErrorCode, ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot,
-        Lifecycle, MessageType, Role, TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        encode_frame, BlockTimeline, ComposerEligibility, ComposerResult, ComposerResultCode,
+        ComposerStatus, ComposerTarget, ComposerTargetMode, CreateExecutionResult, ErrorCode,
+        ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot, Lifecycle, MessageType, Role,
+        SessionOffer, SessionStatus, TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::BlockState,
     AttachmentId, ExecutionId,
@@ -173,6 +175,20 @@ pub struct LocalDisplayClient {
     pub(crate) last_terminate_result: Option<TerminateExecutionResult>,
     pub(crate) viewport_line_ids: Vec<u64>,
     pub(crate) viewport_line_ids_generation: u64,
+    /// ADR-026 bit 13 mutually negotiated with command blocks.
+    pub(crate) session_bootstrap_negotiated: bool,
+    pub(crate) composer_target: Option<ComposerTarget>,
+    pub(crate) target_generation: u64,
+    pub(crate) session_offer: Option<SessionOffer>,
+    pub(crate) session_status: Option<SessionStatus>,
+    /// Composer commands admitted as plaintext relay (no new Block).
+    pub(crate) pending_relay_requests: std::collections::HashSet<u64>,
+    /// Host eligibility byte. 4 is Relay, which type 23 cannot express.
+    pub(crate) projected_eligibility: u8,
+    pub(crate) projected_wire_revision: u64,
+    /// Moves when the projected code changes or a newer wire revision arrives,
+    /// so a type-45 Relay on the same revision as type-23 Busy is re-sent.
+    pub(crate) composer_projection_revision: u64,
 }
 
 impl LocalDisplayClient {
@@ -267,6 +283,97 @@ impl LocalDisplayClient {
         self.composer_status
     }
 
+    /// ADR-026 session affordance for the thin host. `kind`: 0 none, 1 enable
+    /// Blocks (Candidate/Declined/Failed), 2 consent offer. Copy stays Rust.
+    pub fn projected_session_surface(&self) -> (u8, u64, u64) {
+        if !self.session_bootstrap_negotiated {
+            return (0, 0, 0);
+        }
+        if let Some(offer) = self.session_offer.as_ref() {
+            return (2, offer.host_block_id, offer.offer_generation);
+        }
+        let Some(status) = self.session_status else {
+            return (0, 0, 0);
+        };
+        use seyal_runtime::local_ipc::framing::SessionOverlayWire;
+        match status.overlay {
+            SessionOverlayWire::Candidate
+            | SessionOverlayWire::Declined
+            | SessionOverlayWire::Failed => (1, status.host_block_id, status.revision),
+            _ => (0, status.host_block_id, status.revision),
+        }
+    }
+
+    /// Eligibility byte and revision the host should relay. Type 23 stays the
+    /// legacy Busy/Available fact. When a negotiated type 45 says Relay, the
+    /// byte is 4 and the revision moves even if type 23 did not.
+    pub fn projected_composer_status(&self) -> Option<(u8, u64, [u8; 16])> {
+        let status = self.composer_status?;
+        let revision = if self.composer_projection_revision == 0 {
+            status.revision
+        } else {
+            self.composer_projection_revision
+        };
+        let eligibility = if self.projected_eligibility == 0 {
+            match status.eligibility {
+                ComposerEligibility::Available => 1,
+                ComposerEligibility::Busy => 2,
+                ComposerEligibility::Unsupported => 3,
+            }
+        } else {
+            self.projected_eligibility
+        };
+        Some((eligibility, revision, status.attachment_id.to_bytes()))
+    }
+
+    pub(crate) fn note_composer_projection(&mut self) {
+        let Some(status) = self.composer_status else {
+            return;
+        };
+        let wire = status.revision.max(
+            self.composer_target
+                .map(|target| target.revision)
+                .unwrap_or(0),
+        );
+        // Type 45 is the negotiated composer fact. Type 23 is the legacy
+        // Busy/Available fallback used only when no ComposerTarget has arrived.
+        let code = match (
+            self.session_bootstrap_negotiated,
+            self.composer_target.map(|target| target.mode),
+        ) {
+            (true, Some(ComposerTargetMode::Submit)) => 1,
+            (true, Some(ComposerTargetMode::Relay)) => 4,
+            (true, Some(ComposerTargetMode::Unavailable)) => 2,
+            _ => match status.eligibility {
+                ComposerEligibility::Available => 1,
+                ComposerEligibility::Busy => 2,
+                ComposerEligibility::Unsupported => 3,
+            },
+        };
+        if self.composer_projection_revision == 0 {
+            self.projected_eligibility = code;
+            self.projected_wire_revision = wire;
+            self.composer_projection_revision = wire;
+            return;
+        }
+        if code != self.projected_eligibility && wire == self.projected_wire_revision {
+            self.composer_projection_revision = self.composer_projection_revision.saturating_add(1);
+        } else if wire > self.projected_wire_revision {
+            let bumped = self.composer_projection_revision.max(wire);
+            self.composer_projection_revision = if code != self.projected_eligibility
+                && bumped == self.composer_projection_revision
+            {
+                bumped.saturating_add(1)
+            } else {
+                bumped
+            };
+        } else if code != self.projected_eligibility {
+            self.composer_projection_revision = self.composer_projection_revision.saturating_add(1);
+        }
+        self.projected_eligibility = code;
+        self.projected_wire_revision = wire;
+    }
+
     pub fn next_composer_request_id(&self) -> u64 {
         self.next_composer_request_id
     }
@@ -359,12 +466,14 @@ pub(crate) fn validate_composer_result(
     result: ComposerResult,
     attachment_id: AttachmentId,
     pending_requests: &std::collections::HashSet<u64>,
+    relay_accepts_without_block: bool,
 ) -> bool {
     result.attachment_id == attachment_id
         && result.request_id != 0
         && pending_requests.contains(&result.request_id)
         && match result.code {
-            ComposerResultCode::Accepted => result.block_id != 0,
+            // Relay admits the line as typed input and does not allocate a Block.
+            ComposerResultCode::Accepted => result.block_id != 0 || relay_accepts_without_block,
             ComposerResultCode::Busy
             | ComposerResultCode::Unsupported
             | ComposerResultCode::Backpressure
@@ -466,6 +575,15 @@ fn reconstruction_probe_client_with_stream(
         last_terminate_result: None,
         viewport_line_ids: Vec::new(),
         viewport_line_ids_generation: 0,
+        session_bootstrap_negotiated: false,
+        composer_target: None,
+        target_generation: 0,
+        session_offer: None,
+        session_status: None,
+        pending_relay_requests: std::collections::HashSet::new(),
+        projected_eligibility: 0,
+        projected_wire_revision: 0,
+        composer_projection_revision: 0,
     }
 }
 

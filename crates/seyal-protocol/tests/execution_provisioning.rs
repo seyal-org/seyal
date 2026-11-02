@@ -49,7 +49,11 @@ fn framing_version_stays_1_0_and_capability_bit_is_stable() {
         Some(MessageType::SuspendDelivery)
     );
     assert_eq!(MessageType::from_u16(41), Some(MessageType::ResumeDelivery));
-    assert_eq!(MessageType::from_u16(42), None);
+    assert_eq!(MessageType::from_u16(42), Some(MessageType::SessionOffer));
+    assert_eq!(MessageType::from_u16(43), Some(MessageType::SessionConsent));
+    assert_eq!(MessageType::from_u16(44), Some(MessageType::SessionStatus));
+    assert_eq!(MessageType::from_u16(45), Some(MessageType::ComposerTarget));
+    assert_eq!(MessageType::from_u16(46), None);
 }
 
 #[test]
@@ -369,7 +373,8 @@ fn terminate_execution_result_rejects_truncated_oversized_nonzero_reserved_and_u
 
 #[test]
 fn unknown_message_type_stays_unknown_message() {
-    let header = FrameHeader::new(42, 0);
+    // 42–45 are SessionOffer, SessionConsent, SessionStatus, and ComposerTarget.
+    let header = FrameHeader::new(46, 0);
     assert_eq!(
         decode_message(&header, &[]),
         Err(FramingError::UnknownMessageType)

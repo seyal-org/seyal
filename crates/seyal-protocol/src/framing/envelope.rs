@@ -26,6 +26,7 @@ pub const CAP_GRAPHEME_DISPLAY: u32 = 1 << 6;
 pub const CAP_VIEWPORT_LINE_IDS: u32 = 1 << 9;
 /// Per-attachment delivery suspend/resume (SPEC-004 §19, types 40/41).
 /// Bit 10 is `CAP_EXECUTION_PROVISIONING`; bit 12 is `CAP_LAUNCH_POLICY_DETAIL`.
+/// Bit 13 is `CAP_SESSION_BOOTSTRAP` (ADR-026), defined with types 42–45.
 pub const CAP_ATTACHMENT_DELIVERY_CONTROL: u32 = 1 << 11;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

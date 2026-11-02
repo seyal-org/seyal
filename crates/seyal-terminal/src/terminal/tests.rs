@@ -196,10 +196,42 @@ fn prompt_start_marker_is_a_trusted_shell_event_with_exact_shape() {
         terminal.take_shell_integration_event(),
         Some(ShellIntegrationEvent::PromptStarted { token })
     );
-    // Shapes outside A;<32hex> / C;<32hex> / D;<32hex>;<i32> stay deferred.
+    // Shapes outside A/C/D and the R readiness marker stay deferred.
     terminal
             .feed(b"\x1b]133;A\x07\x1b]133;A;abababababababababababababababab;extra\x07\x1b]133;C;abababababababababababababababab;pwd\x07\x1b]133;B;abababababababababababababababab\x07")
             .unwrap();
+    assert_eq!(terminal.take_shell_integration_event(), None);
+}
+
+#[test]
+fn readiness_marker_is_the_fourth_shape_and_names_the_shell() {
+    let mut terminal = TerminalState::new(80, 24).unwrap();
+    let token = ShellIntegrationToken::from_bytes([0x11; 16]);
+    let mut hex = String::new();
+    token.write_hex(&mut hex);
+    terminal
+        .feed(format!("\x1b]133;R;{hex};z\x07").as_bytes())
+        .unwrap();
+    assert_eq!(
+        terminal.take_shell_integration_event(),
+        Some(ShellIntegrationEvent::Readiness {
+            token,
+            shell: SessionShellKind::Zsh,
+        })
+    );
+    terminal
+        .feed(format!("\x1b]133;R;{hex};b\x07").as_bytes())
+        .unwrap();
+    assert_eq!(
+        terminal.take_shell_integration_event(),
+        Some(ShellIntegrationEvent::Readiness {
+            token,
+            shell: SessionShellKind::Bash,
+        })
+    );
+    terminal
+        .feed(format!("\x1b]133;R;{hex};q\x07\x1b]133;R;{hex};z;extra\x07").as_bytes())
+        .unwrap();
     assert_eq!(terminal.take_shell_integration_event(), None);
 }
 

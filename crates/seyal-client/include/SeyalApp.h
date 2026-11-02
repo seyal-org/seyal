@@ -237,7 +237,8 @@ enum SeyalAppComposerEligibility {
     SEYAL_APP_COMPOSER_ELIGIBILITY_NONE = 0,
     SEYAL_APP_COMPOSER_ELIGIBILITY_AVAILABLE = 1,
     SEYAL_APP_COMPOSER_ELIGIBILITY_BUSY = 2,
-    SEYAL_APP_COMPOSER_ELIGIBILITY_UNSUPPORTED = 3
+    SEYAL_APP_COMPOSER_ELIGIBILITY_UNSUPPORTED = 3,
+    SEYAL_APP_COMPOSER_ELIGIBILITY_RELAY = 4
 };
 
 /* SEYAL_APP_ACTION_SET_INSPECTOR reserved values and SeyalAppChrome.inspector_mode. */
@@ -394,7 +395,8 @@ typedef struct SeyalAppAxNode {
 enum SeyalAppComposerMode {
     SEYAL_APP_COMPOSER_HIDDEN = 0,
     SEYAL_APP_COMPOSER_AVAILABLE = 1,
-    SEYAL_APP_COMPOSER_BUSY = 2
+    SEYAL_APP_COMPOSER_BUSY = 2,
+    SEYAL_APP_COMPOSER_RELAY = 3
 };
 
 #define SEYAL_APP_COMPOSER_CAN_SUBMIT 1u
@@ -409,7 +411,8 @@ enum SeyalAppComposerMode {
 
 /*
  * seyal_app_block_row flags: state in the low three bits, plus
- * SEYAL_APP_BLOCK_SELECTED when that Block is bound to the inspector (#935).
+ * SEYAL_APP_BLOCK_SELECTED when that Block is bound to the inspector (#935),
+ * plus SEYAL_APP_BLOCK_SESSION when the Block scope is session.
  * Hosts must mask with SEYAL_APP_BLOCK_STATE_MASK before comparing states.
  */
 #define SEYAL_APP_BLOCK_STATE_RUNNING 1u
@@ -419,6 +422,8 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_BLOCK_STATE_UNKNOWN 4u
 #define SEYAL_APP_BLOCK_STATE_MASK 7u
 #define SEYAL_APP_BLOCK_SELECTED 8u
+/* Session-scoped Block. Hosts may indent; product copy stays in Rust. */
+#define SEYAL_APP_BLOCK_SESSION 16u
 
 typedef struct SeyalAppComposer {
     uint16_t version;

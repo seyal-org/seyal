@@ -18,6 +18,7 @@ final class ProductChromeHostView: NSView {
     let transcript = NSScrollView()
     let blocks = NSStackView()
     let composer: ComposerBridgeView
+    let sessionBootstrap = SessionBootstrapBanner()
     /// Rust-owned history overlay (#933); internal for component tests.
     let historyOverlay: ComposerHistoryOverlayView
     /// Global command palette overlay (#932); internal for component tests.
@@ -177,6 +178,7 @@ final class ProductChromeHostView: NSView {
         // command headers remain AppKit while output glyphs composite on top.
         liveContent.addSubview(transcript)
         liveContent.addSubview(pane)
+        liveContent.addSubview(sessionBootstrap)
         liveContent.addSubview(composer)
         liveContent.addSubview(newShellButton)
         liveContent.addSubview(historyOverlay)
@@ -231,6 +233,9 @@ final class ProductChromeHostView: NSView {
         pane.setContentHuggingPriority(.defaultLow, for: .vertical)
         pane.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         composer.setContentHuggingPriority(.required, for: .vertical)
+        // SessionBootstrapBanner owns its vertical hugging: required only while
+        // offered, fittingSizeCompression while collapsed so it cannot steal
+        // transcript/composer space or fight early liveContent height ≈ 1.
         transcript.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
         transcript.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
@@ -282,16 +287,22 @@ final class ProductChromeHostView: NSView {
             transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20),
             transcript.topAnchor.constraint(equalTo: liveContent.topAnchor, constant: 16),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            sessionBootstrap.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
+            sessionBootstrap.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
+            // When collapsed (height 0), this matches master: composer sits
+            // 12pt below transcript. When the banner is visible it grows in
+            // place without shifting Metal/PTY geometry for the idle path.
+            sessionBootstrap.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
             composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
             composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
-            composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
+            composer.topAnchor.constraint(equalTo: sessionBootstrap.bottomAnchor),
             composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
             newShellButton.centerXAnchor.constraint(equalTo: composer.centerXAnchor),
             newShellButton.centerYAnchor.constraint(equalTo: composer.centerYAnchor),
             newShellButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
-            historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
+            historyOverlay.bottomAnchor.constraint(equalTo: sessionBootstrap.topAnchor, constant: -8),
             blocks.topAnchor.constraint(equalTo: transcript.contentView.topAnchor),
             blocks.leadingAnchor.constraint(equalTo: transcript.contentView.leadingAnchor),
             blocks.widthAnchor.constraint(equalTo: transcript.contentView.widthAnchor),
@@ -456,6 +467,7 @@ final class ProductChromeHostView: NSView {
         let eligibilityChanged = snapshot.eligibility != lastEligibility
         if snapshot.generation == lastSnapshotGeneration && !eligibilityChanged {
             composer.reconcile()
+            sessionBootstrap.reconcile()
             historyOverlay.reconcile()
             commandPalette.reconcile()
             driveRecovery()
@@ -487,6 +499,7 @@ final class ProductChromeHostView: NSView {
         }
         applyTranscriptPresentation(snapshot)
         composer.reconcile()
+        sessionBootstrap.reconcile()
         historyOverlay.reconcile()
         commandPalette.reconcile()
         driveRecovery()
@@ -745,6 +758,7 @@ final class ProductChromeHostView: NSView {
         )
         updateColdVisualProbe(theme)
         composer.apply(theme: theme)
+        sessionBootstrap.apply(theme: theme)
         historyOverlay.apply(theme: theme)
         commandPalette.apply(theme: theme)
         for view in blocks.arrangedSubviews {

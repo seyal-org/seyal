@@ -101,13 +101,25 @@ extension ProductChromeHostView {
             // map stale until some later frame happens to arrive.
             pane.onProductChanged?()
             routeFocus()
+            // Close Terminal finishes after Lifecycle::Finalized; frames stop
+            // so onFrameChanged never rebuilds the Pane tab strip. Reconcile
+            // again once Rust has removed the tab (generation already bumped).
+            if commandId == KeybindingShortcutRealization.terminalCloseFocused {
+                for delay in [0.05, 0.15, 0.4, 1.0] as [TimeInterval] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                        self?.reconcileChrome()
+                        self?.routeFocus()
+                    }
+                }
+            }
         } else {
             NSApp.presentError(
                 NSError(
                     domain: "Seyal.WorkspaceCommand",
                     code: Int(code),
                     userInfo: [
-                        NSLocalizedDescriptionKey: "Seyal could not perform “\(sender.title)”. Try again."
+                        NSLocalizedDescriptionKey:
+                            "Seyal could not perform “\(sender.title)” (code \(code)). Try again."
                     ]
                 )
             )

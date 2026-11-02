@@ -39,6 +39,8 @@ fn timeline_round_trip_preserves_canvas_floor_flag() {
                     exit_status: Some(0),
                 },
                 flags: 0,
+                scope: BlockScope::Local,
+                trust: BlockTrust::LocalTrusted,
             },
             CommandBlock {
                 id: 2,
@@ -49,6 +51,8 @@ fn timeline_round_trip_preserves_canvas_floor_flag() {
                     exit_status: Some(0),
                 },
                 flags: COMMAND_BLOCK_FLAG_CANVAS_FLOOR,
+                scope: BlockScope::Local,
+                trust: BlockTrust::LocalTrusted,
             },
         ],
     };
@@ -67,6 +71,8 @@ fn timeline_round_trip_preserves_only_metadata_and_anchors() {
                 end_line: None,
                 state: CommandBlockState::Running,
                 flags: 0,
+                scope: BlockScope::Local,
+                trust: BlockTrust::LocalTrusted,
             },
             CommandBlock {
                 id: 2,
@@ -77,6 +83,8 @@ fn timeline_round_trip_preserves_only_metadata_and_anchors() {
                     exit_status: Some(1),
                 },
                 flags: 0,
+                scope: BlockScope::Local,
+                trust: BlockTrust::LocalTrusted,
             },
         ],
     };
@@ -94,6 +102,8 @@ fn timeline_state_tag_2_round_trips_completed_without_exit_status() {
             end_line: Some(42),
             state: CommandBlockState::Completed { exit_status: None },
             flags: 0,
+            scope: BlockScope::Local,
+            trust: BlockTrust::LocalTrusted,
         }],
     };
     let encoded = timeline.encode();
@@ -122,6 +132,8 @@ fn timeline_state_tag_2_rejects_nonzero_exit_status_and_inverted_end_line() {
             end_line: Some(52),
             state: CommandBlockState::Completed { exit_status: None },
             flags: 0,
+            scope: BlockScope::Local,
+            trust: BlockTrust::LocalTrusted,
         }],
     };
     let good = timeline.encode();
@@ -154,6 +166,8 @@ fn timeline_try_encode_rejects_unbounded_record_count() {
         end_line: None,
         state: CommandBlockState::Running,
         flags: 0,
+        scope: BlockScope::Local,
+        trust: BlockTrust::LocalTrusted,
     };
     let timeline = BlockTimeline {
         revision: 1,
@@ -177,6 +191,8 @@ fn timeline_try_encode_rejects_cumulative_command_bytes_over_frame() {
                     exit_status: Some(0),
                 },
                 flags: 0,
+                scope: BlockScope::Local,
+                trust: BlockTrust::LocalTrusted,
             })
             .collect(),
     };

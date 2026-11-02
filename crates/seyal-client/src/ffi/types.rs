@@ -426,6 +426,27 @@ impl SeyalComposerStatus {
     }
 }
 
+/// ADR-026 session affordance. `kind`: 0 none, 1 enable Blocks, 2 offer.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct SeyalSessionSurface {
+    pub kind: u8,
+    pub reserved: [u8; 7],
+    pub host_block_id: u64,
+    pub revision: u64,
+}
+
+impl SeyalSessionSurface {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            kind: 0,
+            reserved: [0; 7],
+            host_block_id: 0,
+            revision: 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod composer_status_abi_tests {
     use std::mem::{align_of, offset_of, size_of};

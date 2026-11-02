@@ -1852,18 +1852,26 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(newWindow.isEnabled, "W4b turns CreateWindow admission on")
         newWindow.click()
         waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
-        let fileMenu = app.menuBars.menuBarItems["File"]
-        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
-        fileMenu.click()
-        let close = app.menuItems["Close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
-        close.click()
+        // #1395: File owns Close Terminal / Close Tab; Window owns Close Window.
+        // Hierarchical last-window stay-alive is WindowClose, not AppCloseFocused.
+        let windowMenu = app.menuBars.menuBarItems["Window"]
+        XCTAssertTrue(windowMenu.waitForExistence(timeout: 5))
+        windowMenu.click()
+        let closeWindow = app.menuItems["Close Window"]
+        XCTAssertTrue(
+            closeWindow.waitForExistence(timeout: 5),
+            "Window → Close Window must be projected after #1395"
+        )
+        closeWindow.click()
         waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
-        fileMenu.click()
-        close.click()
+        windowMenu.click()
+        XCTAssertTrue(closeWindow.waitForExistence(timeout: 5))
+        closeWindow.click()
         waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
         RunLoop.current.run(until: Date().addingTimeInterval(2))
         XCTAssertEqual(app.state, .runningForeground, "last-window close must not quit")
+        let fileMenu = app.menuBars.menuBarItems["File"]
+        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
         XCTAssertTrue(
             newWindow.waitForExistence(timeout: 5),
             "File → New Window stays available after the last window closes"
@@ -1886,6 +1894,18 @@ final class SeyalHostUITests: XCTestCase {
         closeButton.click()
         waitForWindowCount(app, 1, message: "title-bar close forwards the typed CloseWindow action")
         XCTAssertEqual(app.state, .runningForeground, "closing a non-final window must not quit")
+    }
+
+    func testSessionBootstrapChromeKeepsComposerUsableAtIdlePrompt() throws {
+        // ProductChromeHostView gained the ADR-026 session banner. Idle prompt
+        // must still admit Flow composer submit while the banner is collapsed.
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        XCTAssertTrue(composer.isHittable)
+        let chrome = app.descendants(matching: .any)["seyal-product-chrome"].firstMatch
+        XCTAssertTrue(chrome.waitForExistence(timeout: 5))
     }
 
     private func waitForWindowCount(

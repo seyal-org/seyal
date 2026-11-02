@@ -11,6 +11,14 @@ use super::config::{PtyEofReapProbe, CONTROL_DISPATCH_QUANTUM};
 use super::lifecycle::Lifecycle;
 use super::Runtime;
 
+/// Line ending or interrupt admitted on the direct path. Candidate evaluation
+/// stays on this cold edge, not on every PTY read.
+fn direct_input_is_candidate_edge(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .any(|byte| matches!(byte, b'\n' | b'\r' | 0x03))
+}
+
 impl Runtime {
     pub(super) fn drain_control(&mut self) -> Result<usize, RuntimeError> {
         let mut handled = 0usize;
@@ -19,12 +27,19 @@ impl Runtime {
                 Ok(ControlMessage::Input(input)) => {
                     let id = input.execution_id;
                     let kind = input.kind;
+                    let candidate_edge =
+                        kind == InputKind::Direct && direct_input_is_candidate_edge(&input.bytes);
                     if let Some(entry) = self.entries.get_mut(&id)
                         && entry.terminal_io_active()
                     {
                         entry.pending_input.push_back(input);
                         if kind == InputKind::Direct {
                             self.note_direct_input_admitted(id);
+                        }
+                        if candidate_edge {
+                            self.consider_session_candidate(id);
+                            #[cfg(target_os = "macos")]
+                            self.publish_composer_status_if_changed(id);
                         }
                         self.service_writes(id)?;
                     }
