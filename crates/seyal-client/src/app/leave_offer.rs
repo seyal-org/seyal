@@ -47,9 +47,7 @@ fn normalize_for_leave(path: &str) -> String {
 /// Decide whether a trusted cwd observation should raise or clear an offer.
 pub(crate) fn evaluate_leave_offer(shell: &ShellState, trusted_cwd: &str) -> Option<LeaveOffer> {
     let active = shell.active_workspace_id();
-    let Some(root) = shell.workspace_root(active) else {
-        return None;
-    };
+    let root = shell.workspace_root(active)?;
     if cwd_under_root(trusted_cwd, root) {
         return None;
     }
