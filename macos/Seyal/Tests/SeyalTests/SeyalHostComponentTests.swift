@@ -448,11 +448,16 @@ final class SeyalHostComponentTests: XCTestCase {
 
         view.showTabs()
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tabs-heading"))
-        let tabRow = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-tab-0") as? NSButton)
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-tab-0"),
+            "Tabs mode lists pane-local TerminalTabs, not outer Workspace Tabs"
+        )
+        let tabRow = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-terminal-tab-left-0") as? NSButton
+        )
         let tabLabel = tabRow.accessibilityLabel() ?? tabRow.accessibilityTitle() ?? ""
-        XCTAssertFalse(tabLabel.hasPrefix("Layout "), "Tabs mode uses the Rust tab title, not Layout N")
+        XCTAssertFalse(tabLabel.hasPrefix("Layout "), "Tabs mode must not use Layout N labels")
         XCTAssertTrue(tabLabel.localizedCaseInsensitiveContains("Terminal"), "expected tab title: \(tabLabel)")
-        XCTAssertTrue(tabLabel.contains("pane"), "Tabs mode secondary is pane count: \(tabLabel)")
         XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-0"))
         XCTAssertNil(accessibilityChild(view, identifier: "seyal-workspaces-heading"))
         view.layoutSubtreeIfNeeded()
@@ -462,6 +467,57 @@ final class SeyalHostComponentTests: XCTestCase {
             accuracy: 0.5,
             "Tabs C04 rows must also span the left panel edge-to-edge"
         )
+        XCTAssertEqual(view.newTabButton.toolTip, "New Terminal")
+    }
+
+    @MainActor
+    func testLeftTabsModeProjectsPaneLocalTerminalTabs() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        XCTAssertEqual(
+            (accessibilityChild(view, identifier: "seyal-left-tabs") as? NSButton)?.title,
+            "Tabs"
+        )
+        view.showTabs()
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-pane-0"),
+            "left Tabs must not dump Pane rows"
+        )
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-tab-0"))
+        let first = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-terminal-tab-left-0") as? NSButton
+        )
+        XCTAssertTrue(
+            (first.accessibilityLabel() ?? first.title).localizedCaseInsensitiveContains("Terminal")
+        )
+
+        var newTerminal = SeyalAppAction()
+        newTerminal.version = UInt16(SEYAL_APP_ABI_VERSION)
+        newTerminal.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        newTerminal.kind = UInt16(SEYAL_APP_ACTION_NEW_TERMINAL.rawValue)
+        XCTAssertEqual(seyal_app_apply(view.pane.appHandle, &newTerminal), 0)
+        view.reconcileChrome()
+        view.showTabs()
+        let second = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-terminal-tab-left-1") as? NSButton
+        )
+        XCTAssertTrue(
+            (second.accessibilityLabel() ?? second.title).contains("Terminal 2")
+                || (second.accessibilityLabel() ?? second.title).contains("Terminal")
+        )
+        (second as NSButton).performClick(nil)
+        view.reconcileChrome()
+        let selected = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-terminal-tab-left-1") as? NSButton
+        )
+        XCTAssertEqual(selected.state, .on)
+
+        XCTAssertFalse(view.newTabButton.isHidden)
+        XCTAssertEqual(view.newTabButton.toolTip, "New Terminal")
+        view.newTabButton.performClick(nil)
+        view.reconcileChrome()
+        view.showTabs()
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-terminal-tab-left-2"))
     }
 
     @MainActor

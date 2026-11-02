@@ -131,19 +131,30 @@ struct RowDraft<'a> {
     title: &'a str,
     detail: &'a str,
     address: Option<crate::navigation::ResourceAddress>,
+    /// Opaque 16-byte fence payload (PaneId for TERMINAL_TAB rows). Mutually
+    /// exclusive with `address` ResourceAddress encoding.
+    raw_address: Option<[u8; 16]>,
 }
 
 fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: RowDraft<'_>) {
     let title_off = push_text(text, draft.title);
     let detail_off = push_text(text, draft.detail);
     let (id_lo, id_hi) = split_id(draft.id);
-    let (address_version, address_kind, address_bytes, address_len) = match draft.address {
-        Some(address) => {
-            let (version, kind, bytes, len) = crate::navigation::encode_resource_address(address);
-            (version, kind, bytes, len)
-        }
-        None => (0, 0, [0; 48], 0),
-    };
+    let (address_version, address_kind, address_bytes, address_len) =
+        match (draft.address, draft.raw_address) {
+            (Some(address), None) => {
+                let (version, kind, bytes, len) =
+                    crate::navigation::encode_resource_address(address);
+                (version, kind, bytes, len)
+            }
+            (None, Some(raw)) => {
+                let mut bytes = [0u8; 48];
+                bytes[..16].copy_from_slice(&raw);
+                (0, 0, bytes, 16)
+            }
+            (None, None) => (0, 0, [0; 48], 0),
+            (Some(_), Some(_)) => (0, 0, [0; 48], 0),
+        };
     rows.push(SeyalAppRow {
         kind: draft.kind,
         flags: draft.flags,
@@ -181,6 +192,7 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 title: &workspace.name,
                 detail: workspace.detail.as_deref().unwrap_or(""),
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -198,6 +210,7 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 title: &tab.title,
                 detail: &pane_count,
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -214,6 +227,61 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 title: &pane.title,
                 detail: "",
                 address: None,
+                raw_address: None,
+            },
+        );
+    }
+    // Flat active-Workspace TerminalTab navigation map for left C03 Tabs (#1412).
+    struct LeftTerminalTabRow {
+        title: String,
+        detail: String,
+        terminal_id: [u8; 16],
+        pane_id: [u8; 16],
+        selected: bool,
+    }
+    let multi_pane = snap.shell.panes.len() > 1;
+    let titles: Vec<LeftTerminalTabRow> = snap
+        .shell
+        .panes
+        .iter()
+        .flat_map(|pane| {
+            let pane_id = pane.id.to_bytes();
+            let pane_title = pane.title.clone();
+            let focused = pane.id == snap.shell.focused_pane;
+            pane.terminal_tabs
+                .iter()
+                .enumerate()
+                .map(move |(term_index, terminal)| {
+                    let selected = focused && pane.selected_terminal_tab == Some(terminal.id);
+                    let title = format!("Terminal {}", term_index + 1);
+                    let detail = if multi_pane {
+                        pane_title.clone()
+                    } else {
+                        String::new()
+                    };
+                    LeftTerminalTabRow {
+                        title,
+                        detail,
+                        terminal_id: terminal.id.to_bytes(),
+                        pane_id,
+                        selected,
+                    }
+                })
+        })
+        .collect();
+    for (terminal_index, row) in titles.iter().enumerate() {
+        push_row(
+            &mut state.shell_rows,
+            &mut state.shell_text,
+            RowDraft {
+                kind: 3,
+                index: terminal_index as u32,
+                id: row.terminal_id,
+                flags: u16::from(row.selected),
+                title: &row.title,
+                detail: &row.detail,
+                address: None,
+                raw_address: Some(row.pane_id),
             },
         );
     }
@@ -251,6 +319,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 title: &title,
                 detail: &row.value,
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -270,6 +339,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 title: agent.id.as_str(),
                 detail: &agent.name,
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -285,6 +355,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 title: item.id.as_str(),
                 detail: &item.title,
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -324,6 +395,7 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
                 title: &block.command,
                 detail: block.state.transcript_status(),
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -358,6 +430,7 @@ pub(super) fn encode_history_rows(state: &mut AppHandle) {
                 title: command,
                 detail: "",
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -380,6 +453,7 @@ pub(super) fn encode_palette_rows(state: &mut AppHandle) {
                 title: &row.label,
                 detail: row.category,
                 address: row.address,
+                raw_address: None,
             },
         );
     }

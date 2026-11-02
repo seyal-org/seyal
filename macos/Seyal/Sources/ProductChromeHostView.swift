@@ -499,7 +499,7 @@ final class ProductChromeHostView: NSView {
         applyLeftModeSwitcher(leftPanel: chrome.left_panel)
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
-        rebuildLayoutActions(shell: shell)
+        rebuildLayoutActions(shell: shell, leftPanel: chrome.left_panel)
         reconcilePaneHosts(paneCount: Int(shell.pane_count))
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
@@ -626,11 +626,22 @@ final class ProductChromeHostView: NSView {
         }
     }
 
-    func rebuildLayoutActions(shell: SeyalAppShell) {
-        // Outer Tab create/close stay with the Tabs navigation control.
-        // Terminal and Pane actions stay pane-local.
-        newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
-        closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
+    func rebuildLayoutActions(shell: SeyalAppShell, leftPanel: UInt16) {
+        // Workspaces mode: + creates an outer Workspace Tab. Tabs mode: + creates
+        // a pane-local TerminalTab on the focused Pane (#1412 / ADR-025 §2.8).
+        if leftPanel == 1 {
+            newTabButton.isHidden = false
+            newTabButton.action = #selector(createTerminal)
+            newTabButton.setAccessibilityLabel("New Terminal")
+            newTabButton.toolTip = "New Terminal"
+            closeTabButton.isHidden = true
+        } else {
+            newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
+            newTabButton.action = #selector(createTab)
+            newTabButton.setAccessibilityLabel("New Tab")
+            newTabButton.toolTip = "New Tab"
+            closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
+        }
         configureCloseButtons(shell: shell)
     }
 
@@ -689,30 +700,65 @@ final class ProductChromeHostView: NSView {
                 }
             }
         } else {
+            // Pane-local TerminalTab navigation map (Rust-authored titles/order).
             appendLeftSection(
                 title: "TABS",
                 identifier: "seyal-tabs-heading",
                 topGap: false
             ) {
-                for index in 0..<Int(shell.tab_count) {
-                    let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), UInt32(index))
-                    let paneCount = productChromeCopyUTF8(row.detail, row.detail_len) ?? "0"
+                let terminalCount = leftTerminalTabRowCount(shell: shell)
+                for index in 0..<terminalCount {
+                    let row = seyal_app_shell_row(
+                        pane.appHandle,
+                        UInt16(SEYAL_APP_ROW_TERMINAL_TAB),
+                        UInt32(index)
+                    )
+                    guard row.title_len > 0 || row.id_lo != 0 || row.id_hi != 0 else { break }
+                    let (paneLo, paneHi) = paneIdFromTerminalTabRow(row)
+                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Terminal"
+                    let detail = productChromeCopyUTF8(row.detail, row.detail_len)
                     leftItems.addArrangedSubview(
                         contextRow(
-                            primary: productChromeCopyUTF8(row.title, row.title_len) ?? "Tab \(index + 1)",
-                            secondary: "\(paneCount) pane\(paneCount == "1" ? "" : "s")",
-                            identifier: "seyal-tab-\(index)",
+                            primary: title,
+                            secondary: Self.helpfulWorkspaceDetail(title: title, detail: detail),
+                            identifier: "seyal-terminal-tab-left-\(index)",
                             selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                            action: #selector(selectTab(_:)),
-                            kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
+                            action: #selector(selectLeftTerminalTab(_:)),
+                            kind: UInt16(SEYAL_APP_ACTION_SELECT_TERMINAL_TAB.rawValue),
                             idLo: row.id_lo,
-                            idHi: row.id_hi
+                            idHi: row.id_hi,
+                            paneLo: paneLo,
+                            paneHi: paneHi
                         )
                     )
                 }
             }
         }
         // Pane focus stays pane-local. C03 must not dump a Pane tree into the left rail.
+    }
+
+    /// Bound for left Tabs rows without growing `SeyalAppShell` ABI size.
+    func leftTerminalTabRowCount(shell: SeyalAppShell) -> Int {
+        var count = 0
+        for index in 0..<Int(shell.pane_count) {
+            let paneRow = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
+            count += Int(seyal_app_pane_terminal_tab_count(pane.appHandle, paneRow.id_lo, paneRow.id_hi))
+        }
+        return count
+    }
+
+    func paneIdFromTerminalTabRow(_ row: SeyalAppRow) -> (UInt64, UInt64) {
+        guard row.address_len >= 16 else { return (0, 0) }
+        let bytes = withUnsafeBytes(of: row.address_bytes) { Array($0.prefix(16)) }
+        var lo: UInt64 = 0
+        var hi: UInt64 = 0
+        withUnsafeMutableBytes(of: &lo) { dest in
+            dest.copyBytes(from: bytes[0..<8])
+        }
+        withUnsafeMutableBytes(of: &hi) { dest in
+            dest.copyBytes(from: bytes[8..<16])
+        }
+        return (UInt64(littleEndian: lo), UInt64(littleEndian: hi))
     }
 
     /// C04 secondary path only when it adds information beyond the primary name.

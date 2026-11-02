@@ -8,6 +8,9 @@ final class IdentityButton: NSButton {
     var kind: UInt16 = 0
     var idLo: UInt64 = 0
     var idHi: UInt64 = 0
+    /// Owning PaneId for left C03 TerminalTab rows (#1412); unused otherwise.
+    var paneLo: UInt64 = 0
+    var paneHi: UInt64 = 0
     var containmentGeneration: UInt64 = 0
 
     /// Transparent hit target for C04 rows that paint their own labels.

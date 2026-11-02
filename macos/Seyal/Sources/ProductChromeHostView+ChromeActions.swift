@@ -18,6 +18,17 @@ extension ProductChromeHostView {
         applyIdentity(UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue), button: sender)
     }
 
+    @objc func selectLeftTerminalTab(_ sender: NSButton) {
+        guard let tagged = sender as? IdentityButton else { return }
+        _ = focusPaneForPaneAction(paneLo: tagged.paneLo, paneHi: tagged.paneHi)
+        selectTerminalTab(
+            paneLo: tagged.paneLo,
+            paneHi: tagged.paneHi,
+            terminalLo: tagged.idLo,
+            terminalHi: tagged.idHi
+        )
+    }
+
     @objc func focusPane(_ sender: NSButton) {
         applyIdentity(UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue), button: sender)
     }
@@ -381,7 +392,9 @@ extension ProductChromeHostView {
         action: Selector,
         kind: UInt16,
         idLo: UInt64,
-        idHi: UInt64
+        idHi: UInt64,
+        paneLo: UInt64 = 0,
+        paneHi: UInt64 = 0
     ) -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -437,6 +450,8 @@ extension ProductChromeHostView {
         let hit = IdentityButton(title: "", target: self, action: action)
         hit.idLo = idLo
         hit.idHi = idHi
+        hit.paneLo = paneLo
+        hit.paneHi = paneHi
         hit.kind = kind
         hit.bezelStyle = .inline
         hit.isBordered = false
