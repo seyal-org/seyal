@@ -234,7 +234,7 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 926
+acknowledged_loc = 934
 issue = 1414
 reason = "Thin AppKit chrome host stays one cold-path façade; #1412 TerminalTab left Tabs plus #1413/#1414 Create Workspace and leave-offer present-if-needed stay on this host without moving product authority into Swift (ADR-015 / ADR-025 §2.8 / ADR-028)."
 
