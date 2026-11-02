@@ -1076,12 +1076,14 @@ fn negotiated_connection_routes_multiple_attachments_independently() {
         }
         .encode(),
     );
-    harness.assert_no_display_for_attachment(
-        &mut client,
-        first.attachment_id,
-        Duration::from_millis(100),
-    );
 
+    // SPEC-004 §19.2 defines no SuspendDelivery ACK. A display frame already
+    // written before the suspend was handled may still arrive over this
+    // socket. Use a subsequent Input to a *different* live attachment, then
+    // observe its resulting display as the ordered control/delivery barrier.
+    // Once that response arrives, old first-attachment frames have been
+    // consumed/parked, and any new first-attachment display is a violation.
+    // This also proves suspension does not stall another live attachment.
     harness.send(
         &mut client,
         MessageType::Input,
@@ -1096,6 +1098,11 @@ fn negotiated_connection_routes_multiple_attachments_independently() {
         second.attachment_id,
         MessageType::DisplayDelta,
         Instant::now() + Duration::from_secs(2),
+    );
+    harness.assert_no_display_for_attachment(
+        &mut client,
+        first.attachment_id,
+        Duration::from_millis(100),
     );
 
     harness.send(
