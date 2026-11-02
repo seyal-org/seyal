@@ -30,6 +30,21 @@ CLAIM_COMMAND = ["python3", "scripts/seyal-ai-sdlc-claim.py"]
 SAFE_ARG = re.compile(r"^[a-zA-Z0-9_./:@=-]+$")
 
 
+def safe_readonly_mcp(tool: str) -> bool:
+    """Explicit GitHub read families required before an issue can be claimed."""
+    if not tool.startswith("MCP:"):
+        return False
+    name = tool[4:].casefold()
+    if "github" not in name:
+        return False
+    # Cursor MCP naming varies between github__get_issue and
+    # mcp__GitHub__get_issue; accept only known read verb families.
+    leaf = name.rsplit("__", 1)[-1]
+    if leaf.startswith("github_"):
+        leaf = leaf[len("github_"):]
+    return bool(re.fullmatch(r"(?:get|fetch|list|search)_[a-z0-9_]+", leaf))
+
+
 def worker_id(event: dict) -> str | None:
     # Cursor documents conversation_id as stable across turns. A generation_id
     # changes per prompt and MUST NOT be used as the owner.
@@ -80,6 +95,8 @@ def safe_shell(command: str) -> bool:
         return not any(arg.startswith(("-o", "--output", "--pre", "--pcre2-version")) for arg in args[1:])
     if args[0] == "git" and len(args) >= 2 and args[1] in SAFE_GIT:
         return not any(arg.startswith(("--output", "--ext-diff", "--textconv", "--config", "-c")) or arg == "--exec-path" for arg in args[2:])
+    if len(args) >= 3 and args[0] == "gh" and args[1] in ("issue", "pr"):
+        return args[2] in ("view", "list", "checks", "status")
     return False
 
 
@@ -105,7 +122,7 @@ def verify_current(worker: str) -> bool:
 
 def decide(event: dict) -> dict:
     tool = event.get("tool_name")
-    if tool in READ_TOOLS:
+    if tool in READ_TOOLS or (isinstance(tool, str) and safe_readonly_mcp(tool)):
         return {"permission": "allow"}
     worker = worker_id(event)
     if not worker:
