@@ -115,6 +115,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
         XCTAssertTrue(element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 12))
+        XCTAssertTrue(
+            element(app, "seyal-pane-presentation-host").waitForExistence(timeout: 8),
+            "focused Flow leaf keeps a durable presentation host"
+        )
         XCTAssertTrue(element(app, "seyal-composer").exists, "focused Pane keeps seyal-composer")
         XCTAssertTrue(element(app, "seyal-blocks").exists, "focused Pane keeps Blocks")
         XCTAssertTrue(
@@ -141,11 +145,305 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForFocus(app, region: other)
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "seyal-blocks").exists)
+        XCTAssertTrue(element(app, "seyal-pane-presentation-host").waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "seyal-secondary-blocks").exists)
 
         let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         shot.name = "1424-dual-flow-blocks-composers"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// #1424 scenario 2: focus churn keeps host/Block content and scroll mid-transcript.
+    func testFocusChurnRetainsScrolledTranscriptAndPaneHosts() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(
+            "printf '%s\\n' $(seq 1 80) 'seyal-1424-scroll-a'",
+            in: app
+        )
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(app, "seyal-pane-presentation-host").waitForExistence(timeout: 8))
+
+        let focusedIdx = try focusedRegionIndex(app, count: 2)
+        let other = focusedIdx == 0 ? 1 : 0
+        // Seed the newly focused sibling with its own tall transcript.
+        element(app, "seyal-pane-region-\(other)").click()
+        waitForFocus(app, region: other)
+        waitForUsablePty(in: app)
+        submitComposerCommand(
+            "printf '%s\\n' $(seq 1 80) 'seyal-1424-scroll-b'",
+            in: app
+        )
+
+        let primaryScroll = element(app, "seyal-blocks-scroll")
+        let secondaryScroll = element(app, "seyal-secondary-blocks-scroll")
+        XCTAssertTrue(primaryScroll.exists)
+        XCTAssertTrue(secondaryScroll.exists)
+        // Scroll the focused transcript away from live end.
+        primaryScroll.scroll(byDeltaX: 0, deltaY: -420)
+        let primaryOriginBefore = primaryScroll.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)
+        ).screenPoint
+        let secondaryFrameBefore = secondaryScroll.frame
+        let blockA = blockCommand(in: app, containing: "seyal-1424-scroll-a")
+        let blockB = blockCommand(in: app, containing: "seyal-1424-scroll-b")
+        XCTAssertTrue(blockA.exists || blockB.exists)
+
+        for cycle in 0..<8 {
+            let target = cycle % 2
+            element(app, "seyal-pane-region-\(target)").click()
+            waitForFocus(app, region: target)
+            XCTAssertTrue(element(app, "seyal-pane-presentation-host").exists)
+            XCTAssertTrue(element(app, "seyal-secondary-live-pane").exists)
+            XCTAssertTrue(element(app, "seyal-composer").exists)
+            XCTAssertTrue(element(app, "seyal-blocks").exists)
+            XCTAssertTrue(element(app, "seyal-secondary-blocks").exists)
+            XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").exists)
+            XCTAssertTrue(
+                blockCommand(in: app, containing: "seyal-1424-scroll-a").exists
+                    || blockCommand(in: app, containing: "seyal-1424-scroll-b").exists,
+                "focus cycle \(cycle) must keep pane Block content"
+            )
+        }
+
+        // Mid-transcript scroll must not jump back to live end after focus churn.
+        let primaryOriginAfter = primaryScroll.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)
+        ).screenPoint
+        XCTAssertEqual(
+            primaryOriginAfter.y,
+            primaryOriginBefore.y,
+            accuracy: 48,
+            "focused transcript scroll position must survive focus ownership churn"
+        )
+        XCTAssertEqual(
+            secondaryScroll.frame.minY,
+            secondaryFrameBefore.minY,
+            accuracy: 8,
+            "secondary transcript host frame must stay stable"
+        )
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1424-focus-churn-scroll-retained"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// #1424 scenario 3: unfocused pane keeps updating the same Block while the sibling is used.
+    func testUnfocusedPaneStreamKeepsUpdatingSameBlock() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let token = "stream-marker-\(String(UUID().uuidString.prefix(6)))"
+        submitComposerCommand(
+            "for i in $(seq 1 40); do printf '%s-%s\\n' '\(token)' \"$i\"; sleep 0.15; done",
+            in: app
+        )
+        let streamBlock = anyPaneBlock(in: app, containing: token)
+        XCTAssertTrue(streamBlock.waitForExistence(timeout: 12), "stream Block must appear")
+        let streamBody = blockBody(for: streamBlock, in: app)
+        XCTAssertTrue(streamBody.waitForExistence(timeout: 8))
+        let heightBefore = streamBody.frame.height
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForUsablePty(in: app)
+        let focused = try focusedRegionIndex(app, count: 2)
+        // Prefer focusing the non-streaming pane so the stream stays visible but unfocused.
+        if focused == 0 {
+            element(app, "seyal-pane-region-1").click()
+            waitForFocus(app, region: 1)
+        }
+        waitForUsablePty(in: app)
+        submitComposerCommand("printf 'seyal-1424-sibling\\n'", in: app)
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: "seyal-1424-sibling").waitForExistence(timeout: 10)
+        )
+
+        let unfocusedStream = anyPaneBlock(in: app, containing: token)
+        XCTAssertTrue(unfocusedStream.exists, "unfocused stream Block must remain after focus move")
+        let unfocusedBody = blockBody(for: unfocusedStream, in: app)
+        let grew = expectation(
+            for: NSPredicate { _, _ in
+                unfocusedBody.exists && unfocusedBody.frame.height > heightBefore + 8
+            },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [grew], timeout: 8),
+            .completed,
+            "unfocused stream body must keep growing; before=\(heightBefore) after=\(unfocusedBody.frame.height)"
+        )
+        XCTAssertTrue(
+            unfocusedStream.identifier.hasPrefix("seyal-secondary-block-")
+                || unfocusedStream.identifier.hasPrefix("seyal-block-"),
+            "stream must stay on a Block surface, id=\(unfocusedStream.identifier)"
+        )
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1424-unfocused-stream-same-block"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// #1424 scenario 4: divider drag keeps dual Flow Blocks+composers.
+    func testDividerDragKeepsDualFlowBlocksAndComposers() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand("printf 'seyal-1424-div-a\\n'", in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForUsablePty(in: app)
+        let focused = try focusedRegionIndex(app, count: 2)
+        let other = focused == 0 ? 1 : 0
+        element(app, "seyal-pane-region-\(other)").click()
+        waitForFocus(app, region: other)
+        waitForUsablePty(in: app)
+        submitComposerCommand("printf 'seyal-1424-div-b\\n'", in: app)
+
+        let divider = element(app, "seyal-pane-divider-0")
+        XCTAssertTrue(divider.waitForExistence(timeout: 8))
+        let leading = element(app, "seyal-pane-region-0")
+        let trailing = element(app, "seyal-pane-region-1")
+        let area = leading.frame.union(trailing.frame)
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: area.minX + area.width * 0.35 - divider.frame.midX, dy: 0))
+        start.press(forDuration: 0.2, thenDragTo: end, withVelocity: 300, thenHoldForDuration: 0.3)
+
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "seyal-blocks").exists)
+        XCTAssertTrue(element(app, "seyal-secondary-blocks").exists)
+        XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").exists)
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
+            ).allElementsBoundByIndex.isEmpty
+        )
+        XCTAssertTrue(blockCommand(in: app, containing: "seyal-1424-div-a").exists)
+        XCTAssertTrue(blockCommand(in: app, containing: "seyal-1424-div-b").exists)
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1424-divider-dual-flow-retained"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// #1424 scenario 5: disposable vim TUI enter/exit restores Blocks+composer.
+    func testVimTuiEnterExitRestoresFlowBlocksAndComposer() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+        submitComposerCommand("vim -Nu NONE -n", in: app)
+
+        let composer = element(app, "seyal-composer")
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        // TUI should take the live surface; composer becomes non-hittable / Hidden.
+        let tuiArrived = expectation(
+            for: NSPredicate(format: "isHittable == false"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        let tuiResult = XCTWaiter.wait(for: [tuiArrived], timeout: 12)
+        if tuiResult != .completed {
+            // Some shells surface vim under Raw with a still-visible composer;
+            // require a usable live terminal either way.
+            XCTAssertTrue(terminal.waitForExistence(timeout: 5), "vim must attach a live surface")
+        }
+        let tuiShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        tuiShot.name = "1424-vim-tui-active"
+        tuiShot.lifetime = .keepAlways
+        add(tuiShot)
+
+        if terminal.exists, terminal.isHittable {
+            terminal.click()
+        }
+        // Quit vim: Escape then :q!
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        app.typeText(":q!")
+        app.typeKey("\r", modifierFlags: [])
+
+        let restored = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [restored], timeout: 15),
+            .completed,
+            "leaving vim must restore hittable Flow composer"
+        )
+        XCTAssertTrue(element(app, "seyal-blocks").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(app, "seyal-blocks-scroll").exists)
+        let editor = element(app, "seyal-composer-editor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.click()
+        let token = "after-vim-marker-1424"
+        editor.typeText(token)
+        XCTAssertTrue(
+            NSPredicate(format: "value CONTAINS %@", token).evaluate(with: editor),
+            "post-vim keys must enter the composer"
+        )
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1424-vim-tui-restored-flow"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// #1424 scenario 6: resize/reflow keeps dual Flow chrome without blank-canvas collapse.
+    func testResizeReflowKeepsDualFlowHostsWithoutBlankCanvas() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand("printf '%s\\n' $(seq 1 30) 'seyal-1424-resize'", in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-secondary-blocks").waitForExistence(timeout: 8))
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let original = window.frame
+        let origin = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
+        origin.click()
+        origin.press(
+            forDuration: 0.05,
+            thenDragTo: origin.withOffset(CGVector(dx: -160, dy: -90))
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        origin.press(
+            forDuration: 0.05,
+            thenDragTo: origin.withOffset(CGVector(dx: 120, dy: 60))
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        let focused = try focusedRegionIndex(app, count: 2)
+        element(app, "seyal-pane-region-\(focused)").click()
+        waitForUsablePty(in: app)
+        submitComposerCommand("printf 'seyal-1424-reflow\\n'", in: app)
+
+        XCTAssertTrue(element(app, "seyal-composer").exists)
+        XCTAssertTrue(element(app, "seyal-blocks").exists)
+        XCTAssertTrue(element(app, "seyal-secondary-blocks").exists)
+        XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").exists)
+        XCTAssertTrue(element(app, "seyal-pane-presentation-host").exists)
+        XCTAssertTrue(element(app, "seyal-secondary-live-pane").exists)
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "seyal-1424-resize").exists)
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "seyal-1424-reflow").exists)
+        let secondaryScroll = element(app, "seyal-secondary-blocks-scroll")
+        XCTAssertLessThan(
+            secondaryScroll.frame.height,
+            max(original.height, window.frame.height),
+            "secondary scroll clip stays inside the window"
+        )
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1424-resize-reflow-dual-flow"
         shot.lifetime = .keepAlways
         add(shot)
         XCTAssertEqual(app.state, .runningForeground)
@@ -370,13 +668,34 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: submit, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
         submit.click()
-        let block = blockCommand(in: app, containing: command)
+        let block = anyPaneBlock(in: app, containing: command)
         XCTAssertTrue(block.waitForExistence(timeout: 10), "the selected execution records its own submitted command")
     }
 
     private func blockCommand(in app: XCUIApplication, containing command: String) -> XCUIElement {
         app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "seyal-block-", command)
+        ).firstMatch
+    }
+
+    private func anyPaneBlock(in app: XCUIApplication, containing command: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label CONTAINS %@",
+                "seyal-block-",
+                "seyal-secondary-block-",
+                command
+            )
+        ).firstMatch
+    }
+
+    private func blockBody(for block: XCUIElement, in app: XCUIApplication) -> XCUIElement {
+        let bodyId = "\(block.identifier)-body"
+        let body = app.descendants(matching: .any)[bodyId].firstMatch
+        if body.exists { return body }
+        // Fallback: any body descendant under the same pane Block stack.
+        return block.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH %@", "-body")
         ).firstMatch
     }
 

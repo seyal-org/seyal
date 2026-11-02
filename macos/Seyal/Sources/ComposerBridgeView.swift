@@ -152,6 +152,22 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         window?.makeFirstResponder(textView) ?? false
     }
 
+    /// Multipane focused host uses the primary `seyal-composer` AX id so XCUI
+    /// and existing host assertions keep working; unfocused keeps pane-scoped id.
+    func setPrimaryAccessibilityIdentifier(_ primary: Bool) {
+        guard let boundPaneLo, let boundPaneHi else {
+            setAccessibilityIdentifier("seyal-composer")
+            return
+        }
+        if primary {
+            setAccessibilityIdentifier("seyal-composer")
+        } else {
+            setAccessibilityIdentifier(
+                String(format: "seyal-composer-%016llx-%016llx", boundPaneHi, boundPaneLo)
+            )
+        }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         focusEligibilityGeneration &+= 1

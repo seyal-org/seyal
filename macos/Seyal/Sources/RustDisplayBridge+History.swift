@@ -3,9 +3,31 @@ import Foundation
 @MainActor
 extension RustDisplayBridge {
   func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    guard isConnected, selectPresentedClient(),
-      blockID > 0, startLine > 0, endLine >= startLine
-    else { return -4 }
+    guard isConnected, selectPresentedClient() else { return -4 }
+    return requestHistoryRangeOnSelectedClient(
+      startLine: startLine, endLine: endLine, blockID: blockID)
+  }
+
+  /// Request completed-Block history for a specific registry Controller.
+  /// Multipane Flow hosts have no per-leaf bridge; they borrow this one (#1424).
+  func requestHistoryRange(
+    forDisplayHandle handle: UInt64,
+    startLine: UInt64,
+    endLine: UInt64,
+    blockID: UInt64
+  ) -> Int32 {
+    guard isConnected, handle != 0, seyal_bridge_select(handle) == 0 else { return -4 }
+    defer { _ = selectClient() }
+    return requestHistoryRangeOnSelectedClient(
+      startLine: startLine, endLine: endLine, blockID: blockID)
+  }
+
+  private func requestHistoryRangeOnSelectedClient(
+    startLine: UInt64,
+    endLine: UInt64,
+    blockID: UInt64
+  ) -> Int32 {
+    guard blockID > 0, startLine > 0, endLine >= startLine else { return -4 }
     let requestID = seyal_bridge_next_history_request_id()
     guard requestID != 0 else { return -4 }
     let result = finishMutation(
@@ -27,8 +49,11 @@ extension RustDisplayBridge {
     }
   }
 
+  /// Publish buffered history for the currently selected registry client.
+  /// Callers must `seyal_bridge_select` / `selectPresentedClient` first so
+  /// unfocused multipane Controllers can deliver their own ranges (#1424).
   func publishHistoryRanges() {
-    guard isConnected, selectPresentedClient() else { return }
+    guard isConnected else { return }
     for (requestKey, request) in Array(requestedHistoryRanges) {
       let metadata = seyal_bridge_history_range_peek_for(request.blockID, requestKey.requestID)
       guard metadata.block_id != 0,
@@ -81,7 +106,7 @@ extension RustDisplayBridge {
       historyRevisions.removeValue(forKey: requestKey)
       historyContinuations.removeValue(forKey: requestKey)
       let truncated = metadata.reserved == 1
-      if truncated, leads > 0, isConnected, selectPresentedClient() {
+      if truncated, leads > 0, isConnected {
         let nextStart = (previous?.startUnit ?? 0) + leads
         let nextID = seyal_bridge_next_history_request_id()
         if nextID != 0 {

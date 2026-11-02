@@ -7,7 +7,11 @@ extension ProductChromeHostView {
         reconcileSecondaryLiveSurfaces(paneCount: paneCount)
     }
 
-    /// Project secondary Metal hosts for non-focused LIVE leaves (#936).
+    /// Project durable multipane Flow hosts (#936 / #1424).
+    ///
+    /// `reconcileSecondaryLiveHosts` applies focus/input ownership. Host
+    /// `reconcileFlowPresentation` rebuilds Blocks only when that pane's
+    /// projection fingerprint changes — focus churn must not recreate views.
     func reconcileSecondaryLiveSurfaces(paneCount: Int) {
         let handle = pane.appHandle
         var bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)] = []
@@ -33,8 +37,13 @@ extension ProductChromeHostView {
             self.reconcilePaneHosts(paneCount: Int(seyal_app_shell(self.pane.appHandle).pane_count))
         }
         centerColumn.reconcileSecondaryLiveHosts(bindings: bindings)
+        let sharedBridge = pane.inputSurface.bridge
         for host in centerColumn.secondaryHosts {
-            host.reconcileFlowPresentation()
+            // Bridgeless Metal surfaces borrow the window bridge for history.
+            host.historyBridge = sharedBridge
+            // Focus/binding reconcile must not rebuild Blocks; content updates
+            // arrive through noteRegistryPolled → reconcileFlowPresentation.
+            host.reconcileFocusOwnershipPresentation()
         }
         let focusedDisplayHandle =
             bindings.first { $0.focused && $0.displayHandle != 0 }?.displayHandle ?? 0

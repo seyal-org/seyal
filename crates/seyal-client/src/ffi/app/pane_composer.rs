@@ -8,9 +8,7 @@ use std::ptr;
 use seyal_core::{ExecutionId, PaneId};
 
 use crate::app::{PresentationEligibility, APP_ABI_VERSION};
-use crate::composer::{
-    BlockPresentationState, ComposerMode, ComposerSnapshot, RuntimeBlockRecord,
-};
+use crate::composer::{BlockPresentationState, ComposerMode, ComposerSnapshot, RuntimeBlockRecord};
 use crate::live_tail::{project_block_output_until, LiveTailProjection};
 use crate::presentation::PresentationMode;
 use crate::LocalDisplayClient;
@@ -46,7 +44,10 @@ fn empty_composer(sized: bool) -> SeyalAppComposer {
     }
 }
 
-fn encode_composer_snapshot(state: &mut AppHandle, composer: &ComposerSnapshot) -> SeyalAppComposer {
+fn encode_composer_snapshot(
+    state: &mut AppHandle,
+    composer: &ComposerSnapshot,
+) -> SeyalAppComposer {
     state.pane_composer_draft = composer.draft.as_bytes().to_vec();
     let mut flags = 0u16;
     if composer.can_submit {
@@ -339,11 +340,7 @@ pub extern "C" fn seyal_app_sync_pane_runtime_blocks(
 /// pane; anything else → Flow. Avoids requiring a second PresentationSession
 /// while still fencing TUI/Raw takeover on that leaf.
 #[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_eligibility_for_pane(
-    handle: u64,
-    pane_lo: u64,
-    pane_hi: u64,
-) -> u16 {
+pub extern "C" fn seyal_app_eligibility_for_pane(handle: u64, pane_lo: u64, pane_hi: u64) -> u16 {
     APPS.with(|apps| {
         let apps = apps.borrow();
         let Some(state) = apps.get(&handle) else {
@@ -370,8 +367,10 @@ pub extern "C" fn seyal_app_eligibility_for_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ffi::app::{seyal_app_apply, seyal_app_create, seyal_app_shell, seyal_app_snapshot, SeyalAppAction};
     use crate::app::APP_ABI_VERSION;
+    use crate::ffi::app::{
+        seyal_app_apply, seyal_app_create, seyal_app_shell, seyal_app_snapshot, SeyalAppAction,
+    };
     use std::mem::size_of;
     use std::ptr;
 
@@ -405,16 +404,14 @@ mod tests {
         assert_eq!(unsafe { seyal_app_apply(handle, &split) }, 0);
         let shell = seyal_app_shell(handle);
         assert_eq!(shell.pane_count, 2);
-        let first = seyal_app_composer_for_pane(handle, shell.focused_pane_lo, shell.focused_pane_hi);
+        let first =
+            seyal_app_composer_for_pane(handle, shell.focused_pane_lo, shell.focused_pane_hi);
         assert_ne!(first.size, 0);
         // Unfocused sibling still has a PaneComposer projection.
         // Find the non-focused region via shell focused ids vs pane region APIs
         // is covered in host tests; here ensure both ids are readable when known.
-        let eligibility = seyal_app_eligibility_for_pane(
-            handle,
-            shell.focused_pane_lo,
-            shell.focused_pane_hi,
-        );
+        let eligibility =
+            seyal_app_eligibility_for_pane(handle, shell.focused_pane_lo, shell.focused_pane_hi);
         assert!(eligibility == 0 || eligibility == 1 || eligibility == 2 || eligibility == 3);
         assert_eq!(
             seyal_app_sync_pane_runtime_blocks(

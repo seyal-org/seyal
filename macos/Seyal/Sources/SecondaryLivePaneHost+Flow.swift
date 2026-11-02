@@ -7,11 +7,17 @@ extension SecondaryLivePaneHost {
         if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {
+            clearPreservedDocumentHeight()
             blocks.arrangedSubviews.forEach { $0.removeFromSuperview() }
             blockCards.removeAll()
             lastBlockCount = 0
             return
         }
+        // Preserve scroll across projection rebuilds so focus/reconcile churn
+        // does not jump the transcript (#1424).
+        let savedOffsetY = transcript.contentView.bounds.origin.y
+        let savedFollowing = followingLiveEnd
+        let savedDocumentHeight = transcriptDocumentScrollHeight()
         blocks.arrangedSubviews.forEach { $0.removeFromSuperview() }
         blockCards.removeAll()
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
@@ -81,10 +87,80 @@ extension SecondaryLivePaneHost {
         syncTranscriptDocumentSize()
         publishLiveTailBlocks()
         publishBlockOutputFrame()
-        if visibleIndex > lastBlockCount, followingLiveEnd {
+        if visibleIndex == 0 {
+            // Empty/cleared canvas: never leave a blank scrollable transcript
+            // from a prior preserved document height (#1424).
+            clearPreservedDocumentHeight()
+            syncTranscriptDocumentSize()
+            setTranscriptDocumentOffsetY(0)
+            followingLiveEnd = true
+            lastBlockCount = 0
+            return
+        }
+        if visibleIndex > lastBlockCount, savedFollowing {
+            clearPreservedDocumentHeight()
             scrollTranscriptToLiveEnd()
+        } else {
+            // rebuildBlocks clears cards before measuring; keep prior document
+            // extent so a mid-transcript offset is not clamped to zero while
+            // projection content is momentarily shorter (#1424).
+            if !savedFollowing, savedDocumentHeight > transcriptDocumentScrollHeight() + 0.5 {
+                preserveDocumentHeight(savedDocumentHeight)
+            } else {
+                clearPreservedDocumentHeight()
+            }
+            setTranscriptDocumentOffsetY(savedOffsetY)
+            followingLiveEnd = savedFollowing
         }
         lastBlockCount = visibleIndex
+    }
+
+    func preserveDocumentHeight(_ height: CGFloat) {
+        clearPreservedDocumentHeight()
+        let constraint = blocks.heightAnchor.constraint(greaterThanOrEqualToConstant: height)
+        constraint.priority = .defaultHigh
+        constraint.isActive = true
+        preservedDocumentHeightConstraint = constraint
+        syncTranscriptDocumentSize()
+    }
+
+    func clearPreservedDocumentHeight() {
+        preservedDocumentHeightConstraint?.isActive = false
+        preservedDocumentHeightConstraint = nil
+    }
+
+    /// Update selection chrome without recreating Block views.
+    func syncBlockSelectionFromProjection() {
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        for index in 0..<Int(composerSnap.block_count) {
+            let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
+            guard row.id_lo != 0, let card = blockCards[row.id_lo] else { continue }
+            card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
+        }
+    }
+
+    /// Re-request history ranges for existing cards after a display-handle bind.
+    /// Also refreshes body height / retained transcript text so a late bind
+    /// does not leave 1-line empty stubs (#1424).
+    func republishExistingBlockProjections() {
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        let cellHeight = surface.terminalPresentationCellSize().height
+        for index in 0..<Int(composerSnap.block_count) {
+            let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
+            guard row.id_lo != 0, let card = blockCards[row.id_lo] else { continue }
+            let projection = seyal_app_block_projection_for_pane(
+                appHandle,
+                paneLo,
+                paneHi,
+                UInt32(index)
+            )
+            card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
+            if let retainedRange = surface.retainedHistoryRange(blockID: row.id_lo) {
+                card.setBodyTranscript(retainedRange.transcriptText)
+            }
+            applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
+        }
+        syncTranscriptDocumentSize()
     }
 
     func outputLineCount(projection: SeyalAppBlockProjection) -> Int {
@@ -104,13 +180,34 @@ extension SecondaryLivePaneHost {
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
         guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
               projection.start_line > 0,
-              projection.end_line >= projection.start_line
+              projection.end_line >= projection.start_line,
+              displayHandle != 0
         else { return }
-        _ = surface.requestHistoryRange(
+        // Surfaces intentionally have bridge == nil; borrow the window bridge
+        // and address this pane's Controller (#1424).
+        _ = historyBridge?.requestHistoryRange(
+            forDisplayHandle: displayHandle,
             startLine: projection.start_line,
             endLine: projection.end_line,
             blockID: blockID
         )
+    }
+
+    /// Deliver a completed history range into this leaf's Metal surface + card.
+    func applyHistoryRange(_ range: NativeHistoryRange) {
+        surface.retainHistoryRange(range)
+        let cellHeight = surface.terminalPresentationCellSize().height
+        if let card = blockCards[range.blockID] {
+            card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
+            card.setBodyTranscript(range.transcriptText)
+        }
+        layoutSubtreeIfNeeded()
+        publishBlockOutputFrame()
+        syncTranscriptDocumentSize()
+        publishBlockOutputFrame()
+        if followingLiveEnd {
+            scrollTranscriptToLiveEnd()
+        }
     }
 
     func publishLiveTailBlocks() {
@@ -201,6 +298,26 @@ extension SecondaryLivePaneHost {
     func transcriptDocumentScrollHeight() -> CGFloat {
         let document = transcript.documentView ?? blocks
         return max(document.frame.height, document.fittingSize.height, 1)
+    }
+
+    /// Stretch the transcript document so scroll-offset retention can be tested
+    /// without depending on Runtime Block projection content.
+    func ensureTranscriptScrollableForTests(minimumHeight: CGFloat = 2400) {
+        let marker = NSUserInterfaceItemIdentifier("seyal-test-scroll-spacer")
+        blocks.arrangedSubviews
+            .filter { $0.identifier == marker }
+            .forEach { blocks.removeArrangedSubview($0); $0.removeFromSuperview() }
+        let spacer = NSView(frame: .zero)
+        spacer.identifier = marker
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        blocks.addArrangedSubview(spacer)
+        NSLayoutConstraint.activate([
+            spacer.heightAnchor.constraint(equalToConstant: minimumHeight),
+            spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 1),
+        ])
+        syncTranscriptDocumentSize()
+        layoutSubtreeIfNeeded()
+        followingLiveEnd = false
     }
 
     func isNearLiveEnd(tolerance: CGFloat = 24) -> Bool {

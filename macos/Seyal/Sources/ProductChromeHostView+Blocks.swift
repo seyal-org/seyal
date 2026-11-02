@@ -225,6 +225,15 @@ extension ProductChromeHostView {
     }
 
     func applyHistoryRange(_ range: NativeHistoryRange) {
+        // Multipane: each leaf owns its cards/surface. Route by block id (#1424).
+        if centerColumn.secondaryHosts.count > 1,
+            let host = centerColumn.secondaryHosts.first(where: {
+                $0.blockCards[range.blockID] != nil
+            })
+        {
+            host.applyHistoryRange(range)
+            return
+        }
         pane.inputSurface.retainHistoryRange(range)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
