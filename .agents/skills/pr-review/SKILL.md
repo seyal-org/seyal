@@ -13,9 +13,7 @@ This is Seyal's single user-facing PR review and re-review entrypoint. The gener
 
 The first review of a candidate reads the whole pull request once and lists every material blocker in that pass. Do not stop at the first finding and leave the rest for a later cycle.
 
-`address-pr-review` fixes that recorded set on the same pull request. The follow-up confirms those findings and the diff since the reviewed head. That confirmation stays in this review. It does not start a second full-candidate review, a new verification, or a new specialist pass.
-
-Start a new full review only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence this review relied on. Core and high-risk work still needs an independent human reviewer. The implementer does not self-approve.
+`address-pr-review` fixes that recorded set on the same pull request. A remediation follow-up performs a **full-candidate re-review** against the exact current head, as required by the pinned generic procedure. Reuse unchanged valid evidence where project policy permits, but never treat review of only the latest comment or diff as independent approval. Run invalidated verification/specialist gates when the head or risk scope warrants them. Core and high-risk work still needs an independent human reviewer. The implementer does not self-approve.
 
 ## Mandatory cross-platform UI ownership gate
 
