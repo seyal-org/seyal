@@ -18,14 +18,13 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     func testCreateTabProjectsSecondTabAfterLiveBind() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
+        showWorkspaces(in: app)
         clickNewTab(in: app)
         waitForRunLoop(5)
         XCTAssertEqual(app.state, .runningForeground, "CreateTab must not crash Seyal.app")
-        showTabs(in: app)
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 12),
-            "CreateTab must project a second tab after live bind"
-        )
+        // Left Tabs mode is TerminalTab inventory (#1412); outer Tab count stays
+        // on the Workspaces row secondary / close-tab affordance.
+        waitForWorkspaceTabCountHint(in: app, atLeast: 2)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-close-tab"].firstMatch.exists)
     }
 
@@ -78,52 +77,41 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     func testCloseTabRemovesChromeWithoutCrashingTheHost() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
+        showWorkspaces(in: app)
         clickNewTab(in: app)
         waitForRunLoop(5)
-        showTabs(in: app)
-        XCTAssertTrue(app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 12))
+        waitForWorkspaceTabCountHint(in: app, atLeast: 2)
         let closeTab = app.descendants(matching: .any)["seyal-close-tab"].firstMatch
         XCTAssertTrue(closeTab.waitForExistence(timeout: 8))
         XCTAssertTrue(closeTab.isHittable, "Rust-enabled close control must be actionable")
         closeTab.click()
         XCTAssertEqual(app.state, .runningForeground)
-        let removedTab = app.descendants(matching: .any)["seyal-tab-1"].firstMatch
-        let removed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"),
-            object: removedTab
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [removed], timeout: 5),
-            .completed,
-            "a current containment fence closes the intended Tab"
-        )
+        waitForWorkspaceTabCountHint(in: app, atLeast: 1, atMost: 1)
         waitForUsablePty(in: app, timeout: 12)
     }
 
     func testTerminateExecutionPaletteVerbKeepsHostAndTabChromeAlive() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
+        showWorkspaces(in: app)
         clickNewTab(in: app)
         waitForRunLoop(5)
-        showTabs(in: app)
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 12),
-            "second tab must be projected before the palette terminate verb"
-        )
+        waitForWorkspaceTabCountHint(in: app, atLeast: 2)
         waitForUsablePty(in: app, timeout: 12)
         runPaletteCommand(in: app, query: "Terminate Execution")
         waitForRunLoop(1)
         XCTAssertEqual(app.state, .runningForeground)
-        showTabs(in: app)
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 8),
-            "terminate does not close tab chrome; wire TerminationRequested is proven in the portable harness"
-        )
+        showWorkspaces(in: app)
+        waitForWorkspaceTabCountHint(in: app, atLeast: 2)
     }
 
     private func clickNewTab(in app: XCUIApplication) {
+        // CreateTab lives on the left + while Workspaces mode is selected (#1412
+        // retargets + to NewTerminal only in Tabs mode).
+        showWorkspaces(in: app)
         let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
         XCTAssertTrue(newTab.waitForExistence(timeout: 8), "production composition shows New Tab")
+        XCTAssertEqual(newTab.label.isEmpty ? newTab.title : newTab.label, "New Tab")
         newTab.click()
     }
 
@@ -144,12 +132,44 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         item.click()
     }
 
-    private func showTabs(in app: XCUIApplication) {
-        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
-        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
-        if tabs.isHittable {
-            tabs.click()
+    private func showWorkspaces(in app: XCUIApplication) {
+        let workspaces = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        XCTAssertTrue(workspaces.waitForExistence(timeout: 5))
+        if workspaces.isHittable {
+            workspaces.click()
         }
+    }
+
+
+    /// Outer Workspace Tab count is projected on the active workspace row after #1412.
+    private func waitForWorkspaceTabCountHint(
+        in app: XCUIApplication,
+        atLeast: Int,
+        atMost: Int? = nil
+    ) {
+        showWorkspaces(in: app)
+        let row = app.descendants(matching: .any)["seyal-workspace-0"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let deadline = Date().addingTimeInterval(12)
+        var last = ""
+        while Date() < deadline {
+            last = row.label.isEmpty ? row.title : row.label
+            let match = last.range(of: #"(\d+)\s+tabs?"#, options: .regularExpression)
+            if let match {
+                let digits = last[match].prefix { $0.isNumber }
+                if let count = Int(digits), count >= atLeast,
+                   atMost.map({ count <= $0 }) ?? true
+                {
+                    return
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTFail(
+            "expected workspace secondary tab count >= \(atLeast)"
+                + (atMost.map { " and <= \($0)" } ?? "")
+                + "; label=\(last)"
+        )
     }
 
     private func runPaletteCommand(in app: XCUIApplication, query: String) {
