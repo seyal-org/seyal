@@ -14,12 +14,12 @@ Codex and GitHub Copilot CLI both discover project skills directly from `.agents
 | --- | --- |
 | Seyal architecture | `AGENTS.md` + `architecture-change` |
 | Project-context retrieval | thin `project-context` adapter → pinned AI-SDLC `project-context` |
-| Issue decomposition | `issue-refinement` facade → pinned AI-SDLC `work-item-design` + GitHub/Seyal deltas |
-| Implementation planning | thin `implementation-planning` adapter → pinned AI-SDLC `implementation-planning` + Seyal architecture/evidence planning gates |
-| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC `development-readiness` + Issue-body plan + Seyal Ready gate |
-| Implementation | `implement-issue` facade → pinned AI-SDLC `implementation` + Seyal human-owner/branch/test/docs/candidate gates |
+| Issue decomposition | `issue-refinement` facade → pinned AI-SDLC `create-issue` + GitHub/Seyal deltas |
+| Implementation planning | thin `implementation-planning` adapter → pinned AI-SDLC `create-issue` (issue-owned plan) + Seyal architecture/evidence planning gates |
+| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC 12-point DoR (`docs/WORKING-LOOP.md`) + Issue-body plan + Seyal Ready gate |
+| Implementation | `implement-issue` facade → pinned AI-SDLC `implement-issue` + Seyal human-owner/branch/test/docs/candidate gates |
 | PR review/re-review | `pr-review` facade → pinned AI-SDLC `pr-review` + Seyal architecture/terminal/evidence merge gates |
-| Review remediation | thin `address-pr-review` adapter → pinned AI-SDLC `address-pr-review` + Seyal one-PR/root-cause/check gates |
+| Review remediation | thin `address-pr-review` adapter → pinned AI-SDLC `process-review` + Seyal one-PR/root-cause/check gates |
 | Change verification | thin `verification` adapter → pinned AI-SDLC `verification` + Seyal evidence gates |
 | Milestone validation | `milestone-validation` facade → pinned AI-SDLC `verification` + Seyal aggregate milestone rules |
 | Native macOS design | `macos-native-design` |
@@ -49,13 +49,12 @@ The consumed generic layer is:
 ```text
 ai-sdlc
   project-context
-  work-item-design
-  implementation-planning
-  development-readiness
-  implementation
+  create-issue
+  implement-issue
   verification
   pr-review
-  address-pr-review
+  process-review
+  pr-merge
         ↓ exact reviewed pin materialized by make bootstrap-agents
 Seyal/.sdlc/framework/
         ↓
@@ -69,11 +68,13 @@ Seyal owns project knowledge and project/domain policy. AI-SDLC owns the reusabl
 The integration forms are deliberate:
 
 - **direct adapters** keep the generic capability name when Seyal adds a narrow local gate (`project-context`, `implementation-planning`, `development-readiness`, `verification`, `address-pr-review`);
-- **Seyal facades** preserve an established project workflow entrypoint or add a larger project-domain acceptance layer while delegating the reusable procedure (`issue-refinement` → `work-item-design`, `implement-issue` → `implementation`, `pr-review` → `pr-review`, `milestone-validation` → `verification`). Planning and review-remediation keep their generic names because their routing boundaries are explicit.
+- **Seyal facades** preserve an established project workflow entrypoint or add a larger project-domain acceptance layer while delegating the reusable procedure (`issue-refinement` → `create-issue`, `implement-issue` → `implement-issue`, `pr-review` → `pr-review`, `milestone-validation` → `verification`). Planning and review-remediation keep their generic names because their routing boundaries are explicit.
 
 `pr-review` is the single review/re-review discovery surface. The first pass reviews the full current candidate once, consumes `verification`, requests specialist review only when risk/policy requires it, and lists every material blocker in that pass. There is no separate diff-only `code-review` pass. `address-pr-review` fixes that recorded set on the same PR. The follow-up confirms those findings and the diff since the reviewed head. A new full `pr-review` starts only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the review relied on. Unfinished accepted scope remains under `implement-issue`.
 
-The Issue body is the plan, and the draft/ready candidate stage is defined, in `docs/engineering/ISSUE-PROTOCOL.md`. Skills resolve those GitHub records. They do not keep the plan or the stage only in chat.
+The Issue body is the plan, and the draft/ready candidate stage is defined, in `docs/engineering/ISSUE-PROTOCOL.md`.
+
+The **human GitHub owner** remains the accountable Issue owner; it does **not** replace exclusive *agent execution* coordination. The current pinned generic `tools/workflow_claims.py` requires a shared local SQLite store, unique active worker identity, and token verification immediately before mutations. Without a genuine host invocation it is only a CLI/skill contract, not enforced ownership across Cursor/cloud agents. Do not substitute GitHub labels, assignees, or branches for the atomic agent claim. Skills resolve those GitHub records. They do not keep the plan or the stage only in chat.
 
 Do not also add local `work-item-design` or `implementation` aliases merely to mirror AI-SDLC. That would create overlapping discovery surfaces with the established Seyal facades. The generic source remains under `.sdlc/framework/` and the project facade/adapter contains only the Seyal-specific delta.
 
