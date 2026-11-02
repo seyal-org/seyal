@@ -261,10 +261,6 @@ path = "crates/seyal-runtime/src/runtime/session_bootstrap.rs"
 acknowledged_loc = 703
 issue = 1398
 reason = "Spawn-time SSH session payload assembly stays one Runtime cold-path module; #1398 adds the remote TERM fallback assertion beside the existing OSC 133 / stty echo payload proofs without a second bootstrap test authority."
-||||||| parent of bc08f052 (feat(1412): project pane-local terminals in left C03 Tabs)
-acknowledged_loc = 788
-issue = 1379
-reason = "Thin AppKit chrome host stays one cold-path façade; #866/#1218 keep eligibility-driven focus and recovery presentation on this host, and #1379 wires New shell recovery, retain-history rebuild pruning, and scroll-republish comments into the existing composer slot without moving product authority into Swift."
 
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.
