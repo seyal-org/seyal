@@ -24,7 +24,7 @@ CLAIM = module_from_spec(SPEC)
 SPEC.loader.exec_module(CLAIM)
 
 READ_TOOLS = {"Read", "Grep", "Glob", "Search", "WebFetch", "WebSearch", "Task"}
-SAFE_GIT = {"status", "diff", "log", "show", "rev-parse", "branch"}
+SAFE_GIT = {"status", "diff", "log", "show", "rev-parse"}
 SAFE_SHELL = {"pwd", "ls", "rg", "grep"}
 CLAIM_COMMAND = ["python3", "scripts/seyal-ai-sdlc-claim.py"]
 SAFE_ARG = re.compile(r"^[a-zA-Z0-9_./:@=-]+$")
@@ -53,7 +53,7 @@ def claim_invocation(command: str):
         args = shlex.split(command)
     except ValueError:
         return None
-    if len(args) != 10 or args[:2] != CLAIM_COMMAND:
+    if len(args) != 9 or args[:2] != CLAIM_COMMAND:
         return None
     if args[2] not in ("begin", "verify", "release"):
         return None
@@ -77,9 +77,9 @@ def safe_shell(command: str) -> bool:
     if not args or not all(SAFE_ARG.fullmatch(arg) for arg in args):
         return False
     if args[0] in SAFE_SHELL:
-        return not any(arg.startswith("-o") or arg.startswith("--output") for arg in args[1:])
+        return not any(arg.startswith(("-o", "--output", "--pre", "--pcre2-version")) for arg in args[1:])
     if args[0] == "git" and len(args) >= 2 and args[1] in SAFE_GIT:
-        return not any(arg.startswith("--output") or arg == "--exec-path" for arg in args[2:])
+        return not any(arg.startswith(("--output", "--ext-diff", "--textconv", "--config", "-c")) or arg == "--exec-path" for arg in args[2:])
     return False
 
 
