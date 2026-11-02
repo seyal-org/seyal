@@ -58,7 +58,11 @@ grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/issue-refi
 grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/implementation-planning/SKILL.md || fail "planning must use the issue-owned canonical plan"
 grep -q '.sdlc/framework/skills/implement-issue/SKILL.md' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must delegate to current generic implement-issue"
 grep -q '.sdlc/framework/skills/process-review/SKILL.md' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must delegate to generic process-review"
-grep -Fq 'tools/workflow_claims.py' .agents/skills/implement-issue/SKILL.md || fail "Seyal implementation must enforce executable agent claim"
+grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/implement-issue/SKILL.md || fail "Seyal implementation must call the executable agent claim wrapper"
+grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/pr-review/SKILL.md || fail "PR review must call the shared claim wrapper"
+grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/address-pr-review/SKILL.md || fail "review remediation must call the shared claim wrapper"
+python3 -m py_compile scripts/seyal-ai-sdlc-claim.py scripts/test-seyal-ai-sdlc-claim.py || fail "agent claim command cannot compile"
+python3 scripts/test-seyal-ai-sdlc-claim.py || fail "agent claim command tests failed"
 grep -Fq 'full-candidate re-review' .agents/skills/pr-review/SKILL.md || fail "Seyal must not retain diff-only PR re-review"
 grep -q '.sdlc/framework/skills/pr-review/SKILL.md' .agents/skills/pr-review/SKILL.md || fail "pr-review must delegate to AI-SDLC pr-review"
 if grep -q '.sdlc/framework/skills/code-review/SKILL.md' .agents/skills/pr-review/SKILL.md; then
