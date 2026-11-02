@@ -19,6 +19,7 @@ mod terminal_tabs;
 mod tree;
 mod unpresented;
 mod workspace;
+mod workspace_ops;
 
 #[cfg(test)]
 mod close_tests;
@@ -44,6 +45,8 @@ mod w2a_tests;
 mod w5_tests;
 #[cfg(test)]
 mod window_admission_tests;
+#[cfg(test)]
+mod workspace_ops_tests;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -111,6 +114,10 @@ pub enum ShellError {
     CrossWorkspaceAdopt,
     /// Adopt/terminate of an execution that is not live-unpresented here.
     ExecutionNotUnpresented,
+    /// CreateWorkspace / SetWorkspaceRoot rejected an empty root path.
+    InvalidWorkspaceRoot,
+    /// CreateWorkspace reused an already-known WorkspaceId (including default).
+    DuplicateWorkspace,
 }
 
 impl ShellError {
@@ -151,6 +158,8 @@ impl ShellError {
             Self::ExecutionNotUnpresented => {
                 "This execution is not a live-unpresented execution in this Workspace."
             }
+            Self::InvalidWorkspaceRoot => "Workspace root path must be non-empty.",
+            Self::DuplicateWorkspace => "That Workspace identity is already known.",
         }
     }
 }
@@ -290,14 +299,28 @@ impl ShellState {
         let window_id = WindowId::new();
         let window = Window::try_new(window_id, WorkspaceId::m001_default(), vec![tab], tab_id)
             .expect("the production window has one tab");
-        let workspace = Workspace {
+        let detail = detail.into();
+        let mut workspace = Workspace {
             id: WorkspaceId::m001_default(),
             name: "Local".to_owned(),
-            detail: Some(detail.into()),
+            root_path: None,
+            detail: None,
             attention: false,
             windows: vec![window],
             active_window: Some(window_id),
         };
+        // Prefer a real filesystem root when the host/detail supplies one;
+        // otherwise bind $HOME while keeping the product name "Local" (ADR-028).
+        let candidate = detail.trim();
+        if !candidate.is_empty()
+            && !candidate.eq_ignore_ascii_case("local")
+            && (candidate.starts_with('/') || candidate.starts_with('~'))
+        {
+            workspace.bind_root_path(candidate.to_owned());
+        } else if let Ok(home) = std::env::var("HOME") {
+            workspace.bind_root_path(home);
+            workspace.name = "Local".to_owned();
+        }
         let mut shell = Self {
             last_active_workspace: workspace.id,
             workspaces: vec![workspace],

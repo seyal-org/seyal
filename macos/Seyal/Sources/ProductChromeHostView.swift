@@ -25,6 +25,7 @@ final class ProductChromeHostView: NSView {
     /// Global command palette overlay (#932); internal for component tests.
     let commandPalette: CommandPaletteOverlayView
     let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
+    let createWorkspaceButton = NSButton(title: "+", target: nil, action: nil)
     let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
     let recoveryLabel = NSTextField(labelWithString: "")
     /// #1379 Defect B: single clear recovery action after primary shell exit.
@@ -44,6 +45,8 @@ final class ProductChromeHostView: NSView {
     /// Held across adopt so frame → reconcile → `driveRecovery` cannot start a
     /// second open while PerformAttempt remains the pending Rust effect.
     var recoveryAttemptInFlight: RecoveryAttemptIdentity?
+    /// ADR-028: avoid re-presenting the same leave-offer path until Rust clears it.
+    var presentedLeaveOfferPath: String?
     /// Blocking hello/attach runs here so the AppKit actor never becomes the
     /// lifecycle I/O executor.
     let recoveryLifecycleQueue = DispatchQueue(
@@ -117,6 +120,7 @@ final class ProductChromeHostView: NSView {
         modeSpacer.translatesAutoresizingMaskIntoConstraints = false
         modeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         leftModeRow.addArrangedSubview(workspacesButton)
+        leftModeRow.addArrangedSubview(createWorkspaceButton)
         leftModeRow.addArrangedSubview(tabsButton)
         leftModeRow.addArrangedSubview(modeSpacer)
         leftModeRow.addArrangedSubview(newTabButton)
@@ -497,7 +501,9 @@ final class ProductChromeHostView: NSView {
         applyShellChrome(chrome)
         let shell = seyal_app_shell(pane.appHandle)
         applyLeftModeSwitcher(leftPanel: chrome.left_panel)
+        createWorkspaceButton.isHidden = chrome.left_panel != 0
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
+        presentLeaveOfferIfNeeded()
         rebuildInspector(chrome)
         rebuildLayoutActions(shell: shell, leftPanel: chrome.left_panel)
         reconcilePaneHosts(paneCount: Int(shell.pane_count))
@@ -658,11 +664,18 @@ final class ProductChromeHostView: NSView {
                     let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace"
                     let path = productChromeCopyUTF8(row.detail, row.detail_len)
                     let selected = row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0
-                    // C04 secondary: helpful path, else active-workspace tab count.
-                    let secondary = Self.helpfulWorkspaceDetail(title: title, detail: path)
-                        ?? (selected
-                            ? "\(shell.tab_count) tab\(shell.tab_count == 1 ? "" : "s")"
-                            : nil)
+                    // C04 secondary: helpful path; on the active Workspace also
+                    // keep outer Tab count when a root is bound (#1413 + #1412).
+                    let pathSecondary = Self.helpfulWorkspaceDetail(title: title, detail: path)
+                    let tabSecondary = selected
+                        ? "\(shell.tab_count) tab\(shell.tab_count == 1 ? "" : "s")"
+                        : nil
+                    let secondary: String?
+                    if let pathSecondary, let tabSecondary {
+                        secondary = "\(pathSecondary) · \(tabSecondary)"
+                    } else {
+                        secondary = pathSecondary ?? tabSecondary
+                    }
                     leftItems.addArrangedSubview(
                         contextRow(
                             primary: title,

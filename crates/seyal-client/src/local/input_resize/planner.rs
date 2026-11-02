@@ -40,6 +40,9 @@ pub(crate) enum OutboundKind {
     TerminateExecution {
         request_id: u64,
     },
+    MintWorkspace {
+        request_id: u64,
+    },
     DeliveryControl,
 }
 

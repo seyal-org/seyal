@@ -249,6 +249,8 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 43 | C→R | `SessionConsent` — Accepted ADR-026 (#1384); shipped under #1388; exact 64 bytes |
 | 44 | R→C | `SessionStatus` — Accepted ADR-026 (#1384); shipped under #1388; exact 56 bytes |
 | 45 | R→C | `ComposerTarget` — Accepted ADR-026 (#1384); input target and target generation; not a longer type-23 body; shipped under #1388; exact 48 bytes |
+| 46 | C→R | `MintWorkspaceRequest` — ADR-028 §2.5 interim WorkspaceId mint (cold control; shares bit 10 / type-36/38 request-id space) |
+| 47 | R→C | `MintWorkspaceResult` — ADR-028 §2.5 interim WorkspaceId mint result |
 
 M001 / live capability bits (master + open claims), for allocation hygiene:
 
@@ -877,11 +879,15 @@ Rules, validated in this order before any process or terminal mutation:
    correlated-resize space, because correlation is per message-type pair and the
    existing resize bookkeeping is unchanged;
 5. outstanding-request budget available (§18.6), otherwise `Backpressure`;
-6. `workspace_id` selects the owning Workspace association. **M003:** only
-   `workspace_id == 0` is accepted and means the Runtime's single
-   implicit/default Workspace (ADR-007 §2). Every nonzero value fails closed
-   with `InvalidWorkspace`. Runtime never creates a Workspace as a side effect
-   and clients need no wire-visible durable `WorkspaceId` in M003;
+6. `workspace_id` selects the owning Workspace association. **M003 / ADR-028
+   §2.5 interim:** `workspace_id == 0` means the Runtime's implicit/default
+   Workspace (ADR-007 §2). A nonzero `u128` is accepted only when it equals an
+   **admitted** Runtime-minted `WorkspaceId` (including the default's bytes when
+   sent explicitly); otherwise fail closed with `InvalidWorkspace`. Runtime
+   never invents a Workspace as a side effect of create. Clients obtain
+   admitted ids via the cold `MintWorkspaceRequest`/`MintWorkspaceResult` path
+   (types 46/47; 42–45 remain ADR-026) before `CreateWorkspace` product
+   recording; durable cross-restart minting remains ADR-023;
 7. `launch_profile` is implemented by this Runtime, otherwise
    `UnsupportedLaunchProfile`. `0` is the default interactive shell profile;
    all other values are reserved and must fail closed rather than fall back;

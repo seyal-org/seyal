@@ -5,6 +5,7 @@ mod block_projection;
 mod decode;
 mod encode;
 mod error_code;
+mod leave_offer_ffi;
 mod loss;
 pub mod pane_recovery;
 mod pane_region;
@@ -38,6 +39,7 @@ use encode::{
 };
 
 pub use block_projection::seyal_app_block_projection;
+pub use leave_offer_ffi::seyal_app_leave_offer;
 pub(crate) use loss::{note_application_roots_client_loss, note_application_roots_execution_ended};
 pub use pane_region::*;
 pub use shortcut::{
@@ -300,6 +302,7 @@ pub(super) struct AppHandle {
     block_rows: Vec<SeyalAppRow>,
     history_rows: Vec<SeyalAppRow>,
     palette_rows: Vec<SeyalAppRow>,
+    leave_offer_path: Vec<u8>,
     pub(super) window_scratch: window::WindowEncodeScratch,
 }
 
@@ -398,6 +401,7 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 block_rows: Vec::new(),
                 history_rows: Vec::new(),
                 palette_rows: Vec::new(),
+                leave_offer_path: Vec::new(),
                 window_scratch: window::WindowEncodeScratch::new(),
             },
         );

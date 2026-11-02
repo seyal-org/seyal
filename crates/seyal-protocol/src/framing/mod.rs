@@ -35,9 +35,9 @@ pub use envelope::{
 };
 
 pub use execution::{
-    CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode,
-    TerminateExecutionRequest, TerminateExecutionResult, TerminateExecutionResultCode,
-    CAP_EXECUTION_PROVISIONING,
+    CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode, MintWorkspaceRequest,
+    MintWorkspaceResult, MintWorkspaceResultCode, TerminateExecutionRequest,
+    TerminateExecutionResult, TerminateExecutionResultCode, CAP_EXECUTION_PROVISIONING,
 };
 
 pub use message::{decode_message, encode_frame, Message, MessageType};

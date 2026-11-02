@@ -73,9 +73,26 @@ impl RuntimeId {
     }
 }
 
+// Fresh Workspace identities have no Default: minting is an explicit Runtime
+// (or Accepted interim local-composition) side effect under ADR-028 §2.5.
+#[allow(clippy::new_without_default)]
 impl WorkspaceId {
     pub const fn m001_default() -> Self {
         Self(DEFAULT_WORKSPACE)
+    }
+
+    /// Opaque process-unique WorkspaceId. Runtime admits the mint under
+    /// ADR-028 §2.5 interim local minting until ADR-023 durable P2 minting.
+    pub fn new() -> Self {
+        Self(unique_id(0x574f_524b_5350_4301))
+    }
+
+    pub const fn from_u128(value: u128) -> Self {
+        Self(value)
+    }
+
+    pub const fn to_u128(self) -> u128 {
+        self.0
     }
 }
 

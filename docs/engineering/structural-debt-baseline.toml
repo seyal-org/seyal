@@ -54,9 +54,9 @@ reason = "Portable provisioning reducer remains the cold-path request/result aut
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 978
-issue = 1381
-reason = "The create/close/terminate/split adapter also routes terminal-tab requests to their exact Runtime execution and preserves sibling bindings under #1381."
+acknowledged_loc = 990
+issue = 1413
+reason = "Create/close/terminate/split adapter retains terminal-tab routing (#1381) and now encodes ADR-028 active-workspace wire ids for CreateExecution."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -72,9 +72,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1100
-issue = 1388
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs, #1379 publishes canvas_floor_block_id on SeyalAppComposer for Flow clear presentation, and #1388 adds the Relay composer mode constant beside the existing Available/Busy mapping."
+ceiling_loc = 1104
+issue = 1414
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi extraction; #1414 adds leave_offer_path scratch on AppHandle while leave-offer encode lives in leave_offer_ffi.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -228,21 +228,21 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer;
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 974
-issue = 1381
-reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1381 moves pane-local terminal-tab operations and queries to terminal_tabs.rs while the shared reducer retains topology and identity invariants."
+acknowledged_loc = 996
+issue = 1413
+reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1413 adds InvalidWorkspaceRoot/DuplicateWorkspace errors for ADR-028 CreateWorkspace while create/bind ops live in workspace_ops.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 920
-issue = 1412
-reason = "Thin AppKit chrome host stays one cold-path façade; #1412 projects Rust-authored left Tabs TerminalTab rows and mode-dependent + (NewTerminal vs CreateTab) on the #1401 C03 chrome without moving inventory or selection authority into Swift (ADR-015 / ADR-025 §2.8). Prefer later responsibility extraction over partN splits if this façade grows again."
+acknowledged_loc = 933
+issue = 1414
+reason = "Thin AppKit chrome host stays one cold-path façade; #1412 TerminalTab left Tabs plus #1413/#1414 Create Workspace and leave-offer present-if-needed stay on this host without moving product authority into Swift (ADR-015 / ADR-025 §2.8 / ADR-028)."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 721
-issue = 1388
-reason = "Local display-client protocol proofs stay one module; #1388 adds the type-45 Submit/Relay/Unavailable projection test beside the existing composer status fixtures rather than a second client test file."
+acknowledged_loc = 723
+issue = 1413
+reason = "Local display-client protocol proofs stay one module; #1413 extends mint-workspace poll fixtures beside the existing composer/status proofs rather than a second client test file."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
@@ -274,9 +274,9 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 861
-issue = 1388
-reason = "ABI action decoding remains one versioned match surface; #1381 adds terminal-tab kinds 77–79, #1379 maps the canvas-floor flag, and #1388 copies BlockTimeline scope onto RuntimeBlockRecord in the same decoder."
+acknowledged_loc = 879
+issue = 1414
+reason = "ABI action decoding remains one versioned match surface; #1414 adds ObserveTrustedForegroundCwd/Confirm/DismissLeaveOffer kinds 83–85 after ADR-026 session kinds and #1413 CreateWorkspace."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"

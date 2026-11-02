@@ -1903,6 +1903,37 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// #1413 / ADR-028: Create Workspace control is visible on the Workspaces left rail.
+    func testCreateWorkspaceControlVisibleOnWorkspacesLeftRail() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
+            "Workspaces owns the left panel by default"
+        )
+        let create = app.descendants(matching: .any)["seyal-create-workspace"].firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 5), "Create Workspace chrome must project")
+        XCTAssertTrue(create.isHittable, "Create Workspace must be hittable on Workspaces panel")
+
+        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
+        tabs.click()
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline && create.exists && create.isHittable {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertFalse(
+            create.exists && create.isHittable,
+            "Create Workspace leaves the rail while Tabs owns the left panel"
+        )
+
+        let workspaces = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        workspaces.click()
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        XCTAssertTrue(create.isHittable)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// W4b: production window admission + last-window-close stay-alive.
     func testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit() throws {
         let app = hostedApp()

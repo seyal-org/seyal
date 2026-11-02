@@ -49,6 +49,17 @@ impl Runtime {
         self.default_workspace
     }
 
+    /// ADR-028 §2.5: mint an opaque WorkspaceId and admit it for CreateExecution.
+    pub fn mint_workspace(&mut self) -> WorkspaceId {
+        let id = WorkspaceId::new();
+        self.admitted_workspaces.insert(id);
+        id
+    }
+
+    pub fn is_workspace_admitted(&self, workspace: WorkspaceId) -> bool {
+        self.admitted_workspaces.contains(&workspace)
+    }
+
     pub fn execution_count(&self) -> usize {
         self.entries.len()
     }
@@ -151,6 +162,19 @@ impl Runtime {
         size: WindowSize,
         launch_policy_detail_negotiated: bool,
     ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
+        self.create_interactive_execution_with_detail_cap_in_workspace(
+            size,
+            launch_policy_detail_negotiated,
+            self.default_workspace,
+        )
+    }
+
+    pub(in crate::runtime) fn create_interactive_execution_with_detail_cap_in_workspace(
+        &mut self,
+        size: WindowSize,
+        launch_policy_detail_negotiated: bool,
+        workspace_id: WorkspaceId,
+    ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
         let resolution = match crate::launch_policy::resolve_default_interactive() {
             Ok(resolution) => resolution,
             Err(failure) => return Err(RuntimeError::LaunchPolicy(failure)),
@@ -162,7 +186,7 @@ impl Runtime {
         }
         let warnings = crate::encode_created_warnings(&resolution.warnings);
         let command = crate::launch_policy::command_spec_from_policy(&resolution);
-        let execution_id = self.create_execution(command, size)?;
+        let execution_id = self.create_execution_in_workspace(command, size, workspace_id)?;
         let detail_code = if launch_policy_detail_negotiated {
             warnings.detail_code
         } else {
@@ -179,12 +203,25 @@ impl Runtime {
         command: CommandSpec,
         size: WindowSize,
     ) -> Result<ExecutionId, RuntimeError> {
+        self.create_execution_in_workspace(command, size, self.default_workspace)
+    }
+
+    pub fn create_execution_in_workspace(
+        &mut self,
+        command: CommandSpec,
+        size: WindowSize,
+        workspace_id: WorkspaceId,
+    ) -> Result<ExecutionId, RuntimeError> {
         if self.shutting_down {
             return Err(RuntimeError::ExecutionNotRunning);
         }
         if self.entries.len() >= self.config.max_executions {
             return Err(RuntimeError::CapacityExceeded);
         }
+        debug_assert!(
+            self.is_workspace_admitted(workspace_id),
+            "CreateExecution must only publish into an admitted Workspace"
+        );
 
         let composed = crate::launch_policy::compose_child_command(
             command,
@@ -253,7 +290,7 @@ impl Runtime {
         let entry = Entry {
             execution,
             token,
-            workspace_id: self.default_workspace,
+            workspace_id,
             attachments: HashSet::new(),
             lifecycle: Lifecycle::Running,
             pty_eof_reap_probe: None,
@@ -314,9 +351,7 @@ impl Runtime {
         // metadata. Admission happens only after TerminalExecution publication
         // and can never roll back or terminate an otherwise valid execution.
         if let Some(start_line_id) = initial_primary_line_id {
-            let _ = self
-                .execution_blocks
-                .admit(self.default_workspace, id, start_line_id);
+            let _ = self.execution_blocks.admit(workspace_id, id, start_line_id);
         }
         Ok(id)
     }
