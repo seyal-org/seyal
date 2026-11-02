@@ -53,7 +53,15 @@ fn framing_version_stays_1_0_and_capability_bit_is_stable() {
     assert_eq!(MessageType::from_u16(43), Some(MessageType::SessionConsent));
     assert_eq!(MessageType::from_u16(44), Some(MessageType::SessionStatus));
     assert_eq!(MessageType::from_u16(45), Some(MessageType::ComposerTarget));
-    assert_eq!(MessageType::from_u16(46), None);
+    assert_eq!(
+        MessageType::from_u16(46),
+        Some(MessageType::MintWorkspaceRequest)
+    );
+    assert_eq!(
+        MessageType::from_u16(47),
+        Some(MessageType::MintWorkspaceResult)
+    );
+    assert_eq!(MessageType::from_u16(48), None);
 }
 
 #[test]
