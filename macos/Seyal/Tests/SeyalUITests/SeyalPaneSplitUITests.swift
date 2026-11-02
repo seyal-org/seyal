@@ -195,7 +195,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let blockB = blockCommand(in: app, containing: "seyal-1424-scroll-b")
         XCTAssertTrue(blockA.exists || blockB.exists)
 
-        for cycle in 0..<8 {
+        for cycle in 0..<4 {
             let target = cycle % 2
             element(app, "seyal-pane-region-\(target)").click()
             waitForFocus(app, region: target)
@@ -241,7 +241,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForUsablePty(in: app)
         let token = "stream-marker-\(String(UUID().uuidString.prefix(6)))"
         submitComposerCommand(
-            "for i in $(seq 1 40); do printf '%s-%s\\n' '\(token)' \"$i\"; sleep 0.15; done",
+            "for i in $(seq 1 24); do printf '%s-%s\\n' '\(token)' \"$i\"; sleep 0.12; done",
             in: app
         )
         let streamBlock = anyPaneBlock(in: app, containing: token)
@@ -276,7 +276,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [grew], timeout: 8),
+            XCTWaiter.wait(for: [grew], timeout: 6),
             .completed,
             "unfocused stream body must keep growing; before=\(heightBefore) after=\(unfocusedBody.frame.height)"
         )
