@@ -192,8 +192,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)
         ).screenPoint
         let secondaryFrameBefore = secondaryScroll.frame
-        let blockA = blockCommand(in: app, containing: "seyal-1424-scroll-a")
-        let blockB = blockCommand(in: app, containing: "seyal-1424-scroll-b")
+        let blockA = anyPaneBlock(in: app, containing: "seyal-1424-scroll-a")
+        let blockB = anyPaneBlock(in: app, containing: "seyal-1424-scroll-b")
         XCTAssertTrue(blockA.exists || blockB.exists)
 
         for cycle in 0..<4 {
@@ -207,8 +207,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
             XCTAssertTrue(element(app, "seyal-secondary-blocks").exists)
             XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").exists)
             XCTAssertTrue(
-                blockCommand(in: app, containing: "seyal-1424-scroll-a").exists
-                    || blockCommand(in: app, containing: "seyal-1424-scroll-b").exists,
+                anyPaneBlock(in: app, containing: "seyal-1424-scroll-a").exists
+                    || anyPaneBlock(in: app, containing: "seyal-1424-scroll-b").exists,
                 "focus cycle \(cycle) must keep pane Block content"
             )
         }
@@ -711,18 +711,27 @@ final class SeyalPaneSplitUITests: XCTestCase {
         // Prefer paste: XCUI typeText mangles quotes/`$()`/paths and only the
         // first character (`/`) may land in the draft under multipane Flow.
         pasteIntoComposerEditor(editor, text: command)
+        // Nudge the text view so NSTextViewDelegate pushDraft reaches Rust and
+        // CAN_SUBMIT enables execute (paste alone can leave execute disabled).
+        editor.typeKey(.rightArrow, modifierFlags: [])
+        editor.typeText(" ")
+        editor.typeKey(.delete, modifierFlags: [])
         let draftMatched = expectation(
-            for: NSPredicate(format: "value CONTAINS %@", String(command.prefix(24))),
+            for: NSPredicate(format: "value CONTAINS %@", String(command.prefix(16))),
             evaluatedWith: editor,
             handler: nil
         )
         if XCTWaiter.wait(for: [draftMatched], timeout: 3) != .completed {
-            // Fallback for hosts that expose draft only on the composer group.
+            editor.typeKey("a", modifierFlags: [.command])
             editor.typeText(command)
         }
         let submit = element(app, "seyal-composer-execute")
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: submit, handler: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [enabled], timeout: 8),
+            .completed,
+            "composer execute stayed disabled after draft paste"
+        )
         submit.click()
         guard expectBlock else { return }
         let marker = blockMarker ?? blockMarkerToken(in: command) ?? command

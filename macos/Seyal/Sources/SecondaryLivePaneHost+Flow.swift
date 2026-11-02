@@ -66,8 +66,11 @@ extension SecondaryLivePaneHost {
                 lines: lines,
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
-            card.setAccessibilityIdentifier("seyal-secondary-block-\(visibleIndex)")
-            card.setBodyAccessibilityIdentifier("seyal-secondary-block-\(visibleIndex)-body")
+            // Focused hosts use the primary seyal-block-* ids so existing XCUI
+            // and host assertions keep working; unfocused stay pane-secondary.
+            let prefix = inputOwned ? "seyal-block-" : "seyal-secondary-block-"
+            card.setAccessibilityIdentifier("\(prefix)\(visibleIndex)")
+            card.setBodyAccessibilityIdentifier("\(prefix)\(visibleIndex)-body")
             visibleIndex += 1
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             card.onSelect = { [weak self] _ in

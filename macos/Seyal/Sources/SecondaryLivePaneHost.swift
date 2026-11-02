@@ -426,6 +426,17 @@ final class SecondaryLivePaneHost: NSView {
             setAccessibilityLabel("Focus secondary terminal pane")
             setAccessibilityIdentifier("seyal-secondary-live-pane")
         }
+        // Retag retained cards without rebuilding so focus ownership swaps do
+        // not drop XCUI Block identity or force a transcript reflow (#1424).
+        retagArrangedBlockAccessibilityIdentifiers()
+    }
+
+    private func retagArrangedBlockAccessibilityIdentifiers() {
+        let prefix = inputOwned ? "seyal-block-" : "seyal-secondary-block-"
+        for (visibleIndex, card) in arrangedBlockViews.enumerated() {
+            card.setAccessibilityIdentifier("\(prefix)\(visibleIndex)")
+            card.setBodyAccessibilityIdentifier("\(prefix)\(visibleIndex)-body")
+        }
     }
 
     func publishFrame() {

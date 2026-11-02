@@ -569,6 +569,10 @@ final class SeyalHostUITests: XCTestCase {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(previous, forType: .string)
             }
+            // Force NSTextViewDelegate pushDraft so CAN_SUBMIT enables submit.
+            editor.typeKey(.rightArrow, modifierFlags: [])
+            editor.typeText(" ")
+            editor.typeKey(.delete, modifierFlags: [])
             let draftMatchesCommand = expectation(
                 for: NSPredicate(format: "value CONTAINS %@", probeScript.lastPathComponent),
                 evaluatedWith: editor,
@@ -583,7 +587,12 @@ final class SeyalHostUITests: XCTestCase {
                 )
                 return nil
             }
-            editor.typeKey("\r", modifierFlags: [])
+            let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
+            if execute.exists, execute.isEnabled {
+                execute.click()
+            } else {
+                editor.typeKey("\r", modifierFlags: [])
+            }
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
                 if FileManager.default.fileExists(atPath: startedFile.path),
@@ -1227,13 +1236,28 @@ final class SeyalHostUITests: XCTestCase {
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         let presentation = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"]
         if presentation.waitForExistence(timeout: 2) {
             XCTAssertTrue(
                 app.descendants(matching: .any)["seyal-composer"].firstMatch.waitForExistence(timeout: timeout),
                 "focused Flow presentation host must expose a composer"
             )
+            // Prefer host execution= once published; fall back to terminal-input
+            // when Raw/TUI still exposes the interactive surface.
+            let hostUsable = NSPredicate(format: "value CONTAINS 'execution='")
+            let hostReady = expectation(for: hostUsable, evaluatedWith: presentation, handler: nil)
+            if XCTWaiter.wait(for: [hostReady], timeout: min(timeout, 8)) != .completed,
+               terminal.waitForExistence(timeout: 2)
+            {
+                let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
+                let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
+                XCTAssertEqual(
+                    XCTWaiter.wait(for: [arrived], timeout: timeout),
+                    .completed,
+                    "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
+                )
+            }
         } else {
-            let terminal = app.descendants(matching: .any)["terminal-input"]
             XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
             let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
             let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
