@@ -45,9 +45,15 @@ class CursorClaimHookTests(unittest.TestCase):
 
     def test_read_only_actions_work_without_claim(self):
         with patch.object(hook, "verify_current", return_value=False):
-            for tool in ("Read", "Grep", "Glob", "Search"):
-                self.assertEqual(hook.decide(event(tool))["permission"], "allow")
-            for command in ("pwd", "git status --short", "git diff --stat", "rg TODO"):
+            for tool in ("Read", "Grep", "Glob", "Search",
+                         "MCP:github__get_issue", "MCP:mcp__GitHub__fetch_pr_patch",
+                         "MCP:github__list_pull_requests"):
+                self.assertEqual(hook.decide(event(tool))["permission"], "allow", tool)
+            for tool in ("MCP:github__push_files", "MCP:github__delete_file",
+                         "MCP:github__update_pull_request"):
+                self.assertEqual(hook.decide(event(tool))["permission"], "deny", tool)
+            for command in ("pwd", "git status --short", "git diff --stat", "rg TODO",
+                            "gh issue view 58", "gh pr checks 1420"):
                 self.assertEqual(hook.decide(event("Shell", {"command": command}))["permission"], "allow")
             for command in ("git branch -D master", "git diff --ext-diff", "rg --pre evil TODO",
                             "ls; rm -rf /tmp/test", "git status && touch bad"):
