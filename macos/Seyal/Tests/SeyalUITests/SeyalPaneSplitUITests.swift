@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 /// Issue #923 headed evidence: with production pane splitting (C3), Split
@@ -521,10 +522,22 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let secondPaneStrips = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier CONTAINS %@ AND identifier CONTAINS %@", "-terminal-tabs", "seyal-pane-")
         )
-        XCTAssertEqual(secondPaneStrips.count, 2, "each Pane owns its own terminal-tab strip")
+        let stripsReady = expectation(
+            for: NSPredicate(format: "count == 2"),
+            evaluatedWith: secondPaneStrips,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [stripsReady], timeout: 12),
+            .completed,
+            "each Pane owns its own terminal-tab strip"
+        )
         waitForFocus(app, region: 1)
         waitForUsablePty(in: app)
-        let secondPaneExecution = try XCTUnwrap(executionIdentity(terminalSurface.value as? String))
+        // Multipane Flow hides terminal-input; focused host publishes execution=.
+        let focusedHost = element(app, "seyal-pane-presentation-host")
+        XCTAssertTrue(focusedHost.waitForExistence(timeout: 8))
+        let secondPaneExecution = try XCTUnwrap(executionIdentity(focusedHost.value as? String))
         XCTAssertNotEqual(secondPaneExecution, originalExecution, "Split creates an independent terminal execution")
         XCTAssertNotEqual(secondPaneExecution, createdExecution, "split Pane does not reuse either terminal tab execution")
         XCTAssertEqual(terminalTabs.count, 3, "two terminal tabs stay in Pane 1 and Pane 2 starts with one")
@@ -532,8 +545,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         element(app, "seyal-pane-region-0").click()
         waitForFocus(app, region: 0)
+        let pane0Host = element(app, "seyal-pane-presentation-host")
+        XCTAssertTrue(pane0Host.waitForExistence(timeout: 8))
         XCTAssertEqual(
-            try XCTUnwrap(executionIdentity(terminalSurface.value as? String)),
+            try XCTUnwrap(executionIdentity(pane0Host.value as? String)),
             createdExecution,
             "returning to Pane 1 preserves its selected terminal"
         )
@@ -541,8 +556,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
                        "Pane 2 command history stays out of Pane 1")
         element(app, "seyal-pane-region-1").click()
         waitForFocus(app, region: 1)
+        let pane1Host = element(app, "seyal-pane-presentation-host")
+        XCTAssertTrue(pane1Host.waitForExistence(timeout: 8))
         XCTAssertEqual(
-            try XCTUnwrap(executionIdentity(terminalSurface.value as? String)),
+            try XCTUnwrap(executionIdentity(pane1Host.value as? String)),
             secondPaneExecution,
             "returning to Pane 2 restores its independent execution"
         )
@@ -685,19 +702,64 @@ final class SeyalPaneSplitUITests: XCTestCase {
     private func submitComposerCommand(
         _ command: String,
         in app: XCUIApplication,
-        expectBlock: Bool = true
+        expectBlock: Bool = true,
+        blockMarker: String? = nil
     ) {
         let editor = element(app, "seyal-composer-editor")
         XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer editor missing")
         editor.click()
-        editor.typeText(command)
+        // Prefer paste: XCUI typeText mangles quotes/`$()`/paths and only the
+        // first character (`/`) may land in the draft under multipane Flow.
+        pasteIntoComposerEditor(editor, text: command)
+        let draftMatched = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", String(command.prefix(24))),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        if XCTWaiter.wait(for: [draftMatched], timeout: 3) != .completed {
+            // Fallback for hosts that expose draft only on the composer group.
+            editor.typeText(command)
+        }
         let submit = element(app, "seyal-composer-execute")
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: submit, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
         submit.click()
         guard expectBlock else { return }
-        let block = anyPaneBlock(in: app, containing: command)
-        XCTAssertTrue(block.waitForExistence(timeout: 10), "the selected execution records its own submitted command")
+        let marker = blockMarker ?? blockMarkerToken(in: command) ?? command
+        let block = anyPaneBlock(in: app, containing: marker)
+        XCTAssertTrue(
+            block.waitForExistence(timeout: 10),
+            "the selected execution records its own submitted command; marker=\(marker)"
+        )
+    }
+
+    /// Paste avoids XCUI key synthesis gaps for shell metacharacters.
+    private func pasteIntoComposerEditor(_ editor: XCUIElement, text: String) {
+        let previous = NSPasteboard.general.string(forType: .string)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        editor.typeKey("a", modifierFlags: [.command])
+        editor.typeKey("v", modifierFlags: [.command])
+        if let previous {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(previous, forType: .string)
+        }
+    }
+
+    /// Prefer a stable marker embedded in the command over the full shell line.
+    private func blockMarkerToken(in command: String) -> String? {
+        let patterns = [
+            #"seyal-1424-[A-Za-z0-9_-]+"#,
+            #"SEYAL_[A-Z0-9_]+"#,
+            #"stream-marker-[A-Za-z0-9_-]+"#,
+            #"after-vim-marker-[A-Za-z0-9_-]+"#,
+        ]
+        for pattern in patterns {
+            if let match = command.range(of: pattern, options: .regularExpression) {
+                return String(command[match])
+            }
+        }
+        return nil
     }
 
     private func blockCommand(in app: XCUIApplication, containing command: String) -> XCUIElement {

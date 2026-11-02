@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 @MainActor
@@ -557,9 +558,19 @@ final class SeyalHostUITests: XCTestCase {
             // product editability contract.
             editor.click()
             let command = "/bin/bash \(probeScript.path)"
-            editor.typeText(command)
+            // Paste avoids XCUI typeText truncating long paths to `/` under
+            // multipane Flow hosts (#1424).
+            let previous = NSPasteboard.general.string(forType: .string)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+            editor.typeKey("a", modifierFlags: [.command])
+            editor.typeKey("v", modifierFlags: [.command])
+            if let previous {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(previous, forType: .string)
+            }
             let draftMatchesCommand = expectation(
-                for: NSPredicate(format: "value == %@", command),
+                for: NSPredicate(format: "value CONTAINS %@", probeScript.lastPathComponent),
                 evaluatedWith: editor,
                 handler: nil
             )
