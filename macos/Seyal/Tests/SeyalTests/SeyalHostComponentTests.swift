@@ -391,6 +391,80 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testLeftContextWorkspacesAndTabsFollowC03Contracts() throws {
+        XCTAssertNil(
+            ProductChromeHostView.helpfulWorkspaceDetail(title: "Local", detail: "local"),
+            "redundant path must not render as Local local"
+        )
+        XCTAssertNil(ProductChromeHostView.helpfulWorkspaceDetail(title: "Local", detail: "  "))
+        XCTAssertEqual(
+            ProductChromeHostView.helpfulWorkspaceDetail(title: "Seyal", detail: "~/src/seyal"),
+            "~/src/seyal"
+        )
+
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+
+        let workspaces = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-left-workspaces") as? NSButton)
+        let tabs = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-left-tabs") as? NSButton)
+        XCTAssertEqual(workspaces.title, "Workspaces")
+        XCTAssertEqual(tabs.title, "Tabs")
+        XCTAssertNotEqual(tabs.title, "Layouts")
+
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-workspaces-heading"))
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-agents-heading"),
+            "empty AGENTS chrome must not appear when Rust projects zero agents"
+        )
+        let workspaceRow = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-workspace-0") as? NSButton)
+        let workspaceLabel = workspaceRow.accessibilityLabel() ?? workspaceRow.accessibilityTitle() ?? ""
+        XCTAssertTrue(
+            workspaceLabel.localizedCaseInsensitiveContains("Local"),
+            "workspace primary must remain Local: \(workspaceLabel)"
+        )
+        XCTAssertFalse(
+            workspaceLabel.localizedCaseInsensitiveContains(", local"),
+            "workspace row must not expose redundant path in the accessibility label"
+        )
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-pane-0"),
+            "C03 must not list Pane rows in the left rail"
+        )
+        XCTAssertTrue(
+            view.newTabButton.isDescendant(of: view.leftModeRow),
+            "New Tab stays with the left mode row; pane terminal tabs stay pane-local"
+        )
+        XCTAssertTrue(
+            workspaceLabel.localizedCaseInsensitiveContains("tab"),
+            "active workspace secondary carries tab count when path is redundant: \(workspaceLabel)"
+        )
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            workspaceRow.superview?.bounds.width ?? 0,
+            view.leftItems.bounds.width,
+            accuracy: 0.5,
+            "C04 selection fill must span the left panel, not hug label intrinsic width"
+        )
+
+        view.showTabs()
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tabs-heading"))
+        let tabRow = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-tab-0") as? NSButton)
+        let tabLabel = tabRow.accessibilityLabel() ?? tabRow.accessibilityTitle() ?? ""
+        XCTAssertFalse(tabLabel.hasPrefix("Layout "), "Tabs mode uses the Rust tab title, not Layout N")
+        XCTAssertTrue(tabLabel.localizedCaseInsensitiveContains("Terminal"), "expected tab title: \(tabLabel)")
+        XCTAssertTrue(tabLabel.contains("pane"), "Tabs mode secondary is pane count: \(tabLabel)")
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-0"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-workspaces-heading"))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            tabRow.superview?.bounds.width ?? 0,
+            view.leftItems.bounds.width,
+            accuracy: 0.5,
+            "Tabs C04 rows must also span the left panel edge-to-edge"
+        )
+    }
+
+    @MainActor
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()

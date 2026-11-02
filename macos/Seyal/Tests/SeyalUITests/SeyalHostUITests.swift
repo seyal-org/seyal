@@ -209,6 +209,48 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }
 
+    /// #1401: left C03 mode switcher is Workspaces ↔ Tabs; Workspaces omits
+    /// empty AGENTS and Pane dumps; Tabs lists Workspace Tab inventory only.
+    func testLeftContextWorkspacesAndTabsModeFollowC03Contracts() throws {
+        let app = hostedApp()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        waitForUsablePty(in: app)
+
+        let workspaces = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
+        XCTAssertTrue(workspaces.waitForExistence(timeout: 5))
+        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspaces.isHittable)
+        XCTAssertTrue(tabs.isHittable)
+        // Prefer AX label; fall back to title — attributed mode labels can vary by OS.
+        let workspacesName = (workspaces.label.isEmpty ? workspaces.title : workspaces.label)
+        let tabsName = (tabs.label.isEmpty ? tabs.title : tabs.label)
+        XCTAssertEqual(workspacesName, "Workspaces")
+        XCTAssertEqual(tabsName, "Tabs")
+        XCTAssertNotEqual(tabsName, "Layouts")
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-workspaces-heading"].firstMatch.waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-agents-heading"].exists,
+            "empty AGENTS chrome must stay omitted"
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-workspace-0"].firstMatch.exists)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-pane-0"].exists,
+            "C03 must not list Pane rows in the left rail"
+        )
+
+        tabs.click()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-tabs-heading"].firstMatch.waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-tab-0"].firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-pane-0"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-workspaces-heading"].exists)
+    }
+
     /// #923: the Tab's Rust PaneTree is projected into Pane regions. Before a
     /// Split, exactly one focused region hosts the live composer/transcript.
     func testSinglePaneTreeProjectsOneFocusedRegionHostingTheLiveSurface() throws {

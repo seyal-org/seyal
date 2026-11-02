@@ -8,10 +8,11 @@ final class ProductChromeHostView: NSView {
     /// Headed/component probe for cold visual snapshot. Identifier-encoded so
     /// VoiceOver does not hear a pipe-delimited token string as the chrome value.
     let coldVisualProbe = NSView()
-    /// Outer Seyal Tab actions stay in the navigation rail. Pane actions live
-    /// beside each Pane's terminal tabs below.
+    /// Outer Tab create/close stay with the left C03 mode row. Pane terminal
+    /// tabs stay pane-local in `PaneLayoutView` (do not add a second strip).
     let newTabButton = NSButton(title: "+", target: nil, action: nil)
     let closeTabButton = IdentityButton(title: "×", target: nil, action: nil)
+    let leftModeRow = NSStackView()
     let left = NSView()
     let inspector = NSStackView()
     let attention = NSStackView()
@@ -24,7 +25,7 @@ final class ProductChromeHostView: NSView {
     /// Global command palette overlay (#932); internal for component tests.
     let commandPalette: CommandPaletteOverlayView
     let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
-    let tabsButton = NSButton(title: "Layouts", target: nil, action: nil)
+    let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
     let recoveryLabel = NSTextField(labelWithString: "")
     /// #1379 Defect B: single clear recovery action after primary shell exit.
     let newShellButton = NSButton(title: "New shell", target: nil, action: nil)
@@ -108,17 +109,29 @@ final class ProductChromeHostView: NSView {
 
         left.translatesAutoresizingMaskIntoConstraints = false
         left.wantsLayer = true
+        leftModeRow.orientation = .horizontal
+        leftModeRow.alignment = .centerY
+        leftModeRow.spacing = 10
+        leftModeRow.translatesAutoresizingMaskIntoConstraints = false
+        let modeSpacer = NSView()
+        modeSpacer.translatesAutoresizingMaskIntoConstraints = false
+        modeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        leftModeRow.addArrangedSubview(workspacesButton)
+        leftModeRow.addArrangedSubview(tabsButton)
+        leftModeRow.addArrangedSubview(modeSpacer)
+        leftModeRow.addArrangedSubview(newTabButton)
+        leftModeRow.addArrangedSubview(closeTabButton)
         leftItems.orientation = .vertical
-        leftItems.alignment = .leading
+        leftItems.alignment = .width
+        leftItems.distribution = .fill
         leftItems.spacing = 2
         leftItems.translatesAutoresizingMaskIntoConstraints = false
-        left.addSubview(workspacesButton)
-        left.addSubview(tabsButton)
-        left.addSubview(newTabButton)
-        left.addSubview(closeTabButton)
+        // Keep the inventory column at panel width so C04 rows cannot hug
+        // label intrinsic size and pin to the trailing seam (same trap as
+        // Flow card NSTextField intrinsic width).
+        leftItems.setHuggingPriority(.defaultHigh, for: .horizontal)
+        left.addSubview(leftModeRow)
         left.addSubview(leftItems)
-        workspacesButton.translatesAutoresizingMaskIntoConstraints = false
-        tabsButton.translatesAutoresizingMaskIntoConstraints = false
 
         inspector.orientation = .vertical
         inspector.alignment = .leading
@@ -254,18 +267,15 @@ final class ProductChromeHostView: NSView {
             left.topAnchor.constraint(equalTo: topAnchor),
             left.bottomAnchor.constraint(equalTo: bottomAnchor),
             left.widthAnchor.constraint(equalToConstant: 220),
-            workspacesButton.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
-            workspacesButton.topAnchor.constraint(equalTo: left.topAnchor, constant: 10),
-            tabsButton.leadingAnchor.constraint(equalTo: workspacesButton.trailingAnchor, constant: 8),
-            tabsButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
-            newTabButton.leadingAnchor.constraint(equalTo: tabsButton.trailingAnchor, constant: 2),
-            newTabButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
-            closeTabButton.leadingAnchor.constraint(equalTo: newTabButton.trailingAnchor, constant: 2),
-            closeTabButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
-            leftItems.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
-            leftItems.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -10),
-            leftItems.topAnchor.constraint(equalTo: workspacesButton.bottomAnchor, constant: 12),
-            leftItems.bottomAnchor.constraint(lessThanOrEqualTo: left.bottomAnchor, constant: -10),
+            leftModeRow.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 12),
+            leftModeRow.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -12),
+            leftModeRow.topAnchor.constraint(equalTo: left.topAnchor, constant: 12),
+            // Rows bleed to the panel seam so C04 selection fill is edge-to-edge;
+            // section labels keep the same 12 pt content inset via their own padding.
+            leftItems.leadingAnchor.constraint(equalTo: left.leadingAnchor),
+            leftItems.trailingAnchor.constraint(equalTo: left.trailingAnchor),
+            leftItems.topAnchor.constraint(equalTo: leftModeRow.bottomAnchor, constant: 14),
+            leftItems.bottomAnchor.constraint(lessThanOrEqualTo: left.bottomAnchor, constant: -12),
 
             inspectorColumn.trailingAnchor.constraint(equalTo: trailingAnchor),
             inspectorColumn.topAnchor.constraint(equalTo: topAnchor),
@@ -486,8 +496,7 @@ final class ProductChromeHostView: NSView {
         let chrome = seyal_app_chrome(pane.appHandle)
         applyShellChrome(chrome)
         let shell = seyal_app_shell(pane.appHandle)
-        workspacesButton.state = chrome.left_panel == 0 ? .on : .off
-        tabsButton.state = chrome.left_panel == 1 ? .on : .off
+        applyLeftModeSwitcher(leftPanel: chrome.left_panel)
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildLayoutActions(shell: shell)
@@ -618,8 +627,8 @@ final class ProductChromeHostView: NSView {
     }
 
     func rebuildLayoutActions(shell: SeyalAppShell) {
-        // These are outer layout-tab actions, grouped with the Layouts
-        // navigation control. Terminal and Pane actions stay pane-local.
+        // Outer Tab create/close stay with the Tabs navigation control.
+        // Terminal and Pane actions stay pane-local.
         newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
         closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
         configureCloseButtons(shell: shell)
@@ -628,54 +637,137 @@ final class ProductChromeHostView: NSView {
     func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {
         leftItems.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if leftPanel == 0 {
-            for index in 0..<Int(shell.workspace_count) {
-                let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_WORKSPACE), UInt32(index))
-                leftItems.addArrangedSubview(
-                    rowButton(
-                        title: productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace",
-                        detail: productChromeCopyUTF8(row.detail, row.detail_len),
-                        identifier: "seyal-workspace-\(index)",
-                        selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                        action: #selector(selectWorkspace(_:)),
-                        kind: UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue),
-                        idLo: row.id_lo,
-                        idHi: row.id_hi
+            appendLeftSection(
+                title: "WORKSPACES",
+                identifier: "seyal-workspaces-heading",
+                topGap: false
+            ) {
+                for index in 0..<Int(shell.workspace_count) {
+                    let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_WORKSPACE), UInt32(index))
+                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace"
+                    let path = productChromeCopyUTF8(row.detail, row.detail_len)
+                    let selected = row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0
+                    // C04 secondary: helpful path, else active-workspace tab count.
+                    let secondary = Self.helpfulWorkspaceDetail(title: title, detail: path)
+                        ?? (selected
+                            ? "\(shell.tab_count) tab\(shell.tab_count == 1 ? "" : "s")"
+                            : nil)
+                    leftItems.addArrangedSubview(
+                        contextRow(
+                            primary: title,
+                            secondary: secondary,
+                            identifier: "seyal-workspace-\(index)",
+                            selected: selected,
+                            action: #selector(selectWorkspace(_:)),
+                            kind: UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue),
+                            idLo: row.id_lo,
+                            idHi: row.id_hi
+                        )
                     )
-                )
+                }
+            }
+            let chrome = seyal_app_chrome(pane.appHandle)
+            if chrome.agent_count > 0 {
+                appendLeftSection(
+                    title: "AGENTS",
+                    identifier: "seyal-agents-heading",
+                    topGap: true
+                ) {
+                    for index in 0..<Int(chrome.agent_count) {
+                        let row = seyal_app_chrome_row(
+                            pane.appHandle,
+                            UInt16(SEYAL_APP_ROW_AGENT),
+                            UInt32(index)
+                        )
+                        let identity = productChromeCopyUTF8(row.title, row.title_len) ?? ""
+                        let name = productChromeCopyUTF8(row.detail, row.detail_len) ?? identity
+                        let button = borderlessButton(title: name, action: #selector(selectAgent(_:)))
+                        button.identifier = NSUserInterfaceItemIdentifier(identity)
+                        button.setAccessibilityIdentifier("seyal-agent-\(index)")
+                        leftItems.addArrangedSubview(button)
+                    }
+                }
             }
         } else {
-            for index in 0..<Int(shell.tab_count) {
-                let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), UInt32(index))
-                let paneCount = productChromeCopyUTF8(row.detail, row.detail_len) ?? "0"
-                leftItems.addArrangedSubview(
-                    rowButton(
-                        title: "Layout \(index + 1)",
-                        detail: "\(paneCount) pane\(paneCount == "1" ? "" : "s")",
-                        identifier: "seyal-tab-\(index)",
-                        selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                        action: #selector(selectTab(_:)),
-                        kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
-                        idLo: row.id_lo,
-                        idHi: row.id_hi
+            appendLeftSection(
+                title: "TABS",
+                identifier: "seyal-tabs-heading",
+                topGap: false
+            ) {
+                for index in 0..<Int(shell.tab_count) {
+                    let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), UInt32(index))
+                    let paneCount = productChromeCopyUTF8(row.detail, row.detail_len) ?? "0"
+                    leftItems.addArrangedSubview(
+                        contextRow(
+                            primary: productChromeCopyUTF8(row.title, row.title_len) ?? "Tab \(index + 1)",
+                            secondary: "\(paneCount) pane\(paneCount == "1" ? "" : "s")",
+                            identifier: "seyal-tab-\(index)",
+                            selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                            action: #selector(selectTab(_:)),
+                            kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
+                            idLo: row.id_lo,
+                            idHi: row.id_hi
+                        )
                     )
-                )
+                }
             }
         }
-        for index in 0..<Int(shell.pane_count) {
-            let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
-            leftItems.addArrangedSubview(
-                rowButton(
-                    title: productChromeCopyUTF8(row.title, row.title_len) ?? "Pane",
-                    detail: nil,
-                    identifier: "seyal-pane-\(index)",
-                    selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                    action: #selector(focusPane(_:)),
-                    kind: UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue),
-                    idLo: row.id_lo,
-                    idHi: row.id_hi
-                )
-            )
+        // Pane focus stays pane-local. C03 must not dump a Pane tree into the left rail.
+    }
+
+    /// C04 secondary path only when it adds information beyond the primary name.
+    static func helpfulWorkspaceDetail(title: String, detail: String?) -> String? {
+        guard let detail else { return nil }
+        let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.caseInsensitiveCompare(title) == .orderedSame {
+            return nil
         }
+        return trimmed
+    }
+
+    func appendLeftSection(
+        title: String,
+        identifier: String,
+        topGap: Bool,
+        populate: () -> Void
+    ) {
+        if topGap {
+            leftItems.addArrangedSubview(leftSectionSpacer(height: 14))
+        }
+        leftItems.addArrangedSubview(sectionHeader(title, identifier: identifier))
+        leftItems.setCustomSpacing(8, after: leftItems.arrangedSubviews.last!)
+        populate()
+    }
+
+    func leftSectionSpacer(height: CGFloat) -> NSView {
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.heightAnchor.constraint(equalToConstant: height).isActive = true
+        spacer.setContentHuggingPriority(.required, for: .vertical)
+        return spacer
+    }
+
+    func sectionHeader(_ title: String, identifier: String) -> NSView {
+        let wrap = NSView()
+        wrap.translatesAutoresizingMaskIntoConstraints = false
+        wrap.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let header = NSTextField(labelWithString: title)
+        header.font = .systemFont(ofSize: 10, weight: .semibold)
+        header.textColor = .secondaryLabelColor
+        header.tag = 2
+        header.setAccessibilityIdentifier(identifier)
+        header.setAccessibilityElement(true)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        header.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        wrap.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: wrap.leadingAnchor, constant: 12),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: wrap.trailingAnchor, constant: -12),
+            header.topAnchor.constraint(equalTo: wrap.topAnchor),
+            header.bottomAnchor.constraint(equalTo: wrap.bottomAnchor),
+        ])
+        return wrap
     }
 
     func rebuildInspector(_ chrome: SeyalAppChrome) {
