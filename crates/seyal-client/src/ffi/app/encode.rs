@@ -232,9 +232,15 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
         );
     }
     // Flat active-Workspace TerminalTab navigation map for left C03 Tabs (#1412).
+    struct LeftTerminalTabRow {
+        title: String,
+        detail: String,
+        terminal_id: [u8; 16],
+        pane_id: [u8; 16],
+        selected: bool,
+    }
     let multi_pane = snap.shell.panes.len() > 1;
-    let mut terminal_index = 0u32;
-    let titles: Vec<(String, String, [u8; 16], [u8; 16], bool)> = snap
+    let titles: Vec<LeftTerminalTabRow> = snap
         .shell
         .panes
         .iter()
@@ -253,26 +259,31 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                     } else {
                         String::new()
                     };
-                    (title, detail, terminal.id.to_bytes(), pane_id, selected)
+                    LeftTerminalTabRow {
+                        title,
+                        detail,
+                        terminal_id: terminal.id.to_bytes(),
+                        pane_id,
+                        selected,
+                    }
                 })
         })
         .collect();
-    for (title, detail, terminal_id, pane_id, selected) in &titles {
+    for (terminal_index, row) in titles.iter().enumerate() {
         push_row(
             &mut state.shell_rows,
             &mut state.shell_text,
             RowDraft {
                 kind: 3,
-                index: terminal_index,
-                id: *terminal_id,
-                flags: u16::from(*selected),
-                title,
-                detail,
+                index: terminal_index as u32,
+                id: row.terminal_id,
+                flags: u16::from(row.selected),
+                title: &row.title,
+                detail: &row.detail,
                 address: None,
-                raw_address: Some(*pane_id),
+                raw_address: Some(row.pane_id),
             },
         );
-        terminal_index += 1;
     }
     relocate_row_pointers(&mut state.shell_rows, state.shell_text.as_ptr());
 }
