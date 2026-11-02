@@ -1100,6 +1100,9 @@ fn negotiated_connection_routes_multiple_attachments_independently() {
     let error = ErrorMessage::decode(&payload).expect("suspended Resync error");
     assert_eq!(error.error_code, ErrorCode::InvalidState as u16);
     assert_eq!(error.offending_message_type, MessageType::Resync as u16);
+    // The client discards obsolete queued presentation on entering Hidden;
+    // it must not be replayed as the subsequent resumed snapshot/LineIds.
+    client.deferred_presentation_frames.remove(&first.attachment_id);
 
     harness.assert_no_display_for_attachment(
         &mut client,
