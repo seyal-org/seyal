@@ -234,15 +234,15 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 920
-issue = 1412
-reason = "Thin AppKit chrome host stays one cold-path façade; #1412 projects Rust-authored left Tabs TerminalTab rows and mode-dependent + (NewTerminal vs CreateTab) on the #1401 C03 chrome without moving inventory or selection authority into Swift (ADR-015 / ADR-025 §2.8). Prefer later responsibility extraction over partN splits if this façade grows again."
+acknowledged_loc = 926
+issue = 1414
+reason = "Thin AppKit chrome host stays one cold-path façade; #1412 TerminalTab left Tabs plus #1413/#1414 Create Workspace and leave-offer present-if-needed stay on this host without moving product authority into Swift (ADR-015 / ADR-025 §2.8 / ADR-028)."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 721
-issue = 1388
-reason = "Local display-client protocol proofs stay one module; #1388 adds the type-45 Submit/Relay/Unavailable projection test beside the existing composer status fixtures rather than a second client test file."
+acknowledged_loc = 723
+issue = 1413
+reason = "Local display-client protocol proofs stay one module; #1413 extends mint-workspace poll fixtures beside the existing composer/status proofs rather than a second client test file."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
