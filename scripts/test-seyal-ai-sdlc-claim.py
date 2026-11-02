@@ -75,6 +75,8 @@ class SeyalClaimTests(unittest.TestCase):
             gate = Path(directory) / "workflow_claims.py"
             gate.write_text("# pinned fixture\n")
             env = {"AI_SDLC_WORKER_ID": "cursor-session-44", "XDG_STATE_HOME": directory}
+            module.set_active(Path(directory) / "seyal-ai-sdlc", "cursor-session-44",
+                              {"repo": "seyal-org/seyal", "phase": "pr", "number": 200})
             with patch.dict(os.environ, env):
                 with patch.object(module, "FRAMEWORK_CLI", gate):
                     with patch.object(module, "ensure_claim_store"):
