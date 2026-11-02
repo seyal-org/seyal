@@ -381,8 +381,8 @@ fn terminate_execution_result_rejects_truncated_oversized_nonzero_reserved_and_u
 
 #[test]
 fn unknown_message_type_stays_unknown_message() {
-    // 42–45 are SessionOffer, SessionConsent, SessionStatus, and ComposerTarget.
-    let header = FrameHeader::new(46, 0);
+    // 42–45 are ADR-026 session/ComposerTarget; 46–47 are ADR-028 MintWorkspace.
+    let header = FrameHeader::new(48, 0);
     assert_eq!(
         decode_message(&header, &[]),
         Err(FramingError::UnknownMessageType)
