@@ -547,6 +547,97 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(paneTabs.accessibilityValue() as? String, "focused")
     }
 
+    /// #1413 / ADR-028: Create Workspace chrome is Workspaces-panel-local.
+    @MainActor
+    func testCreateWorkspaceControlFollowsLeftPanelWorkspacesMode() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        XCTAssertEqual(seyal_app_chrome(handle).left_panel, 0)
+        let create = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace"))
+        XCTAssertFalse(create.isHidden, "Create Workspace stays on the Workspaces left panel")
+        XCTAssertEqual(create.accessibilityLabel(), "Create Workspace")
+
+        var tabs = SeyalAppAction()
+        tabs.version = UInt16(SEYAL_APP_ABI_VERSION)
+        tabs.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        tabs.kind = UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue)
+        tabs.reserved = 1
+        XCTAssertEqual(seyal_app_apply(handle, &tabs), 0)
+        view.reconcileChrome()
+        XCTAssertEqual(seyal_app_chrome(handle).left_panel, 1)
+        XCTAssertTrue(
+            try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace")).isHidden,
+            "Create Workspace is hidden while Tabs owns the left panel"
+        )
+
+        var workspaces = SeyalAppAction()
+        workspaces.version = UInt16(SEYAL_APP_ABI_VERSION)
+        workspaces.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        workspaces.kind = UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue)
+        workspaces.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &workspaces), 0)
+        view.reconcileChrome()
+        XCTAssertFalse(
+            try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace")).isHidden
+        )
+    }
+
+    /// #1413 / #1414: SetWorkspaceRoot + ObserveTrustedForegroundCwd leave-offer ABI.
+    /// Avoid reconcileChrome while an offer is pending (host presents NSAlert).
+    func testLeaveOfferAbiRaisesCreateAndDismissClearsWithoutMint() throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-1413-leave-root-\(UUID().uuidString)", isDirectory: true)
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-1413-leave-out-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+
+        let workspace = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_WORKSPACE), 0)
+        XCTAssertGreaterThan(workspace.id_lo | workspace.id_hi, 0)
+        XCTAssertEqual(
+            applyWorkspacePayload(
+                handle,
+                kind: UInt16(SEYAL_APP_ACTION_SET_WORKSPACE_ROOT.rawValue),
+                payload: root.path,
+                targetLo: workspace.id_lo,
+                targetHi: workspace.id_hi
+            ),
+            0
+        )
+
+        var none = seyal_app_leave_offer(handle)
+        XCTAssertEqual(none.kind, UInt16(SEYAL_APP_LEAVE_OFFER_NONE.rawValue))
+
+        XCTAssertEqual(
+            applyWorkspacePayload(
+                handle,
+                kind: UInt16(SEYAL_APP_ACTION_OBSERVE_TRUSTED_FOREGROUND_CWD.rawValue),
+                payload: outside.path
+            ),
+            0
+        )
+        let offer = seyal_app_leave_offer(handle)
+        XCTAssertEqual(offer.kind, UInt16(SEYAL_APP_LEAVE_OFFER_CREATE.rawValue))
+        XCTAssertGreaterThan(offer.path_len, 0)
+
+        var dismiss = SeyalAppAction()
+        dismiss.version = UInt16(SEYAL_APP_ABI_VERSION)
+        dismiss.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        dismiss.kind = UInt16(SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &dismiss), 0)
+        none = seyal_app_leave_offer(handle)
+        XCTAssertEqual(none.kind, UInt16(SEYAL_APP_LEAVE_OFFER_NONE.rawValue))
+        XCTAssertEqual(seyal_app_shell(handle).workspace_count, 1, "No must not mint a Workspace")
+    }
+
     @MainActor
     func testCloseTabUsesSnapshotContainmentFence() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
@@ -2813,6 +2904,27 @@ final class SeyalHostComponentTests: XCTestCase {
         return utf8.withUnsafeBufferPointer { buffer in
             action.payload = payload == nil ? nil : buffer.baseAddress
             action.payload_len = payload == nil ? 0 : UInt32(buffer.count)
+            return seyal_app_apply(handle, &action)
+        }
+    }
+
+    private func applyWorkspacePayload(
+        _ handle: UInt64,
+        kind: UInt16,
+        payload: String,
+        targetLo: UInt64 = 0,
+        targetHi: UInt64 = 0
+    ) -> Int32 {
+        let utf8 = Array(payload.utf8)
+        return utf8.withUnsafeBufferPointer { buffer in
+            var action = SeyalAppAction()
+            action.version = UInt16(SEYAL_APP_ABI_VERSION)
+            action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            action.kind = kind
+            action.target_execution_lo = targetLo
+            action.target_execution_hi = targetHi
+            action.payload = buffer.baseAddress
+            action.payload_len = UInt32(buffer.count)
             return seyal_app_apply(handle, &action)
         }
     }
