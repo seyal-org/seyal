@@ -1091,10 +1091,8 @@ fn negotiated_connection_routes_multiple_attachments_independently() {
         .encode(),
     );
     client.park_presentation = true;
-    let (kind, payload) = harness.expect_frame(
-        &mut client,
-        Instant::now() + Duration::from_secs(2),
-    );
+    let (kind, payload) =
+        harness.expect_frame(&mut client, Instant::now() + Duration::from_secs(2));
     client.park_presentation = false;
     assert_eq!(kind, MessageType::Error as u16);
     let error = ErrorMessage::decode(&payload).expect("suspended Resync error");
@@ -1102,7 +1100,9 @@ fn negotiated_connection_routes_multiple_attachments_independently() {
     assert_eq!(error.offending_message_type, MessageType::Resync as u16);
     // The client discards obsolete queued presentation on entering Hidden;
     // it must not be replayed as the subsequent resumed snapshot/LineIds.
-    client.deferred_presentation_frames.remove(&first.attachment_id);
+    client
+        .deferred_presentation_frames
+        .remove(&first.attachment_id);
 
     harness.assert_no_display_for_attachment(
         &mut client,
