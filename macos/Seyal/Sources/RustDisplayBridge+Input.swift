@@ -254,6 +254,12 @@ extension RustDisplayBridge {
       // Block timeline while the client is still registered (unregister waits
       // for stop — #1379 clear→exit). Other losses unregister inside poll;
       // APPLY_RUNTIME_BLOCKS with no client retains the composer timeline.
+      if result < 0, result != -18, !Self.isTerminalPollResult(result) {
+        // Non-terminal poll error (#1433): Rust's own registry did not drop
+        // this client. Retry on the next poll instead of stopping a live
+        // connection over a transient backpressure/protocol hiccup.
+        return
+      }
       if result < 0 {
         _ = selectPresentedClient()
         publishHistoryRanges()

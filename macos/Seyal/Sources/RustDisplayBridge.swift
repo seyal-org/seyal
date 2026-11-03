@@ -437,6 +437,21 @@ final class RustDisplayBridge {
     return seyal_bridge_select(handle) == 0
   }
 
+  /// Negative `seyal_bridge_poll`/`seyal_bridge_poll_for` codes that Rust's
+  /// own registry treats as a genuinely dead Controller
+  /// (`is_terminal_client_loss` in `crates/seyal-client/src/ffi/display.rs`
+  /// / `crates/seyal-client/src/app/session.rs`): `-3` Io, `-6`
+  /// NoRunningExecution (shell exit), `-10` Disconnected. Every other
+  /// negative `ClientError` code (Protocol, Capacity, ClientBackpressure,
+  /// CommitTooLarge, BlockMetadataConflict, a Server code, ...) is
+  /// transient/non-fatal on Rust's own terms — Rust does not unregister the
+  /// client for those. Treating "any negative" as fatal here tore down a
+  /// live sibling Controller on a benign poll hiccup, e.g. right after
+  /// Split Right while the new leaf's attach is still in flight (#1433).
+  nonisolated static func isTerminalPollResult(_ code: Int32) -> Bool {
+    code == -3 || code == -6 || code == -10
+  }
+
   /// One DispatchSourceRead per live Controller fd. CreateTab's second
   /// client must not steal the first connection's readiness handler.
   func armAuxiliaryReadSources() {
@@ -457,6 +472,12 @@ final class RustDisplayBridge {
         seyalRunAsMainActorFromMainQueue {
           guard let self, self.isConnected else { return }
           let result = seyal_bridge_poll_for(handle)
+          if result < 0, !Self.isTerminalPollResult(result) {
+            // Non-terminal poll error (#1433): Rust's own registry did not
+            // drop this Controller. Leave the fd armed; the next readiness
+            // event retries instead of disconnecting a live sibling.
+            return
+          }
           if result < 0 {
             // Level-trigger progress: EOF/disconnect must disarm this fd's
             // sources. Tab 1 stays up (do not stop()).

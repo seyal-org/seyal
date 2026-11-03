@@ -55,6 +55,15 @@ private struct ResolvedGlyph {
     let fontName: String
 }
 
+/// Keys a successful [`TerminalFontResolver.resolve`] result by its inputs
+/// (#1433). `backingScale` is folded in via its bit pattern, matching the
+/// `pixelSizeBits` convention already used by `GlyphKey`/`GraphemeKey`.
+private struct ResolveKey: Hashable {
+    let scalar: UInt32
+    let bold: Bool
+    let backingScaleBits: UInt64
+}
+
 private struct AtlasCursor {
     var x = 1
     var y = 1
@@ -66,6 +75,27 @@ final class TerminalFontResolver {
     private let regular: CTFont
     private let bold: CTFont
     let resolvedFamily: String
+    /// Memoizes `resolve(scalar:bold:backingScale:)` by its inputs so a
+    /// `GlyphAtlas.lookup` cache hit does not still pay for full CoreText
+    /// font/glyph-index construction on every call (#1433). `regular`/`bold`
+    /// are fixed for this resolver's lifetime, so no invalidation is needed.
+    private var resolveCache: [ResolveKey: ResolvedGlyph] = [:]
+    /// Test seam mirroring `GlyphAtlasStats.hits`/`.misses` for the bitmap
+    /// cache: proves `resolve` reuses a prior result instead of re-running
+    /// CoreText font/glyph construction (#1433).
+    private(set) var resolveCacheHits: UInt64 = 0
+    private(set) var resolveCacheMisses: UInt64 = 0
+
+    /// Test seam (#1433): exercises `resolve`'s input-keyed cache without
+    /// leaking the `fileprivate` `ResolvedGlyph` type across files.
+    @discardableResult
+    func warmResolveCacheForTests(
+        scalar: UInt32,
+        bold: Bool = false,
+        backingScale: CGFloat = 1
+    ) -> Bool {
+        resolve(scalar: scalar, bold: bold, backingScale: backingScale) != nil
+    }
 
     var regularFontForShaping: CTFont { regular }
     var boldFontForShaping: CTFont { bold }
@@ -153,14 +183,27 @@ final class TerminalFontResolver {
         bold requestedBold: Bool,
         backingScale: CGFloat
     ) -> ResolvedGlyph? {
-        if let resolved = resolveDirect(
+        let key = ResolveKey(
             scalar: scalar,
             bold: requestedBold,
-            backingScale: backingScale
-        ) {
-            return resolved
+            backingScaleBits: Double(backingScale).bitPattern
+        )
+        if let cached = resolveCache[key] {
+            resolveCacheHits &+= 1
+            return cached
         }
-        return resolveReplacement(bold: requestedBold, backingScale: backingScale)
+        resolveCacheMisses &+= 1
+        guard
+            let resolved = resolveDirect(
+                scalar: scalar,
+                bold: requestedBold,
+                backingScale: backingScale
+            ) ?? resolveReplacement(bold: requestedBold, backingScale: backingScale)
+        else {
+            return nil
+        }
+        resolveCache[key] = resolved
+        return resolved
     }
 
     /// Validation seam for M001 scalar correctness. This proves that a valid
