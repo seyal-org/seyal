@@ -508,35 +508,23 @@ final class SeyalPaneSplitUITests: XCTestCase {
             originalExecution,
             "the focused terminal surface returns to the original execution"
         )
-        submitComposerCommand("echo SEYAL_TAB_ONE_MARKER", in: app)
         created.click()
         XCTAssertEqual(created.value as? String, "selected")
         let createdExecution = try XCTUnwrap(executionIdentity(terminalSurface.value as? String))
         XCTAssertNotEqual(createdExecution, originalExecution, "the selected terminal surface follows the selected tab")
-        submitComposerCommand("echo SEYAL_TAB_TWO_MARKER", in: app)
         original.click()
         XCTAssertEqual(
             try XCTUnwrap(executionIdentity(terminalSurface.value as? String)),
             originalExecution,
             "switching back restores the original execution without replacing it"
         )
-        XCTAssertTrue(blockCommand(in: app, containing: "SEYAL_TAB_ONE_MARKER").exists)
-        XCTAssertFalse(blockCommand(in: app, containing: "SEYAL_TAB_TWO_MARKER").exists)
-        created.click()
-        XCTAssertTrue(blockCommand(in: app, containing: "SEYAL_TAB_TWO_MARKER").exists)
-        XCTAssertFalse(blockCommand(in: app, containing: "SEYAL_TAB_ONE_MARKER").exists)
 
+        // Split while the AX tree is still light (before Block markers). Seeding
+        // Blocks first stalled multipane region queries on CI (#1424).
         click(app, "seyal-split-right")
-        // Prefer divider/secondary host signals — full-tree region queries can
-        // stall while multipane hosts rebuild Blocks after tab+marker seeding.
-        let splitArrived =
-            element(app, "seyal-pane-divider-0").waitForExistence(timeout: 12)
-            || element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 4)
-            || element(app, "seyal-pane-region-1").waitForExistence(timeout: 4)
-        XCTAssertTrue(splitArrived, "Split Right must project a second Pane after pane-local tabs")
         XCTAssertTrue(
             element(app, "seyal-pane-region-1").waitForExistence(timeout: 12),
-            "second Pane region must become AX-addressable"
+            "Split Right projects a second Pane after pane-local tabs"
         )
         let secondPaneStrips = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier CONTAINS %@ AND identifier CONTAINS %@", "-terminal-tabs", "seyal-pane-")
@@ -553,7 +541,6 @@ final class SeyalPaneSplitUITests: XCTestCase {
         )
         waitForFocus(app, region: 1)
         waitForUsablePty(in: app)
-        // Multipane Flow hides terminal-input; focused host publishes execution=.
         let focusedHost = element(app, "seyal-pane-presentation-host")
         XCTAssertTrue(focusedHost.waitForExistence(timeout: 8))
         let secondPaneExecution = try XCTUnwrap(executionIdentity(focusedHost.value as? String))
@@ -564,15 +551,32 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         element(app, "seyal-pane-region-0").click()
         waitForFocus(app, region: 0)
+        waitForUsablePty(in: app)
         let pane0Host = element(app, "seyal-pane-presentation-host")
         XCTAssertTrue(pane0Host.waitForExistence(timeout: 8))
+        // Pane 1 still has the selected created tab from before the split.
         XCTAssertEqual(
             try XCTUnwrap(executionIdentity(pane0Host.value as? String)),
             createdExecution,
             "returning to Pane 1 preserves its selected terminal"
         )
-        XCTAssertFalse(blockCommand(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists,
-                       "Pane 2 command history stays out of Pane 1")
+        original.click()
+        waitForUsablePty(in: app)
+        submitComposerCommand("echo SEYAL_TAB_ONE_MARKER", in: app)
+        created.click()
+        waitForUsablePty(in: app)
+        submitComposerCommand("echo SEYAL_TAB_TWO_MARKER", in: app)
+        original.click()
+        XCTAssertTrue(blockCommand(in: app, containing: "SEYAL_TAB_ONE_MARKER").exists)
+        XCTAssertFalse(blockCommand(in: app, containing: "SEYAL_TAB_TWO_MARKER").exists)
+        created.click()
+        XCTAssertTrue(blockCommand(in: app, containing: "SEYAL_TAB_TWO_MARKER").exists)
+        XCTAssertFalse(blockCommand(in: app, containing: "SEYAL_TAB_ONE_MARKER").exists)
+        XCTAssertFalse(
+            anyPaneBlock(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists,
+            "Pane 2 command history stays out of Pane 1"
+        )
+
         element(app, "seyal-pane-region-1").click()
         waitForFocus(app, region: 1)
         let pane1Host = element(app, "seyal-pane-presentation-host")
@@ -582,7 +586,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
             secondPaneExecution,
             "returning to Pane 2 restores its independent execution"
         )
-        XCTAssertTrue(blockCommand(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists)
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists)
 
         XCTAssertEqual(app.state, .runningForeground)
     }
@@ -769,11 +773,22 @@ final class SeyalPaneSplitUITests: XCTestCase {
         editor.click()
         editor.typeKey("a", modifierFlags: [.command])
         editor.typeKey("v", modifierFlags: [.command])
+        editor.click()
+        let needle = String(text.prefix(12))
+        let pasted = NSPredicate(format: "value CONTAINS %@", needle).evaluate(with: editor)
+        if !pasted {
+            // Retry once — XCUI paste can miss under multipane focus churn.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            editor.click()
+            editor.typeKey("a", modifierFlags: [.command])
+            editor.typeKey("v", modifierFlags: [.command])
+            editor.click()
+        }
         if let previous {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(previous, forType: .string)
         }
-        editor.click()
     }
 
     /// Prefer a stable marker embedded in the command over the full shell line.

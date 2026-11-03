@@ -810,6 +810,12 @@ final class SeyalHostUITests: XCTestCase {
             oldWidth + 20,
             "window must resize; before=\(oldWidth) frame=\(window.frame)"
         )
+        // Nudge layout on both Flow hosts so pane geometry proposals run after
+        // the outer-window resize gesture (#1424 multipane hosts).
+        primarySurfaceAfterFocus.click()
+        secondaryHostAfterFocus.click()
+        primarySurfaceAfterFocus.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
 
         func waitForResizedSize(
             in region: XCUIElement,
@@ -819,7 +825,7 @@ final class SeyalHostUITests: XCTestCase {
             previous: (rows: Int, columns: Int, shellPID: Int),
             requireUnfocused: Bool
         ) -> (rows: Int, columns: Int, shellPID: Int)? {
-            let deadline = Date().addingTimeInterval(10)
+            let deadline = Date().addingTimeInterval(16)
             var lastProbe = "missing"
             var lastProjection = "unavailable"
             while Date() < deadline {

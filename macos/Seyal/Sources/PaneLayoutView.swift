@@ -268,11 +268,10 @@ final class PaneLayoutView: NSView {
                     host.frame = targetFrame
                 }
                 addSubview(host, positioned: .above, relativeTo: liveContent)
-                // Defer the first Block sync so region/divider AX targets publish
-                // before a heavy multipane rebuild can stall XCUI queries (#1424).
-                DispatchQueue.main.async { [weak host] in
-                    host?.noteRegistryPolled()
-                }
+                // Do not sync Blocks synchronously on install. The shared bridge
+                // poll (`onRegistryHandlePolled` → noteRegistryPolled) fills
+                // Flow content after region/divider AX is already queryable;
+                // a same-turn rebuild with seeded Blocks stalls XCUI (#1424).
             }
             // Zoom/occlusion must remove the leaf's surface; Raw/TUI covers the
             // focused host with liveContent without destroying it (#1424).
