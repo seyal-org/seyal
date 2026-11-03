@@ -255,16 +255,19 @@ extension RustDisplayBridge {
       // for stop — #1379 clear→exit). Other losses unregister inside poll;
       // APPLY_RUNTIME_BLOCKS with no client retains the composer timeline.
       if result < 0 {
+        _ = selectPresentedClient()
         publishHistoryRanges()
         onTimeline()
         // Rebuild may have issued fresh history requests for settled Blocks;
         // one more publish picks up anything already buffered on the client.
+        _ = selectPresentedClient()
         publishHistoryRanges()
         onError(result)
         stop(reconnect: result == -18)
         return
       }
       runtimeBlockMetadata = currentBlockMetadata()
+      _ = selectPresentedClient()
       publishHistoryRanges()
       publishComposerResult()
       publishComposerStatus()

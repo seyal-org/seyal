@@ -72,9 +72,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1104
-issue = 1414
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi extraction; #1414 adds leave_offer_path scratch on AppHandle while leave-offer encode lives in leave_offer_ffi.rs."
+ceiling_loc = 1117
+issue = 1424
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction; #1424 adds pane-scoped composer/block scratch on AppHandle while pane-addressed encode lives in pane_composer.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -234,9 +234,15 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 933
-issue = 1414
-reason = "Thin AppKit chrome host stays one cold-path façade; #1412 TerminalTab left Tabs plus #1413/#1414 Create Workspace and leave-offer present-if-needed stay on this host without moving product authority into Swift (ADR-015 / ADR-025 §2.8 / ADR-028)."
+acknowledged_loc = 936
+issue = 1424
+reason = "Thin AppKit chrome host stays one cold-path façade; #1424 themes secondary Flow presentation hosts after Split without moving product authority into Swift (ADR-015 / M001-MULTIPANE-VIEW §5)."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/PaneLayoutView.swift"
+acknowledged_loc = 709
+issue = 1424
+reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1424 publishes SecondaryLivePaneHost frames before install and leaves first Block sync to registry polls so multipane AutoresizingMask never fights composer constraints and region AX stays responsive."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"

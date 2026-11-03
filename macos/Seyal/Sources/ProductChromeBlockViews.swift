@@ -162,8 +162,16 @@ final class CommandBlockView: NSView {
 
     func setBodyTranscript(_ text: String) {
         bodyTranscript.stringValue = text
-        bodyTranscript.setAccessibilityLabel(text)
-        bodyTranscript.setAccessibilityValue(text)
+        // Bound AX payloads so tall Block bodies do not stall XCUI tree walks.
+        let ax = Self.accessibilitySummary(for: text)
+        bodyTranscript.setAccessibilityLabel(ax)
+        bodyTranscript.setAccessibilityValue(ax)
+    }
+
+    private static func accessibilitySummary(for text: String, limit: Int = 240) -> String {
+        guard text.count > limit else { return text }
+        // Prefer the live tail so streaming Blocks keep late lines AX-visible.
+        return "…" + String(text.suffix(limit))
     }
 
     override func layout() {

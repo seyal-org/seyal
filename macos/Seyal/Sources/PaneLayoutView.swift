@@ -5,14 +5,20 @@ import AppKit
 ///
 /// Geometry, focus, ratios and live-surface placement come from Rust
 /// (`seyal_app_pane_region` / `seyal_app_pane_divider`); this view only
-/// positions frames. The focused chrome container (`liveContent`) hosts
-/// composer/transcript/primary Metal. Additional LIVE leaves host secondary
-/// Metal surfaces via `installSecondaryLive`. Every leaf is a focusable region
-/// bound to its real PaneId; focusing dispatches Rust `FOCUS_PANE` through
-/// `onFocusPane`. Dividers sit on the Rust-projected line; dragging one
-/// forwards the raw pointer position in Tab unit space as `MOVE_SPLIT_DIVIDER`,
-/// and Rust derives and clamps the ratio. This view re-reads only the Pane
-/// projection, so a drag never rebuilds Blocks on every mouse move.
+/// positions frames.
+///
+/// Multipane Flow (#1424): every visible leaf owns a durable
+/// `SecondaryLivePaneHost`. Focus changes input ownership only — hosts are not
+/// destroyed and `liveContent` is not relocated solely because focus moved.
+/// `liveContent` remains for single-pane Flow and multipane Raw/TUI when the
+/// focused leaf needs the interactive Metal surface.
+///
+/// Every leaf is a focusable region bound to its real PaneId; focusing
+/// dispatches Rust `FOCUS_PANE` through `onFocusPane`. Dividers sit on the
+/// Rust-projected line; dragging one forwards the raw pointer position in Tab
+/// unit space as `MOVE_SPLIT_DIVIDER`, and Rust derives and clamps the ratio.
+/// This view re-reads only the Pane projection, so a drag never rebuilds Blocks
+/// on every mouse move.
 @MainActor
 final class PaneLayoutView: NSView {
     enum SplitDirection {
@@ -186,26 +192,55 @@ final class PaneLayoutView: NSView {
         secondaryLiveHosts.values.first { $0.displayHandle == displayHandle }
     }
 
-    /// Ensure non-focused LIVE leaves with a display handle have Metal hosts.
+    /// All multipane Flow presentation hosts currently installed (focused and not).
+    var secondaryHosts: [SecondaryLivePaneHost] {
+        Array(secondaryLiveHosts.values)
+    }
+
+    func presentationHost(paneLo: UInt64, paneHi: UInt64) -> SecondaryLivePaneHost? {
+        secondaryLiveHosts[PaneKey(lo: paneLo, hi: paneHi)]
+    }
+
+    /// Ensure every visible multipane leaf keeps a durable Flow presentation
+    /// host. Focus changes input ownership only (#1424). LIVE gates Metal
+    /// frames; Raw/TUI on the focused leaf temporarily covers that leaf with
+    /// `liveContent` without destroying the host.
     func reconcileSecondaryLiveHosts(
         bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)]
     ) {
+        let multipane = bindings.count > 1
+        if !multipane {
+            for key in Array(secondaryLiveHosts.keys) {
+                secondaryLiveHosts.removeValue(forKey: key)?.removeFromSuperview()
+            }
+            needsLayout = true
+            return
+        }
+
+        let focused = bindings.first(where: \.focused)
+        let focusedEligibility = focused.map {
+            seyal_app_eligibility_for_pane(appHandle, $0.paneLo, $0.paneHi)
+        } ?? 0
+        let focusedNeedsInteractiveLiveContent =
+            focusedEligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+            || focusedEligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        // Multipane Flow: pane hosts own presentation; do not relocate liveContent.
+        liveContent.isHidden = !focusedNeedsInteractiveLiveContent
+
         var keep = Set<PaneKey>()
         for binding in bindings {
             let key = PaneKey(lo: binding.paneLo, hi: binding.paneHi)
-            guard binding.live else {
-                if let host = secondaryLiveHosts.removeValue(forKey: key) {
-                    host.removeFromSuperview()
-                }
-                continue
-            }
-            guard !binding.focused else {
-                if let host = secondaryLiveHosts.removeValue(forKey: key) {
-                    host.removeFromSuperview()
-                }
-                continue
-            }
             keep.insert(key)
+            let region = regions.first(where: { $0.paneLo == key.lo && $0.paneHi == key.hi })
+            let occluded = region?.occluded ?? false
+            let coveredByInteractiveLive =
+                binding.focused && focusedNeedsInteractiveLiveContent
+            let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
+            let targetFrame: CGRect = {
+                guard let region, !occluded else { return .zero }
+                return contentFrame(region.rect, inset: inset)
+            }()
+
             let host: SecondaryLivePaneHost
             if let existing = secondaryLiveHosts[key] {
                 host = existing
@@ -226,17 +261,27 @@ final class PaneLayoutView: NSView {
                     self?.onRetryPaneRecovery?(target)
                 }
                 secondaryLiveHosts[key] = host
-                addSubview(host, positioned: .above, relativeTo: liveContent)
-                if binding.displayHandle != 0 {
-                    host.noteRegistryPolled()
+                // Frame before install: a zero-size host activates AutoresizingMask
+                // width/height==0 against Flow composer/transcript constraints and
+                // can stall the main thread during multipane split (#1424).
+                if targetFrame.width > 1, targetFrame.height > 1 {
+                    host.frame = targetFrame
                 }
+                addSubview(host, positioned: .above, relativeTo: liveContent)
+                // Do not sync Blocks synchronously on install. The shared bridge
+                // poll (`onRegistryHandlePolled` → noteRegistryPolled) fills
+                // Flow content after region/divider AX is already queryable;
+                // a same-turn rebuild with seeded Blocks stalls XCUI (#1424).
             }
+            // Zoom/occlusion must remove the leaf's surface; Raw/TUI covers the
+            // focused host with liveContent without destroying it (#1424).
+            host.isHidden = coveredByInteractiveLive || occluded
+            host.setInputOwned(binding.focused && !coveredByInteractiveLive && !occluded)
             // Publish the target frame in the same reconciliation turn that
             // installs the host. Waiting for a later parent layout pass leaves
-            // the AX button at its initial zero frame and unhittable to XCUI.
-            if let region = regions.first(where: { $0.paneLo == key.lo && $0.paneHi == key.hi }) {
-                let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
-                host.frame = scaled(region.rect).insetBy(dx: inset, dy: inset)
+            // the AX target at its initial zero frame and unhittable to XCUI.
+            if targetFrame.width > 1, targetFrame.height > 1 {
+                host.frame = targetFrame
             }
         }
         for key in secondaryLiveHosts.keys where !keep.contains(key) {
@@ -411,9 +456,11 @@ final class PaneLayoutView: NSView {
             addSubview(view, positioned: .below, relativeTo: liveContent)
             return view
         }
-        // Focused chrome container stays visible while any leaf is LIVE; it is
-        // positioned on the focused LIVE region (or the sole LIVE region).
-        liveContent.isHidden = !next.contains(where: \.live)
+        // Single-pane: liveContent follows LIVE. Multipane Flow visibility is
+        // owned by reconcileSecondaryLiveHosts (hide unless Raw/TUI needs it).
+        if next.count <= 1 {
+            liveContent.isHidden = !next.contains(where: \.live)
+        }
     }
 
     private func rebuildDividerViews(_ nextDividers: [Divider]) {
@@ -437,36 +484,48 @@ final class PaneLayoutView: NSView {
         self.theme = theme
         regionViews.forEach { $0.apply(theme: theme) }
         dividerViews.forEach { $0.apply(theme: theme) }
+        secondaryLiveHosts.values.forEach { $0.apply(theme: theme) }
     }
 
     override func layout() {
-        let liveFrame = focusedLiveFrame()
-        if !applyingLiveFrame,
-           liveFrame.width > 1,
-           liveFrame.height > 1,
-           (
-               abs(liveOriginX.constant - liveFrame.minX) > 0.5
-                   || abs(liveOriginY.constant - liveFrame.minY) > 0.5
-                   || abs(liveWidth.constant - liveFrame.width) > 0.5
-                   || abs(liveHeight.constant - liveFrame.height) > 0.5
-           )
-        {
-            liveOriginX.constant = liveFrame.minX
-            liveOriginY.constant = liveFrame.minY
-            liveWidth.constant = liveFrame.width
-            liveHeight.constant = liveFrame.height
-            applyingLiveFrame = true
-            layoutSubtreeIfNeeded()
-            applyingLiveFrame = false
+        // Relocate interactive liveContent only while it is visible (single-pane
+        // Flow, or multipane Raw/TUI). Multipane Flow keeps it hidden so focus
+        // cannot move presentation chrome between leaves (#1424).
+        if !liveContent.isHidden {
+            let liveFrame = focusedLiveFrame()
+            if !applyingLiveFrame,
+               liveFrame.width > 1,
+               liveFrame.height > 1,
+               (
+                   abs(liveOriginX.constant - liveFrame.minX) > 0.5
+                       || abs(liveOriginY.constant - liveFrame.minY) > 0.5
+                       || abs(liveWidth.constant - liveFrame.width) > 0.5
+                       || abs(liveHeight.constant - liveFrame.height) > 0.5
+               )
+            {
+                liveOriginX.constant = liveFrame.minX
+                liveOriginY.constant = liveFrame.minY
+                liveWidth.constant = liveFrame.width
+                liveHeight.constant = liveFrame.height
+                applyingLiveFrame = true
+                layoutSubtreeIfNeeded()
+                applyingLiveFrame = false
+            }
         }
         super.layout()
         let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
         for (view, region) in zip(regionViews, regions) {
             view.frame = scaled(region.rect)
         }
-        for region in regions where region.live && !region.focused && !region.occluded {
+        for region in regions {
             let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
-            secondaryLiveHosts[key]?.frame = contentFrame(region.rect, inset: inset)
+            guard let host = secondaryLiveHosts[key] else { continue }
+            if region.occluded {
+                host.isHidden = true
+                continue
+            }
+            guard !host.isHidden else { continue }
+            host.frame = contentFrame(region.rect, inset: inset)
         }
         for region in regions where !region.occluded {
             let key = PaneKey(lo: region.paneLo, hi: region.paneHi)

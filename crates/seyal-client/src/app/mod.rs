@@ -564,6 +564,26 @@ impl ApplicationRoot {
         }
     }
 
+    /// Pane-addressed composer snapshot for visible non-focused Flow hosts
+    /// (#1424). Does not rebind fence authority.
+    pub fn composer_for_pane(&self, pane: PaneId) -> Option<ComposerSnapshot> {
+        self.composer.snapshot(pane).ok()
+    }
+
+    /// Whether `pane` is present in the shell tree (execution may still be None).
+    pub fn pane_known(&self, pane: PaneId) -> bool {
+        self.shell.pane_execution(pane).is_ok()
+    }
+
+    /// Bound execution for a known Pane, if any.
+    pub fn pane_execution_id(&self, pane: PaneId) -> Option<ExecutionId> {
+        self.shell.pane_execution(pane).ok().flatten()
+    }
+
+    pub fn focused_pane_id(&self) -> PaneId {
+        self.shell.snapshot().focused_pane
+    }
+
     pub fn snapshot(&self) -> AppSnapshot {
         let shell = self.shell.snapshot();
         let composer = self.composer.snapshot(shell.focused_pane).ok();

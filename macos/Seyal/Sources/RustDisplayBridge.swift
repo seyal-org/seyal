@@ -479,6 +479,11 @@ final class RustDisplayBridge {
             self.onStatusChanged()
             return
           }
+          // Publish history for the polled Controller before focus gating so
+          // unfocused multipane Flow leaves receive completed Block bodies (#1424).
+          if seyal_bridge_select(handle) == 0 {
+            self.publishHistoryRanges()
+          }
           self.onRegistryHandlePolled?(handle)
           if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
             self.runtimeBlockMetadata = self.currentBlockMetadata()

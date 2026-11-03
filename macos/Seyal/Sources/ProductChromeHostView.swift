@@ -915,6 +915,9 @@ final class ProductChromeHostView: NSView {
         for view in blocks.arrangedSubviews {
             (view as? CommandBlockView)?.apply(theme: theme)
         }
+        for host in centerColumn.secondaryHosts {
+            host.apply(theme: theme)
+        }
     }
 
     func updateColdVisualProbe(_ theme: NativeTheme) {

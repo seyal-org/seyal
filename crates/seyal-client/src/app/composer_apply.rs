@@ -205,6 +205,31 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// Apply Candidate-D Block records to a specific Pane without requiring
+    /// that Pane to hold focused fence authority (#1424). Callers must supply
+    /// records from that Pane's own Controller client.
+    pub fn apply_runtime_blocks_for_pane(
+        &mut self,
+        pane: seyal_core::PaneId,
+        records: Vec<RuntimeBlockRecord>,
+    ) -> Result<(), AppError> {
+        if !self.pane_known(pane) {
+            return Err(AppError::UnknownPane);
+        }
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        self.composer
+            .apply(ComposerAction::ApplyRuntimeBlocks { pane, records })
+            .map(|_| ())
+            .map_err(composer_error)?;
+        if pane == self.focused_pane_id()
+            && self.chrome.selected_block_is_stale(&self.focused_blocks())
+        {
+            let shell = self.shell.snapshot();
+            let _ = self.chrome.apply(ChromeAction::ClearBlockSelection, &shell);
+        }
+        Ok(())
+    }
+
     pub(super) fn apply_runtime_composer_status(
         &mut self,
         fence: AppFence,

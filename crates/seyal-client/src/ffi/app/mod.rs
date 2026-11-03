@@ -7,6 +7,7 @@ mod encode;
 mod error_code;
 mod leave_offer_ffi;
 mod loss;
+mod pane_composer;
 pub mod pane_recovery;
 mod pane_region;
 mod shortcut;
@@ -41,6 +42,10 @@ use encode::{
 pub use block_projection::seyal_app_block_projection;
 pub use leave_offer_ffi::seyal_app_leave_offer;
 pub(crate) use loss::{note_application_roots_client_loss, note_application_roots_execution_ended};
+pub use pane_composer::{
+    seyal_app_block_projection_for_pane, seyal_app_block_row_for_pane, seyal_app_composer_for_pane,
+    seyal_app_eligibility_for_pane, seyal_app_sync_pane_runtime_blocks,
+};
 pub use pane_region::*;
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
@@ -287,11 +292,15 @@ pub(super) struct AppHandle {
     pub(super) root: ApplicationRoot,
     output: Vec<u8>,
     composer_draft: Vec<u8>,
+    /// Scratch for `seyal_app_composer_for_pane` so focused draft encode stays
+    /// stable while a secondary host reads its own Pane composer.
+    pane_composer_draft: Vec<u8>,
     ax_nodes: Vec<SeyalAppAxNode>,
     ax_text: Vec<u8>,
     shell_text: Vec<u8>,
     chrome_text: Vec<u8>,
     block_text: Vec<u8>,
+    pane_block_text: Vec<u8>,
     history_query: Vec<u8>,
     history_text: Vec<u8>,
     palette_query: Vec<u8>,
@@ -300,6 +309,7 @@ pub(super) struct AppHandle {
     shell_rows: Vec<SeyalAppRow>,
     chrome_rows: Vec<SeyalAppRow>,
     block_rows: Vec<SeyalAppRow>,
+    pane_block_rows: Vec<SeyalAppRow>,
     history_rows: Vec<SeyalAppRow>,
     palette_rows: Vec<SeyalAppRow>,
     leave_offer_path: Vec<u8>,
@@ -386,11 +396,13 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 root: ApplicationRoot::new(),
                 output: Vec::new(),
                 composer_draft: Vec::new(),
+                pane_composer_draft: Vec::new(),
                 ax_nodes: Vec::new(),
                 ax_text: Vec::new(),
                 shell_text: Vec::new(),
                 chrome_text: Vec::new(),
                 block_text: Vec::new(),
+                pane_block_text: Vec::new(),
                 history_query: Vec::new(),
                 history_text: Vec::new(),
                 palette_query: Vec::new(),
@@ -399,6 +411,7 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 shell_rows: Vec::new(),
                 chrome_rows: Vec::new(),
                 block_rows: Vec::new(),
+                pane_block_rows: Vec::new(),
                 history_rows: Vec::new(),
                 palette_rows: Vec::new(),
                 leave_offer_path: Vec::new(),
