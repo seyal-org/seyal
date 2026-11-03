@@ -240,9 +240,10 @@ reason = "Thin AppKit chrome host stays one cold-path façade; #1442 routes Raw 
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
-acknowledged_loc = 715
-issue = 1440
-reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1424 multipane host publish plus #1440 Raw secondary Metal keep-warm under focused liveContent cover stay on this thin AppKit layout surface."
+acknowledged_loc = 716
+issue = 1429
+reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1424/#1440 multipane/Raw host wiring plus #1429 shell pane titles into PaneTerminalTabStrip stay on this thin AppKit layout surface."
+issue_url = "https://github.com/seyal-org/seyal/issues/1429"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"

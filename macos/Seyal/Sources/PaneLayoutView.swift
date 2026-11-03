@@ -579,6 +579,7 @@ final class PaneLayoutView: NSView {
             let strip = PaneTerminalTabStrip(
                 paneLo: region.paneLo,
                 paneHi: region.paneHi,
+                paneTitle: region.title,
                 tabs: region.terminalTabs,
                 focused: region.focused,
                 canSplit: shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) != 0,

@@ -1653,6 +1653,64 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(BundledRuntimeLauncher.helperIdentifier, "dev.seyal.Seyal.runtime")
     }
 
+    @MainActor
+    func testSplitPaneTerminalTabTitlesUseDistinctPaneIdentity() {
+        XCTAssertEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 1", index: 0, tabCount: 1),
+            "Pane 1"
+        )
+        XCTAssertEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 0, tabCount: 1),
+            "Pane 2"
+        )
+        XCTAssertNotEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 1", index: 0, tabCount: 1),
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 0, tabCount: 1),
+            "split leaves must not both read as Terminal 1 (#1429)"
+        )
+        XCTAssertEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 1, tabCount: 2),
+            "Pane 2 · 2"
+        )
+        XCTAssertEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "  ", index: 0, tabCount: 1),
+            "Terminal 1"
+        )
+
+        let stripA = PaneTerminalTabStrip(
+            paneLo: 1,
+            paneHi: 0,
+            paneTitle: "Pane 1",
+            tabs: [PaneLayoutView.TerminalTab(lo: 1, hi: 0, selected: true)],
+            focused: true,
+            canSplit: true,
+            canClosePane: true
+        )
+        let stripB = PaneTerminalTabStrip(
+            paneLo: 2,
+            paneHi: 0,
+            paneTitle: "Pane 2",
+            tabs: [PaneLayoutView.TerminalTab(lo: 2, hi: 0, selected: true)],
+            focused: false,
+            canSplit: true,
+            canClosePane: true
+        )
+        func firstPaneButtonTitle(in root: NSView) -> String? {
+            if let button = root as? NSButton, button.title.hasPrefix("Pane") {
+                return button.title
+            }
+            for child in root.subviews {
+                if let title = firstPaneButtonTitle(in: child) { return title }
+            }
+            return nil
+        }
+        let a = firstPaneButtonTitle(in: stripA)
+        let b = firstPaneButtonTitle(in: stripB)
+        XCTAssertEqual(a, "Pane 1")
+        XCTAssertEqual(b, "Pane 2")
+        XCTAssertNotEqual(a, b)
+    }
+
     func testIsolatedRuntimeDirectoryDoesNotWeakenProductionDiscovery() {
         XCTAssertEqual(
             IsolatedRuntimeDirectory.helperArguments(from: ["Seyal"], testHostLoaded: false),
