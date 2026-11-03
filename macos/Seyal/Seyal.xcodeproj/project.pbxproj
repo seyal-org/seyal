@@ -54,6 +54,7 @@
 		C1000000000000000000000C /* PaneRegionProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000C /* PaneRegionProjectionTests.swift */; };
 		C10000000000000000000013 /* TerminalFontResolverCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000013 /* TerminalFontResolverCacheTests.swift */; };
 		C10000000000000000000014 /* RustDisplayBridgePollClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000014 /* RustDisplayBridgePollClassificationTests.swift */; };
+		C10000000000000000000015 /* RustDisplayBridgeFinishMutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000015 /* RustDisplayBridgeFinishMutationTests.swift */; };
 		C1000000000000000000000D /* SeyalPaneSplitUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000D /* SeyalPaneSplitUITests.swift */; };
 		C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000007 /* IsolatedHostedRuntime.swift */; };
 		A10000000000000000000050 /* TerminalCompositionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000050 /* TerminalCompositionDocument.swift */; };
@@ -133,6 +134,7 @@
 		C2000000000000000000000C /* PaneRegionProjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneRegionProjectionTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000013 /* TerminalFontResolverCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalFontResolverCacheTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000014 /* RustDisplayBridgePollClassificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustDisplayBridgePollClassificationTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000015 /* RustDisplayBridgeFinishMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustDisplayBridgeFinishMutationTests.swift; sourceTree = "<group>"; };
 		C2000000000000000000000D /* SeyalPaneSplitUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalPaneSplitUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000007 /* IsolatedHostedRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedHostedRuntime.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* RustDisplayBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustDisplayBridge.swift; sourceTree = "<group>"; };
@@ -356,6 +358,7 @@
 				C2000000000000000000000C /* PaneRegionProjectionTests.swift */,
 				C20000000000000000000013 /* TerminalFontResolverCacheTests.swift */,
 				C20000000000000000000014 /* RustDisplayBridgePollClassificationTests.swift */,
+				C20000000000000000000015 /* RustDisplayBridgeFinishMutationTests.swift */,
 			);
 			path = SeyalTests;
 			sourceTree = "<group>";
@@ -581,6 +584,7 @@
 				C1000000000000000000000C /* PaneRegionProjectionTests.swift in Sources */,
 				C10000000000000000000013 /* TerminalFontResolverCacheTests.swift in Sources */,
 				C10000000000000000000014 /* RustDisplayBridgePollClassificationTests.swift in Sources */,
+				C10000000000000000000015 /* RustDisplayBridgeFinishMutationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

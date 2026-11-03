@@ -30,6 +30,9 @@ final class ProductChromeHostView: NSView {
     let recoveryLabel = NSTextField(labelWithString: "")
     /// #1379 Defect B: single clear recovery action after primary shell exit.
     let newShellButton = NSButton(title: "New shell", target: nil, action: nil)
+    /// #1433: whether `updateNewShellRecoveryAction()` is the one currently
+    /// holding `composer.isHidden = true`, so it only reverses its own hide.
+    var newShellHidComposer = false
     let leftItems = NSStackView()
     let inspectorColumn = NSView()
     /// Rust-projected Pane regions (#923); the live surface sits in

@@ -437,6 +437,16 @@ final class RustDisplayBridge {
     return seyal_bridge_select(handle) == 0
   }
 
+  /// The handle `selectPresentedClient()` selects right now: this window's
+  /// focused Pane if one is bound, otherwise this bridge's own primary
+  /// Controller. `finishMutation` reads this to scope teardown to the
+  /// specific handle a mutation actually targeted (#1433: a terminal code on
+  /// a focused *sibling* Pane's mutation must not cascade into disconnecting
+  /// this window's primary Controller or other siblings).
+  var presentedClientHandle: UInt64 {
+    windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+  }
+
   /// Negative `seyal_bridge_poll`/`seyal_bridge_poll_for` codes that Rust's
   /// own registry treats as a genuinely dead Controller
   /// (`is_terminal_client_loss` in `crates/seyal-client/src/ffi/display.rs`
