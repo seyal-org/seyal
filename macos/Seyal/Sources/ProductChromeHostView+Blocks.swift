@@ -233,7 +233,14 @@ extension ProductChromeHostView {
     }
 
     func applyHistoryRange(_ range: NativeHistoryRange) {
-        // Multipane: each leaf owns its cards/surface. Route by block id (#1424).
+        // Multipane: route by the Controller that produced the range (#1426).
+        // Block ids alone collide across executions and caused cross-pane bodies.
+        if range.sourceDisplayHandle != 0,
+            let host = centerColumn.secondaryHost(displayHandle: range.sourceDisplayHandle)
+        {
+            host.applyHistoryRange(range)
+            return
+        }
         if centerColumn.secondaryHosts.count > 1,
             let host = centerColumn.secondaryHosts.first(where: {
                 $0.blockCards[range.blockID] != nil

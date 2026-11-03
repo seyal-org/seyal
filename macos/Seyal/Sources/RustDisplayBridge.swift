@@ -466,10 +466,13 @@ final class RustDisplayBridge {
             // registered, then disconnect. Early disconnect dropped retained
             // clear→exit bodies for an unfocused sibling Controller (#1379 /
             // SPEC-009 §8.2.2).
-            if result == -6, seyal_bridge_select(handle) == 0 {
-              self.publishHistoryRanges()
-              self.onTimeline()
-              self.publishHistoryRanges()
+            if result == -6 {
+              // Handle-addressed history (#1426): do not rely on select→focused.
+              self.publishHistoryRanges(forDisplayHandle: handle)
+              if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
+                self.onTimeline()
+              }
+              self.publishHistoryRanges(forDisplayHandle: handle)
             }
             seyal_bridge_disconnect_handle(handle)
             _ = self.selectClient()
@@ -480,14 +483,12 @@ final class RustDisplayBridge {
             return
           }
           // Publish history for the polled Controller before focus gating so
-          // unfocused multipane Flow leaves receive completed Block bodies (#1424).
-          if seyal_bridge_select(handle) == 0 {
-            self.publishHistoryRanges()
-          }
+          // unfocused multipane Flow leaves receive completed Block bodies (#1424/#1426).
+          self.publishHistoryRanges(forDisplayHandle: handle)
           self.onRegistryHandlePolled?(handle)
           if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
             self.runtimeBlockMetadata = self.currentBlockMetadata()
-            self.publishHistoryRanges()
+            self.publishHistoryRanges(forDisplayHandle: handle)
             self.publishComposerResult()
             self.publishComposerStatus()
             let revision = seyal_bridge_block_timeline_revision()
