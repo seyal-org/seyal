@@ -58,7 +58,10 @@ extension ProductChromeHostView {
     }
 
     func rebuildBlocks() {
-        blocks.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        // Leading spacer stays; it is not a Block card (#1426 follow-up).
+        blocks.arrangedSubviews
+            .filter { $0 !== transcriptLeadingSpacer }
+            .forEach { $0.removeFromSuperview() }
         blockCards.removeAll()
         let composer = seyal_app_composer(pane.appHandle)
         let count = Int(composer.block_count)
@@ -270,14 +273,35 @@ extension ProductChromeHostView {
         }
     }
 
-    /// AppKit scrolls with `documentView.frame`, while Auto Layout growth often
-    /// only updates `fittingSize`. Expand (never shrink) after Block body growth
-    /// so long Flow output is scrollable without collapsing live clips (#1379).
+    /// AppKit scrolls with `documentView.frame`; `blocks.fittingSize` is the
+    /// authoritative content height once `layoutSubtreeIfNeeded()` has run
+    /// (every call site updates card heights before calling this). When at
+    /// least one real Block card is present, the document floors at the
+    /// scroll viewport height — never below it — so sparse Flow content
+    /// never under-fills the visible transcript area, while a
+    /// viewport-sized leading spacer (not a Block card) absorbs that slack
+    /// and pushes real Blocks down to hug the composer, Warp-style (#1426
+    /// follow-up). A genuinely empty canvas (no cards at all) must still
+    /// collapse toward zero rather than hold a blank scrollable viewport
+    /// (#1424); the viewport floor is skipped in that case so a cleared
+    /// transcript never regains a preserved/blank scroll extent. This
+    /// replaced an older "expand, never shrink" policy (#1379) that also
+    /// left a permanent dead zone below cards once content shrank after
+    /// growing tall; the viewport floor keeps the same anti-collapse intent
+    /// for non-empty content without that stale-gap regression.
     func syncTranscriptDocumentSize() {
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
+        let contentHeight = max(fitted.height - transcriptLeadingSpacerHeight.constant, 0)
+        let hasCards = !blockCards.isEmpty
+        let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
-        let height = max(fitted.height, blocks.frame.height, 1)
+        let height = max(contentHeight, viewportHeight, 1)
+        let spacerHeight = max(height - contentHeight, 0)
+        if abs(transcriptLeadingSpacerHeight.constant - spacerHeight) > 0.5 {
+            transcriptLeadingSpacerHeight.constant = spacerHeight
+            layoutSubtreeIfNeeded()
+        }
         if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - height) > 0.5 {
             blocks.setFrameSize(NSSize(width: width, height: height))
             transcript.reflectScrolledClipView(transcript.contentView)

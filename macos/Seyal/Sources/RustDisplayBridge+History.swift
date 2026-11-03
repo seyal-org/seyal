@@ -38,8 +38,22 @@ extension RustDisplayBridge {
     return result
   }
 
+  /// Discard this bridge's own focused-Controller stale requests.
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
-    requestedHistoryRanges = requestedHistoryRanges.filter { blockIDs.contains($0.value.blockID) }
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    discardHistoryRequests(except: blockIDs, forDisplayHandle: handle)
+  }
+
+  /// Discard stale pending history requests for one registry Controller only.
+  /// `requestedHistoryRanges` is shared across every Flow host borrowing this
+  /// bridge (#1424/#1426); filtering by Block id alone — without scoping to
+  /// `handle` — evicted other panes' in-flight requests whose Block ids are
+  /// simply absent from the caller's own retained set, permanently blanking
+  /// their Block bodies (#1426 residual).
+  func discardHistoryRequests(except blockIDs: Set<UInt64>, forDisplayHandle handle: UInt64) {
+    requestedHistoryRanges = requestedHistoryRanges.filter { key, value in
+      key.displayHandle != handle || blockIDs.contains(value.blockID)
+    }
     historyRevisions = historyRevisions.filter { requestKey, _ in
       requestedHistoryRanges[requestKey] != nil
     }

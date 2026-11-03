@@ -8,7 +8,9 @@ extension SecondaryLivePaneHost {
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {
             clearPreservedDocumentHeight()
-            blocks.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            blocks.arrangedSubviews
+                .filter { $0 !== transcriptLeadingSpacer }
+                .forEach { $0.removeFromSuperview() }
             blockCards.removeAll()
             lastBlockCount = 0
             return
@@ -18,7 +20,9 @@ extension SecondaryLivePaneHost {
         let savedOffsetY = transcript.contentView.bounds.origin.y
         let savedFollowing = followingLiveEnd
         let savedDocumentHeight = transcriptDocumentScrollHeight()
-        blocks.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        blocks.arrangedSubviews
+            .filter { $0 !== transcriptLeadingSpacer }
+            .forEach { $0.removeFromSuperview() }
         blockCards.removeAll()
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
         let count = Int(composerSnap.block_count)
@@ -85,7 +89,9 @@ extension SecondaryLivePaneHost {
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
             }
         }
-        surface.discardHistoryRequests(except: retained)
+        // Bridgeless surfaces: discard through the borrowed window bridge,
+        // scoped to this pane's own handle (#1426 residual).
+        historyBridge?.discardHistoryRequests(except: retained, forDisplayHandle: displayHandle)
         surface.removeTranscriptRegions(except: retained)
         syncTranscriptDocumentSize()
         publishLiveTailBlocks()
@@ -286,11 +292,30 @@ extension SecondaryLivePaneHost {
         return regions
     }
 
+    /// Mirrors `ProductChromeHostView+Blocks.syncTranscriptDocumentSize`: when
+    /// at least one real Block card is present, the document floors at the
+    /// scroll viewport height so sparse Flow content never under-fills the
+    /// visible transcript, while a viewport-sized leading spacer (not a
+    /// Block card) absorbs that slack and pushes real Blocks down to hug the
+    /// composer, Warp-style (#1426 follow-up). A genuinely empty canvas (no
+    /// cards at all) must still collapse toward zero rather than hold a
+    /// blank scrollable viewport (#1424); the viewport floor is skipped in
+    /// that case. This replaced an older "expand, never shrink" policy that
+    /// left a permanent dead zone below cards once content shrank after
+    /// growing tall.
     func syncTranscriptDocumentSize() {
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
+        let contentHeight = max(fitted.height - transcriptLeadingSpacerHeight.constant, 0)
+        let hasCards = !blockCards.isEmpty
+        let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
-        let height = max(fitted.height, blocks.frame.height, 1)
+        let height = max(contentHeight, viewportHeight, 1)
+        let spacerHeight = max(height - contentHeight, 0)
+        if abs(transcriptLeadingSpacerHeight.constant - spacerHeight) > 0.5 {
+            transcriptLeadingSpacerHeight.constant = spacerHeight
+            layoutSubtreeIfNeeded()
+        }
         if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - height) > 0.5 {
             blocks.setFrameSize(NSSize(width: width, height: height))
             transcript.reflectScrolledClipView(transcript.contentView)
