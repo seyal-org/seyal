@@ -320,6 +320,43 @@ final class SeyalHostUITests: XCTestCase {
         )
     }
 
+    /// #1429: PaneLayoutView wires each region's shell pane title into
+    /// PaneTerminalTabStrip, so split leaves read "Pane 1" / "Pane 2" instead
+    /// of both reading "Terminal 1".
+    func testSplitPaneTerminalTabsShowDistinctPaneTitles() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        XCTAssertTrue(split.waitForExistence(timeout: 8))
+        split.click()
+        let firstRegion = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
+        let secondRegion = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(
+            secondRegion.waitForExistence(timeout: 12),
+            "SplitFocused must project a second Pane region"
+        )
+        XCTAssertTrue(firstRegion.exists)
+
+        func tabTitle(in region: XCUIElement) -> String? {
+            let predicate = NSPredicate(
+                format: "identifier BEGINSWITH 'seyal-terminal-tab-' "
+                    + "AND NOT (identifier CONTAINS[c] 'left') "
+                    + "AND NOT (identifier ENDSWITH '-close')"
+            )
+            let button = region.descendants(matching: .any).matching(predicate).firstMatch
+            guard button.waitForExistence(timeout: 8) else { return nil }
+            return button.label.isEmpty ? button.title : button.label
+        }
+
+        let firstTitle = tabTitle(in: firstRegion)
+        let secondTitle = tabTitle(in: secondRegion)
+        XCTAssertEqual(firstTitle, "Pane 1")
+        XCTAssertEqual(secondTitle, "Pane 2")
+        XCTAssertNotEqual(
+            firstTitle, secondTitle, "split leaves must not both read as Terminal 1 (#1429)"
+        )
+    }
+
     /// Reads AX values only when the element is still in the tree. A hidden
     /// composer is absent, and `.value` then throws instead of reporting why.
     private func paneProbeDiagnostics(_ app: XCUIApplication) -> String {
