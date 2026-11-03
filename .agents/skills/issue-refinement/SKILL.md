@@ -5,7 +5,7 @@ description: Seyal facade for AI-SDLC work-item design, adding GitHub Issue, ter
 
 # Issue refinement
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/work-item-design/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
+Follow the canonical generic procedure in `.sdlc/framework/skills/create-issue/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
 Apply only these Seyal-specific rules on top of the generic procedure:
 

@@ -11,10 +11,10 @@ This is **reference-consumer integration evidence**, not the model/evaluation be
 Seyal consumes AI-SDLC `main` at exact commit:
 
 ```text
-8d1cac09aef61bb3fb1431c35a114ef047aca12c
+4b4c603b2fc51105119a7773119319e8902f48e6
 ```
 
-This pin contains AI-SDLC PR #22. The work item is the plan. A separate plan acceptance record is optional. A closed unmerged candidate that was not architecture-rejected stays the candidate. `pr-review` remains the single generic review entrypoint.
+This pin contains merged AI-SDLC PRs #24–#29, including executable local claim coordination. The Issue body is the plan; closed-unmerged candidates remain resumable when authorized. `pr-review` is the single review entrypoint and always re-reviews the full current candidate.
 
 The pin is developer tooling only and is materialized by `make bootstrap-agents` under ignored `.sdlc/framework/`. Product build/test/runtime paths do not depend on it.
 
@@ -23,13 +23,13 @@ The pin is developer tooling only and is materialized by `make bootstrap-agents`
 | Seyal entrypoint | Generic authority | Seyal-only delta |
 | --- | --- | --- |
 | `project-context` | AI-SDLC `project-context` | Seyal context/index + authority chain |
-| `issue-refinement` | AI-SDLC `work-item-design` | GitHub Issue fields, milestone frontier, terminal evidence classification, parent/sub-issue slice mapping |
-| `implementation-planning` | AI-SDLC `implementation-planning` | optional; only when the Issue body does not yet state the production path |
-| `development-readiness` | AI-SDLC `development-readiness` | Issue body plus `ISSUE-PROTOCOL.md` Ready checklist and architecture triggers |
-| `implement-issue` | AI-SDLC `implementation` | human GitHub owner, deterministic branch/worktree, same-candidate resume, repository/domain gates |
+| `issue-refinement` | AI-SDLC `create-issue` | GitHub Issue fields, milestone frontier, terminal evidence classification, parent/sub-issue slice mapping |
+| `implementation-planning` | AI-SDLC `create-issue` (issue-owned plan) | optional; only when the Issue body does not yet state the production path |
+| `development-readiness` | AI-SDLC `create-issue` / shared DoR | Issue body plus `ISSUE-PROTOCOL.md` Ready checklist and architecture triggers |
+| `implement-issue` | AI-SDLC `implement-issue` | human GitHub owner, deterministic branch/worktree, same-candidate resume, repository/domain gates |
 | `verification` | AI-SDLC `verification` | Seyal Issue/candidate criterion evidence and repository/domain gates |
 | `pr-review` | AI-SDLC `pr-review` | full-candidate terminal architecture/hot-path/evidence merge gates |
-| `address-pr-review` | AI-SDLC `address-pr-review` | complete GitHub review/check inventory, bounded root-cause remediation on the same PR |
+| `address-pr-review` | AI-SDLC `process-review` | complete GitHub review/check inventory, bounded root-cause remediation on the same PR |
 | `milestone-validation` | AI-SDLC `verification` | aggregate milestone criteria and sequencing |
 
 There is intentionally **no Seyal `code-review` adapter**. All review/re-review requests use `pr-review`. Review-stage remediation uses `address-pr-review`; unfinished accepted-scope work remains under `implement-issue`.
@@ -48,9 +48,7 @@ implement-issue
 pr-review
   → one full current-candidate review, complete blocker list
   ├─ READY_TO_MERGE
-  ├─ CHANGES_REQUIRED → address-pr-review → confirm that recorded set on the diff
-  │     └─ full pr-review again only when the fix changes scope, architecture,
-  │        the hot path, or evidence the review relied on
+  ├─ CHANGES_REQUIRED → address-pr-review → full exact-head pr-review
   └─ BLOCKED_BY_DECISION → resolve the other decision, keep this candidate
 ```
 
@@ -59,6 +57,8 @@ A chat outline is not the plan. A separate plan comment is not required.
 ## Reference scenario 1 — work-item design, planning and readiness
 
 `issue-refinement` produces one GitHub Issue whose body states outcome, scope, acceptance, dependencies, ownership boundary, and required evidence. That body is the plan. `development-readiness` applies the generic readiness gate plus Seyal's Ready checklist. `implementation-planning` runs only when the production path is still missing from the Issue. It does not claim the Issue or start production work.
+
+**Claim boundary:** Human Issue ownership (assignee/acknowledged owner record) and agent execution exclusion are distinct. The agent must run the pinned `tools/workflow_claims.py` begin/verify/release commands using one shared same-host private DB and a unique active worker identity. A label/branch is not an atomic agent claim. Cross-host collaboration requires a shared atomic backend.
 
 ## Reference scenario 2 — implementation and same-candidate continuation
 
@@ -80,7 +80,7 @@ A correct implementation handoff is implemented-for-review on a concrete candida
 
 For Seyal it additionally enforces terminal/runtime ownership, hot-path constraints, permanent production architecture, tests/evidence, measurements, security/domain gates and truthful Issue/PR state.
 
-When changes are required on an `IN_REVIEW` candidate, `address-pr-review` inventories the unresolved findings and failing required checks from that pass, fixes them on the same candidate, and reruns the evidence that fix invalidated. The follow-up confirms those findings and the diff since the reviewed head. A new full `pr-review` starts only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the previous review relied on.
+When changes are required on an `IN_REVIEW` candidate, `address-pr-review` inventories the unresolved findings and failing required checks from that pass, fixes them on the same candidate, and reruns the evidence that fix invalidated. The follow-up performs a complete independent `pr-review` of the current candidate and reruns invalidated evidence on the new head. A review of only the latest comment or diff is insufficient.
 
 ## Reference scenario 4 — verification
 
@@ -100,4 +100,4 @@ Repository integration evidence includes:
 
 This integration does not itself make AI-SDLC product/runtime authority and does not prove publication readiness. Generic framework defects belong in `ai-sdlc`; Seyal-specific terminal/product rules remain local.
 
-As of this pin, AI-SDLC PR #21 (behavioral evaluation runtime) is still open upstream and therefore is **not** included in this exact commit. Pin it only after it merges and passes a separate Seyal consumer update/review.
+The pinned local claim workflow has a fail-closed project `preToolUse` gate for Cursor-dispatched mutation tools (`.cursor/hooks.json` and `.cursor/hooks/claim-gate.py`). Its private same-host SQLite claim store and session-derived worker identity do **not** constitute an OS, cross-host, or GitHub authorization boundary. A live multi-agent Cursor test must still demonstrate that the installed client actually invokes these hooks and rejects unauthorized writes; passing static/tooling tests alone does not prove enforcement. The separate macOS IPC suspension test failure originally observed on integration PR #1420 was addressed on runtime test PR #1423 (merged with green Foundation Quality and M001 Production Fuzz); the consumer PR must obtain fresh exact-head CI against the updated `master`.

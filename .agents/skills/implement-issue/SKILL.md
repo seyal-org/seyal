@@ -7,7 +7,7 @@ description: Seyal facade for AI-SDLC implementation, adding mandatory human Git
 
 This is the mandatory entrypoint for production implementation of a Seyal GitHub Issue. Requests such as implement, fix, finish, code, or complete a specific Issue must use this skill before production edits; do not bypass it by editing directly.
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/implementation/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
+Follow the canonical generic procedure in `.sdlc/framework/skills/implement-issue/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
 ## Finding work
 
@@ -22,7 +22,7 @@ If the requested issue is `needs-refinement`, stop implementation and refine it.
 
 ## Exclusive GitHub Issue claim
 
-Claiming the Issue is a coordination preflight, not implementation permission. Implementation planning happens before final readiness and does not claim ownership. Perform the human-owner claim before implementation branch/worktree creation, generated files, or production edits.
+The human owner record is the accountable contributor, **not** an atomic agent-execution lock. The pinned generic executable claim gate is additionally required. In Seyal, invoke `python3 scripts/seyal-ai-sdlc-claim.py begin --repo seyal-org/seyal --phase implement --number <N>` after approval and `verify` with the same arguments immediately before *every* mutation, followed by `release` only after successful handoff. The wrapper uses one host-local DB and a stable private token path; `AI_SDLC_WORKER_ID` must uniquely identify the active worker, not the human GitHub owner. This Seyal wrapper replaces (does not duplicate) the generic direct CLI invocation. On `BUSY`/`DENIED`/`ERROR` do not edit or create a replacement branch/PR; same-worker restart resumes its retained token. The human owner stays unchanged. Claiming the Issue is a coordination preflight, not implementation permission. Implementation planning happens before final readiness and does not claim ownership. Perform the human-owner claim before implementation branch/worktree creation, generated files, or production edits.
 
 1. Resolve the responsible **human GitHub owner** using the project-approved GitHub tooling and the fresh complete Issue owner-record state (assignees plus any maintainer-acknowledged `Owner: @login` claim). Coding-agent/bot identities are not valid Seyal owners. Do not guess from git author name, OS username, chat name, agent/vendor identity, or repository ownership. If the human owner cannot be resolved uniquely, stop with `BLOCKED: human implementation owner unavailable` and do not claim or edit the Issue.
 2. Fetch the owning GitHub Issue fresh from GitHub immediately before pickup. Cached project context, chat state, an earlier fetch, or the Issue body alone is not sufficient for owner-record state.
@@ -59,7 +59,7 @@ Do not create or switch the implementation worktree/branch, generate files, or s
 4. Resolve the implementation candidate defined in `docs/engineering/ISSUE-PROTOCOL.md` before creating a branch/worktree. `Refs` and `Part of` do not make a pull request the candidate. Include a closed unmerged pull request on the Issue branch:
    - `NONE` → keep implementing on the branch. Do not open a pull request while accepted scope is incomplete. When it is complete, open one pull request ready for review;
    - same human owner + `IMPLEMENTATION_IN_PROGRESS` (an existing draft) → resume that exact candidate/branch; keep it a draft until accepted scope is complete, then mark that same PR ready for review;
-   - `IN_REVIEW` (ready for review) + reviewer feedback or required-check remediation → use `address-pr-review` and confirm that recorded set on the same PR. Do not open a second PR and do not start a new full `pr-review` unless the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the review relied on;
+   - `IN_REVIEW` (ready for review) + reviewer feedback or required-check remediation → use `address-pr-review` (Seyal alias for generic `process-review`) and review the complete candidate again through `pr-review` after the batch. Do not open a second PR;
    - `CLOSED_UNMERGED` → reopen or rebase that same head. Review findings use `address-pr-review`. Do not re-implement it and do not open a second PR. A decision blocker names the other pull request and keeps this one;
    - `REJECTED` → do not resume;
    - `UNKNOWN`, another owner, ambiguous ownership, or multiple active candidates → stop and reconcile; never create a second candidate.

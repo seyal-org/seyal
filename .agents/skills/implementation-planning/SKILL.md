@@ -5,7 +5,7 @@ description: Seyal adapter for AI-SDLC implementation planning, adding terminal 
 
 # Implementation planning
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/implementation-planning/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
+Use the issue-owned 3–7-step implementation plan from `.sdlc/framework/skills/create-issue/SKILL.md`. This is a **supporting Seyal planning adapter**, not a separate generic approval or execution skill. If it is unavailable, run `make bootstrap-agents` first.
 
 For Seyal, apply only these project-specific deltas:
 

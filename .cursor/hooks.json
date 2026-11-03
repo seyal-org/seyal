@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "python3 .cursor/hooks/claim-gate.py",
+        "matcher": "*",
+        "failClosed": true,
+        "timeout": 15
+      }
+    ]
+  }
+}

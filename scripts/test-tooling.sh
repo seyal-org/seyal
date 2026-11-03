@@ -23,13 +23,15 @@ done
 grep -q 'XCODEBUILD_MCP_VERSION=' scripts/bootstrap-dev.sh || fail "XcodeBuildMCP is not pinned"
 grep -q 'AI_SDLC_REPO=' scripts/bootstrap-dev.sh || fail "AI-SDLC repository is not declared"
 grep -Eq 'AI_SDLC_COMMIT="[0-9a-f]{40}"' scripts/bootstrap-dev.sh || fail "AI-SDLC must be pinned by full commit SHA"
-grep -q 'AI_SDLC_COMMIT="8d1cac09aef61bb3fb1431c35a114ef047aca12c"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include the work-item-is-the-plan revision"
+grep -q 'AI_SDLC_COMMIT="4b4c603b2fc51105119a7773119319e8902f48e6"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include the executable claim-integrated skills"
 grep -q '^AI_SDLC_SKILLS=(' scripts/bootstrap-dev.sh || fail "AI-SDLC skill manifest is missing"
 grep -q '^ensure_ai_sdlc()' scripts/bootstrap-dev.sh || fail "AI-SDLC materialization is missing"
-for generic_skill in project-context work-item-design implementation-planning development-readiness implementation verification pr-review address-pr-review; do
+for generic_skill in project-context create-issue implement-issue verification pr-review process-review pr-merge; do
   grep -q "  ${generic_skill}$" scripts/bootstrap-dev.sh || fail "AI-SDLC generic skill is not pinned: ${generic_skill}"
 done
-grep -q 'tools/project_context.py' scripts/bootstrap-dev.sh || fail "AI-SDLC project-context tool verification is missing"
+for tool in project_context.py work_claims.py workflow_claims.py; do
+  grep -Fq "${tool}" scripts/bootstrap-dev.sh || fail "AI-SDLC required tool missing from bootstrap validation: ${tool}"
+done
 grep -q 'project_context.py.*--root.*validate' scripts/bootstrap-dev.sh || fail "agent bootstrap must validate the derived context index"
 grep -q 'github-mcp-server' scripts/bootstrap-dev.sh || fail "GitHub MCP bootstrap is missing"
 grep -q 'mcpbridge' scripts/bootstrap-dev.sh || fail "official Xcode MCP bootstrap is missing"
@@ -52,16 +54,23 @@ done
 [[ ! -e .agents/skills/code-review/SKILL.md ]] || fail "obsolete Seyal code-review adapter must be removed"
 [[ ! -e .claude/skills/code-review/SKILL.md ]] || fail "obsolete Claude code-review adapter must be removed"
 
-grep -q '.sdlc/framework/skills/work-item-design/SKILL.md' .agents/skills/issue-refinement/SKILL.md || fail "issue-refinement must delegate to AI-SDLC work-item-design"
-grep -q '.sdlc/framework/skills/implementation-planning/SKILL.md' .agents/skills/implementation-planning/SKILL.md || fail "implementation-planning must delegate to AI-SDLC"
-grep -q '.sdlc/framework/skills/implementation/SKILL.md' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must delegate to AI-SDLC implementation"
-grep -q '.sdlc/framework/skills/address-pr-review/SKILL.md' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must delegate to AI-SDLC"
+grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/issue-refinement/SKILL.md || fail "issue-refinement must delegate to AI-SDLC create-issue"
+grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/implementation-planning/SKILL.md || fail "planning must use the issue-owned canonical plan"
+grep -q '.sdlc/framework/skills/implement-issue/SKILL.md' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must delegate to current generic implement-issue"
+grep -q '.sdlc/framework/skills/process-review/SKILL.md' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must delegate to generic process-review"
+grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/implement-issue/SKILL.md || fail "Seyal implementation must call the executable agent claim wrapper"
+grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/pr-review/SKILL.md || fail "PR review must call the shared claim wrapper"
+grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/address-pr-review/SKILL.md || fail "review remediation must call the shared claim wrapper"
+python3 -m py_compile scripts/seyal-ai-sdlc-claim.py scripts/test-seyal-ai-sdlc-claim.py .cursor/hooks/claim-gate.py scripts/test-cursor-claim-hook.py || fail "agent claim or hook cannot compile"
+python3 scripts/test-seyal-ai-sdlc-claim.py || fail "agent claim command tests failed"
+python3 scripts/test-cursor-claim-hook.py || fail "Cursor preToolUse claim enforcement tests failed"
+grep -Fq 'full-candidate re-review' .agents/skills/pr-review/SKILL.md || fail "Seyal must not retain diff-only PR re-review"
 grep -q '.sdlc/framework/skills/pr-review/SKILL.md' .agents/skills/pr-review/SKILL.md || fail "pr-review must delegate to AI-SDLC pr-review"
 if grep -q '.sdlc/framework/skills/code-review/SKILL.md' .agents/skills/pr-review/SKILL.md; then
   fail "pr-review must not reference removed generic code-review authority"
 fi
 grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/milestone-validation/SKILL.md || fail "milestone-validation must build on AI-SDLC verification"
-grep -q '.sdlc/framework/skills/development-readiness/SKILL.md' .agents/skills/development-readiness/SKILL.md || fail "development-readiness adapter must delegate to AI-SDLC"
+grep -q '.sdlc/framework/docs/WORKING-LOOP.md' .agents/skills/development-readiness/SKILL.md || fail "readiness must use current canonical issue DoR"
 grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/verification/SKILL.md || fail "verification adapter must delegate to AI-SDLC"
 
 # Parallel-development safety: implementation pickup must be an exclusive,
