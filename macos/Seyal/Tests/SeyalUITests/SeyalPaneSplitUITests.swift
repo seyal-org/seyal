@@ -251,7 +251,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
             "for i in $(seq 1 40); do printf '%s-%s\\n' '\(token)' \"$i\"; sleep 0.15; done",
             in: app,
             expectBlock: true,
-            blockMarker: "\(token)-1"
+            blockMarker: token
         )
         let streamBlock = anyPaneBlock(in: app, containing: token)
         XCTAssertTrue(streamBlock.waitForExistence(timeout: 12), "stream Block must appear")

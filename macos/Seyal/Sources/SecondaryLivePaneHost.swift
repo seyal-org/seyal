@@ -204,7 +204,10 @@ final class SecondaryLivePaneHost: NSView {
 
         updateRecoveryTarget(recoveryTarget)
         updateAvailabilityPresentation()
-        reconcileFlowPresentation()
+        // Do not rebuild Blocks in init at a zero frame — that trips AutoresizingMask
+        // conflicts and can stall the main thread during multipane install (#1424).
+        // PaneLayoutView frames the host, then noteRegistryPolled syncs projection.
+        applyTranscriptPresentation()
         publishFrame()
     }
 
@@ -597,6 +600,9 @@ final class SecondaryLivePaneHost: NSView {
             Double(cell.width),
             Double(cell.height)
         )
+        // Pick up the resized prepared frame for AX/PTY convergence after
+        // window or divider geometry changes (#1424).
+        publishFrame()
         publishBlockOutputFrame()
     }
 }
