@@ -2,45 +2,41 @@ import XCTest
 
 @testable import Seyal
 
-/// #1433 — `armAuxiliaryReadSources`/`drainReadyDisplayWork` used to treat
-/// *any* negative `seyal_bridge_poll`/`seyal_bridge_poll_for` result as a
-/// dead Controller and disconnect it, even though Rust's own registry
-/// (`is_terminal_client_loss` in `crates/seyal-client/src/ffi/display.rs`)
-/// only unregisters the client for `Io`/`NoRunningExecution`/`Disconnected`.
-/// A transient `Protocol`/`ClientBackpressure`/`CommitTooLarge`/
-/// `BlockMetadataConflict`/`Server(_)` code on a live sibling (e.g. right
-/// after Split Right, while the new leaf's attach is still in flight) tore
-/// the sibling's connection down over a benign hiccup Rust itself did not
-/// consider fatal. `isTerminalPollResult` must mirror Rust's classification
-/// exactly: only `-3` (Io), `-6` (NoRunningExecution / shell exit), and
-/// `-10` (Disconnected) are terminal.
+/// #1433 — flush/write paths use a narrow socket-loss set; poll paths use a
+/// wider set that includes Protocol/`-4` and BlockMetadataConflict/`-18`
+/// (SPEC-007 §12: those frames are never consumed, so Rust unregisters).
 final class RustDisplayBridgePollClassificationTests: XCTestCase {
-    func testOnlyRustsTerminalClientLossCodesAreTerminal() {
+    func testFlushPathOnlyTreatsSocketLossAsTerminal() {
         for code: Int32 in [-3, -6, -10] {
             XCTAssertTrue(
                 RustDisplayBridge.isTerminalPollResult(code),
-                "code \(code) is a Rust is_terminal_client_loss code and must disconnect"
+                "code \(code) means the mutation target's socket is gone"
+            )
+        }
+        // Keep Protocol/BlockMetadataConflict off the flush path so sibling
+        // write handlers cannot window-wide stop() on -4.
+        for code: Int32 in [-4, -18] {
+            XCTAssertFalse(
+                RustDisplayBridge.isTerminalPollResult(code),
+                "code \(code) must not widen flush-path stop()"
             )
         }
     }
 
-    func testNonTerminalErrorCodesAreNotTreatedAsFatal() {
-        // -2 Discovery, -4 Protocol, -5 UnsupportedDisplayCapability,
-        // -7 InvalidAttachment, -8 Display, -9 Prepare, -11 Capacity,
-        // -12 UnsupportedInteractiveCapability, -13 ClientBackpressure,
-        // -14 CommitTooLarge, -15 LostController, -16 ResizeProtocolFailure,
-        // -17 InvalidGeometry, -18 BlockMetadataConflict, -19
-        // AmbiguousExecutions, -20 StartupDeadlineExceeded, and a
-        // `Server(code)` diagnostic (<= -1000) — none of these cause Rust to
-        // unregister the client (`error_code` in
-        // `crates/seyal-client/src/ffi/errors.rs`).
-        let nonTerminal: [Int32] = [
-            -2, -4, -5, -7, -8, -9, -11, -12, -13, -14, -15, -16, -17, -18, -19, -20, -1000, -1255,
+    func testPollPathClosesOnUnconsumedFatalFrames() {
+        for code: Int32 in [-3, -4, -6, -10, -18] {
+            XCTAssertTrue(
+                RustDisplayBridge.pollResultClosesConnection(code),
+                "code \(code) must disarm that handle's read source"
+            )
+        }
+        let nonClosing: [Int32] = [
+            -2, -5, -7, -8, -9, -11, -12, -13, -14, -15, -16, -17, -19, -20, -1000, -1255,
         ]
-        for code in nonTerminal {
+        for code in nonClosing {
             XCTAssertFalse(
-                RustDisplayBridge.isTerminalPollResult(code),
-                "code \(code) is not one of Rust's is_terminal_client_loss codes and must not disconnect"
+                RustDisplayBridge.pollResultClosesConnection(code),
+                "code \(code) must leave the fd armed for retry"
             )
         }
     }
@@ -48,6 +44,8 @@ final class RustDisplayBridgePollClassificationTests: XCTestCase {
     func testSuccessCodesAreNotTerminal() {
         XCTAssertFalse(RustDisplayBridge.isTerminalPollResult(0))
         XCTAssertFalse(RustDisplayBridge.isTerminalPollResult(1))
+        XCTAssertFalse(RustDisplayBridge.pollResultClosesConnection(0))
+        XCTAssertFalse(RustDisplayBridge.pollResultClosesConnection(1))
     }
 }
 

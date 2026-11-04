@@ -26,6 +26,9 @@ mod launch_policy;
 mod session;
 mod types;
 
+#[cfg(test)]
+mod poll_loss_tests;
+
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,

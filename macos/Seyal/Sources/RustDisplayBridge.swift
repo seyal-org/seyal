@@ -447,19 +447,21 @@ final class RustDisplayBridge {
     windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
   }
 
-  /// Negative `seyal_bridge_poll`/`seyal_bridge_poll_for` codes that Rust's
-  /// own registry treats as a genuinely dead Controller
-  /// (`is_terminal_client_loss` in `crates/seyal-client/src/ffi/display.rs`
-  /// / `crates/seyal-client/src/app/session.rs`): `-3` Io, `-6`
-  /// NoRunningExecution (shell exit), `-10` Disconnected. Every other
-  /// negative `ClientError` code (Protocol, Capacity, ClientBackpressure,
-  /// CommitTooLarge, BlockMetadataConflict, a Server code, ...) is
-  /// transient/non-fatal on Rust's own terms — Rust does not unregister the
-  /// client for those. Treating "any negative" as fatal here tore down a
-  /// live sibling Controller on a benign poll hiccup, e.g. right after
-  /// Split Right while the new leaf's attach is still in flight (#1433).
+  /// Flush/write-path codes that mean the *socket* for that mutation target
+  /// is gone (`-3` Io, `-6` shell exit, `-10` Disconnected). Keep this set
+  /// narrow: widening it to Protocol/BlockMetadataConflict would route `-4`
+  /// into sibling write handlers' window-wide `stop()` (#1433).
   nonisolated static func isTerminalPollResult(_ code: Int32) -> Bool {
     code == -3 || code == -6 || code == -10
+  }
+
+  /// Poll codes after which Rust has closed that handle's connection
+  /// (`is_terminal_client_loss`, including Protocol/`-4` and
+  /// BlockMetadataConflict/`-18`). Those two leave the offending frame
+  /// unconsumed and `-18` has already shut the stream down, so an armed
+  /// read source would refire forever (SPEC-007 §12.1/§12.2, #1433).
+  nonisolated static func pollResultClosesConnection(_ code: Int32) -> Bool {
+    isTerminalPollResult(code) || code == -4 || code == -18
   }
 
   /// One DispatchSourceRead per live Controller fd. CreateTab's second
@@ -482,10 +484,10 @@ final class RustDisplayBridge {
         seyalRunAsMainActorFromMainQueue {
           guard let self, self.isConnected else { return }
           let result = seyal_bridge_poll_for(handle)
-          if result < 0, !Self.isTerminalPollResult(result) {
-            // Non-terminal poll error (#1433): Rust's own registry did not
-            // drop this Controller. Leave the fd armed; the next readiness
-            // event retries instead of disconnecting a live sibling.
+          if result < 0, !Self.pollResultClosesConnection(result) {
+            // Transient poll error: Rust kept the client registered. Leave
+            // the fd armed for the next readiness event without tearing down
+            // a live sibling (#1433).
             return
           }
           if result < 0 {
@@ -554,7 +556,16 @@ final class RustDisplayBridge {
     source.setEventHandler { [weak self] in
       seyalRunAsMainActorFromMainQueue {
         guard let self, self.isConnected else { return }
-        _ = seyal_bridge_poll()
+        let pinned = self.selectClient()
+        let result = seyal_bridge_poll()
+        // After Rust unregisters Protocol/BlockMetadataConflict, a pinned
+        // main-connection poll that closes must recover via stop() so sibling
+        // sources are cancelled too (#1433). -6 keeps the drainReady path.
+        if pinned, result < 0, result != -6, Self.pollResultClosesConnection(result) {
+          self.onError(result)
+          self.stop()
+          return
+        }
         self.armAuxiliaryReadSources()
         self.publishCurrentFrame()
         self.publishComposerStatus()

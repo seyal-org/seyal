@@ -221,42 +221,17 @@ extension RustDisplayBridge {
     return seyal_bridge_resize_failure()
   }
 
-  func finishMutation(_ result: Int32) -> Int32 {
+  func finishMutation(_ result: Int32, targetHandle: UInt64? = nil) -> Int32 {
+    // Capture before `onStatusChanged()` so a focus callback cannot redirect
+    // teardown to a different Pane (#1433).
+    let handle = targetHandle ?? presentedClientHandle
     synchronizeWriteReadinessSource()
     onStatusChanged()
-    // `-18` (BlockMetadataConflict) is deliberately excluded: Rust's own
-    // registry (`is_terminal_registry_loss` in
-    // crates/seyal-client/src/app/session.rs) never unregisters a client for
-    // it -- only Io(-3)/NoRunningExecution(-6)/Disconnected(-10) are terminal
-    // there, matching `isTerminalPollResult` below. A stray history/block
-    // mutation that does not match current Block state is a retryable
-    // rejection, not evidence the transport died.
-    //
-    // #1433 adversarial finding: right after Split Right, the newly focused
-    // (not-yet-bound) leaf has no live Controller, so `presentedClientHandle`
-    // falls back to this bridge's own primary `clientHandle` (the pane that
-    // was just split *away* from, still perfectly healthy). `rebuildBlocks()`
-    // issuing a history request for that transiently unbound leaf landed on
-    // the primary connection and came back `-18`. Treating `-18` as terminal
-    // here used to call `stop(reconnect: true)` on that live primary --
-    // tearing down an untouched sibling Pane, which Rust's own
-    // RecoveryCoordinator then reconnected, which hit the exact same false
-    // classification on the next reconcile pass: an unbounded
-    // disconnect/reconnect storm with a monotonically increasing registry
-    // handle and the create-admission response for the new leaf never
-    // drained (PROOF: /tmp/seyal-1433-adversarial/PROOF.md).
+    // Mutations never return -18 (only poll_prepare quarantines) and -4 is
+    // input validation; only -3/-10 mean the target's socket is gone.
     guard result == -3 || result == -10 else { return result }
-    // Mutations route through `selectPresentedClient()`, which targets this
-    // window's *focused* Pane and may be a sibling's auxiliary Controller,
-    // not this bridge's own primary `clientHandle`. A terminal code here used
-    // to call the window-wide `stop()` unconditionally, which cancels EVERY
-    // auxiliary read/write source (`cancelAuxiliaryReadSources()`) and tears
-    // down the primary connection too -- one sibling Pane's real shell exit
-    // or disconnect took the whole window down, including Panes the user
-    // never touched. Found via adversarial Split Right + secondary-pane
-    // submit testing (regression surfaced through #1426/#1427; the primary
-    // vs. auxiliary handle split predates both #1424 and #1426/#1433).
-    let handle = presentedClientHandle
+    // Scope teardown to the mutation target — never window-wide `stop()` for
+    // a sibling Controller's real disconnect (#1433).
     guard handle != 0, handle != clientHandle else {
       onError(result)
       stop()
@@ -298,23 +273,12 @@ extension RustDisplayBridge {
       // for stop — #1379 clear→exit). Other losses unregister inside poll;
       // APPLY_RUNTIME_BLOCKS with no client retains the composer timeline.
       //
-      // `-18` (BlockMetadataConflict) used to be carved out of this guard so
-      // it fell through to `stop(reconnect: true)` below -- inconsistent with
-      // Rust's own `is_terminal_registry_loss` (never -18), with the sibling
-      // `armAuxiliaryReadSources()` poll handler (which already treats -18 as
-      // benign), and with the now-fixed `finishMutation`. #1433 adversarial
-      // finding: after Split Right, focusing the still-unbound sibling Pane
-      // (`FOCUS_PANE`) re-adopts this primary handle via
-      // `finishAdoptedHandle`/`publishCurrentFrame` -> chrome reconcile ->
-      // `rebuildBlocks` -> a history mutation that comes back `-18`. Tearing
-      // down and reconnecting on every poll of that handle reproduced the
-      // exact same unbounded disconnect/reconnect storm as the mutation-path
-      // bug, just one layer up the call stack (PROOF:
-      // /tmp/seyal-1433-adversarial/PROOF.md).
-      if result < 0, !Self.isTerminalPollResult(result) {
-        // Non-terminal poll error (#1433): Rust's own registry did not drop
-        // this client. Retry on the next poll instead of stopping a live
-        // connection over a transient backpressure/protocol hiccup.
+      // Protocol (-4) and BlockMetadataConflict (-18) close the connection in
+      // Rust (`is_terminal_client_loss`) because the offending frame is never
+      // consumed; leaving this source armed would spin the main thread
+      // (SPEC-007 §12.1/§12.2, #1433). Other negatives stay registered and
+      // retry on the next poll.
+      if result < 0, !Self.pollResultClosesConnection(result) {
         return
       }
       if result < 0 {

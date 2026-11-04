@@ -425,11 +425,17 @@ impl ApplicationRoot {
 
 #[cfg(target_os = "macos")]
 fn is_terminal_registry_loss(error: &crate::local::ClientError) -> bool {
+    // Mirror `ffi::display::is_terminal_client_loss`: Protocol and
+    // BlockMetadataConflict leave the frame unconsumed, so the only
+    // level-trigger progress is unregistering this client (SPEC-007 §12,
+    // #1433).
     matches!(
         error,
         crate::local::ClientError::Disconnected
             | crate::local::ClientError::Io
             | crate::local::ClientError::NoRunningExecution
+            | crate::local::ClientError::Protocol
+            | crate::local::ClientError::BlockMetadataConflict
     )
 }
 
