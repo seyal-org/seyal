@@ -73,6 +73,15 @@ pub extern "C" fn seyal_bridge_next_history_request_id() -> u64 {
     with_display_client(LocalDisplayClient::next_history_request_id).unwrap_or(0)
 }
 
+/// Peek the next history request id on one registry Controller (#1426).
+///
+/// Does not change the focused display/input client. Multipane Flow must pair
+/// this with [`seyal_bridge_request_history_range_for`] on the same handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_next_history_request_id_for(handle: u64) -> u64 {
+    super::with_client(handle, LocalDisplayClient::next_history_request_id).unwrap_or(0)
+}
+
 /// Atomically peeks one bounded response by its typed Block/request identity.
 /// Anchor coordinates are metadata only and never select a response.
 #[unsafe(no_mangle)]
@@ -80,33 +89,54 @@ pub extern "C" fn seyal_bridge_history_range_peek_for(
     block_id: u64,
     request_id: u64,
 ) -> SeyalHistoryRange {
-    with_display_client(|client| {
-        let Some(range) = client.history_range_for(block_id, request_id) else {
-            return SeyalHistoryRange::empty();
-        };
-        let Some(first) = range.rows.first() else {
-            return SeyalHistoryRange {
-                start_line: 0,
-                end_line: 0,
-                block_id: range.block_id,
-                request_id: range.request_id,
-                revision: range.revision,
-                row_count: 0,
-                reserved: range.status as u32,
-            };
-        };
-        let last = range.rows.last().map_or(first.line_id, |row| row.line_id);
-        SeyalHistoryRange {
-            start_line: first.line_id,
-            end_line: last,
+    with_display_client(|client| history_range_peek_from_client(client, block_id, request_id))
+        .unwrap_or_else(SeyalHistoryRange::empty)
+}
+
+/// Peek a history response on one registry Controller (#1426).
+///
+/// Does not change the focused display/input client.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_peek_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistoryRange {
+    super::with_client(handle, |client| {
+        history_range_peek_from_client(client, block_id, request_id)
+    })
+    .unwrap_or_else(SeyalHistoryRange::empty)
+}
+
+fn history_range_peek_from_client(
+    client: &LocalDisplayClient,
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistoryRange {
+    let Some(range) = client.history_range_for(block_id, request_id) else {
+        return SeyalHistoryRange::empty();
+    };
+    let Some(first) = range.rows.first() else {
+        return SeyalHistoryRange {
+            start_line: 0,
+            end_line: 0,
             block_id: range.block_id,
             request_id: range.request_id,
             revision: range.revision,
-            row_count: range.rows.len() as u32,
+            row_count: 0,
             reserved: range.status as u32,
-        }
-    })
-    .unwrap_or_else(SeyalHistoryRange::empty)
+        };
+    };
+    let last = range.rows.last().map_or(first.line_id, |row| row.line_id);
+    SeyalHistoryRange {
+        start_line: first.line_id,
+        end_line: last,
+        block_id: range.block_id,
+        request_id: range.request_id,
+        revision: range.revision,
+        row_count: range.rows.len() as u32,
+        reserved: range.status as u32,
+    }
 }
 
 /// Returns one borrowed row using the typed block/request identity returned by
@@ -118,20 +148,41 @@ pub extern "C" fn seyal_bridge_history_range_row_for(
     request_id: u64,
     index: u32,
 ) -> SeyalHistoryRow {
-    with_display_client(|client| {
-        let Some(range) = client.history_range_for(block_id, request_id) else {
-            return SeyalHistoryRow::empty();
-        };
-        let Some(row) = range.rows.get(index as usize) else {
-            return SeyalHistoryRow::empty();
-        };
-        SeyalHistoryRow {
-            line_id: row.line_id,
-            cells: row.cells.as_ptr().cast::<SeyalHistoryCell>(),
-            cell_count: row.cells.len() as u32,
-        }
+    with_display_client(|client| history_range_row_from_client(client, block_id, request_id, index))
+        .unwrap_or_else(SeyalHistoryRow::empty)
+}
+
+/// Borrow one history row on a named registry Controller (#1426).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_row_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+    index: u32,
+) -> SeyalHistoryRow {
+    super::with_client(handle, |client| {
+        history_range_row_from_client(client, block_id, request_id, index)
     })
     .unwrap_or_else(SeyalHistoryRow::empty)
+}
+
+fn history_range_row_from_client(
+    client: &LocalDisplayClient,
+    block_id: u64,
+    request_id: u64,
+    index: u32,
+) -> SeyalHistoryRow {
+    let Some(range) = client.history_range_for(block_id, request_id) else {
+        return SeyalHistoryRow::empty();
+    };
+    let Some(row) = range.rows.get(index as usize) else {
+        return SeyalHistoryRow::empty();
+    };
+    SeyalHistoryRow {
+        line_id: row.line_id,
+        cells: row.cells.as_ptr().cast::<SeyalHistoryCell>(),
+        cell_count: row.cells.len() as u32,
+    }
 }
 
 /// Returns the snapshot sidecar for a previously peeked history range. The
@@ -142,17 +193,36 @@ pub extern "C" fn seyal_bridge_history_range_sidecar_for(
     block_id: u64,
     request_id: u64,
 ) -> SeyalHistorySidecar {
-    with_display_client(|client| {
-        let Some(range) = client.history_range_for(block_id, request_id) else {
-            return SeyalHistorySidecar::empty();
-        };
-        SeyalHistorySidecar {
-            bytes: range.sidecar.as_ptr(),
-            len: range.sidecar.len() as u32,
-            reserved: 0,
-        }
+    with_display_client(|client| history_range_sidecar_from_client(client, block_id, request_id))
+        .unwrap_or_else(SeyalHistorySidecar::empty)
+}
+
+/// Borrow the history sidecar on a named registry Controller (#1426).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_sidecar_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistorySidecar {
+    super::with_client(handle, |client| {
+        history_range_sidecar_from_client(client, block_id, request_id)
     })
     .unwrap_or_else(SeyalHistorySidecar::empty)
+}
+
+fn history_range_sidecar_from_client(
+    client: &LocalDisplayClient,
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistorySidecar {
+    let Some(range) = client.history_range_for(block_id, request_id) else {
+        return SeyalHistorySidecar::empty();
+    };
+    SeyalHistorySidecar {
+        bytes: range.sidecar.as_ptr(),
+        len: range.sidecar.len() as u32,
+        reserved: 0,
+    }
 }
 
 /// Consumes a previously peeked response after its rows have been copied by
@@ -161,6 +231,19 @@ pub extern "C" fn seyal_bridge_history_range_sidecar_for(
 pub extern "C" fn seyal_bridge_history_range_consume(block_id: u64, request_id: u64) -> u8 {
     with_display_client_mut(|client| u8::from(client.consume_history_range(block_id, request_id)))
         .unwrap_or(0)
+}
+
+/// Consume a peeked history response on a named registry Controller (#1426).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_consume_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> u8 {
+    super::with_client_mut(handle, |client| {
+        u8::from(client.consume_history_range(block_id, request_id))
+    })
+    .unwrap_or(0)
 }
 
 /// Copies the latest Runtime ComposerResult into a typed C value. No command
@@ -445,6 +528,28 @@ pub extern "C" fn seyal_bridge_request_history_range(
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
+/// Request completed-Block history on one registry Controller (#1426).
+///
+/// Does not change the focused display/input client. Multipane secondary Flow
+/// hosts must use this instead of `seyal_bridge_select` + focused history APIs.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_request_history_range_for(
+    handle: u64,
+    block_id: u64,
+    start_line: u64,
+    end_line: u64,
+    max_lines: u16,
+    max_cells: u32,
+    start_unit: u32,
+) -> i32 {
+    super::with_client_mut(handle, |client| {
+        client.request_history_range(
+            block_id, start_line, end_line, max_lines, max_cells, start_unit,
+        )
+    })
+    .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
+}
+
 /// Borrow the current contiguous prepared surface.
 ///
 /// The returned cell pointer borrows Rust-owned prepared storage and is valid
@@ -527,5 +632,26 @@ fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedF
         grapheme_utf8: grapheme.as_ptr(),
         grapheme_utf8_len,
         reserved2: 0,
+    }
+}
+
+#[cfg(test)]
+mod handle_addressed_history_tests {
+    use super::{
+        seyal_bridge_history_range_consume_for_handle, seyal_bridge_history_range_peek_for_handle,
+        seyal_bridge_next_history_request_id_for, seyal_bridge_request_history_range_for,
+    };
+
+    #[test]
+    fn unknown_handle_history_apis_fail_closed() {
+        assert_eq!(seyal_bridge_next_history_request_id_for(0), 0);
+        assert_eq!(
+            seyal_bridge_request_history_range_for(0, 1, 1, 2, 512, 131_072, 0),
+            -1
+        );
+        let peek = seyal_bridge_history_range_peek_for_handle(0, 1, 1);
+        assert_eq!(peek.block_id, 0);
+        assert_eq!(peek.request_id, 0);
+        assert_eq!(seyal_bridge_history_range_consume_for_handle(0, 1, 1), 0);
     }
 }

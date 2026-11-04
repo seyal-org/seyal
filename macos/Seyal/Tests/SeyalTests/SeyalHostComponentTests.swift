@@ -2285,15 +2285,15 @@ final class SeyalHostComponentTests: XCTestCase {
         let bridgePath = sourceRoot.appendingPathComponent("RustDisplayBridge.swift")
         let bridgeText = (try? String(contentsOf: bridgePath, encoding: .utf8)) ?? ""
         XCTAssertTrue(
-            bridgeText.contains("result == -6, seyal_bridge_select(handle) == 0"),
-            "auxiliary poll must select the ended Controller before history publish"
+            bridgeText.contains("result == -6"),
+            "auxiliary poll must detect shell-exit before history publish"
         )
         XCTAssertTrue(
-            bridgeText.contains("publishHistoryRanges()"),
-            "auxiliary shell-exit must publish history before disconnect_handle"
+            bridgeText.contains("publishHistoryRanges(forDisplayHandle: handle)"),
+            "auxiliary shell-exit must publish handle-addressed history before disconnect (#1426)"
         )
         // Ensure disconnect stays after the -6 publish window (order gate).
-        if let exitRange = bridgeText.range(of: "result == -6, seyal_bridge_select(handle) == 0"),
+        if let exitRange = bridgeText.range(of: "if result == -6"),
            let disconnectRange = bridgeText.range(
             of: "seyal_bridge_disconnect_handle(handle)",
             range: exitRange.upperBound..<bridgeText.endIndex
@@ -2301,12 +2301,52 @@ final class SeyalHostComponentTests: XCTestCase {
         {
             XCTAssertTrue(
                 bridgeText[exitRange.upperBound..<disconnectRange.lowerBound]
-                    .contains("publishHistoryRanges()"),
-                "auxiliary -6 must publishHistoryRanges before disconnect_handle"
+                    .contains("publishHistoryRanges(forDisplayHandle: handle)"),
+                "auxiliary -6 must publishHistoryRanges(forDisplayHandle:) before disconnect_handle"
             )
         } else {
             XCTFail("auxiliary -6 publish-before-disconnect ordering markers missing")
         }
+    }
+
+    /// #1426: multipane history must address Controllers by handle, not via
+    /// `seyal_bridge_select` + focused-display history FFI.
+    @MainActor
+    func testMultipaneHistoryUsesHandleAddressedFFI() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let historyPath = sourceRoot.appendingPathComponent("RustDisplayBridge+History.swift")
+        let historyText = (try? String(contentsOf: historyPath, encoding: .utf8)) ?? ""
+        XCTAssertFalse(historyText.isEmpty, "RustDisplayBridge+History.swift must be readable")
+        XCTAssertTrue(
+            historyText.contains("seyal_bridge_next_history_request_id_for(handle)"),
+            "history request id must be peeked on the target Controller"
+        )
+        XCTAssertTrue(
+            historyText.contains("seyal_bridge_request_history_range_for("),
+            "history request must target the named Controller"
+        )
+        XCTAssertTrue(
+            historyText.contains("seyal_bridge_history_range_peek_for_handle("),
+            "history peek must read the named Controller cache"
+        )
+        XCTAssertTrue(
+            historyText.contains("sourceDisplayHandle: handle"),
+            "published ranges must carry the producing display handle"
+        )
+        XCTAssertFalse(
+            historyText.contains("seyal_bridge_select(handle) == 0 else { return -4 }"),
+            "must not pretend select redirects focused history FFI"
+        )
+        let blocksPath = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
+        let blocksText = (try? String(contentsOf: blocksPath, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            blocksText.contains("secondaryHost(displayHandle: range.sourceDisplayHandle)"),
+            "history delivery must route by source display handle"
+        )
     }
 
     @MainActor

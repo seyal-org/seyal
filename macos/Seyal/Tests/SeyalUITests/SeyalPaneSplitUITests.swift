@@ -302,6 +302,74 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// #1426: completed Block history stays on the producing pane after focus moves.
+    /// Handle-addressed history FFI must not blank or swap bodies via the focused display.
+    func testCompletedBlockHistoryStaysOnProducingUnfocusedPane() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let markerA = "seyal-1426-hist-a-\(String(UUID().uuidString.prefix(6)))"
+        let markerB = "seyal-1426-hist-b-\(String(UUID().uuidString.prefix(6)))"
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForUsablePty(in: app)
+
+        submitComposerCommand(
+            "printf '\(markerA)\\n'",
+            in: app,
+            expectBlock: true,
+            blockMarker: markerA
+        )
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: markerA).waitForExistence(timeout: 12),
+            "pane A completed Block must appear"
+        )
+        let bodyA = blockBody(for: anyPaneBlock(in: app, containing: markerA), in: app)
+        XCTAssertTrue(bodyA.waitForExistence(timeout: 8))
+        let heightA = bodyA.frame.height
+
+        let focused = try focusedRegionIndex(app, count: 2)
+        let sibling = focused == 0 ? 1 : 0
+        element(app, "seyal-pane-region-\(sibling)").click()
+        waitForFocus(app, region: sibling)
+        waitForUsablePty(in: app)
+        submitComposerCommand(
+            "printf '\(markerB)\\n'",
+            in: app,
+            expectBlock: true,
+            blockMarker: markerB
+        )
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: markerB).waitForExistence(timeout: 12),
+            "pane B completed Block must appear"
+        )
+
+        let unfocusedA = anyPaneBlock(in: app, containing: markerA)
+        XCTAssertTrue(unfocusedA.exists, "pane A completed Block must remain after focus move (#1426)")
+        let unfocusedBodyA = blockBody(for: unfocusedA, in: app)
+        XCTAssertTrue(unfocusedBodyA.exists, "pane A Block body must stay bound")
+        XCTAssertGreaterThan(
+            unfocusedBodyA.frame.height,
+            0,
+            "pane A history body must not blank via focused-handle routing"
+        )
+        XCTAssertEqual(
+            unfocusedBodyA.frame.height,
+            heightA,
+            accuracy: 12,
+            "pane A completed body height must stay stable after sibling history bind"
+        )
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: markerB).exists,
+            "pane B Block must not steal or erase pane A history"
+        )
+
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1426-completed-history-on-producing-pane"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// #1424 scenario 4: divider drag keeps dual Flow Blocks+composers.
     func testDividerDragKeepsDualFlowBlocksAndComposers() throws {
         let app = hostedApp()

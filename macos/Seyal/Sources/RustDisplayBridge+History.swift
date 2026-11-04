@@ -3,44 +3,57 @@ import Foundation
 @MainActor
 extension RustDisplayBridge {
   func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    guard isConnected, selectPresentedClient() else { return -4 }
-    return requestHistoryRangeOnSelectedClient(
-      startLine: startLine, endLine: endLine, blockID: blockID)
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    guard isConnected, handle != 0 else { return -4 }
+    return requestHistoryRange(
+      forDisplayHandle: handle,
+      startLine: startLine,
+      endLine: endLine,
+      blockID: blockID
+    )
   }
 
   /// Request completed-Block history for a specific registry Controller.
-  /// Multipane Flow hosts have no per-leaf bridge; they borrow this one (#1424).
+  /// Multipane Flow hosts have no per-leaf bridge; they borrow this one (#1424/#1426).
   func requestHistoryRange(
     forDisplayHandle handle: UInt64,
     startLine: UInt64,
     endLine: UInt64,
     blockID: UInt64
   ) -> Int32 {
-    guard isConnected, handle != 0, seyal_bridge_select(handle) == 0 else { return -4 }
-    defer { _ = selectClient() }
-    return requestHistoryRangeOnSelectedClient(
-      startLine: startLine, endLine: endLine, blockID: blockID)
-  }
-
-  private func requestHistoryRangeOnSelectedClient(
-    startLine: UInt64,
-    endLine: UInt64,
-    blockID: UInt64
-  ) -> Int32 {
+    guard isConnected, handle != 0 else { return -4 }
     guard blockID > 0, startLine > 0, endLine >= startLine else { return -4 }
-    let requestID = seyal_bridge_next_history_request_id()
+    // Address the named Controller directly. `seyal_bridge_select` only moves
+    // poll/flush; focused history FFI would hit FOCUSED_DISPLAY_HANDLE (#1426).
+    let requestID = seyal_bridge_next_history_request_id_for(handle)
     guard requestID != 0 else { return -4 }
     let result = finishMutation(
-      seyal_bridge_request_history_range(blockID, startLine, endLine, 512, 131_072, 0))
+      seyal_bridge_request_history_range_for(
+        handle, blockID, startLine, endLine, 512, 131_072, 0))
     if result == 0 {
-      let requestKey = PaneHistoryRequestKey(paneID: paneID, requestID: requestID)
+      let requestKey = PaneHistoryRequestKey(
+        displayHandle: handle, paneID: paneID, requestID: requestID)
       requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
     }
     return result
   }
 
+  /// Discard this bridge's own focused-Controller stale requests.
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
-    requestedHistoryRanges = requestedHistoryRanges.filter { blockIDs.contains($0.value.blockID) }
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    discardHistoryRequests(except: blockIDs, forDisplayHandle: handle)
+  }
+
+  /// Discard stale pending history requests for one registry Controller only.
+  /// `requestedHistoryRanges` is shared across every Flow host borrowing this
+  /// bridge (#1424/#1426); filtering by Block id alone — without scoping to
+  /// `handle` — evicted other panes' in-flight requests whose Block ids are
+  /// simply absent from the caller's own retained set, permanently blanking
+  /// their Block bodies (#1426 residual).
+  func discardHistoryRequests(except blockIDs: Set<UInt64>, forDisplayHandle handle: UInt64) {
+    requestedHistoryRanges = requestedHistoryRanges.filter { key, value in
+      key.displayHandle != handle || blockIDs.contains(value.blockID)
+    }
     historyRevisions = historyRevisions.filter { requestKey, _ in
       requestedHistoryRanges[requestKey] != nil
     }
@@ -49,13 +62,20 @@ extension RustDisplayBridge {
     }
   }
 
-  /// Publish buffered history for the currently selected registry client.
-  /// Callers must `seyal_bridge_select` / `selectPresentedClient` first so
-  /// unfocused multipane Controllers can deliver their own ranges (#1424).
+  /// Publish buffered history for the focused/presented Controller.
   func publishHistoryRanges() {
-    guard isConnected else { return }
-    for (requestKey, request) in Array(requestedHistoryRanges) {
-      let metadata = seyal_bridge_history_range_peek_for(request.blockID, requestKey.requestID)
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    guard handle != 0 else { return }
+    publishHistoryRanges(forDisplayHandle: handle)
+  }
+
+  /// Publish buffered history for one registry Controller (#1426).
+  func publishHistoryRanges(forDisplayHandle handle: UInt64) {
+    guard isConnected, handle != 0 else { return }
+    let pending = requestedHistoryRanges.filter { $0.key.displayHandle == handle }
+    for (requestKey, request) in Array(pending) {
+      let metadata = seyal_bridge_history_range_peek_for_handle(
+        handle, request.blockID, requestKey.requestID)
       guard metadata.block_id != 0,
         metadata.request_id != 0,
         metadata.block_id == request.blockID,
@@ -64,7 +84,8 @@ extension RustDisplayBridge {
         historyRevisions[requestKey]?.revision != metadata.revision
           || historyRevisions[requestKey]?.requestID != metadata.request_id
       else { continue }
-      let sidecar = seyal_bridge_history_range_sidecar_for(metadata.block_id, metadata.request_id)
+      let sidecar = seyal_bridge_history_range_sidecar_for_handle(
+        handle, metadata.block_id, metadata.request_id)
       let sidecarData: Data
       if sidecar.len > 0, let bytes = sidecar.bytes {
         sidecarData = Data(bytes: bytes, count: Int(sidecar.len))
@@ -72,7 +93,8 @@ extension RustDisplayBridge {
         sidecarData = Data()
       }
       let rows = (0..<Int(metadata.row_count)).compactMap { index -> [NativeHistoryRange.Cell]? in
-        let row = seyal_bridge_history_range_row_for(
+        let row = seyal_bridge_history_range_row_for_handle(
+          handle,
           metadata.block_id,
           metadata.request_id,
           UInt32(index)
@@ -96,25 +118,29 @@ extension RustDisplayBridge {
         requestID: metadata.request_id,
         revision: metadata.revision,
         rows: rows,
-        status: metadata.reserved
+        status: metadata.reserved,
+        sourceDisplayHandle: handle
       )
       let previous = historyContinuations[requestKey]
       let merged = mergeHistoryRange(previous?.range, chunk)
       let leads = historyLeadCount(rows)
-      _ = seyal_bridge_history_range_consume(metadata.block_id, metadata.request_id)
+      _ = seyal_bridge_history_range_consume_for_handle(
+        handle, metadata.block_id, metadata.request_id)
       requestedHistoryRanges.removeValue(forKey: requestKey)
       historyRevisions.removeValue(forKey: requestKey)
       historyContinuations.removeValue(forKey: requestKey)
       let truncated = metadata.reserved == 1
       if truncated, leads > 0, isConnected {
         let nextStart = (previous?.startUnit ?? 0) + leads
-        let nextID = seyal_bridge_next_history_request_id()
+        let nextID = seyal_bridge_next_history_request_id_for(handle)
         if nextID != 0 {
           let continued = finishMutation(
-            seyal_bridge_request_history_range(
-              request.blockID, request.startLine, request.endLine, 512, 131_072, nextStart))
+            seyal_bridge_request_history_range_for(
+              handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
+              nextStart))
           if continued == 0 {
-            let nextKey = PaneHistoryRequestKey(paneID: paneID, requestID: nextID)
+            let nextKey = PaneHistoryRequestKey(
+              displayHandle: handle, paneID: paneID, requestID: nextID)
             requestedHistoryRanges[nextKey] = request
             historyContinuations[nextKey] = (nextStart, merged)
           }

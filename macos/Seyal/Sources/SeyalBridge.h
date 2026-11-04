@@ -245,11 +245,43 @@ int32_t seyal_bridge_request_history_range(
     uint32_t max_cells,
     uint32_t start_unit
 );
+/* History on one registry Controller without changing focus (#1426). */
+int32_t seyal_bridge_request_history_range_for(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t start_line,
+    uint64_t end_line,
+    uint16_t max_lines,
+    uint32_t max_cells,
+    uint32_t start_unit
+);
 uint64_t seyal_bridge_next_history_request_id(void);
+uint64_t seyal_bridge_next_history_request_id_for(uint64_t handle);
 SeyalHistoryRange seyal_bridge_history_range_peek_for(uint64_t block_id, uint64_t request_id);
+SeyalHistoryRange seyal_bridge_history_range_peek_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id
+);
 SeyalHistoryRow seyal_bridge_history_range_row_for(uint64_t block_id, uint64_t request_id, uint32_t index);
+SeyalHistoryRow seyal_bridge_history_range_row_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id,
+    uint32_t index
+);
 SeyalHistorySidecar seyal_bridge_history_range_sidecar_for(uint64_t block_id, uint64_t request_id);
+SeyalHistorySidecar seyal_bridge_history_range_sidecar_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id
+);
 uint8_t seyal_bridge_history_range_consume(uint64_t block_id, uint64_t request_id);
+uint8_t seyal_bridge_history_range_consume_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id
+);
 SeyalComposerResult seyal_bridge_composer_result(void);
 SeyalComposerStatus seyal_bridge_composer_status(void);
 SeyalSessionSurface seyal_bridge_session_surface(void);

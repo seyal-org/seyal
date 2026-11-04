@@ -30,10 +30,14 @@ struct PaneBlockKey: Hashable, Sendable {
 }
 
 struct PaneHistoryRequestKey: Hashable, Sendable {
+  /// Registry Controller that owns the request. Multipane history must key by
+  /// handle because Block/request ids are only unique within one execution (#1426).
+  let displayHandle: UInt64
   let paneID: String
   let requestID: UInt64
 
-  init(paneID: String, requestID: UInt64) {
+  init(displayHandle: UInt64, paneID: String, requestID: UInt64) {
+    self.displayHandle = displayHandle
     self.paneID = paneID
     self.requestID = requestID
   }
@@ -83,6 +87,8 @@ struct NativeHistoryRange: Equatable {
   let revision: UInt64
   let rows: [[Cell]]
   let status: UInt32
+  /// Registry Controller that produced this range; 0 means focused/legacy path.
+  let sourceDisplayHandle: UInt64
 
   init(
     startLine: UInt64,
@@ -91,7 +97,8 @@ struct NativeHistoryRange: Equatable {
     requestID: UInt64,
     revision: UInt64,
     rows: [[Cell]],
-    status: UInt32 = 0
+    status: UInt32 = 0,
+    sourceDisplayHandle: UInt64 = 0
   ) {
     self.startLine = startLine
     self.endLine = endLine
@@ -100,6 +107,7 @@ struct NativeHistoryRange: Equatable {
     self.revision = revision
     self.rows = rows
     self.status = status
+    self.sourceDisplayHandle = sourceDisplayHandle
   }
 
   /// Plain text of retained history rows. Accessibility only; Metal still paints.
@@ -131,7 +139,9 @@ func mergeHistoryRange(
       requestID: chunk.requestID,
       revision: chunk.revision,
       rows: chunk.rows,
-      status: chunk.status
+      status: chunk.status,
+      sourceDisplayHandle: chunk.sourceDisplayHandle != 0
+        ? chunk.sourceDisplayHandle : previous.sourceDisplayHandle
     )
   }
   if chunk.rows.isEmpty {
@@ -142,7 +152,9 @@ func mergeHistoryRange(
       requestID: chunk.requestID,
       revision: chunk.revision,
       rows: previous.rows,
-      status: chunk.status
+      status: chunk.status,
+      sourceDisplayHandle: chunk.sourceDisplayHandle != 0
+        ? chunk.sourceDisplayHandle : previous.sourceDisplayHandle
     )
   }
   var rows = previous.rows
@@ -159,7 +171,9 @@ func mergeHistoryRange(
     requestID: chunk.requestID,
     revision: chunk.revision,
     rows: rows,
-    status: chunk.status
+    status: chunk.status,
+    sourceDisplayHandle: chunk.sourceDisplayHandle != 0
+      ? chunk.sourceDisplayHandle : previous.sourceDisplayHandle
   )
 }
 

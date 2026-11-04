@@ -45,6 +45,12 @@ final class SecondaryLivePaneHost: NSView {
     private(set) var composer: ComposerBridgeView!
     let transcript = NSScrollView()
     let blocks = NSStackView()
+    /// Leading filler so sparse Flow content hugs the bottom, just above the
+    /// composer, instead of top-packing with a dead zone below it (#1426
+    /// follow-up / Warp-like Block stacking). Height is driven explicitly by
+    /// `syncTranscriptDocumentSize`, never by NSStackView distribution.
+    let transcriptLeadingSpacer = NSView()
+    var transcriptLeadingSpacerHeight: NSLayoutConstraint!
     var blockCards: [UInt64: CommandBlockView] = [:]
     var lastBlockCount = 0
     var followingLiveEnd = true
@@ -141,6 +147,13 @@ final class SecondaryLivePaneHost: NSView {
         blocks.setAccessibilityElement(true)
         blocks.setAccessibilityRole(.list)
         blocks.setAccessibilityIdentifier("seyal-secondary-blocks")
+        transcriptLeadingSpacer.translatesAutoresizingMaskIntoConstraints = false
+        transcriptLeadingSpacer.setAccessibilityElement(false)
+        transcriptLeadingSpacerHeight = transcriptLeadingSpacer.heightAnchor.constraint(
+            equalToConstant: 0
+        )
+        transcriptLeadingSpacerHeight.isActive = true
+        blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
 
         let clip = NSClipView()
         clip.drawsBackground = false

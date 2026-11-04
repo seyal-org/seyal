@@ -18,6 +18,12 @@ final class ProductChromeHostView: NSView {
     let attention = NSStackView()
     let transcript = NSScrollView()
     let blocks = NSStackView()
+    /// Leading filler so sparse Flow content hugs the bottom, just above the
+    /// composer, instead of top-packing with a dead zone below it (#1426
+    /// follow-up / Warp-like Block stacking). Height is driven explicitly by
+    /// `syncTranscriptDocumentSize`, never by NSStackView distribution.
+    let transcriptLeadingSpacer = NSView()
+    var transcriptLeadingSpacerHeight: NSLayoutConstraint!
     let composer: ComposerBridgeView
     let sessionBootstrap = SessionBootstrapBanner()
     /// Rust-owned history overlay (#933); internal for component tests.
@@ -170,6 +176,13 @@ final class ProductChromeHostView: NSView {
         blocks.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         blocks.translatesAutoresizingMaskIntoConstraints = false
         expose(blocks, identifier: "seyal-blocks")
+        transcriptLeadingSpacer.translatesAutoresizingMaskIntoConstraints = false
+        transcriptLeadingSpacer.setAccessibilityElement(false)
+        transcriptLeadingSpacerHeight = transcriptLeadingSpacer.heightAnchor.constraint(
+            equalToConstant: 0
+        )
+        transcriptLeadingSpacerHeight.isActive = true
+        blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
         composer.setAccessibilityIdentifier("seyal-composer")
 
         let clip = TranscriptClipView()
@@ -321,6 +334,23 @@ final class ProductChromeHostView: NSView {
             blocks.leadingAnchor.constraint(equalTo: transcript.contentView.leadingAnchor),
             blocks.widthAnchor.constraint(equalTo: transcript.contentView.widthAnchor),
         ])
+        // The required chain transcript→sessionBootstrap→composer only fixes
+        // their COMBINED span; with sessionBootstrap's collapsed state using
+        // near-zero (fittingSizeCompression) priorities on both axes (by
+        // design, see above), the transcript/sessionBootstrap split is
+        // otherwise ambiguous and AppKit's solver can settle on sessionBootstrap
+        // absorbing the slack instead of transcript — leaving Blocks stacked
+        // at the top with a dead gap above the composer (#1426 follow-up).
+        // This advisory (non-required) pin breaks the tie deterministically
+        // toward "transcript fills to the composer" whenever the banner is
+        // collapsed; it cannot win over the banner's own required content
+        // pins when a banner is actually offered.
+        let transcriptFillsToComposer = transcript.bottomAnchor.constraint(
+            equalTo: composer.topAnchor,
+            constant: -12
+        )
+        transcriptFillsToComposer.priority = .defaultHigh
+        transcriptFillsToComposer.isActive = true
         centerLeadingHost = centerColumn.leadingAnchor.constraint(equalTo: leadingAnchor)
         centerTrailingHost = centerColumn.trailingAnchor.constraint(equalTo: trailingAnchor)
         centerTopHost = centerColumn.topAnchor.constraint(equalTo: topAnchor)
