@@ -22,6 +22,7 @@ final class PaneTerminalTabStrip: NSView {
     init(
         paneLo: UInt64,
         paneHi: UInt64,
+        paneTitle: String,
         tabs: [PaneLayoutView.TerminalTab],
         focused: Bool,
         canSplit: Bool,
@@ -60,10 +61,18 @@ final class PaneTerminalTabStrip: NSView {
             let group = NSStackView()
             group.orientation = .horizontal
             group.spacing = 0
-            let button = NSButton(title: "Terminal \(index + 1)", target: self, action: #selector(selectTab(_:)))
+            // Pane-local index alone made every split leaf read "Terminal 1"
+            // (#1429). Prefer the shell pane title so leaves stay distinct.
+            let title = Self.terminalTabTitle(
+                paneTitle: paneTitle,
+                index: index,
+                tabCount: tabs.count
+            )
+            let button = NSButton(title: title, target: self, action: #selector(selectTab(_:)))
             button.bezelStyle = .recessed
             button.identifier = NSUserInterfaceItemIdentifier("seyal-terminal-tab-\(tab.hi)-\(tab.lo)")
             button.setAccessibilityIdentifier(button.identifier!.rawValue)
+            button.setAccessibilityLabel(title)
             button.setAccessibilityValue(tab.selected ? "selected" : "")
             button.state = tab.selected ? .on : .off
             button.tag = index
@@ -75,7 +84,7 @@ final class PaneTerminalTabStrip: NSView {
             let close = NSButton(title: "×", target: self, action: #selector(closeTab(_:)))
             close.bezelStyle = .texturedRounded
             close.setAccessibilityIdentifier("seyal-terminal-tab-\(tab.hi)-\(tab.lo)-close")
-            close.setAccessibilityLabel("Close Terminal \(index + 1)")
+            close.setAccessibilityLabel("Close \(title)")
             close.tag = index
             group.addArrangedSubview(close)
             tabStack.addArrangedSubview(group)
@@ -163,6 +172,15 @@ final class PaneTerminalTabStrip: NSView {
         tabViewport.contentView.scroll(to: origin)
         tabViewport.reflectScrolledClipView(tabViewport.contentView)
         revealedSelectedTab = true
+    }
+
+    /// Distinct per-pane terminal-tab label. Single-tab leaves use the pane
+    /// title alone; additional terminals in the same pane keep an index suffix.
+    static func terminalTabTitle(paneTitle: String, index: Int, tabCount: Int) -> String {
+        let trimmed = paneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? "Terminal \(index + 1)" : trimmed
+        if tabCount <= 1 { return base }
+        return "\(base) · \(index + 1)"
     }
 
     private static func iconButton(
