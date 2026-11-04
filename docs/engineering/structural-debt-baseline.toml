@@ -84,9 +84,9 @@ reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shel
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
-acknowledged_loc = 944
-issue = 1388
-reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module; production composer reducer stays under review_loc. #1379 adds clear canvas-floor coverage, and #1388 carries BlockScope through the RuntimeBlockRecord fixtures without a second projection test module."
+acknowledged_loc = 977
+issue = 1433
+reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module; production composer reducer stays under review_loc. #1433 proves Frozen input-route (Hidden mode) keeps Flow presentation_mode so Split focus handoff never invents Raw eligibility."
 
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
@@ -234,9 +234,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 936
-issue = 1424
-reason = "Thin AppKit chrome host stays one cold-path façade; #1424 themes secondary Flow presentation hosts after Split without moving product authority into Swift (ADR-015 / M001-MULTIPANE-VIEW §5)."
+acknowledged_loc = 939
+issue = 1433
+reason = "Thin AppKit chrome host stays one cold-path façade; #1433 adds a boolean latch so New-shell recovery hide only reverses its own composer hide after Split, without moving product authority into Swift (ADR-015)."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"

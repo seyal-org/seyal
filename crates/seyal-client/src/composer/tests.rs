@@ -419,6 +419,39 @@ fn raw_direct_terminal_hides_composer_without_clearing_draft() {
     assert_eq!(snap.draft, "vim");
 }
 
+/// #1433 (Raw flip): a focus/authority handoff (Split, client-loss notice on
+/// a shared registry handle, etc.) sets the *outgoing* Pane's `input_route`
+/// to `Frozen`, which makes `mode()` report `Hidden` — that is correct, this
+/// Pane currently has no input authority. But `presentation_mode` is a
+/// separate fact owned by this Pane and must not be disturbed by an
+/// input-authority handoff: a Flow-capable sibling that merely lost focus
+/// stays `presentation_mode: Flow` so callers (`seyal_app_eligibility_for_pane`)
+/// never infer a Raw/TUI takeover from `Hidden` alone.
+#[test]
+fn frozen_input_route_on_non_focused_pane_keeps_flow_presentation_mode() {
+    let pane = pane();
+    let mut state = ComposerState::new();
+    let _ = ready(&mut state, pane);
+    state
+        .apply(ComposerAction::ApplyPresentation {
+            pane,
+            mode: PresentationMode::Flow,
+            input_route: InputRoute::Frozen,
+        })
+        .unwrap();
+    let snap = state.snapshot(pane).unwrap();
+    assert_eq!(
+        snap.mode,
+        ComposerMode::Hidden,
+        "no input authority right now"
+    );
+    assert_eq!(
+        snap.presentation_mode,
+        PresentationMode::Flow,
+        "losing input authority must not relabel this Pane as Raw/TUI"
+    );
+}
+
 #[test]
 fn runtime_projection_does_not_forge_prior_block_completion() {
     let pane = pane();

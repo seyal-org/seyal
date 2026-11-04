@@ -157,6 +157,54 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// #1433: command output on Pane 1, then Split Right, must keep the
+    /// originating pane attached (no "Waiting to reconnect") and keep both
+    /// leaves on Flow Blocks rather than flipping the sibling to Raw.
+    func testSplitAfterCommandKeepsOriginatingPaneAttachedAndFlow() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(app, "seyal-blocks").waitForExistence(timeout: 5))
+
+        submitComposerCommand("printf 'seyal-1433-before-split\\n'", in: app)
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: "seyal-1433-before-split").waitForExistence(timeout: 10),
+            "originating pane must record command output before Split"
+        )
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        XCTAssertTrue(element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 12))
+
+        let secondary = element(app, "seyal-secondary-live-pane")
+        let reconnectChrome = NSPredicate(format: "value CONTAINS[c] %@", "Waiting to reconnect")
+        XCTAssertFalse(
+            reconnectChrome.evaluate(with: secondary),
+            "originating pane must keep its Controller after Split; AX value=\(secondary.value ?? "nil")"
+        )
+        XCTAssertTrue(
+            element(app, "seyal-secondary-blocks").waitForExistence(timeout: 8),
+            "unfocused originating pane must stay on Flow Blocks, not Raw-only Metal"
+        )
+        XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").exists)
+        XCTAssertTrue(element(app, "seyal-blocks").exists, "focused new pane keeps Flow Blocks")
+        XCTAssertTrue(element(app, "seyal-composer").exists, "focused pane keeps composer")
+
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        XCTAssertTrue(recovery.waitForExistence(timeout: 5))
+        let recoveryValue = "\(recovery.value ?? "")"
+        XCTAssertFalse(
+            recoveryValue.localizedCaseInsensitiveContains("restoring"),
+            "Split must not trap the workspace in restoring; seyal-recovery=\(recoveryValue)"
+        )
+
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1433-split-keeps-originating-flow"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// #1424 scenario 2: focus churn keeps host/Block content and scroll mid-transcript.
     func testFocusChurnRetainsScrolledTranscriptAndPaneHosts() throws {
         let app = hostedApp()

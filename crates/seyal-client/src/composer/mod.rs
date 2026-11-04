@@ -256,6 +256,13 @@ pub struct ComposerSnapshot {
     pub pane: PaneId,
     pub draft: String,
     pub mode: ComposerMode,
+    /// This Pane's own presentation family (Flow/Raw/Tui), independent of
+    /// `mode`. `mode == Hidden` only says this Pane currently has no input
+    /// authority (unfocused, busy, or a pending request); it is not evidence
+    /// that the Pane itself is Raw/TUI. #1433: callers that infer Raw/TUI
+    /// eligibility for a non-focused Hidden Pane must consult this field
+    /// first so a Flow-capable sibling never flips to Raw on focus loss.
+    pub presentation_mode: PresentationMode,
     pub can_submit: bool,
     pub pending_request_id: Option<u64>,
     pub epoch: u64,
@@ -634,6 +641,7 @@ impl ComposerState {
             pane,
             draft: composer.draft.clone(),
             mode: composer.mode(),
+            presentation_mode: composer.presentation_mode,
             can_submit: composer.can_submit(),
             pending_request_id: composer.pending_request_id,
             epoch: composer.epoch,

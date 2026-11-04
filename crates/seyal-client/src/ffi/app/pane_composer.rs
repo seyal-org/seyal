@@ -172,6 +172,22 @@ fn eligibility_code(value: PresentationEligibility) -> u16 {
     }
 }
 
+/// Eligibility for a non-focused Pane whose composer is `Hidden`. #1433 (Raw
+/// flip): `Hidden` only says this Pane currently holds no input authority
+/// (unfocused, a transient focus-handoff client-loss notice, or a pending
+/// request/busy process) — it is not evidence the Pane itself took a
+/// Raw/TUI takeover. Keep this Pane in the same presentation family it was
+/// already in; only a genuine `Raw`/`Tui` `presentation_mode` on this Pane
+/// falls back to the full-pane direct-terminal path. A Flow-capable sibling
+/// must never flip to Raw merely because it lost focus or input authority.
+fn hidden_unfocused_eligibility(presentation_mode: PresentationMode) -> PresentationEligibility {
+    match presentation_mode {
+        PresentationMode::Flow => PresentationEligibility::Flow,
+        PresentationMode::Raw => PresentationEligibility::Raw,
+        PresentationMode::Tui => PresentationEligibility::Tui,
+    }
+}
+
 /// Pane-addressed composer read; empty when Pane unknown. Draft ptr is
 /// invalidated by the next composer encode on this handle.
 #[unsafe(no_mangle)]
@@ -248,13 +264,11 @@ pub extern "C" fn seyal_app_block_projection_for_pane(
         };
         let running = block.state == BlockPresentationState::Running;
         let exclusive_end = following_session_start(&composer, index as usize);
-        // Non-focused Flow leaves keep Flow projection unless that Pane's
-        // composer is Hidden (Raw/TUI takeover on that leaf).
-        let mode = if composer.mode == ComposerMode::Hidden {
-            PresentationMode::Raw
-        } else {
-            PresentationMode::Flow
-        };
+        // Non-focused Flow leaves keep Flow projection on their own
+        // `presentation_mode` regardless of `composer.mode`: Hidden only
+        // means no input authority right now (#1433), not a Raw/TUI
+        // takeover on this leaf.
+        let mode = composer.presentation_mode;
         if mode != PresentationMode::Flow && running {
             return SeyalAppBlockProjection::fail_closed();
         }
@@ -336,9 +350,11 @@ pub extern "C" fn seyal_app_sync_pane_runtime_blocks(
     })
 }
 
-/// Composer-mode proxy for non-focused presentation: Hidden → Raw-like full
-/// pane; anything else → Flow. Avoids requiring a second PresentationSession
-/// while still fencing TUI/Raw takeover on that leaf.
+/// Composer-mode proxy for non-focused presentation: Hidden on the focused
+/// Pane keeps full Session eligibility; Hidden on a non-focused Pane keeps
+/// that Pane's own presentation family (#1433) rather than assuming Raw.
+/// Avoids requiring a second PresentationSession while still fencing a
+/// genuine TUI/Raw takeover on that leaf.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_eligibility_for_pane(handle: u64, pane_lo: u64, pane_hi: u64) -> u16 {
     APPS.with(|apps| {
@@ -358,7 +374,7 @@ pub extern "C" fn seyal_app_eligibility_for_pane(handle: u64, pane_lo: u64, pane
             if pane == focused {
                 return eligibility_code(state.root.snapshot().eligibility);
             }
-            return eligibility_code(PresentationEligibility::Raw);
+            return eligibility_code(hidden_unfocused_eligibility(composer.presentation_mode));
         }
         eligibility_code(PresentationEligibility::Flow)
     })
@@ -373,6 +389,26 @@ mod tests {
     };
     use std::mem::size_of;
     use std::ptr;
+
+    /// #1433 (Raw flip): a non-focused Pane whose composer is `Hidden` only
+    /// because it currently holds no input authority (focus/registry-client
+    /// handoff) must keep its own presentation family. Do not invent
+    /// Raw-on-focus-loss for a Pane that is still `presentation_mode: Flow`.
+    #[test]
+    fn hidden_unfocused_eligibility_keeps_each_presentation_family() {
+        assert_eq!(
+            hidden_unfocused_eligibility(PresentationMode::Flow),
+            PresentationEligibility::Flow
+        );
+        assert_eq!(
+            hidden_unfocused_eligibility(PresentationMode::Raw),
+            PresentationEligibility::Raw
+        );
+        assert_eq!(
+            hidden_unfocused_eligibility(PresentationMode::Tui),
+            PresentationEligibility::Tui
+        );
+    }
 
     #[test]
     fn composer_for_pane_survives_split_and_focus_switch() {
