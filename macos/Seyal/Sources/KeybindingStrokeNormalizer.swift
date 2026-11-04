@@ -73,7 +73,8 @@ enum KeybindingStrokeNormalizer {
         switch event.specialKey {
         case .carriageReturn, .newline, .enter: return namedEnter
         case .tab, .backTab: return namedTab
-        case .backspace: return namedBackspace
+        // `.delete` is Mac Backspace (0x7f); forward delete is `.deleteForward`.
+        case .backspace, .delete: return namedBackspace
         case .upArrow: return namedUp
         case .downArrow: return namedDown
         case .leftArrow: return namedLeft
@@ -94,7 +95,7 @@ enum KeybindingStrokeNormalizer {
         case .end: return namedEnd
         case .pageUp: return namedPageUp
         case .pageDown: return namedPageDown
-        case .delete: return namedDelete
+        case .deleteForward: return namedDelete
         default:
             if let fromFunctionScalar = namedKeyFromFunctionKeyScalar(event) {
                 return fromFunctionScalar

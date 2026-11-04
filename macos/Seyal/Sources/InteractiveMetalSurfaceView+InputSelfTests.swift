@@ -255,8 +255,10 @@ extension InteractiveMetalSurfaceView {
             && TerminalNativeKeyClassifier.semanticKey(
                 specialKey: .backTab, charactersIgnoringModifiers: nil, modifierFlags: [.shift])
                 == nil
+            // AppKit `.delete` is Mac Backspace (0x7f); forward delete is `.deleteForward`.
             && TerminalNativeKeyClassifier.semanticKey(
-                specialKey: .delete, charactersIgnoringModifiers: nil, modifierFlags: []) == nil
+                specialKey: .delete, charactersIgnoringModifiers: nil, modifierFlags: [])
+                == .backspace
             && TerminalNativeKeyClassifier.v2(
                 keyCode: 36, specialKey: .enter, charactersIgnoringModifiers: nil, characters: nil,
                 modifierFlags: [], optionAsAlt: false)?.kind == 1
@@ -275,6 +277,14 @@ extension InteractiveMetalSurfaceView {
                 keyCode: 51, specialKey: .backspace, charactersIgnoringModifiers: nil,
                 characters: nil, modifierFlags: [.control], optionAsAlt: false
             ).map { $0.kind == 3 && $0.modifiers == 4 } == true
+            && TerminalNativeKeyClassifier.v2(
+                keyCode: 51, specialKey: .delete, charactersIgnoringModifiers: "\u{7f}",
+                characters: "\u{7f}", modifierFlags: [], optionAsAlt: false
+            )?.kind == 3
+            && TerminalNativeKeyClassifier.v2(
+                keyCode: 117, specialKey: .deleteForward, charactersIgnoringModifiers: nil,
+                characters: nil, modifierFlags: [], optionAsAlt: false
+            )?.kind == 12
             && InteractiveMetalSurfaceView.v2ActionIDBeforeExhaustion(1) == 1
             && InteractiveMetalSurfaceView.v2ActionIDBeforeExhaustion(0) == nil
             && InteractiveMetalSurfaceView.v2ActionIDBeforeExhaustion(.max) == nil
