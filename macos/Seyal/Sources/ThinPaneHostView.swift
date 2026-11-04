@@ -61,7 +61,11 @@ final class ThinPaneHostView: NSView {
         // NSView hit-testing would then return `self` and swallow the click
         // so CommandBlockView never sees it. Fall through in Flow; keep the
         // surface in Raw/TUI where drawsLiveGrid is true.
-        if hit === self, !inputSurface.inspectRendererPresentation().drawsLiveGrid {
+        // Raw scrollback suppresses drawsLiveGrid but must remain hittable (#1442).
+        if hit === self,
+            !inputSurface.inspectRendererPresentation().drawsLiveGrid,
+            inputSurface.rawScrollOffset == 0
+        {
             return nil
         }
         return hit

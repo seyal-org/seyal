@@ -36,11 +36,19 @@ extension ProductChromeHostView {
             NSLayoutConstraint.activate(paneFillsCenter)
             let mode: TerminalPresentationMode =
                 snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
+            if mode == .tui {
+                pane.inputSurface.clearRawScrollbackFollowTail()
+            }
             pane.inputSurface.applyRendererPresentation(.fullPane(mode))
             pane.inputSurface.setLiveTailBlocks([:])
             pane.inputSurface.removeTranscriptRegions(except: [])
             layoutSubtreeIfNeeded()
+            pane.inputSurface.preserveRawScrollbackAfterPresentationChange(
+                eligibility: snapshot.eligibility)
         } else {
+            // Leaving Raw must drop presentation-local scroll state; otherwise
+            // frame ticks keep painting u64::MAX history and wipe Block bodies.
+            pane.inputSurface.clearRawScrollbackFollowTail()
             NSLayoutConstraint.deactivate(paneFillsCenter)
             NSLayoutConstraint.activate(paneFollowsTranscript)
             pane.inputSurface.applyRendererPresentation(.flow())

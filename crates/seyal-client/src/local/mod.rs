@@ -439,17 +439,28 @@ impl LocalDisplayClient {
         self.next_history_request_id
     }
 
+    /// Correlation `block_id` for presentation-local Raw scrollback (#1442).
+    /// Not a BlockTimeline identity; BlockTimeline purge must never drop it.
+    pub const PRESENTATION_HISTORY_CORRELATION_BLOCK_ID: u64 = u64::MAX;
+
     /// An authoritative timeline replacement evicts history projections for
     /// blocks no longer visible. Late responses for those request IDs are
     /// ignored by the request table and cannot repopulate the cache.
+    ///
+    /// Retains [`Self::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID`] so Raw
+    /// scrollback requests survive empty/partial BlockTimeline replacements.
     pub fn purge_history_for_blocks(
         &mut self,
         retained_block_ids: &std::collections::HashSet<u64>,
     ) {
+        let keep = |block_id: u64| {
+            block_id == Self::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID
+                || retained_block_ids.contains(&block_id)
+        };
         self.history_ranges
-            .retain(|(block_id, _), _| retained_block_ids.contains(block_id));
+            .retain(|(block_id, _), _| keep(*block_id));
         self.history_requests
-            .retain(|_, (block_id, _, _)| retained_block_ids.contains(block_id));
+            .retain(|_, (block_id, _, _)| keep(*block_id));
     }
 
     fn quarantine_block_metadata(&mut self) -> ClientError {

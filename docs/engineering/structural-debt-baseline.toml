@@ -24,9 +24,9 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 923
-issue = 1379
-reason = "Flow history retention across shell-exit poll loss stays on the Metal surface that already owns historyRanges; #1379 splits hasRetainedHistoryPresentation from hasPreparedState (SPEC-009 Usable) so retained history presents after wipe without false Usable, AX exposes history-instances/regions/clips, and #1382 pane-terminal routing lands on the same thin host surface."
+acknowledged_loc = 937
+issue = 1442
+reason = "Metal surface remains the thin historyRanges/hit-test owner; #1442 adds presentation-local Raw scroll offset fields and hit/history-except hooks that call into MetalSurfaceView+RawScrollback without inventing a second VT/history authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -66,9 +66,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1062
-issue = 1388
-responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture, #1379 adds canvas_floor field literals, and #1388 carries BlockScope on those RuntimeBlockRecord fixtures."
+ceiling_loc = 1075
+issue = 1440
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -78,9 +78,9 @@ responsibility = "Published C ABI entry points stay one façade after decode/enc
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 783
-issue = 1388
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shell composition cases to shell_composition_tests.rs. #1388 asserts BlockScope survives runtime_block_from_command, including a session-scoped record, beside the existing lifecycle proofs."
+acknowledged_loc = 800
+issue = 1440
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shell composition cases aside. #1388 BlockScope and #1440 Raw-default resting projection proofs stay beside the existing lifecycle ABI fixtures."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
@@ -234,21 +234,27 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 936
-issue = 1424
-reason = "Thin AppKit chrome host stays one cold-path façade; #1424 themes secondary Flow presentation hosts after Split without moving product authority into Swift (ADR-015 / M001-MULTIPANE-VIEW §5)."
+acknowledged_loc = 940
+issue = 1442
+reason = "Thin AppKit chrome host stays one cold-path façade; #1442 routes Raw correlation history ranges through renderRawScrollbackHistoryIfNeeded before Flow applyHistoryRange so Block bodies and Raw scroll cannot split-brain on the same surface."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
-acknowledged_loc = 709
-issue = 1424
-reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1424 publishes SecondaryLivePaneHost frames before install and leaves first Block sync to registry polls so multipane AutoresizingMask never fights composer constraints and region AX stays responsive."
+acknowledged_loc = 715
+issue = 1440
+reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1424 multipane host publish plus #1440 Raw secondary Metal keep-warm under focused liveContent cover stay on this thin AppKit layout surface."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 723
-issue = 1413
-reason = "Local display-client protocol proofs stay one module; #1413 extends mint-workspace poll fixtures beside the existing composer/status proofs rather than a second client test file."
+acknowledged_loc = 745
+issue = 1442
+reason = "Local display-client protocol proofs stay one module; #1442 adds the Raw presentation-correlation purge retention proof beside existing history request fixtures rather than a second client test file."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
+acknowledged_loc = 739
+issue = 1442
+reason = "Interactive Metal remains the AppKit input owner; #1442 adds Raw-local wheel/PageUp/PageDown routing that calls MetalSurfaceView+RawScrollback applyRawScrollDelta without moving PTY mouse reporting or inventing a second input surface."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"

@@ -254,6 +254,17 @@ mod tests {
             reserved: 0,
         };
         assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            state
+                .root
+                .apply(AppAction::SelectRestingPresentation {
+                    fence: state.root.fence(),
+                    raw: false,
+                })
+                .unwrap();
+        });
         assert_eq!(seyal_app_snapshot(handle).eligibility, 1, "Flow");
 
         APPS.with(|apps| {
@@ -351,6 +362,13 @@ mod tests {
                         pty_generation: 1,
                         alternate_screen: false,
                     },
+                })
+                .unwrap();
+            state
+                .root
+                .apply(AppAction::SelectRestingPresentation {
+                    fence: state.root.fence(),
+                    raw: false,
                 })
                 .unwrap();
             let fence = state.root.fence();
@@ -476,6 +494,13 @@ mod tests {
         APPS.with(|apps| {
             let mut apps = apps.borrow_mut();
             let state = apps.get_mut(&handle).unwrap();
+            state
+                .root
+                .apply(AppAction::SelectRestingPresentation {
+                    fence: state.root.fence(),
+                    raw: false,
+                })
+                .unwrap();
             let fence = state.root.fence();
             state
                 .root

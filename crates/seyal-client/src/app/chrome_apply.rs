@@ -323,7 +323,8 @@ impl ApplicationRoot {
             .flat_map(|tab| &tab.panes)
             .find(|pane| pane.id == focused)
             .map(|pane| pane.presentation_mode);
-        self.explicit_raw = stored_mode == Some(crate::presentation::PresentationMode::Raw);
+        // Per-pane stored mode → Flow opt-in latch (#1438). Raw/Tui/absent → not Flow.
+        self.explicit_flow = stored_mode == Some(crate::presentation::PresentationMode::Flow);
         self.recompute_resting();
         let alternate = self.alternate_screen_for_pane(focused);
         let _ = self.derive_presentation(alternate);

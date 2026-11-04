@@ -443,7 +443,11 @@ final class SecondaryLivePaneHost: NSView {
     }
 
     func publishFrame() {
-        guard displayHandle != 0, window != nil, !isHidden else { return }
+        // Keep consuming bridge frames while this host is covered by focused
+        // Raw/TUI `liveContent` (`isHidden == true`). Otherwise unfocus reveals
+        // a stale Metal buffer and drops lines typed/drawn while focused
+        // (grid-first multipane headed: vim/`took 2s` vanishing on focus out).
+        guard displayHandle != 0, window != nil else { return }
         guard seyal_bridge_ensure_prepared_for(displayHandle) == 0 else { return }
         let frame = seyal_bridge_frame_for(displayHandle)
         guard frame.cells != nil, frame.cell_count > 0 else { return }
@@ -497,12 +501,18 @@ final class SecondaryLivePaneHost: NSView {
             activateDirectSurfaceConstraints()
             let mode: TerminalPresentationMode =
                 eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
+            if mode == .tui {
+                surface.clearRawScrollbackFollowTail()
+            }
             surface.applyRendererPresentation(.fullPane(mode))
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])
             composer.isHidden = true
             clearPreservedDocumentHeight()
+            surface.preserveRawScrollbackAfterPresentationChange(eligibility: eligibility)
         } else {
+            // Same as primary: Raw scrollback must not survive into Flow Metal.
+            surface.clearRawScrollbackFollowTail()
             activateFlowConstraintsIfSized()
             surface.applyRendererPresentation(.flow())
             // Composer visibility still follows pane-scoped reconcile().

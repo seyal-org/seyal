@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "93cf773b6a2bc94941bc0a10185f926166a8d55f"
+          "fingerprint": "bf39214b6c4e76b13df0852291321dd7e86f9da5"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "93cf773b6a2bc94941bc0a10185f926166a8d55f"
+          "fingerprint": "bf39214b6c4e76b13df0852291321dd7e86f9da5"
         }
       ],
       "relationships": [
@@ -104,7 +104,7 @@
       "id": "COMP-PANE-PRESENTATION",
       "kind": "component",
       "title": "Pane Flow Raw TUI presentation",
-      "summary": "Per TerminalExecution, exactly one user-visible presentation is active: Flow native Blocks/composer, Raw full-Pane primary grid, or TUI full-Pane takeover. Flow terminal cells are clipped to Block output regions and input ownership/reconnect transitions are fenced.",
+      "summary": "Per TerminalExecution, exactly one user-visible presentation is active: Flow native Blocks/composer, Raw full-Pane primary grid, or TUI full-Pane takeover. Resting presentation is grid-first Raw (#1438); Flow is an explicit trusted-shell mode. Flow terminal cells are clipped to Block output regions and input ownership/reconnect transitions are fenced.",
       "tags": [
         "pane",
         "presentation",
@@ -126,7 +126,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "3491f7a895d5963367a52b0462c08b392f96bc50"
+          "fingerprint": "ab7a0f9d23e7875919163fd78c93681f5dfe2e9f"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
@@ -134,7 +134,7 @@
         },
         {
           "path": "docs/specs/SPEC-008-M003-COMMAND-BLOCKS.md",
-          "fingerprint": "89e30eee194d910848b2fa222a3bf831a55b3960"
+          "fingerprint": "9e4f29e92ff99120149e3ac3d0c0b26e6016f4f0"
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
@@ -193,7 +193,7 @@
       "id": "DEC-ADR-009",
       "kind": "decision",
       "title": "ADR-009 Command Blocks composer and presentation takeover",
-      "summary": "Accepted command-Block baseline plus accepted #858 / PR #859 (8d08f2f) correction: Block-first Flow, mutually exclusive Raw/TUI takeover, renderer reuse without viewport authority, and fenced Rust/native input-ownership transitions.",
+      "summary": "Accepted command-Block baseline plus #858/#859 mutually exclusive Flow/Raw/TUI takeover, renderer reuse without viewport authority, and fenced input-ownership transitions; #1438 supersedes #1404 so resting presentation is grid-first Raw and Flow is explicit trusted-shell mode.",
       "tags": [
         "adr",
         "adr-009",
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "3491f7a895d5963367a52b0462c08b392f96bc50"
+          "fingerprint": "ab7a0f9d23e7875919163fd78c93681f5dfe2e9f"
         }
       ],
       "relationships": [

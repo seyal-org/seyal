@@ -311,8 +311,9 @@ pub struct ApplicationRoot {
     alternate_screen: bool,
     /// Flow or Raw used while alternate screen is off.
     resting: PresentationMode,
-    /// User asked for Raw until they ask to re-evaluate.
-    explicit_raw: bool,
+    /// User explicitly opted into Flow (#1438 grid-first). Default resting is
+    /// Raw; shell-integration status alone must not set this.
+    explicit_flow: bool,
     /// Runtime reported unsupported shell integration. SPEC-008 requires
     /// full-Pane Raw until a later status says otherwise.
     integration_unsupported: bool,
@@ -394,7 +395,7 @@ impl ApplicationRoot {
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
         let _ = composer.apply(ComposerAction::ApplyPresentation {
             pane,
-            mode: PresentationMode::Flow,
+            mode: PresentationMode::Raw,
             input_route: InputRoute::Frozen,
         });
         // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
@@ -407,7 +408,7 @@ impl ApplicationRoot {
         }
         let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
-            presentation: PresentationSession::new(None, PresentationMode::Flow),
+            presentation: PresentationSession::new(None, PresentationMode::Raw),
             shell,
             authority: None,
             pane_authorities: HashMap::new(),
@@ -432,8 +433,8 @@ impl ApplicationRoot {
             goto: GotoState::new(),
             focus_history: FocusHistory::new(),
             alternate_screen: false,
-            resting: PresentationMode::Flow,
-            explicit_raw: false,
+            resting: PresentationMode::Raw,
+            explicit_flow: false,
             integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,

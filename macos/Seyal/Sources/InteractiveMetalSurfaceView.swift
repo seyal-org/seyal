@@ -256,6 +256,28 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             super.scrollWheel(with: event)
             return
         }
+        let eligibility = seyal_app_snapshot(appHandle).eligibility
+        let alternate = terminalCurrentFrame()?.alternate_screen != 0
+        if prefersRawLocalScrollback(eligibility: eligibility, alternateScreen: alternate),
+            abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
+            event.scrollingDeltaY != 0
+        {
+            // AppKit: positive scrollingDeltaY = fingers/content move down = view older lines.
+            let cell = max(terminalPresentationCellSize().height, 1)
+            var steps = Int((abs(event.scrollingDeltaY) / cell).rounded(.up))
+            if steps < 1 { steps = 1 }
+            if event.isDirectionInvertedFromDevice {
+                // Natural: fingers up → positive delta → scroll toward older history.
+                let delta = event.scrollingDeltaY > 0 ? steps : -steps
+                _ = applyRawScrollDelta(
+                    rows: delta, eligibility: eligibility, alternateScreen: alternate)
+            } else {
+                let delta = event.scrollingDeltaY > 0 ? -steps : steps
+                _ = applyRawScrollDelta(
+                    rows: delta, eligibility: eligibility, alternateScreen: alternate)
+            }
+            return
+        }
         let button: UInt8
         if abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX) {
             if event.scrollingDeltaY == 0 { return }
@@ -291,6 +313,17 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             return
         }
         guard allowsDirectTerminalInput else { return }
+
+        let eligibility = seyal_app_snapshot(appHandle).eligibility
+        let alternate = terminalCurrentFrame()?.alternate_screen != 0
+        if prefersRawLocalScrollback(eligibility: eligibility, alternateScreen: alternate),
+            let pageDelta = Self.rawScrollPageDelta(for: event)
+        {
+            let page = max(Int(terminalCurrentFrame()?.rows ?? 1) - 1, 1)
+            _ = applyRawScrollDelta(
+                rows: pageDelta * page, eligibility: eligibility, alternateScreen: alternate)
+            return
+        }
 
         if composition.hasMarkedText, inputContext?.handleEvent(event) == true {
             return
@@ -546,6 +579,20 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         let eligibility = seyal_app_snapshot(appHandle).eligibility
         return eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+    }
+
+    /// +1 = PageUp (older), -1 = PageDown (toward live). Nil when not a page key.
+    static func rawScrollPageDelta(for event: NSEvent) -> Int? {
+        switch event.specialKey {
+        case .pageUp: return 1
+        case .pageDown: return -1
+        default:
+            switch event.charactersIgnoringModifiers {
+            case String(UnicodeScalar(NSPageUpFunctionKey)!): return 1
+            case String(UnicodeScalar(NSPageDownFunctionKey)!): return -1
+            default: return nil
+            }
+        }
     }
 
     private func submitIfAllowed(_ text: String) {

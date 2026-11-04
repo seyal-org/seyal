@@ -92,9 +92,10 @@ pub enum AppAction {
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
     },
-    /// User choice of the non-TUI presentation (#867).
-    /// `raw` keeps Raw across TUI entry and exit. Clearing it follows
-    /// structured eligibility again.
+    /// User choice of the non-TUI resting presentation (#867, #1438).
+    /// `raw == true` selects grid-first Raw (clears Flow opt-in). `raw == false`
+    /// opts into Flow when integration allows. Shell-integration status alone
+    /// must not flip resting Raw → Flow while Flow is quarantined.
     SelectRestingPresentation {
         fence: AppFence,
         raw: bool,

@@ -17,6 +17,11 @@ fn make_primary_usable(root: &mut ApplicationRoot) {
         },
     })
     .unwrap();
+    root.apply(AppAction::SelectRestingPresentation {
+        fence: root.fence(),
+        raw: false,
+    })
+    .unwrap();
     root.apply(AppAction::BeginRecovery {
         now: Duration::ZERO,
     })

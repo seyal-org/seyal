@@ -471,6 +471,25 @@ pub extern "C" fn seyal_bridge_frame_for(handle: u64) -> SeyalPreparedFrame {
         .unwrap_or_else(SeyalPreparedFrame::empty)
 }
 
+/// First LineId of the paired primary viewport (`ViewportLineIds[0]`), or 0
+/// when unpaired. Presentation-local Raw scrollback uses this as the live
+/// window origin without inventing client-side history (#1442).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_viewport_start_line_id() -> u64 {
+    with_display_client(|client| client.viewport_line_ids().first().copied().unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Same as [`seyal_bridge_viewport_start_line_id`] for one registry handle
+/// without changing the focused display client.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_viewport_start_line_id_for(handle: u64) -> u64 {
+    super::with_client(handle, |client| {
+        client.viewport_line_ids().first().copied().unwrap_or(0)
+    })
+    .unwrap_or(0)
+}
+
 fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {
     if client.ensure_prepared_surface().is_err() {
         return SeyalPreparedFrame::empty();

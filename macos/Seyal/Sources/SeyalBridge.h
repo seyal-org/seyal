@@ -297,6 +297,9 @@ int32_t seyal_bridge_resize_failure(void);
 SeyalPreparedFrame seyal_bridge_frame(void);
 /* Prepared frame for one registry handle without changing focus (#936). */
 SeyalPreparedFrame seyal_bridge_frame_for(uint64_t handle);
+/* Paired ViewportLineIds[0] for Raw presentation scroll (#1442); 0 if unpaired. */
+uint64_t seyal_bridge_viewport_start_line_id(void);
+uint64_t seyal_bridge_viewport_start_line_id_for(uint64_t handle);
 int32_t seyal_bridge_ensure_prepared_for(uint64_t handle);
 uint64_t seyal_bridge_block_timeline_revision(void);
 uint64_t seyal_bridge_next_composer_request_id(void);

@@ -1,31 +1,36 @@
 # SPEC-008 — M003 command Blocks, Pane composer and presentation modes
 
-- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`) and the duration / shell-metadata boundary amendment accepted by #686 / PR #1022. Amendments below that cite ADR-026 are normative on merge of the ADR-026 acceptance PR by a non-author maintainer under #1384. An author or agent comment is not that acceptance.
-- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 alignment accepted 2026-10-29 (#1384)
+- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`), the duration / shell-metadata boundary amendment accepted by #686 / PR #1022, and the grid-first resting-presentation amendment accepted under #1438 / PR #1439 (implemented by #1440). Amendments below that cite ADR-026 are normative on merge of the ADR-026 acceptance PR by a non-author maintainer under #1384. An author or agent comment is not that acceptance.
+- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 alignment accepted 2026-10-29 (#1384); grid-first resting presentation 2026-11-04 (#1438/#1440)
 - **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract. Accepted ADR-026 (#1384) is the authority for the session-bootstrap and input-target amendments in §3.1, §3.2, §3.5, §4, §5.5, §8 and §10.
 - **Depends on:** accepted SPEC-001 through SPEC-007 and completed Pass 7
 
 ## 1. Observable contract
 
-The default supported structured-shell presentation is a scrollable Flow/Blocks
-transcript. A Pane has one composer. When trusted shell integration reports a
-supported structured command-entry state, submitting the composer creates one
-new logical command Block. The Block displays the submitted command metadata and
-canonical terminal output projection produced by that command. Multiple
-completed and running Blocks remain ordered in the Pane transcript.
+Under the accepted #1438 grid-first amendment, the **default resting**
+presentation for a new Pane is **Raw** (full-Pane primary terminal grid with
+direct-terminal input). Flow/Blocks remains the structured product surface but
+is an **explicit opt-in** while quarantined: shell-integration status alone must
+not auto-promote Raw → Flow. A Pane still has one composer; when the user has
+opted into Flow and trusted shell integration reports a supported structured
+command-entry state, submitting the composer creates one new logical command
+Block. The Block displays the submitted command metadata and canonical terminal
+output projection produced by that command. Multiple completed and running
+Blocks remain ordered in the Pane transcript. `BlockTimeline` may still
+accumulate under Raw; Timeline existence does not require Flow to be visible.
 
 The same Pane and `ExecutionId` remain authoritative throughout. A command Block
 is not a terminal session and does not contain copied terminal state.
 
-Under the accepted #858 amendment, Flow, Raw and TUI are mutually exclusive
-user-visible presentations:
+Under the accepted #858 amendment (as amended by #1438), Flow, Raw and TUI are
+mutually exclusive user-visible presentations:
 
 ```text
-supported structured shell state
-  -> Flow: Block transcript + Pane composer
-
-unsupported/unsafe character-level terminal state or explicit Raw
+default resting / unsupported integration / explicit Raw
   -> Raw: full-Pane primary terminal grid
+
+explicit Flow opt-in + supported structured shell state
+  -> Flow: Block transcript + Pane composer
 
 alternate/full-screen application state
   -> TUI: full-Pane terminal application presentation
