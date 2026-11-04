@@ -7,15 +7,25 @@ extension MetalSurfaceView {
         eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue) && !alternateScreen
     }
 
+    /// Drop presentation-local Raw scroll state. Does not change eligibility
+    /// presentation (Flow/TUI/Raw) — callers set that after clearing.
     func clearRawScrollbackFollowTail() {
-        guard rawScrollOffset != 0 || rawScrollPaintedStartLineID != 0 else { return }
+        guard rawScrollOffset != 0 || rawScrollPaintedStartLineID != 0
+            || rawScrollDidRefillLeadingBlanks
+        else { return }
         rawScrollOffset = 0
         rawScrollPaintedStartLineID = 0
+        rawScrollDidRefillLeadingBlanks = false
         var except = Set(historyRanges.keys.map(\.blockID))
         except.remove(RawScrollbackViewport.correlationBlockID)
         discardHistoryRequests(except: except)
+        // Removes only the Raw correlation region; Flow Block ids stay intact.
         removeTranscriptRegions(except: except)
-        renderer.setHistoryRegionOrder([])
+    }
+
+    /// Follow-tail in Raw: clear scroll offset and restore live grid paint.
+    func restoreRawFollowTailLiveGrid() {
+        clearRawScrollbackFollowTail()
         applyRendererPresentation(.fullPane(.raw))
         publishCurrentTerminalFrame()
     }
@@ -41,6 +51,7 @@ extension MetalSurfaceView {
             return true
         }
         rawScrollOffset = next
+        rawScrollDidRefillLeadingBlanks = false
         refreshRawScrollbackPaint(force: true)
         return true
     }
@@ -55,8 +66,16 @@ extension MetalSurfaceView {
     func refreshRawScrollbackPaint(force: Bool = false) {
         guard rawScrollOffset > 0 else {
             if rawScrollPaintedStartLineID != 0 {
-                clearRawScrollbackFollowTail()
+                restoreRawFollowTailLiveGrid()
             }
+            return
+        }
+        // Flow/TUI must never keep driving Raw scroll paint (#1442 regression).
+        let eligibility =
+            recoveryAppHandle != 0
+            ? seyal_app_snapshot(recoveryAppHandle).eligibility : 0
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue) else {
+            clearRawScrollbackFollowTail()
             return
         }
         guard let frame = terminalCurrentFrame(), frame.rows > 0 else { return }
@@ -66,7 +85,7 @@ extension MetalSurfaceView {
             offset: rawScrollOffset
         )
         guard rawScrollOffset > 0 else {
-            clearRawScrollbackFollowTail()
+            restoreRawFollowTailLiveGrid()
             return
         }
         if !force, startLineID == rawScrollPaintedStartLineID { return }
@@ -77,7 +96,7 @@ extension MetalSurfaceView {
                 offset: rawScrollOffset
             )
         else {
-            clearRawScrollbackFollowTail()
+            restoreRawFollowTailLiveGrid()
             return
         }
         rawScrollPaintedStartLineID = startLineID
@@ -89,7 +108,7 @@ extension MetalSurfaceView {
             blockID: RawScrollbackViewport.correlationBlockID
         )
         if result != 0 {
-            clearRawScrollbackFollowTail()
+            restoreRawFollowTailLiveGrid()
         }
     }
 
@@ -117,9 +136,34 @@ extension MetalSurfaceView {
     func renderRawScrollbackHistoryIfNeeded(_ range: NativeHistoryRange) -> Bool {
         guard range.blockID == RawScrollbackViewport.correlationBlockID else { return false }
         guard rawScrollOffset > 0 else { return false }
-        if range.rows.isEmpty {
+        let eligibility =
+            recoveryAppHandle != 0
+            ? seyal_app_snapshot(recoveryAppHandle).eligibility : 0
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue) else {
             clearRawScrollbackFollowTail()
             return true
+        }
+        if range.rows.isEmpty {
+            restoreRawFollowTailLiveGrid()
+            return true
+        }
+        let columns = Int(terminalCurrentFrame()?.columns ?? 0)
+        let targetRows = Int(terminalCurrentFrame()?.rows ?? 0)
+        let leadingBlanks = range.rows.prefix { RawScrollbackViewport.isBlankRow($0) }.count
+        // After trimming sealed empty rows at LineId 1, refill from the first
+        // content LineId so the page is real output—not one title + blank pad.
+        if leadingBlanks > 0, !rawScrollDidRefillLeadingBlanks, targetRows > 0 {
+            let contentStart = range.startLine &+ UInt64(leadingBlanks)
+            let contentEnd = contentStart &+ UInt64(targetRows) &- 1
+            if contentStart > range.startLine {
+                rawScrollDidRefillLeadingBlanks = true
+                _ = requestHistoryRange(
+                    startLine: contentStart,
+                    endLine: contentEnd,
+                    blockID: RawScrollbackViewport.correlationBlockID
+                )
+                return true
+            }
         }
         // History covers the scrolled window; suppress live grid while offset > 0.
         applyRendererPresentation(
@@ -133,8 +177,6 @@ extension MetalSurfaceView {
         // Flow publishes order via setTranscriptFrame. Raw must set it here or
         // historyRegions stay undrawn (orderedBlockRegions empty → blank).
         renderer.setHistoryRegionOrder([RawScrollbackViewport.correlationBlockID])
-        let columns = Int(terminalCurrentFrame()?.columns ?? 0)
-        let targetRows = Int(terminalCurrentFrame()?.rows ?? 0)
         let paddedRows = RawScrollbackViewport.padRowsForViewport(
             rows: range.rows,
             columns: columns,

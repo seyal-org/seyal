@@ -507,6 +507,8 @@ final class SecondaryLivePaneHost: NSView {
             clearPreservedDocumentHeight()
             surface.preserveRawScrollbackAfterPresentationChange(eligibility: eligibility)
         } else {
+            // Same as primary: Raw scrollback must not survive into Flow Metal.
+            surface.clearRawScrollbackFollowTail()
             activateFlowConstraintsIfSized()
             surface.applyRendererPresentation(.flow())
             // Composer visibility still follows pane-scoped reconcile().

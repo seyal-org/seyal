@@ -46,6 +46,9 @@ extension ProductChromeHostView {
             pane.inputSurface.preserveRawScrollbackAfterPresentationChange(
                 eligibility: snapshot.eligibility)
         } else {
+            // Leaving Raw must drop presentation-local scroll state; otherwise
+            // frame ticks keep painting u64::MAX history and wipe Block bodies.
+            pane.inputSurface.clearRawScrollbackFollowTail()
             NSLayoutConstraint.deactivate(paneFillsCenter)
             NSLayoutConstraint.activate(paneFollowsTranscript)
             pane.inputSurface.applyRendererPresentation(.flow())

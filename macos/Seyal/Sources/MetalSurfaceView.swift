@@ -70,6 +70,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var rawScrollOffset: UInt64 = 0
   /// `ViewportLineIds[0]` last used to paint Raw scrollback; 0 when follow-tail.
   var rawScrollPaintedStartLineID: UInt64 = 0
+  /// One-shot refill after trimming sealed blank LineIds at absolute top.
+  var rawScrollDidRefillLeadingBlanks = false
 
   override convenience init(frame frameRect: NSRect) {
     self.init(frame: frameRect, paneID: "unbound")
@@ -532,7 +534,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       lastAlternateScreen = frame.alternateScreen
       onAlternateScreenChanged?(frame.alternateScreen)
       if frame.alternateScreen {
-        clearRawScrollbackFollowTail()
+        restoreRawFollowTailLiveGrid()
       }
     }
     refreshRecoveryAccessibilityValue()
