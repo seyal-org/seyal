@@ -118,6 +118,21 @@ fn window_event_rejects_unknown_reserved_bits_and_misplaced_occlusion_flag() {
     assert_eq!(super::decode::decode_action(&action), Err(-6));
 }
 
+
+fn opt_in_flow_handle(handle: u64) {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        state
+            .root
+            .apply(AppAction::SelectRestingPresentation {
+                fence: state.root.fence(),
+                raw: false,
+            })
+            .expect("opt in Flow");
+    });
+}
+
 fn bound_handle() -> (u64, SeyalAppSnapshot) {
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);
@@ -143,6 +158,7 @@ fn bound_handle() -> (u64, SeyalAppSnapshot) {
         reserved: 0,
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+    opt_in_flow_handle(handle);
     relay_composer_status(handle, 1, 1);
     let bound = seyal_app_snapshot(handle);
     (handle, bound)
@@ -184,6 +200,7 @@ fn composer_status_relay_gates_availability_and_rejects_bad_codes() {
         reserved: 0,
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+    opt_in_flow_handle(handle);
     // Bound but Runtime has published nothing: busy, not submittable,
     // and the placeholder says so.
     let composer = seyal_app_composer(handle);
@@ -427,8 +444,8 @@ fn bind_through_explicit_handle_does_not_use_implicit_select() {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &action) }, 0);
     let bound = seyal_app_snapshot(handle);
-    assert_eq!(bound.eligibility, 1);
-    assert_eq!(bound.flags & SNAP_COMPOSER, SNAP_COMPOSER);
+    assert_eq!(bound.eligibility, 2); // Raw default (#1438)
+    assert_eq!(bound.flags & SNAP_COMPOSER, 0);
     assert_eq!(bound.flags & SNAP_HAS_EXECUTION, SNAP_HAS_EXECUTION);
     action.kind = 0;
     assert_eq!(unsafe { seyal_app_apply(handle, &action) }, -4);
@@ -759,7 +776,7 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
     let bound = seyal_app_snapshot(handle);
-    assert_eq!(bound.eligibility, 1);
+    assert_eq!(bound.eligibility, 2); // Raw default (#1438)
     let mut refresh = identity_fence(2, &bound);
     refresh.flags |= FLAG_ALTERNATE_SCREEN;
     assert_eq!(unsafe { seyal_app_apply(handle, &refresh) }, 0);
@@ -770,7 +787,7 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
     refresh.flags &= !FLAG_ALTERNATE_SCREEN;
     refresh.fence_epoch = tui.epoch;
     assert_eq!(unsafe { seyal_app_apply(handle, &refresh) }, 0);
-    assert_eq!(seyal_app_snapshot(handle).eligibility, 1);
+    assert_eq!(seyal_app_snapshot(handle).eligibility, 2);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 

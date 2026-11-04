@@ -23,6 +23,15 @@ fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
     .unwrap();
 }
 
+/// Grid-first default is Raw (#1438). Flow/composer tests must opt in.
+fn opt_in_flow(root: &mut ApplicationRoot) {
+    root.apply(AppAction::SelectRestingPresentation {
+        fence: root.fence(),
+        raw: false,
+    })
+    .unwrap();
+}
+
 #[test]
 fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
     use crate::composer::ComposerMode;
@@ -33,6 +42,7 @@ fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     let bound = root.snapshot().composer.unwrap();
     assert!(matches!(bound.mode, ComposerMode::Busy { .. }));
     assert!(!bound.can_submit);
@@ -138,7 +148,7 @@ fn unbound_cannot_authorize_flow_or_composer() {
         .any(|node| node.role == AccessibilityRole::Composer));
     assert_eq!(
         root.presentation.snapshot().input_route,
-        InputRoute::Composer
+        InputRoute::DirectTerminal
     );
     assert_ne!(snap.eligibility, PresentationEligibility::Flow);
 }
@@ -155,8 +165,8 @@ fn bind_then_focus_keeps_one_execution() {
     .unwrap();
     let snap = root.snapshot();
     assert_eq!(snap.execution, Some(bound.execution));
-    assert_eq!(snap.eligibility, PresentationEligibility::Flow);
-    assert!(snap.composer_eligible);
+    assert_eq!(snap.eligibility, PresentationEligibility::Raw);
+    assert!(!snap.composer_eligible);
     let focused = snap.pane;
     root.apply(AppAction::Focus {
         fence: root.fence(),
@@ -192,8 +202,8 @@ fn refresh_alternate_screen_takeover_is_not_latched_at_bind() {
         evidence: evidence(2, true, false),
     })
     .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
-    assert!(root.snapshot().composer_eligible);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert!(!root.snapshot().composer_eligible);
     root.apply(AppAction::Refresh {
         fence: root.fence(),
         alternate_screen: true,
@@ -207,9 +217,9 @@ fn refresh_alternate_screen_takeover_is_not_latched_at_bind() {
         alternate_screen: false,
     })
     .unwrap();
-    let flow = root.snapshot();
-    assert_eq!(flow.eligibility, PresentationEligibility::Flow);
-    assert!(flow.composer_eligible);
+    let raw = root.snapshot();
+    assert_eq!(raw.eligibility, PresentationEligibility::Raw);
+    assert!(!raw.composer_eligible);
 }
 
 #[test]
@@ -295,6 +305,7 @@ fn observer_and_flow_cannot_submit_direct_input() {
             evidence: evidence(5, true, false),
         })
         .unwrap();
+    opt_in_flow(&mut controller);
     assert_eq!(
         controller.apply(AppAction::SubmitInput {
             fence: controller.fence(),
@@ -428,6 +439,7 @@ fn composer_history_is_fenced_and_never_submits() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     runtime_available(&mut root, 1);
     let epoch = root.snapshot().composer.unwrap().epoch;
     root.apply(AppAction::SetComposerDraft {
@@ -929,6 +941,7 @@ fn composer_submit_busy_and_stale_request_are_rust_owned() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     runtime_available(&mut root, 1);
     let epoch = root.snapshot().composer.as_ref().unwrap().epoch;
     root.apply(AppAction::SetComposerDraft {

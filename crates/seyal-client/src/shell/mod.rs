@@ -290,7 +290,7 @@ impl ShellState {
             }],
             selected_terminal_tab: None,
             allows_implicit_execution_bootstrap: true,
-            presentation_mode: crate::presentation::PresentationMode::Flow,
+            presentation_mode: crate::presentation::PresentationMode::Raw,
         };
         let mut pane = pane;
         pane.selected_terminal_tab = pane.terminal_tabs.first().map(|row| row.id);
@@ -848,7 +848,7 @@ impl ShellState {
             }],
             selected_terminal_tab: Some(terminal_id),
             allows_implicit_execution_bootstrap: false,
-            presentation_mode: crate::presentation::PresentationMode::Flow,
+            presentation_mode: crate::presentation::PresentationMode::Raw,
         };
         let id = pane.id;
         // ADR-021 §3: successful structural mutation clears zoom.

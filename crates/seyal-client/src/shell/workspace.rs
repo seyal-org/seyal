@@ -166,7 +166,7 @@ impl Workspace {
                         allows_implicit_execution_bootstrap: tab
                             .pane
                             .allows_implicit_execution_bootstrap,
-                        presentation_mode: PresentationMode::Flow,
+                        presentation_mode: PresentationMode::Raw,
                     };
                     let mut composed = Tab::with_pane(tab.id, tab.title, pane);
                     composed.attention = tab.attention;

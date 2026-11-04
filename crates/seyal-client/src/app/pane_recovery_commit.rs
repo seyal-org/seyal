@@ -113,7 +113,7 @@ impl ApplicationRoot {
                     .apply(crate::presentation::PresentationAction::Transition {
                         mode: desired_mode,
                         identity,
-                        explicit: self.explicit_raw
+                        explicit: self.explicit_flow
                             && desired_mode == crate::presentation::PresentationMode::Raw,
                         epoch: current.epoch,
                     })

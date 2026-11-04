@@ -210,8 +210,9 @@ impl PresentationSession {
 
     fn clear_identity(&mut self) {
         self.identity = None;
-        self.mode = PresentationMode::Flow;
-        self.input_route = Self::route(PresentationMode::Flow);
+        // Grid-first resting default while unbound (#1438).
+        self.mode = PresentationMode::Raw;
+        self.input_route = Self::route(PresentationMode::Raw);
         self.last_transition_was_explicit = false;
         self.epoch = self.epoch.checked_add(1).unwrap_or(1);
     }
@@ -422,7 +423,7 @@ mod tests {
             .expect("clear");
         let cleared = session.snapshot();
         assert_eq!(cleared.identity, None);
-        assert_eq!(cleared.mode, PresentationMode::Flow);
+        assert_eq!(cleared.mode, PresentationMode::Raw);
         assert_eq!(cleared.epoch, before + 1);
         session
             .apply(PresentationAction::BindIdentity(identity(2, 7)))
