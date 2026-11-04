@@ -187,6 +187,40 @@ final class SeyalHostHistoryUITests: XCTestCase {
         attachScreenshot(app, name: "842-history-after-altscreen")
     }
 
+    /// #1442: Cmd+Enter Raw toggle must leave Flow chrome, then restore Blocks
+    /// so Raw scroll state cannot keep wiping Block bodies after return.
+    func testCmdEnterRawToggleRestoresFlowBlocks() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "printf '%s\\n' $(seq 1 40)")
+        waitBriefly(0.8)
+        assertFlowBlocksOrFail(in: app)
+
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let blocks = app.descendants(matching: .any)["seyal-blocks"].firstMatch
+        app.typeKey("\r", modifierFlags: .command)
+        let leftFlow = expectation(
+            for: NSPredicate(format: "isHittable == false OR exists == false"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [leftFlow], timeout: 8),
+            .completed,
+            "Cmd+Enter must leave Flow composer for Raw"
+        )
+        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed entering Raw")
+        attachScreenshot(app, name: "1442-raw-after-cmd-enter")
+
+        app.typeKey("\r", modifierFlags: .command)
+        XCTAssertTrue(
+            blocks.waitForExistence(timeout: 8),
+            "Cmd+Enter back must restore seyal-blocks"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "1442-flow-after-raw-toggle")
+    }
+
     private func submitComposerCommand(_ app: XCUIApplication, _ command: String) {
         let composer = app.descendants(matching: .any)["seyal-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
