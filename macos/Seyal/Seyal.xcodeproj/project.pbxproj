@@ -10,6 +10,9 @@
 		A10000000000000000000001 /* Main.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* Main.swift */; };
 		A10000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AppDelegate.swift */; };
 		A10000000000000000000003 /* MetalSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* MetalSurfaceView.swift */; };
+		A10000000000000000000090 /* RawScrollbackViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* RawScrollbackViewport.swift */; };
+		A10000000000000000000091 /* MetalSurfaceView+RawScrollback.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000091 /* MetalSurfaceView+RawScrollback.swift */; };
+		A10000000000000000000092 /* RawScrollbackViewport+SelfTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000092 /* RawScrollbackViewport+SelfTests.swift */; };
 		A10000000000000000000004 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* AppKit.framework */; };
 		A10000000000000000000005 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* Metal.framework */; };
 		A10000000000000000000006 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* QuartzCore.framework */; };
@@ -111,6 +114,9 @@
 		A20000000000000000000001 /* Main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Main.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* MetalSurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalSurfaceView.swift; sourceTree = "<group>"; };
+		A20000000000000000000090 /* RawScrollbackViewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawScrollbackViewport.swift; sourceTree = "<group>"; };
+		A20000000000000000000091 /* MetalSurfaceView+RawScrollback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+RawScrollback.swift"; sourceTree = "<group>"; };
+		A20000000000000000000092 /* RawScrollbackViewport+SelfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RawScrollbackViewport+SelfTests.swift"; sourceTree = "<group>"; };
 		A20000000000000000000004 /* Seyal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Seyal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000005 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		A20000000000000000000006 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
@@ -263,6 +269,9 @@
 				A20000000000000000000043 /* RendererPresentationPlan.swift */,
 				A20000000000000000000040 /* NativeFontSpec.swift */,
 				A20000000000000000000003 /* MetalSurfaceView.swift */,
+				A20000000000000000000090 /* RawScrollbackViewport.swift */,
+				A20000000000000000000091 /* MetalSurfaceView+RawScrollback.swift */,
+				A20000000000000000000092 /* RawScrollbackViewport+SelfTests.swift */,
 				A2000000000000000000000D /* TerminalSurfaceHostView.swift */,
 				A20000000000000000000010 /* RustDisplayBridge.swift */,
 				A20000000000000000000011 /* GlyphAtlas.swift */,
@@ -503,6 +512,9 @@
 				A10000000000000000000043 /* RendererPresentationPlan.swift in Sources */,
 				A10000000000000000000040 /* NativeFontSpec.swift in Sources */,
 				A10000000000000000000003 /* MetalSurfaceView.swift in Sources */,
+				A10000000000000000000090 /* RawScrollbackViewport.swift in Sources */,
+				A10000000000000000000091 /* MetalSurfaceView+RawScrollback.swift in Sources */,
+				A10000000000000000000092 /* RawScrollbackViewport+SelfTests.swift in Sources */,
 				A1000000000000000000000B /* TerminalSurfaceHostView.swift in Sources */,
 				A10000000000000000000025 /* RuntimeRecoveryGlue.swift in Sources */,
 				A1000000000000000000002C /* SeyalAccessibilityAnnouncement.swift in Sources */,

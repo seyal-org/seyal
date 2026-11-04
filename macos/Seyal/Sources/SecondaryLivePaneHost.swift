@@ -497,11 +497,15 @@ final class SecondaryLivePaneHost: NSView {
             activateDirectSurfaceConstraints()
             let mode: TerminalPresentationMode =
                 eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
+            if mode == .tui {
+                surface.clearRawScrollbackFollowTail()
+            }
             surface.applyRendererPresentation(.fullPane(mode))
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])
             composer.isHidden = true
             clearPreservedDocumentHeight()
+            surface.preserveRawScrollbackAfterPresentationChange(eligibility: eligibility)
         } else {
             activateFlowConstraintsIfSized()
             surface.applyRendererPresentation(.flow())

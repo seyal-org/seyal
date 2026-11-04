@@ -380,7 +380,11 @@ final class ProductChromeHostView: NSView {
             self?.refreshRunningBlockOutput()
         }
         pane.inputSurface.onHistoryRangeChanged = { [weak self] range in
-            self?.applyHistoryRange(range)
+            guard let self else { return }
+            if self.pane.inputSurface.renderRawScrollbackHistoryIfNeeded(range) {
+                return
+            }
+            self.applyHistoryRange(range)
         }
         pane.inputSurface.onComposerResultChanged = { [weak self] result in
             let accepted = result.code == .accepted || result.code == .unsupported

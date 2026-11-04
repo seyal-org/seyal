@@ -36,10 +36,15 @@ extension ProductChromeHostView {
             NSLayoutConstraint.activate(paneFillsCenter)
             let mode: TerminalPresentationMode =
                 snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
+            if mode == .tui {
+                pane.inputSurface.clearRawScrollbackFollowTail()
+            }
             pane.inputSurface.applyRendererPresentation(.fullPane(mode))
             pane.inputSurface.setLiveTailBlocks([:])
             pane.inputSurface.removeTranscriptRegions(except: [])
             layoutSubtreeIfNeeded()
+            pane.inputSurface.preserveRawScrollbackAfterPresentationChange(
+                eligibility: snapshot.eligibility)
         } else {
             NSLayoutConstraint.deactivate(paneFillsCenter)
             NSLayoutConstraint.activate(paneFollowsTranscript)

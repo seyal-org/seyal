@@ -66,6 +66,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
   var lastProposedGeometry = CGRect.null
   var proposingGeometry = false
+  /// Presentation-local Raw scrollback rows above live origin (#1442).
+  var rawScrollOffset: UInt64 = 0
+  /// `ViewportLineIds[0]` last used to paint Raw scrollback; 0 when follow-tail.
+  var rawScrollPaintedStartLineID: UInt64 = 0
 
   override convenience init(frame frameRect: NSRect) {
     self.init(frame: frameRect, paneID: "unbound")
@@ -203,7 +207,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   override func hitTest(_ point: NSPoint) -> NSView? {
     // Flow paints terminal pixels over Block bodies. Chrome owns scrolling
     // and composer hit-testing, so the compositor must not swallow events.
-    if inspectRendererPresentation().drawsLiveGrid {
+    // Raw scrollback temporarily suppresses drawsLiveGrid but must keep hits (#1442).
+    if inspectRendererPresentation().drawsLiveGrid || rawScrollOffset > 0 {
       return super.hitTest(point)
     }
     return nil
@@ -227,12 +232,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   func removeTranscriptRegions(except ids: Set<UInt64>) {
-    historyRanges = historyRanges.filter { ids.contains($0.key.blockID) }
+    let kept = historyExceptPreservingRawScrollback(ids)
+    historyRanges = historyRanges.filter { kept.contains($0.key.blockID) }
     if historyRanges.isEmpty {
       hasRetainedHistoryPresentation = false
     }
-    renderer.removeHistoryRegions(except: ids)
-    clearLiveTailWhenTranscriptEmpty(ids)
+    renderer.removeHistoryRegions(except: kept)
+    clearLiveTailWhenTranscriptEmpty(kept)
   }
 
   var terminalExecutionIdentity: String? {
@@ -525,6 +531,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     if lastAlternateScreen != frame.alternateScreen {
       lastAlternateScreen = frame.alternateScreen
       onAlternateScreenChanged?(frame.alternateScreen)
+      if frame.alternateScreen {
+        clearRawScrollbackFollowTail()
+      }
     }
     refreshRecoveryAccessibilityValue()
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
@@ -537,6 +546,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       if result == .updated {
         forceNextFrame = false
         hasPreparedState = true
+        if rawScrollOffset > 0, !frame.alternateScreen {
+          refreshRawScrollbackPaint(force: false)
+        }
         // Chrome learns the frame only after Candidate-D prepare succeeds.
         onFrameChanged?(frame)
         // Candidate-D can continue advancing while an exhausted GPU
@@ -751,7 +763,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
-    bridge?.discardHistoryRequests(except: blockIDs)
+    bridge?.discardHistoryRequests(except: historyExceptPreservingRawScrollback(blockIDs))
   }
 
   @discardableResult

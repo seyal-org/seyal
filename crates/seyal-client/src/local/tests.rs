@@ -721,3 +721,25 @@ fn negotiated_type_45_projects_submit_relay_and_unavailable() {
     );
     assert!(legacy_revision > relay_revision);
 }
+
+#[test]
+fn purge_history_retains_presentation_correlation_block_id() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    let correlation = LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID;
+    client
+        .history_requests
+        .insert(42, (correlation, 10, 50));
+    client
+        .history_requests
+        .insert(43, (7, 1, 2));
+    client.purge_history_for_blocks(&std::collections::HashSet::new());
+    assert!(
+        client.history_requests.contains_key(&42),
+        "empty BlockTimeline must not drop Raw scrollback correlation (#1442)"
+    );
+    assert!(
+        !client.history_requests.contains_key(&43),
+        "ordinary Block history must still purge when not retained"
+    );
+}

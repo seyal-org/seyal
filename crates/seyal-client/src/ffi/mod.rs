@@ -112,8 +112,9 @@ pub use display::{
     seyal_bridge_history_range_sidecar_for, seyal_bridge_next_composer_request_id,
     seyal_bridge_next_history_request_id, seyal_bridge_poll, seyal_bridge_poll_for,
     seyal_bridge_request_history_range, seyal_bridge_session_consent, seyal_bridge_session_copy,
-    seyal_bridge_session_request, seyal_bridge_session_surface, seyal_bridge_wants_write,
-    seyal_bridge_wants_write_for,
+    seyal_bridge_session_request, seyal_bridge_session_surface,
+    seyal_bridge_viewport_start_line_id, seyal_bridge_viewport_start_line_id_for,
+    seyal_bridge_wants_write, seyal_bridge_wants_write_for,
 };
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]

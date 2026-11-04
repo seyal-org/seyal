@@ -27,6 +27,7 @@ extension InteractiveMetalSurfaceView {
             && capabilityLossDropsHeldKeyReleaseSelfTest()
             && RustDisplayBridge.pasteAdmissionSelfTest()
             && xtermButtonSelfTest()
+            && RawScrollbackViewportSelfTests.runAll()
     }
 
     static func controlNormalizationSelfTest() -> Bool {
