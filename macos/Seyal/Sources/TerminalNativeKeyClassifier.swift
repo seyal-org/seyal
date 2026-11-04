@@ -62,7 +62,10 @@ enum TerminalNativeKeyClassifier {
         case .tab, .backTab:
             kind = 2
             value = 0
-        case .backspace:
+        // AppKit: `.delete` is NSDeleteCharacter (0x7f) from the Mac Backspace
+        // key; `.deleteForward` is the forward-delete key (NSDeleteFunctionKey).
+        // Mis-mapping `.delete` → V2 Delete sends CSI 3~ and breaks erase=^?.
+        case .backspace, .delete:
             kind = 3
             value = 0
         case .upArrow: kind = 5; value = 0
@@ -72,7 +75,9 @@ enum TerminalNativeKeyClassifier {
         case .home: kind = 9; value = 0
         case .end: kind = 10; value = 0
         case .insert: kind = 11; value = 0
-        case .delete: kind = 12; value = 0
+        case .deleteForward:
+            kind = 12
+            value = 0
         case .pageUp: kind = 13; value = 0
         case .pageDown: kind = 14; value = 0
         default:
@@ -158,7 +163,7 @@ enum TerminalNativeKeyClassifier {
             candidate = .enter
         case .tab:
             candidate = .tab
-        case .backspace:
+        case .backspace, .delete:
             candidate = .backspace
         case .upArrow:
             candidate = .arrowUp
