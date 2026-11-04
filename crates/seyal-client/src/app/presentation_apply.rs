@@ -73,4 +73,13 @@ impl ApplicationRoot {
         let mode = self.presentation.snapshot().mode;
         let _ = self.shell.set_presentation_mode(pane, mode);
     }
+
+    /// ShellState is the per-Pane presentation authority. Composer Hidden only
+    /// means this leaf has no input authority right now (#1433).
+    pub(crate) fn pane_shell_presentation_mode(
+        &self,
+        pane: seyal_core::PaneId,
+    ) -> Option<crate::presentation::PresentationMode> {
+        self.shell.presentation_mode(pane)
+    }
 }

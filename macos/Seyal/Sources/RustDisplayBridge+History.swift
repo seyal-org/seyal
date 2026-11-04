@@ -5,7 +5,11 @@ extension RustDisplayBridge {
   func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
     guard isConnected, selectPresentedClient() else { return -4 }
     return requestHistoryRangeOnSelectedClient(
-      startLine: startLine, endLine: endLine, blockID: blockID)
+      startLine: startLine,
+      endLine: endLine,
+      blockID: blockID,
+      targetHandle: presentedClientHandle
+    )
   }
 
   /// Request completed-Block history for a specific registry Controller.
@@ -19,19 +23,26 @@ extension RustDisplayBridge {
     guard isConnected, handle != 0, seyal_bridge_select(handle) == 0 else { return -4 }
     defer { _ = selectClient() }
     return requestHistoryRangeOnSelectedClient(
-      startLine: startLine, endLine: endLine, blockID: blockID)
+      startLine: startLine,
+      endLine: endLine,
+      blockID: blockID,
+      targetHandle: handle
+    )
   }
 
   private func requestHistoryRangeOnSelectedClient(
     startLine: UInt64,
     endLine: UInt64,
-    blockID: UInt64
+    blockID: UInt64,
+    targetHandle: UInt64
   ) -> Int32 {
     guard blockID > 0, startLine > 0, endLine >= startLine else { return -4 }
     let requestID = seyal_bridge_next_history_request_id()
     guard requestID != 0 else { return -4 }
     let result = finishMutation(
-      seyal_bridge_request_history_range(blockID, startLine, endLine, 512, 131_072, 0))
+      seyal_bridge_request_history_range(blockID, startLine, endLine, 512, 131_072, 0),
+      targetHandle: targetHandle
+    )
     if result == 0 {
       let requestKey = PaneHistoryRequestKey(paneID: paneID, requestID: requestID)
       requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
@@ -52,8 +63,9 @@ extension RustDisplayBridge {
   /// Publish buffered history for the currently selected registry client.
   /// Callers must `seyal_bridge_select` / `selectPresentedClient` first so
   /// unfocused multipane Controllers can deliver their own ranges (#1424).
-  func publishHistoryRanges() {
+  func publishHistoryRanges(targetHandle: UInt64? = nil) {
     guard isConnected else { return }
+    let mutationHandle = targetHandle ?? presentedClientHandle
     for (requestKey, request) in Array(requestedHistoryRanges) {
       let metadata = seyal_bridge_history_range_peek_for(request.blockID, requestKey.requestID)
       guard metadata.block_id != 0,
@@ -112,7 +124,9 @@ extension RustDisplayBridge {
         if nextID != 0 {
           let continued = finishMutation(
             seyal_bridge_request_history_range(
-              request.blockID, request.startLine, request.endLine, 512, 131_072, nextStart))
+              request.blockID, request.startLine, request.endLine, 512, 131_072, nextStart),
+            targetHandle: mutationHandle
+          )
           if continued == 0 {
             let nextKey = PaneHistoryRequestKey(paneID: paneID, requestID: nextID)
             requestedHistoryRanges[nextKey] = request
@@ -144,7 +158,7 @@ extension RustDisplayBridge {
       ?? Array(text.utf8).withUnsafeBufferPointer { buffer in
         seyal_bridge_submit_utf8_for(handle, buffer.baseAddress, count)
       }
-    return finishMutation(result)
+    return finishMutation(result, targetHandle: handle)
   }
 
   /// Empty paste is invalid (`-4`); UTF-8 above `MAX_INPUT_BYTES` is CommitTooLarge (`-14`).

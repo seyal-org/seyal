@@ -82,4 +82,15 @@ final class RustDisplayBridgeFinishMutationTests: XCTestCase {
             )
         }
     }
+
+    func testTerminalLossOnHistorySiblingHandleLeavesPrimaryConnected() {
+        let bridge = makeConnectedBridge(clientHandle: 0xFEED_0001)
+        let result = bridge.finishMutation(-10, targetHandle: 0xFEED_00AA)
+        XCTAssertEqual(result, -10)
+        XCTAssertTrue(
+            bridge.isConnected,
+            "a history mutation aimed at a sibling Controller must not stop this window"
+        )
+        XCTAssertEqual(bridge.clientHandle, 0xFEED_0001)
+    }
 }

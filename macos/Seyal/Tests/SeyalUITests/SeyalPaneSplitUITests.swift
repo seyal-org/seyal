@@ -175,19 +175,46 @@ final class SeyalPaneSplitUITests: XCTestCase {
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
         XCTAssertTrue(element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 12))
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 8), "Split must leave a settled window")
+        let settled = expectation(
+            for: NSPredicate(format: "hittable == true"),
+            evaluatedWith: window,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [settled], timeout: 8),
+            .completed,
+            "window must be hittable before sampling pane connection chrome"
+        )
 
-        let secondary = element(app, "seyal-secondary-live-pane")
+        let originating = element(app, "seyal-pane-region-0")
+        XCTAssertTrue(originating.waitForExistence(timeout: 8), "Pane 1 must stay projected")
+        originating.click()
+        waitForFocus(app, region: 0)
+
         let reconnectChrome = NSPredicate(format: "value CONTAINS[c] %@", "Waiting to reconnect")
-        XCTAssertFalse(
-            reconnectChrome.evaluate(with: secondary),
-            "originating pane must keep its Controller after Split; AX value=\(secondary.value ?? "nil")"
+        for identifier in ["seyal-pane-presentation-host", "seyal-secondary-live-pane"] {
+            let host = element(app, identifier)
+            XCTAssertTrue(host.waitForExistence(timeout: 8), "\(identifier) must stay on screen")
+            XCTAssertFalse(
+                reconnectChrome.evaluate(with: host),
+                "\(identifier) must stay connected after clicking Pane 1; AX value=\(host.value ?? "nil")"
+            )
+        }
+        XCTAssertTrue(
+            element(app, "seyal-blocks").waitForExistence(timeout: 8),
+            "focused originating pane must keep Flow Blocks"
         )
         XCTAssertTrue(
             element(app, "seyal-secondary-blocks").waitForExistence(timeout: 8),
-            "unfocused originating pane must stay on Flow Blocks, not Raw-only Metal"
+            "the other pane must keep Flow Blocks, not Raw-only Metal"
+        )
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: "seyal-1433-before-split").exists,
+            "Pane 1 must still show the pre-split command Block"
         )
         XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").exists)
-        XCTAssertTrue(element(app, "seyal-blocks").exists, "focused new pane keeps Flow Blocks")
         XCTAssertTrue(element(app, "seyal-composer").exists, "focused pane keeps composer")
 
         let recovery = app.descendants(matching: .any)["seyal-recovery"]

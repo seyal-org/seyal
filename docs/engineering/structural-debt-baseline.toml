@@ -286,9 +286,9 @@ reason = "ABI action decoding remains one versioned match surface; #1414 adds Ob
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"
-acknowledged_loc = 760
-issue = 1398
-reason = "Session adoption and Runtime attachment reconciliation also register exact terminal-tab bindings under #1381 so portable selected-terminal authority follows the attached execution; #1379 keeps the registry client after shell exit for Flow history drain; #1398 absorbs wire terminate before bailing on NoRunningExecution so Close Terminal can remove the focused Pane terminal tab."
+acknowledged_loc = 766
+issue = 1433
+reason = "Session adoption and Runtime attachment reconciliation also register exact terminal-tab bindings under #1381 so portable selected-terminal authority follows the attached execution; #1379 keeps the registry client after shell exit for Flow history drain; #1398 absorbs wire terminate before bailing on NoRunningExecution so Close Terminal can remove the focused Pane terminal tab. #1433 treats Protocol and BlockMetadataConflict as terminal registry loss so an unconsumed frame cannot spin level-triggered poll."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/live_attach_apply.rs"

@@ -117,29 +117,12 @@ extension ProductChromeHostView {
 
     /// #1379 Defect B: show New shell only when Rust admits it for the focused
     /// Pane (`seyal_app_new_shell_available`). Do not re-derive from the
-    /// app-wide recovery stage (ADR-015).
-    ///
-    /// #1433: only undo *our own* hide. `composer.reconcile()` runs earlier
-    /// in `reconcileChrome()` and is the sole authority for hiding the
-    /// composer in TUI/Raw/backend-hidden presentation
-    /// (`testNestedProductChangeDuringReconcileStillHidesComposerForTui` must
-    /// keep failing closed there). The bug this fixes is narrower: the prior
-    /// `if show { composer.isHidden = true }` never un-hid, so one pass where
-    /// `show` was transiently true (observed on the newly focused leaf right
-    /// after Split, before its own binding settles) latched the composer
-    /// hidden forever, even once `show` genuinely returned to `false`. Track
-    /// whether *this* function did the hiding and only reverse that specific
-    /// hide, so reconcile()'s own TUI/Raw hide is never overridden.
+    /// app-wide recovery stage (ADR-015). Composer visibility stays with
+    /// `ComposerBridgeView.reconcile()` (Rust composer mode); this button
+    /// must not latch `isHidden` across Split (#1433).
     func updateNewShellRecoveryAction() {
         let show = seyal_app_new_shell_available(pane.appHandle) != 0
         newShellButton.isHidden = !show
-        if show {
-            composer.isHidden = true
-            newShellHidComposer = true
-        } else if newShellHidComposer {
-            composer.isHidden = false
-            newShellHidComposer = false
-        }
     }
 
     /// Explicit New shell after `exit`. Rust prepares the ended Pane, creates

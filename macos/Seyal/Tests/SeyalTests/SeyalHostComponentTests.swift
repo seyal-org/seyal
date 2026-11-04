@@ -2289,8 +2289,8 @@ final class SeyalHostComponentTests: XCTestCase {
             "auxiliary poll must select the ended Controller before history publish"
         )
         XCTAssertTrue(
-            bridgeText.contains("publishHistoryRanges()"),
-            "auxiliary shell-exit must publish history before disconnect_handle"
+            bridgeText.contains("publishHistoryRanges(targetHandle: handle)"),
+            "auxiliary shell-exit must publish that Controller's history before disconnect"
         )
         // Ensure disconnect stays after the -6 publish window (order gate).
         if let exitRange = bridgeText.range(of: "result == -6, seyal_bridge_select(handle) == 0"),
@@ -2301,8 +2301,8 @@ final class SeyalHostComponentTests: XCTestCase {
         {
             XCTAssertTrue(
                 bridgeText[exitRange.upperBound..<disconnectRange.lowerBound]
-                    .contains("publishHistoryRanges()"),
-                "auxiliary -6 must publishHistoryRanges before disconnect_handle"
+                    .contains("publishHistoryRanges(targetHandle: handle)"),
+                "auxiliary -6 must publishHistoryRanges for that handle before disconnect_handle"
             )
         } else {
             XCTFail("auxiliary -6 publish-before-disconnect ordering markers missing")

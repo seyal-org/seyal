@@ -500,9 +500,9 @@ final class RustDisplayBridge {
             // clear→exit bodies for an unfocused sibling Controller (#1379 /
             // SPEC-009 §8.2.2).
             if result == -6, seyal_bridge_select(handle) == 0 {
-              self.publishHistoryRanges()
+              self.publishHistoryRanges(targetHandle: handle)
               self.onTimeline()
-              self.publishHistoryRanges()
+              self.publishHistoryRanges(targetHandle: handle)
             }
             seyal_bridge_disconnect_handle(handle)
             _ = self.selectClient()
@@ -515,7 +515,7 @@ final class RustDisplayBridge {
           // Publish history for the polled Controller before focus gating so
           // unfocused multipane Flow leaves receive completed Block bodies (#1424).
           if seyal_bridge_select(handle) == 0 {
-            self.publishHistoryRanges()
+            self.publishHistoryRanges(targetHandle: handle)
           }
           self.onRegistryHandlePolled?(handle)
           if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {

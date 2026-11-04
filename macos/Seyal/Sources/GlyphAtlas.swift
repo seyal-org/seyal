@@ -77,14 +77,22 @@ final class TerminalFontResolver {
     let resolvedFamily: String
     /// Memoizes `resolve(scalar:bold:backingScale:)` by its inputs so a
     /// `GlyphAtlas.lookup` cache hit does not still pay for full CoreText
-    /// font/glyph-index construction on every call (#1433). `regular`/`bold`
-    /// are fixed for this resolver's lifetime, so no invalidation is needed.
+    /// font/glyph-index construction on every call (#1433). The key space is
+    /// unbounded, so the map has a hard cap and is dropped when the atlas
+    /// resets on GPU idle.
+    static let defaultResolveCacheLimit = 4096
+    private let resolveCacheLimit: Int
     private var resolveCache: [ResolveKey: ResolvedGlyph] = [:]
     /// Test seam mirroring `GlyphAtlasStats.hits`/`.misses` for the bitmap
     /// cache: proves `resolve` reuses a prior result instead of re-running
     /// CoreText font/glyph construction (#1433).
     private(set) var resolveCacheHits: UInt64 = 0
     private(set) var resolveCacheMisses: UInt64 = 0
+    var resolveCacheCount: Int { resolveCache.count }
+
+    func clearResolveCache() {
+        resolveCache.removeAll(keepingCapacity: false)
+    }
 
     /// Test seam (#1433): exercises `resolve`'s input-keyed cache without
     /// leaking the `fileprivate` `ResolvedGlyph` type across files.
@@ -100,8 +108,12 @@ final class TerminalFontResolver {
     var regularFontForShaping: CTFont { regular }
     var boldFontForShaping: CTFont { bold }
 
-    init(spec: SeyalResolvedFontSpec = .canonicalTerminal) {
+    init(
+        spec: SeyalResolvedFontSpec = .canonicalTerminal,
+        resolveCacheLimit: Int = TerminalFontResolver.defaultResolveCacheLimit
+    ) {
         self.pointSize = spec.pointSize
+        self.resolveCacheLimit = max(resolveCacheLimit, 1)
         let resolved = Self.makeFonts(spec: spec)
         regular = resolved.regular
         bold = resolved.bold
@@ -201,6 +213,9 @@ final class TerminalFontResolver {
             ) ?? resolveReplacement(bold: requestedBold, backingScale: backingScale)
         else {
             return nil
+        }
+        if resolveCache.count >= resolveCacheLimit {
+            resolveCache.removeAll(keepingCapacity: true)
         }
         resolveCache[key] = resolved
         return resolved
@@ -530,6 +545,7 @@ final class GlyphAtlas {
         textureStorage = nil
         entries.removeAll(keepingCapacity: true)
         graphemeEntries.removeAll(keepingCapacity: true)
+        fontResolver.clearResolveCache()
         fallbackGeneration &+= 1
         cursors = Array(repeating: AtlasCursor(), count: Self.sliceCount)
         stats.resets &+= 1

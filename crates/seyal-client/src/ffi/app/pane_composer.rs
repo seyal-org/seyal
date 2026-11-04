@@ -264,11 +264,13 @@ pub extern "C" fn seyal_app_block_projection_for_pane(
         };
         let running = block.state == BlockPresentationState::Running;
         let exclusive_end = following_session_start(&composer, index as usize);
-        // Non-focused Flow leaves keep Flow projection on their own
-        // `presentation_mode` regardless of `composer.mode`: Hidden only
-        // means no input authority right now (#1433), not a Raw/TUI
-        // takeover on this leaf.
-        let mode = composer.presentation_mode;
+        // Non-focused leaves keep the presentation family ShellState stored
+        // for this Pane. Composer Hidden only means no input authority right
+        // now (#1433), not a Raw/TUI takeover invented on split.
+        let mode = state
+            .root
+            .pane_shell_presentation_mode(pane)
+            .unwrap_or(composer.presentation_mode);
         if mode != PresentationMode::Flow && running {
             return SeyalAppBlockProjection::fail_closed();
         }
@@ -352,9 +354,8 @@ pub extern "C" fn seyal_app_sync_pane_runtime_blocks(
 
 /// Composer-mode proxy for non-focused presentation: Hidden on the focused
 /// Pane keeps full Session eligibility; Hidden on a non-focused Pane keeps
-/// that Pane's own presentation family (#1433) rather than assuming Raw.
-/// Avoids requiring a second PresentationSession while still fencing a
-/// genuine TUI/Raw takeover on that leaf.
+/// that Pane's ShellState presentation family (#1433) rather than assuming
+/// Raw. A genuine ShellState Raw/TUI leaf still takes the direct path.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_eligibility_for_pane(handle: u64, pane_lo: u64, pane_hi: u64) -> u16 {
     APPS.with(|apps| {
@@ -374,7 +375,11 @@ pub extern "C" fn seyal_app_eligibility_for_pane(handle: u64, pane_lo: u64, pane
             if pane == focused {
                 return eligibility_code(state.root.snapshot().eligibility);
             }
-            return eligibility_code(hidden_unfocused_eligibility(composer.presentation_mode));
+            let mode = state
+                .root
+                .pane_shell_presentation_mode(pane)
+                .unwrap_or(composer.presentation_mode);
+            return eligibility_code(hidden_unfocused_eligibility(mode));
         }
         eligibility_code(PresentationEligibility::Flow)
     })
@@ -457,5 +462,50 @@ mod tests {
             ),
             0
         );
+    }
+
+    /// #1433: Split must not invent Raw for the unfocused leaf. Eligibility
+    /// follows that Pane's ShellState presentation (new leaves start Flow).
+    #[test]
+    fn split_unfocused_pane_keeps_shell_flow_eligibility() {
+        let handle = seyal_app_create();
+        let split = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 25,
+            flags: 0,
+            fence_pane_lo: 0,
+            fence_pane_hi: 0,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: 0,
+            target_execution_lo: 0,
+            target_execution_hi: 0,
+            target_attachment_lo: 0,
+            target_attachment_hi: 0,
+            target_generation: 0,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &split) }, 0);
+        let shell = seyal_app_shell(handle);
+        assert_eq!(shell.pane_count, 2);
+        let mut saw_unfocused = false;
+        for index in 0..shell.pane_count {
+            let region = crate::ffi::app::seyal_app_pane_region(handle, u32::from(index));
+            if region.flags & 1 != 0 {
+                continue;
+            }
+            assert_eq!(
+                seyal_app_eligibility_for_pane(handle, region.pane_lo, region.pane_hi),
+                eligibility_code(PresentationEligibility::Flow),
+                "unfocused split leaf must stay on ShellState Flow"
+            );
+            saw_unfocused = true;
+        }
+        assert!(saw_unfocused, "split must leave one unfocused Pane");
     }
 }

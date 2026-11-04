@@ -1,3 +1,4 @@
+import Metal
 import XCTest
 
 @testable import Seyal
@@ -46,5 +47,39 @@ final class TerminalFontResolverCacheTests: XCTestCase {
         resolver.warmResolveCacheForTests(scalar: 65, bold: false, backingScale: 1.0)
         XCTAssertEqual(resolver.resolveCacheHits, 1)
         XCTAssertEqual(resolver.resolveCacheMisses, 4)
+    }
+
+    func testResolveCacheHardCapDropsOverflow() {
+        let resolver = TerminalFontResolver(resolveCacheLimit: 2)
+        XCTAssertTrue(resolver.warmResolveCacheForTests(scalar: 65, bold: false, backingScale: 1))
+        XCTAssertTrue(resolver.warmResolveCacheForTests(scalar: 66, bold: false, backingScale: 1))
+        XCTAssertEqual(resolver.resolveCacheCount, 2)
+        XCTAssertTrue(resolver.warmResolveCacheForTests(scalar: 67, bold: false, backingScale: 1))
+        XCTAssertEqual(
+            resolver.resolveCacheCount, 1,
+            "a full cache drops before the new entry so the map never exceeds the cap"
+        )
+        XCTAssertTrue(resolver.warmResolveCacheForTests(scalar: 67, bold: false, backingScale: 1))
+        XCTAssertEqual(resolver.resolveCacheHits, 1)
+    }
+
+    func testClearResolveCacheForcesTheNextResolveToMiss() {
+        let resolver = TerminalFontResolver()
+        XCTAssertTrue(resolver.warmResolveCacheForTests(scalar: 65))
+        XCTAssertEqual(resolver.resolveCacheCount, 1)
+        resolver.clearResolveCache()
+        XCTAssertEqual(resolver.resolveCacheCount, 0)
+        XCTAssertTrue(resolver.warmResolveCacheForTests(scalar: 65))
+        XCTAssertEqual(resolver.resolveCacheMisses, 2)
+        XCTAssertEqual(resolver.resolveCacheHits, 0)
+    }
+
+    func testAtlasResetWhenGPUIdleClearsResolveCache() {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let resolver = TerminalFontResolver()
+        XCTAssertTrue(resolver.warmResolveCacheForTests(scalar: 65, backingScale: 2))
+        let atlas = GlyphAtlas(device: device, fontResolver: resolver)
+        atlas.resetWhenGPUIdle()
+        XCTAssertEqual(resolver.resolveCacheCount, 0)
     }
 }
