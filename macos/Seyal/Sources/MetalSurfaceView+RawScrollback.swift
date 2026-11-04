@@ -133,7 +133,23 @@ extension MetalSurfaceView {
         // Flow publishes order via setTranscriptFrame. Raw must set it here or
         // historyRegions stay undrawn (orderedBlockRegions empty → blank).
         renderer.setHistoryRegionOrder([RawScrollbackViewport.correlationBlockID])
-        renderHistoryRange(range)
+        let columns = Int(terminalCurrentFrame()?.columns ?? 0)
+        let targetRows = Int(terminalCurrentFrame()?.rows ?? 0)
+        let paddedRows = RawScrollbackViewport.padRowsForViewport(
+            rows: range.rows,
+            columns: columns,
+            targetRowCount: targetRows
+        )
+        let painted = NativeHistoryRange(
+            startLine: range.startLine,
+            endLine: range.endLine,
+            blockID: range.blockID,
+            requestID: range.requestID,
+            revision: range.revision,
+            rows: paddedRows,
+            status: range.status
+        )
+        renderHistoryRange(painted)
         return true
     }
 }

@@ -471,6 +471,37 @@ fn history_wire_skip_leads_returns_the_unconsumed_suffix() {
 }
 
 #[test]
+fn primary_history_wire_range_retains_blank_line_ids() {
+    let mut terminal = TerminalState::new(8, 4).expect("terminal");
+    terminal.feed(b"a\r\n\r\n\r\nb\r\n").expect("blank lines");
+    let wire = terminal
+        .primary_history_wire_range(LineId(1), LineId(u64::MAX), 16, 0)
+        .expect("wire");
+    let texts: Vec<String> = wire
+        .iter()
+        .map(|(_, cells)| {
+            cells
+                .iter()
+                .filter(|cell| !cell.continuation)
+                .map(|cell| cell.text.as_str())
+                .collect::<String>()
+        })
+        .collect();
+    assert!(
+        texts.iter().any(|row| row.trim() == "a"),
+        "expected lead a in {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|row| row.trim() == "b"),
+        "expected lead b in {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|row| row.chars().all(|c| c == ' ')),
+        "blank LineIds must remain as space rows for Raw viewport height (#1442): {texts:?}"
+    );
+}
+
+#[test]
 fn resize_reflows_soft_wrap_across_retained_and_active_boundary() {
     let mut terminal = TerminalState::new(4, 2).expect("terminal");
     terminal

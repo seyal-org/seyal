@@ -4,7 +4,7 @@ use super::state::TerminalState;
 use crate::{
     selection::format_history_copy, Cell, CellRole, HistoryAnchor, HistoryAnchorResolution,
     HistoryBreakAfter, HistoryMatch, HistoryRangeError, HistoryUnitView, HistoryWireCell, LineId,
-    ReflowRow,
+    ReflowRow, Style,
 };
 
 impl TerminalState {
@@ -141,10 +141,19 @@ impl TerminalState {
             if id > end {
                 break;
             }
-            let cells = skip_wire_leads(entry.wire_cells(), &mut skip);
-            if cells.is_empty() {
-                continue;
-            }
+            let wire = entry.wire_cells();
+            let had_units = !wire.is_empty();
+            let cells = skip_wire_leads(wire, &mut skip);
+            // Retain blank LineIds (and lines fully consumed only when skip is
+            // done) so Raw scrollback pages keep one row per LineId (#1442).
+            let cells = if cells.is_empty() {
+                if skip > 0 && had_units {
+                    continue;
+                }
+                blank_wire_row()
+            } else {
+                cells
+            };
             if let Some((last_id, last_cells)) = lines.last_mut()
                 && *last_id == id
             {
@@ -210,12 +219,17 @@ impl TerminalState {
                     }
                 }
             }
-            lines.push((id, skip_wire_leads(wire, &mut skip)));
-            if let Some((_, cells)) = lines.last()
-                && cells.is_empty()
-            {
-                lines.pop();
-            }
+            let had_content = !wire.is_empty();
+            let cells = skip_wire_leads(wire, &mut skip);
+            let cells = if cells.is_empty() {
+                if skip > 0 && had_content {
+                    continue;
+                }
+                blank_wire_row()
+            } else {
+                cells
+            };
+            lines.push((id, cells));
             if skip == 0 && lines.len() >= max_lines {
                 break;
             }
@@ -432,6 +446,15 @@ impl TerminalState {
         let units = self.primary_history_selection(start, end)?;
         format_history_copy(&units)
     }
+}
+
+fn blank_wire_row() -> Vec<HistoryWireCell> {
+    vec![HistoryWireCell {
+        text: " ".into(),
+        width: 1,
+        style: Style::default(),
+        continuation: false,
+    }]
 }
 
 fn skip_wire_leads(cells: Vec<HistoryWireCell>, skip: &mut u32) -> Vec<HistoryWireCell> {

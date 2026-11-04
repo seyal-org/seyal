@@ -47,4 +47,38 @@ enum RawScrollbackViewport {
         let next = offset > sub ? offset &- sub : 0
         return clampOffset(startLineID: startLineID, offset: next)
     }
+
+    /// Pad history rows to the live grid width/height so scrolled Raw fills
+    /// like the live surface instead of sparse glyphs on cleared Metal.
+    static func padRowsForViewport(
+        rows: [[NativeHistoryRange.Cell]],
+        columns: Int,
+        targetRowCount: Int
+    ) -> [[NativeHistoryRange.Cell]] {
+        guard columns > 0, targetRowCount > 0 else { return rows }
+        let blank = NativeHistoryRange.Cell(
+            scalar: 32,
+            foreground: 0,
+            background: 0,
+            flags: 0
+        )
+        var padded: [[NativeHistoryRange.Cell]] = rows.map { row in
+            if row.count >= columns {
+                return Array(row.prefix(columns))
+            }
+            var next = row
+            next.reserveCapacity(columns)
+            while next.count < columns {
+                next.append(blank)
+            }
+            return next
+        }
+        while padded.count < targetRowCount {
+            padded.append(Array(repeating: blank, count: columns))
+        }
+        if padded.count > targetRowCount {
+            padded = Array(padded.prefix(targetRowCount))
+        }
+        return padded
+    }
 }

@@ -6,6 +6,7 @@ enum RawScrollbackViewportSelfTests {
             && lineWindowScrolled()
             && lineWindowClamp()
             && applyDelta()
+            && padRowsForViewport()
     }
 
     private static func lineWindowFollowTail() -> Bool {
@@ -30,5 +31,21 @@ enum RawScrollbackViewportSelfTests {
         RawScrollbackViewport.applyDelta(startLineID: 100, offset: 0, deltaRows: 3) == 3
             && RawScrollbackViewport.applyDelta(startLineID: 100, offset: 3, deltaRows: -5) == 0
             && RawScrollbackViewport.applyDelta(startLineID: 10, offset: 8, deltaRows: 50) == 9
+    }
+
+    private static func padRowsForViewport() -> Bool {
+        let short: [[NativeHistoryRange.Cell]] = [
+            [
+                NativeHistoryRange.Cell(
+                    scalar: 49, foreground: 0, background: 0, flags: 0)
+            ]
+        ]
+        let padded = RawScrollbackViewport.padRowsForViewport(
+            rows: short, columns: 4, targetRowCount: 3)
+        return padded.count == 3
+            && padded.allSatisfy { $0.count == 4 }
+            && padded[0][0].scalar == 49
+            && padded[0][1].scalar == 32
+            && padded[2][0].scalar == 32
     }
 }
