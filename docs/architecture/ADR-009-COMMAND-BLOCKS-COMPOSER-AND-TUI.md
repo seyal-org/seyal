@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384 (Accepted on merge of this acceptance PR by a non-author maintainer; normative; read through ADR-026; an author or agent comment is not acceptance); Raw-choice amendment proposed by #1404 (not normative until a separate acceptance PR)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment proposed 2026-11-01 (#1404)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384 (Accepted on merge of this acceptance PR by a non-author maintainer; normative; read through ADR-026; an author or agent comment is not acceptance); Raw-choice amendment under #1404 recorded 2026-11-01 and **superseded** by the grid-first resting-presentation amendment under #1438 (normative on merge of its architecture-only acceptance PR)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1255,11 +1255,12 @@ These ADR-026 seams are recorded here by reference only. They are not inserted i
 
 ## 2026-11-01 accepted amendment — Raw is system-selected, not user-selectable (#1404)
 
-**Status:** Accepted by the product owner following the merge of PR #1405 on
-2026-11-01. The product owner explicitly directs that this merge constitutes
-approval of the amendment. This section is normative. PR #1405 had no submitted
-reviews; its required implementation evidence remains a gate for the separate
-production implementation PR.
+**Status:** **Superseded** for resting-presentation / Raw-selection product
+policy by the 2026-11-04 grid-first amendment under #1438. Retained as
+historical record of the 2026-11-01 decision (Accepted via PR #1405 / status
+PR #1415). Do not implement new work from this section. Single-authority,
+mutual-exclusion, and “no Raw viewport under Flow” invariants from earlier
+accepted ADR-009 text remain in force and are restated by #1438.
 
 ### Problem
 
@@ -1349,4 +1350,136 @@ that direct-terminal input remains available in automatic Raw/TUI. Update the
 User Guide. Reconcile #867 / PR #1286 without expanding or changing their
 in-review state silently. The owning implementation Issue must be Ready, and
 the required evidence above must be attached to its implementation PR.
+
+> **Supersession note (2026-11-04):** The follow-up above targeted #1406 under
+> the Flow-primary / system-selected-Raw policy. That implementation direction
+> is blocked. See the grid-first amendment below and Architecture Issue #1438.
+
+## 2026-11-04 accepted amendment — Grid-first resting presentation (#1438)
+
+**Status:** Accepted by the product owner on 2026-11-04 after headed evidence
+that Flow, Raw, and TUI each failed basic interactive use, and after
+independent Sol/Opus decision review. Normative on merge of the
+architecture-only PR under #1438. This amendment **supersedes** the
+resting-presentation and Raw-selection product policy of the 2026-11-01
+#1404 amendment. It does **not** supersede earlier accepted ADR-009
+invariants: one `TerminalExecution` / PTY / VT / `TerminalState` authority;
+mutually exclusive Flow | Raw | TUI; no Raw viewport or input route under
+Flow; Metal as the production macOS renderer; Rust-owned portable
+presentation policy (ADR-015).
+
+### Problem
+
+After months of Flow-primary investment, headed multipane use still fails
+basic terminal work: Flow blanks on scroll and loses split-pane content;
+Block cards can show a command with an empty body; the composer can stick on
+“Waiting for prompt…”. Explicit Raw entry via menu/⌘↩ fails to latch resting
+Raw, so the next shell-integration composer-status update recomputes resting
+as Flow and snaps the Pane back to Blocks without usable output. TUI return
+depends on the same resting restore. Shipping Flow as the default while the
+canonical grid path is unreliable leaves no working product surface.
+
+The #1404 direction (remove user Raw; keep Flow default; auto-return to Flow
+when eligibility appears) deepens that failure mode. Basic interactive
+reliability must become the resting contract; Flow/Blocks remain the
+structured product direction but only after a headed reliability gate.
+
+### Accepted decision
+
+Keep `Flow | Raw | TUI` as mutually exclusive presentations over the same
+execution. Change the **resting** policy to **grid-first**:
+
+1. **Default resting presentation is Raw.** A newly created Pane, and cold
+   start of a Pane without an explicit Flow choice, presents the full-Pane
+   primary Metal grid with direct-terminal input. Shell integration may still
+   be injected and may still populate `BlockTimeline`; integration status
+   alone must not change the visible resting presentation away from Raw while
+   Flow is quarantined.
+2. **Flow is explicit opt-in and quarantined as default.** Enter Flow only
+   through an explicit user command (palette / workspace command) when Rust
+   can prove current Flow eligibility under the existing
+   execution/attachment/presentation fence. While quarantined, Rust must not
+   automatically promote Raw → Flow because composer eligibility, a trusted
+   prompt, or shell-integration status became Available.
+3. **One Rust selection path.** Menu, keybinding, palette, and restore must
+   share one resting-selection apply path that updates both the presentation
+   snapshot and the durable resting latch (today’s `explicit_raw` /
+   per-Pane resting choice). A second writer that changes mode without the
+   latch is a merge-blocking defect.
+4. **TUI remains alternate-screen takeover only.** It is not a resting
+   choice. On TUI exit, restore that Pane’s stored resting presentation (Raw
+   by default; Flow only if explicitly chosen and still eligible). Do not
+   invent a user-selected resting TUI.
+5. **Unsupported / quarantined integration still forces Raw** when Flow cannot
+   be proven safe, including when the user previously opted into Flow.
+6. **No Raw viewport under Flow.** Entering Flow yields/hides the full-Pane
+   Raw interaction surface exactly as today.
+7. **Flow promotion gate.** Flow may become the default resting presentation
+   again only after a separate accepted readiness record proves headed
+   multipane reliability: command output bodies, long scrollback without
+   blank frames, split/focus/reconnect retention, vim/less/htop enter/exit,
+   live-tail/empty-body cases, and an agreed latency/CPU/RSS budget versus
+   Raw. Until that gate passes, Flow remains opt-in.
+8. **Block decorations on the Raw grid** (gutter/separators/exit/copy/agent
+   attach as read-only overlays over `BlockTimeline`) are an allowed future
+   direction and require their own Issue/ADR slice before production; they
+   are not authorized by this amendment alone.
+
+### Consequences
+
+- Cold-start and new-Pane UX is a conventional full-Pane terminal until Flow
+  is explicitly chosen or later re-promoted.
+- #1406 (remove manual Raw; keep Flow default) is superseded and must not
+  merge under the #1404 direction.
+- Keybinding/palette Raw commands remain meaningful: they select resting Raw
+  (or toggle resting Raw ↔ Flow where a toggle remains) and must latch
+  resting state. Auto-snap from Raw to Flow on shell status is forbidden
+  under quarantine.
+- Per-Pane resting presentation (#1435) remains required so focus changes
+  cannot rewrite another Pane’s resting choice through a global latch.
+- Agent-native Block metadata continues to accumulate under Raw; Flow is not
+  required for Timeline existence.
+- CI green without headed Raw/TUI checklist evidence is insufficient to claim
+  presentation readiness.
+
+### Alternatives considered
+
+- **Keep Flow primary; fix Blocks first.** Rejected: current headed failures
+  span multiple Flow subsystems; not a reliable this-quarter default.
+- **Raw default with automatic promotion to Flow when integration is
+  trusted.** Rejected: same class of bug as today’s Raw→Flow snap-back;
+  integration proof ≠ render reliability.
+- **Delete Flow immediately.** Rejected: quarantine with an explicit
+  promotion gate and later kill-date review is cheaper and reversible.
+- **Always-grid with Block chrome never replacing the grid.** Deferred as a
+  follow-on design; may graduate after Raw default lands and decorations are
+  specified.
+
+### Required implementation evidence
+
+- Architecture-only merge of this amendment under #1438 before any production
+  presentation default change.
+- Subsequent Ready implementation Issue(s) must prove:
+  - single resting-selection path for menu/keybinding/palette/restore;
+  - new Pane / cold start defaults to Raw;
+  - no automatic Raw→Flow on composer-status / trusted-prompt alone while
+    Flow is quarantined;
+  - TUI exit restores stored resting mode;
+  - headed Raw checklist (prompt, `ls`, long scrollback, split, resize,
+    vim/less/htop, Ctrl-C, detach/reattach) as release evidence for that
+    implementation PR.
+- SPEC-008 / SPEC-024 (and SPEC-006 only if needed) and the User Guide must
+  be updated in the implementation track after this ADR is normative.
+- Reconcile #1406, #867 / PR #1286, and #1435 explicitly; do not silently
+  redefine their Done criteria.
+
+### Follow-up for implementation
+
+1. Land this architecture-only PR under #1438.
+2. Open/Ready an implementation Issue for Raw default + single selection path
+   + no auto Flow promotion (production code + tests + headed evidence).
+3. Keep #1435 (per-pane presentation) on the critical path before multipane
+   resting choices can be correct under focus changes.
+4. Only after the headed Raw gate is green, schedule Flow reliability work
+   against the promotion gate—not as the cold-start default.
 
