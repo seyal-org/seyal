@@ -275,6 +275,7 @@ final class PaneLayoutView: NSView {
             }
             // Zoom/occlusion must remove the leaf's surface; Raw/TUI covers the
             // focused host with liveContent without destroying it (#1424).
+            let wasHidden = host.isHidden
             host.isHidden = coveredByInteractiveLive || occluded
             host.setInputOwned(binding.focused && !coveredByInteractiveLive && !occluded)
             // Publish the target frame in the same reconciliation turn that
@@ -282,6 +283,11 @@ final class PaneLayoutView: NSView {
             // the AX target at its initial zero frame and unhittable to XCUI.
             if targetFrame.width > 1, targetFrame.height > 1 {
                 host.frame = targetFrame
+            }
+            // After Raw/TUI cover lifts, force a fresh bridge frame so the
+            // revealed secondary surface matches the focused liveContent grid.
+            if wasHidden, !host.isHidden {
+                host.publishFrame()
             }
         }
         for key in secondaryLiveHosts.keys where !keep.contains(key) {

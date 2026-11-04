@@ -180,8 +180,8 @@ impl PaletteState {
 
     /// Rebuild the frozen projection from authoritative shell/chrome state.
     /// Called after Open and SetQuery so Run never re-resolves by ordinal.
-    /// `explicit_raw` is `Some` only for a bound Pane: `Some(true)` offers
-    /// return to Flow; `Some(false)` offers explicit Raw; `None` omits both.
+    /// `resting_is_raw` is `Some` only for a bound Pane: `Some(true)` offers
+    /// Flow opt-in; `Some(false)` offers Raw; `None` omits both (#1438).
     /// `unpresented` must already be sorted deterministically (ExecutionId order).
     pub fn rebuild(
         &mut self,
@@ -189,7 +189,7 @@ impl PaletteState {
         chrome: &ChromeSnapshot,
         allows_tab_creation: bool,
         allows_pane_splitting: bool,
-        explicit_raw: Option<bool>,
+        resting_is_raw: Option<bool>,
         unpresented: &[ExecutionId],
     ) {
         if !self.open {
@@ -201,7 +201,7 @@ impl PaletteState {
             chrome,
             allows_tab_creation,
             allows_pane_splitting,
-            explicit_raw,
+            resting_is_raw,
             unpresented,
         );
         self.projected = filter(&commands, &self.query);
@@ -300,23 +300,23 @@ fn build_commands(
     chrome: &ChromeSnapshot,
     allows_tab_creation: bool,
     allows_pane_splitting: bool,
-    explicit_raw: Option<bool>,
+    resting_is_raw: Option<bool>,
     unpresented: &[ExecutionId],
 ) -> Vec<PaletteEntry> {
     let mut entries = Vec::new();
 
-    match explicit_raw {
+    match resting_is_raw {
+        Some(true) => entries.push(PaletteEntry {
+            label: "Use Flow".to_owned(),
+            category: "Terminal",
+            address: None,
+            command: Some(PaletteCommand::SelectResting { raw: false }),
+        }),
         Some(false) => entries.push(PaletteEntry {
             label: "Use Raw Terminal".to_owned(),
             category: "Terminal",
             address: None,
             command: Some(PaletteCommand::SelectResting { raw: true }),
-        }),
-        Some(true) => entries.push(PaletteEntry {
-            label: "Return to Flow".to_owned(),
-            category: "Terminal",
-            address: None,
-            command: Some(PaletteCommand::SelectResting { raw: false }),
         }),
         None => {}
     }

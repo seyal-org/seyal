@@ -4,7 +4,7 @@
 - **Date:** 2026-09-25
 - **Amended:** §5.6 chrome-visibility commands under #1352 (accepted on merge of its PR by a non-author maintainer; gated per R5.6.3).
 - **Architecture authority:** ADR-015 (Rust product UI / thin native host); Foundation §5.1 / §13 (cold precompiled keybinding lookup; TOML canonical static config). **No new ADR:** see §0.
-- **Preserved contracts:** SPEC-006 (native input classification, Command reservation, IME/composition order, presentation-route fencing); SPEC-006 §21.3 immutable `input.option_as_alt`; SPEC-008 / ADR-009 (Flow/Raw/TUI mutual exclusion and input ownership); ADR-015 menu/command forwarding.
+- **Preserved contracts:** SPEC-006 (native input classification, Command reservation, IME/composition order, presentation-route fencing); SPEC-006 §21.3 immutable `input.option_as_alt`; SPEC-008 / ADR-009 (Flow/Raw/TUI mutual exclusion and input ownership; #1438 grid-first resting Raw default with Flow opt-in); ADR-015 menu/command forwarding. Menu/keybinding `presentation.set_raw` / `presentation.toggle_raw` / `presentation.set_flow` must share the same Rust resting-selection latch as the palette (#1440).
 - **Issue:** #1002 — parent umbrella #676, epic #665
 - **Owns for others:** key assignment for the Accepted ADR-021 (#1001) PaneTree verbs (zoom/unzoom, equalize, swap, move, directional focus) per ADR-021 §8; ADR-021 / SPEC-025 own their semantics (§5.1).
 - **Owns for others (continued):** key assignment for Accepted SPEC-022 (#1004) focus-history Back/Forward and goto-open (§5.5), and for the composer history-search trigger delegated by `M001-COMPOSER-HISTORY-FUZZY-SEARCH.md` §6 (§5.4). SPEC-022 and SPEC-008 own their semantics.

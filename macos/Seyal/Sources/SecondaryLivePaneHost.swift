@@ -443,7 +443,11 @@ final class SecondaryLivePaneHost: NSView {
     }
 
     func publishFrame() {
-        guard displayHandle != 0, window != nil, !isHidden else { return }
+        // Keep consuming bridge frames while this host is covered by focused
+        // Raw/TUI `liveContent` (`isHidden == true`). Otherwise unfocus reveals
+        // a stale Metal buffer and drops lines typed/drawn while focused
+        // (grid-first multipane headed: vim/`took 2s` vanishing on focus out).
+        guard displayHandle != 0, window != nil else { return }
         guard seyal_bridge_ensure_prepared_for(displayHandle) == 0 else { return }
         let frame = seyal_bridge_frame_for(displayHandle)
         guard frame.cells != nil, frame.cell_count > 0 else { return }
