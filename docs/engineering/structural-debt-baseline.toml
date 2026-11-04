@@ -66,9 +66,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1062
-issue = 1388
-responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture, #1379 adds canvas_floor field literals, and #1388 carries BlockScope on those RuntimeBlockRecord fixtures."
+ceiling_loc = 1075
+issue = 1440
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -78,9 +78,9 @@ responsibility = "Published C ABI entry points stay one façade after decode/enc
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 783
-issue = 1388
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shell composition cases to shell_composition_tests.rs. #1388 asserts BlockScope survives runtime_block_from_command, including a session-scoped record, beside the existing lifecycle proofs."
+acknowledged_loc = 800
+issue = 1440
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shell composition cases aside. #1388 BlockScope and #1440 Raw-default resting projection proofs stay beside the existing lifecycle ABI fixtures."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
