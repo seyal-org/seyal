@@ -447,6 +447,11 @@ final class RustDisplayBridge {
     windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
   }
 
+  /// Controller whose history snapshot `publishHistoryRanges` is delivering.
+  /// Command block ids are per-execution, so the host routes by this handle
+  /// and only then by block id (#1433).
+  var historyPublishHandle: UInt64 = 0
+
   /// Flush/write-path codes that mean the *socket* for that mutation target
   /// is gone (`-3` Io, `-6` shell exit, `-10` Disconnected). Keep this set
   /// narrow: widening it to Protocol/BlockMetadataConflict would route `-4`

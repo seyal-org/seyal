@@ -44,7 +44,7 @@ extension RustDisplayBridge {
       targetHandle: targetHandle
     )
     if result == 0 {
-      let requestKey = PaneHistoryRequestKey(paneID: paneID, requestID: requestID)
+      let requestKey = PaneHistoryRequestKey(clientHandle: targetHandle, requestID: requestID)
       requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
     }
     return result
@@ -66,7 +66,9 @@ extension RustDisplayBridge {
   func publishHistoryRanges(targetHandle: UInt64? = nil) {
     guard isConnected else { return }
     let mutationHandle = targetHandle ?? presentedClientHandle
+    guard mutationHandle != 0 else { return }
     for (requestKey, request) in Array(requestedHistoryRanges) {
+      guard requestKey.clientHandle == mutationHandle else { continue }
       let metadata = seyal_bridge_history_range_peek_for(request.blockID, requestKey.requestID)
       guard metadata.block_id != 0,
         metadata.request_id != 0,
@@ -128,12 +130,13 @@ extension RustDisplayBridge {
             targetHandle: mutationHandle
           )
           if continued == 0 {
-            let nextKey = PaneHistoryRequestKey(paneID: paneID, requestID: nextID)
+            let nextKey = PaneHistoryRequestKey(clientHandle: mutationHandle, requestID: nextID)
             requestedHistoryRanges[nextKey] = request
             historyContinuations[nextKey] = (nextStart, merged)
           }
         }
       }
+      historyPublishHandle = mutationHandle
       onHistory(merged)
     }
   }

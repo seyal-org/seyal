@@ -1285,6 +1285,15 @@ final class SeyalHostComponentTests: XCTestCase {
             accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-status") as? NSTextField
         )
         XCTAssertEqual(status.stringValue, "Terminal disconnected")
+        XCTAssertNil(
+            accessibilityChild(host, identifier: "seyal-composer-editor"),
+            "an unfocused pane composer must not take the primary editor AX id"
+        )
+        XCTAssertNotNil(accessibilityChild(host, identifier: "seyal-secondary-composer-editor"))
+        host.setInputOwned(true)
+        XCTAssertNotNil(accessibilityChild(host, identifier: "seyal-composer-editor"))
+        XCTAssertNil(accessibilityChild(host, identifier: "seyal-secondary-composer-editor"))
+        host.setInputOwned(false)
         let retry = try XCTUnwrap(
             accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-retry") as? NSButton
         )

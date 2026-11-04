@@ -198,6 +198,7 @@ extension SecondaryLivePaneHost {
 
     /// Deliver a completed history range into this leaf's Metal surface + card.
     func applyHistoryRange(_ range: NativeHistoryRange) {
+        guard !range.rows.isEmpty else { return }
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {

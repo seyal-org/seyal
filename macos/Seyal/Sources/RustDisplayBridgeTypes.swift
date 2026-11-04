@@ -30,11 +30,14 @@ struct PaneBlockKey: Hashable, Sendable {
 }
 
 struct PaneHistoryRequestKey: Hashable, Sendable {
-  let paneID: String
+  /// Registry Controller that owns this request. Command block ids restart at
+  /// 1 on every execution, and request ids restart per Controller, so the
+  /// shared bridge pane id is not a unique key (#1433).
+  let clientHandle: UInt64
   let requestID: UInt64
 
-  init(paneID: String, requestID: UInt64) {
-    self.paneID = paneID
+  init(clientHandle: UInt64, requestID: UInt64) {
+    self.clientHandle = clientHandle
     self.requestID = requestID
   }
 }
