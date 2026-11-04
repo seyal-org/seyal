@@ -12,6 +12,9 @@ enum RawScrollbackViewport {
     static let correlationBlockID: UInt64 = .max
 
     /// Visible LineId window for a non-zero offset, or `nil` when follow-tail.
+    ///
+    /// When the window starts at LineId 1, over-fetch one extra page so leading
+    /// blank sealed rows can be trimmed while still filling the live grid.
     static func lineWindow(
         startLineID: UInt64,
         rows: UInt16,
@@ -23,7 +26,8 @@ enum RawScrollbackViewport {
         guard clamped > 0 else { return nil }
         let rowCount = UInt64(rows)
         let start = startLineID > clamped ? startLineID &- clamped : 1
-        let end = start &+ rowCount &- 1
+        let span = start == 1 ? rowCount &+ rowCount : rowCount
+        let end = start &+ span &- 1
         return (start, end)
     }
 
@@ -48,8 +52,31 @@ enum RawScrollbackViewport {
         return clampOffset(startLineID: startLineID, offset: next)
     }
 
+    /// True when a history row has no visible glyphs (space-only / empty).
+    static func isBlankRow(_ row: [NativeHistoryRange.Cell]) -> Bool {
+        row.allSatisfy { cell in
+            if !cell.graphemeUtf8.isEmpty { return false }
+            let scalar = cell.scalar
+            return scalar == 0 || scalar == 32
+        }
+    }
+
+    /// Drop leading blank LineIds so absolute-top scroll top-aligns real content
+    /// instead of painting sealed empty viewport rows as a white slab.
+    static func trimLeadingBlankRows(
+        _ rows: [[NativeHistoryRange.Cell]]
+    ) -> [[NativeHistoryRange.Cell]] {
+        var index = 0
+        while index < rows.count, isBlankRow(rows[index]) {
+            index += 1
+        }
+        if index == 0 { return rows }
+        return Array(rows[index...])
+    }
+
     /// Pad history rows to the live grid width/height so scrolled Raw fills
     /// like the live surface instead of sparse glyphs on cleared Metal.
+    /// Leading blanks are trimmed first (see `trimLeadingBlankRows`).
     static func padRowsForViewport(
         rows: [[NativeHistoryRange.Cell]],
         columns: Int,
@@ -62,7 +89,8 @@ enum RawScrollbackViewport {
             background: 0,
             flags: 0
         )
-        var padded: [[NativeHistoryRange.Cell]] = rows.map { row in
+        let trimmed = trimLeadingBlankRows(rows)
+        var padded: [[NativeHistoryRange.Cell]] = trimmed.map { row in
             if row.count >= columns {
                 return Array(row.prefix(columns))
             }
@@ -73,11 +101,11 @@ enum RawScrollbackViewport {
             }
             return next
         }
-        while padded.count < targetRowCount {
-            padded.append(Array(repeating: blank, count: columns))
-        }
         if padded.count > targetRowCount {
             padded = Array(padded.prefix(targetRowCount))
+        }
+        while padded.count < targetRowCount {
+            padded.append(Array(repeating: blank, count: columns))
         }
         return padded
     }

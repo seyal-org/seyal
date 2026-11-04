@@ -22,8 +22,8 @@ enum RawScrollbackViewportSelfTests {
     private static func lineWindowClamp() -> Bool {
         guard let window = RawScrollbackViewport.lineWindow(startLineID: 5, rows: 40, offset: 100)
         else { return false }
-        // maxOffset = 4 → start = 1, end = 40
-        return window.start == 1 && window.end == 40
+        // maxOffset = 4 → start = 1; over-fetch second page for leading-blank trim
+        return window.start == 1 && window.end == 80
             && RawScrollbackViewport.clampOffset(startLineID: 5, offset: 99) == 4
     }
 
@@ -34,18 +34,25 @@ enum RawScrollbackViewportSelfTests {
     }
 
     private static func padRowsForViewport() -> Bool {
-        let short: [[NativeHistoryRange.Cell]] = [
-            [
-                NativeHistoryRange.Cell(
-                    scalar: 49, foreground: 0, background: 0, flags: 0)
-            ]
-        ]
+        let space = NativeHistoryRange.Cell(
+            scalar: 32, foreground: 0, background: 0, flags: 0)
+        let digit = NativeHistoryRange.Cell(
+            scalar: 49, foreground: 0, background: 0, flags: 0)
+        let short: [[NativeHistoryRange.Cell]] = [[digit]]
         let padded = RawScrollbackViewport.padRowsForViewport(
             rows: short, columns: 4, targetRowCount: 3)
+        let withLeadingBlanks = RawScrollbackViewport.padRowsForViewport(
+            rows: [[space], [space], [digit]],
+            columns: 4,
+            targetRowCount: 3
+        )
         return padded.count == 3
             && padded.allSatisfy { $0.count == 4 }
             && padded[0][0].scalar == 49
             && padded[0][1].scalar == 32
             && padded[2][0].scalar == 32
+            && withLeadingBlanks.count == 3
+            && withLeadingBlanks[0][0].scalar == 49
+            && RawScrollbackViewport.trimLeadingBlankRows([[space], [digit]]).count == 1
     }
 }
