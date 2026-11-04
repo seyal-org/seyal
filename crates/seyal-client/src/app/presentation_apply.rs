@@ -75,7 +75,9 @@ impl ApplicationRoot {
     }
 
     /// ShellState is the per-Pane presentation authority. Composer Hidden only
-    /// means this leaf has no input authority right now (#1433).
+    /// means this leaf has no input authority right now (#1433). The macOS
+    /// FFI bridge is the caller; Linux `make check` does not build that bridge.
+    #[cfg(target_os = "macos")]
     pub(crate) fn pane_shell_presentation_mode(
         &self,
         pane: seyal_core::PaneId,

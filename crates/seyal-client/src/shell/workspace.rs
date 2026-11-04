@@ -389,7 +389,8 @@ fn helpful_workspace_detail(name: &str, root: &str) -> Option<String> {
 impl super::ShellState {
     /// This Pane's presentation family as stored on `ShellState`. Eligibility
     /// and Block retention read this instead of inferring Raw from composer
-    /// Hidden (#1433).
+    /// Hidden (#1433). Callers live in the macOS FFI bridge.
+    #[cfg(target_os = "macos")]
     pub(crate) fn presentation_mode(&self, pane_id: PaneId) -> Option<PresentationMode> {
         self.pane(pane_id).ok().map(|pane| pane.presentation_mode)
     }
