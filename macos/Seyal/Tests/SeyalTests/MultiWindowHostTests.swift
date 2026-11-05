@@ -365,9 +365,9 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertTrue(host.orderedKeys.isEmpty)
     }
 
-    func testApplicationShouldTerminateAfterLastWindowClosedIsFalse() {
+    func testApplicationShouldTerminateAfterLastWindowClosedIsTrue() {
         let delegate = AppDelegate()
-        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+        XCTAssertTrue(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
     }
 
     func testWindowActivationRaisesOnlyTheNamedWindow() {
@@ -577,7 +577,7 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertNotEqual(secondWindow.windowNumber, -1)
     }
 
-    func testLastWindowCloseLeavesZeroWindowsWithoutQuit() {
+    func testLastWindowCloseLeavesZeroWindowsAndAppKitMayQuit() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
@@ -587,8 +587,9 @@ final class MultiWindowHostTests: XCTestCase {
         host.forwardCloseWindow(key)
         XCTAssertTrue(host.orderedKeys.isEmpty)
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        // Host unit test does not drive NSApp terminate; AppKit asks the delegate.
         let delegate = AppDelegate()
-        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+        XCTAssertTrue(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
     }
 
     func testZeroWindowReentryViaNewWindowAndDockReopen() {

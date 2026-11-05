@@ -17,8 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // ADR-018 §2.5: last-window-close never quits in M003 (W4b).
-        false
+        // macOS-default: closing the last window quits the headed app so Dock
+        // does not keep Seyal as "Running in Background". Cmd-Q still runs the
+        // ADR-018 §4 confirm + bounded detach path via applicationShouldTerminate.
+        true
     }
 
     func applicationShouldHandleReopen(

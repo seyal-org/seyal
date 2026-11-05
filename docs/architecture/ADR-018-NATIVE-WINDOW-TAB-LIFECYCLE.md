@@ -226,13 +226,16 @@ The host must not, locally:
 - destroy a Window on its own. `windowShouldClose(_:)` returns `false`, forwards a
   typed `CloseWindow` action, and destroys the realization only when Rust's next
   snapshot or effect says that `WindowId` is gone;
-- decide that closing the last Window quits the application.
-  `applicationShouldTerminateAfterLastWindowClosed` returns `false`. The M003
-  policy is fixed here: closing the last Window **never** produces a quit
-  intent; the application keeps running with zero Windows (§3.2) and re-entry
-  follows §3.3a. Rust must not emit quit from last-window-close in M003; any
-  quit-on-last-close option is M004 config policy (#676) and requires amending
-  this ADR;
+- invent last-window quit **outside** the AppKit delegate contract below.
+  `applicationShouldTerminateAfterLastWindowClosed` returns **`true`** so
+  closing the last Window starts the normal headed Quit path
+  (`applicationShouldTerminate` → §4.0 confirm if owed → §4.1). Rust still
+  must not emit a parallel quit intent from `CloseWindow` itself; AppKit
+  owns the last-window → terminate handoff. Zero-window residence without
+  Quit remains possible only until AppKit delivers that terminate (crash
+  paths and tests that close without AppKit may still observe zero Windows);
+  Dock reopen after a completed Quit is a fresh app launch, not §3.3a
+  in-process ActivateWorkspace;
 - terminate the process while bounded cleanup is owed (§4), except through the
   single Rust-armed backstop timer that §4 defines;
 - create, reorder, group or renumber tabs or windows;
@@ -269,7 +272,7 @@ forbidden by this section.
 | Close Pane leaf | leaf destroyed, parent split collapsed, surviving sibling keeps focus/draft state | unbound, attachment released, execution stays live |
 | Close Tab | Tab and its whole `PaneTree` destroyed | every bound execution unbound and detached, all stay live |
 | Close Window | Window, its Tabs and their `PaneTree`s destroyed | every bound execution unbound and detached, all stay live |
-| Close last Window | Window destroyed; application keeps running with zero Windows, zero attachments, zero Controller leases and no hidden input route (SPEC-009 §6). Re-entry is mandatory (§3.3a) | all stay live |
+| Close last Window | Window destroyed; AppKit then asks the host to terminate (`applicationShouldTerminateAfterLastWindowClosed` → true → §4). Until that terminate completes, attachments/Controller leases are already released by the close (SPEC-009 §6). After Quit, Dock click is a fresh launch | all stay live across headed Quit (Runtime survives); headed process exits |
 | Application quit | all presentation destroyed after §4 | all stay live |
 | Explicit terminate | unchanged by itself | named execution terminated through the ADR-005 path |
 
