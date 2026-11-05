@@ -9,6 +9,7 @@
 //! host-facing product shell reducer. It is not a second Workspace database.
 
 pub mod app;
+pub mod app_policy;
 pub mod chrome;
 pub mod composer;
 pub mod goto;
@@ -70,6 +71,7 @@ pub use ffi::{
     seyal_app_composer, seyal_app_composer_for_pane, seyal_app_copy, seyal_app_create,
     seyal_app_destroy, seyal_app_eligibility_for_pane, seyal_app_invoke_workspace_command,
     seyal_app_last_error, seyal_app_leave_offer, seyal_app_native_effect, seyal_app_option_as_alt,
+    seyal_app_should_confirm_quit,
     seyal_app_palette, seyal_app_palette_row, seyal_app_pane_binding, seyal_app_pane_divider,
     seyal_app_pane_leaf, seyal_app_pane_region, seyal_app_propose_pane_geometry,
     seyal_app_record_compatible, seyal_app_recovery_param, seyal_app_retry_pane_recovery,

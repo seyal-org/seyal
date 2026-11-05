@@ -191,6 +191,9 @@ pub fn load_ui_configuration(
                 diagnostics
                     .warnings
                     .extend(crate::input_policy::load_input_policy(Some(text)).1);
+                diagnostics
+                    .warnings
+                    .extend(crate::app_policy::load_app_policy(Some(text)).1);
                 source = String::from("toml");
             }
             Err(TomlError(message)) => {
