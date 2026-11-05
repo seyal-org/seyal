@@ -1156,6 +1156,11 @@ final class SeyalPaneSplitUITests: XCTestCase {
                 .completed,
                 "Block history must publish the final stream line before checking its tail; body=\(body.label)"
             )
+            let firstLine = String(format: "%@-%03d", marker, 1)
+            XCTAssertTrue(
+                NSPredicate(format: "label CONTAINS %@", firstLine).evaluate(with: body),
+                "Block history must retain the stream's first output line; body=\(body.label)"
+            )
             for line in 77...100 {
                 let expected = String(format: "%@-%03d", marker, line)
                 XCTAssertTrue(

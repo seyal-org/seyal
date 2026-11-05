@@ -1044,6 +1044,23 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(sessionSeam.frame.maxX, localSeam.frame.maxX, accuracy: 1)
     }
 
+    @MainActor
+    func testLongBlockAccessibilitySummaryKeepsFirstAndLastOutputLines() throws {
+        let card = CommandBlockView(
+            prompt: "$", title: "stream", detail: "", state: 0,
+            cellHeight: 14, lines: 100, session: false
+        )
+        let output = (1...100).map { String(format: "AXSTREAM-%03d", $0) }
+            .joined(separator: "\n")
+        card.setBodyTranscript(output)
+        let transcript = try XCTUnwrap(card.body.subviews.first as? NSTextField)
+        let summary = try XCTUnwrap(transcript.accessibilityLabel() as? String)
+
+        XCTAssertTrue(summary.contains("AXSTREAM-001"))
+        XCTAssertTrue(summary.contains("AXSTREAM-100"))
+        XCTAssertLessThanOrEqual(summary.count, 240)
+    }
+
     /// #1424: focus ownership updates must not recreate Block views or scroll.
     @MainActor
     func testFocusOwnershipPreservesBlockViewIdentityAndScroll() throws {
