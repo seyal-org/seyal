@@ -5,7 +5,8 @@
 - **Reconciled:** 2026-09-04 against closed #719 / Pass 10 review candidate `1005bc42397aac485b1aeff08cafd0f67790d969`
 - **Presentation amendment:** accepted by #858 / PR #859 (`8d08f2f`) on 2026-09-11
 - **Issue:** #717 refinement authority; #719 production implementation (Done)
-- **Architecture authority:** accepted Seyal foundation architecture, ADR-001/004/005/006/007/015 (ADR-015 governs Rust/native ownership only); accepted ADR-009 including the #858 / PR #859 amendment governs presentation behavior. Accepted ADR-026 (#1384) reconnect re-derivation below is normative on merge of that ADR's acceptance PR by a non-author maintainer. An author or agent comment is not that acceptance.
+- **Architecture authority:** accepted Seyal foundation architecture, ADR-001/004/005/006/007/015 (ADR-015 governs Rust/native ownership only); accepted ADR-009 including the #858 / PR #859 amendment governs presentation behavior. Accepted ADR-026 (#1384) reconnect re-derivation below is normative on merge of that ADR's acceptance PR by a non-author maintainer. An author or agent comment is not that acceptance. **Proposed ADR-018 #1447 amendment** (quit confirm / Dock reopen terminal) is not SPEC authority until that ADR acceptance PR merges.
+
 - **Depends on:** SPEC-002, SPEC-003, SPEC-004, SPEC-005, SPEC-006 and accepted SPEC-007
 - **Pass 7 authority:** PR #707 merged as `4490d89fd32f96fe5ff04393a5470944c592f546`
 - **Pass 8 authority:** reviewed head `54b3a1748effc7c47c409d1f7cfdcbd547e8d1cc`, merged by PR #721 as `d9d21187e8429bbd3dbeb3e1c7cc4d05c1d147e6`
@@ -91,7 +92,7 @@ Runtime-crash live-PTY survival is explicitly outside M001 Pass 9.
 13. Native first-responder, accessibility and IME state are reconstructed as presentation state; they never become terminal authority.
 14. Seyal OSS remains independent of commercial code.
 15. Reconnect selects one current `Flow | Raw | TUI` presentation before focus/AX/IME/mouse/input ownership is enabled; stale or uncertain ownership fails closed and no raw terminal input target remains active underneath Flow.
-16. Cmd-Q / application termination: Rust freezes input and requests bounded detach/cleanup before native application termination. Native must not terminate the process while that bounded cleanup is still owed. This never stalls PTY/VT progress for surviving executions.
+16. Cmd-Q / application termination: Rust freezes input and requests bounded detach/cleanup before native application termination. Native must not terminate the process while that bounded cleanup is still owed. This never stalls PTY/VT progress for surviving executions. **After ADR-018 #1447 acceptance:** before that bounded sequence, when cold config `app.warn_before_quit` is true (default) and the headed composition has more than one Window or more than one outer Tab, native shows one Quit confirmation owned by Rust's should-confirm decision; Cancel skips `RequestQuit`. Successful headed Quit must exit `Seyal.app` so Dock does not show it running; Runtime survival across Quit is unchanged.
 
 ## 3. Scope
 
