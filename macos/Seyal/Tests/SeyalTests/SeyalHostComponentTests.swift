@@ -1299,7 +1299,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertGreaterThan(host.frame.width, 0)
         XCTAssertGreaterThan(host.frame.height, 0)
         XCTAssertTrue(host.isAccessibilityEnabled())
-        XCTAssertEqual(host.accessibilityRole(), .button)
+        XCTAssertEqual(host.accessibilityRole(), .group)
         XCTAssertEqual(host.accessibilityLabel(), "Focus secondary terminal pane")
         XCTAssertTrue(layout.hitTest(NSPoint(x: 375, y: 150)) === host)
     }
@@ -4453,8 +4453,8 @@ final class SeyalHostComponentTests: XCTestCase {
             contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift"),
             encoding: .utf8
         )
-        XCTAssertTrue(chrome.contains("func transcriptDidScroll()"))
-        XCTAssertTrue(chrome.contains("publishBlockOutputFrame()"))
+        XCTAssertTrue(blocks.contains("func transcriptDidScroll()"))
+        XCTAssertTrue(blocks.contains("publishBlockOutputFrame()"))
         XCTAssertFalse(
             chrome.contains("proposeGeometry"),
             "ProductChromeHostView scroll path must not propose PTY geometry"

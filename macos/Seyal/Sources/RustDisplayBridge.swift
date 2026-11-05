@@ -2,6 +2,14 @@ import Foundation
 
 @MainActor
 final class RustDisplayBridge {
+  nonisolated static func isTerminalPollResult(_ result: Int32) -> Bool {
+    result == -3 || result == -6 || result == -10
+  }
+
+  nonisolated static func pollResultClosesConnection(_ result: Int32) -> Bool {
+    isTerminalPollResult(result) || result == -4 || result == -18
+  }
+
   typealias FrameHandler = @MainActor (SeyalPreparedFrame) -> Void
   typealias TimelineHandler = @MainActor () -> Void
   typealias HistoryHandler = @MainActor (NativeHistoryRange) -> Void
@@ -492,6 +500,11 @@ final class RustDisplayBridge {
         seyalRunAsMainActorFromMainQueue {
           guard let self, self.auxiliaryReadSources[handle] != nil else { return }
           let result = seyal_bridge_poll_for(handle)
+          if result < 0, !Self.pollResultClosesConnection(result) {
+            // Transient poll errors leave this Controller registered. Keep the
+            // source armed so the next readiness event can make progress.
+            return
+          }
           if result < 0 {
             // Level-trigger progress: EOF/disconnect must disarm this fd's
             // sources. Tab 1 stays up (do not stop()).

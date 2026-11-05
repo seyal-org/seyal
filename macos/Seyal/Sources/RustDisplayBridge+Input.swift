@@ -225,9 +225,10 @@ extension RustDisplayBridge {
     synchronizeWriteReadinessSource()
     onStatusChanged()
     if result == -18 {
+      // A mutation conflict is retryable. Polling the unconsumed frame owns
+      // connection teardown; never stop the whole window from a sibling write.
       onError(result)
-      stop(reconnect: true)
-    } else if result == -3 || result == -10 {
+    } else if Self.isTerminalPollResult(result) {
       onError(result)
       stop()
     }
@@ -243,6 +244,10 @@ extension RustDisplayBridge {
   func finishAddressedMutation(_ result: Int32, forDisplayHandle handle: UInt64) -> Int32 {
     guard result != 0 else { return result }
     guard handle == clientHandle else {
+      guard Self.isTerminalPollResult(result) else {
+        onStatusChanged()
+        return result
+      }
       if let source = auxiliaryWriteSources.removeValue(forKey: handle) {
         // Stop a level-triggered writable error loop, including a handle
         // removed between readiness and flush (reported as -1). The same
@@ -279,6 +284,10 @@ extension RustDisplayBridge {
         return
       }
       let result = seyal_bridge_poll()
+      if result < 0, !Self.pollResultClosesConnection(result) {
+        onError(result)
+        return
+      }
       // Shell exit (-6): Lifecycle Finalized arrives after the final display /
       // history frames in the same poll. Publish those history ranges and the
       // Block timeline while the client is still registered (unregister waits

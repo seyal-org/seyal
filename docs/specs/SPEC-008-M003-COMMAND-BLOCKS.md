@@ -1,23 +1,25 @@
 # SPEC-008 — M003 command Blocks, Pane composer and presentation modes
 
-- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`), the duration / shell-metadata boundary amendment accepted by #686 / PR #1022, the grid-first resting-presentation amendment accepted under #1438 / PR #1439 (implemented by #1440), and the split-created Flow amendment recorded under #1426 on 2026-11-05.
+- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`), the duration / shell-metadata boundary amendment accepted by #686 / PR #1022, the grid-first resting-presentation amendment accepted under #1438 / PR #1439 (implemented by #1440), and the proposed tab-wide split-to-Flow amendment under #1454, included with implementation in the combined multipane PR.
 - **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 alignment accepted 2026-10-29 (#1384); grid-first resting presentation 2026-11-04 (#1438/#1440); split-created Flow 2026-11-05 (#1426)
 - **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract. Accepted ADR-026 (#1384) is the authority for the session-bootstrap and input-target amendments in §3.1, §3.2, §3.5, §4, §5.5, §8 and §10.
 - **Depends on:** accepted SPEC-001 through SPEC-007 and completed Pass 7
 
 ## 1. Observable contract
 
-Under the accepted #1438 grid-first amendment, the **default resting**
-A newly started terminal session or a Pane created in a new Tab remains
-**Raw** (full-Pane primary terminal grid with direct-terminal input). A split
-creates its new Pane in Flow when trusted Flow eligibility is established for
-that new execution; unsupported or untrusted integration keeps the new Pane in
-Raw. This applies when splitting a Raw, Flow, or TUI Pane. A split from Flow
-continues to create a Flow sibling, and shell-integration status alone must not
-change an existing Pane's selected mode. The new split leaf is the only
-automatic Flow selection in this amendment; it does not promote existing Raw
-Panes. Flow/Blocks remains explicitly selectable for existing Raw Panes while
-quarantined.
+Under the accepted #1438 grid-first amendment, a newly started terminal
+session or a Pane created in a new Tab remains **Raw** by default. A successful
+explicit split opts the affected Tab into Flow for every trusted,
+Flow-capable Pane in that Tab, including existing Raw panes and the new leaf.
+Other Tabs retain their own choices. An active TUI remains full-Pane through
+the split and restores the newly stored Flow resting mode on exit. Unsupported
+or untrusted integration retains the existing safe fallback. Shell-integration
+status alone never promotes a Pane; the explicit split is the opt-in.
+
+Every Pane continues to project its own execution and BlockTimeline. Adding
+splits or terminal tabs must preserve each Pane's mode, Block bodies, live
+output, and transcript scroll state. Focus changes affect only input focus and
+composer target. A Pane failure or recovery cannot suspend a healthy sibling.
 A Pane still has one composer; when the user has
 opted into Flow and trusted shell integration reports a supported structured
 command-entry state, submitting the composer creates one new logical command

@@ -1503,3 +1503,36 @@ rule for an existing Raw Pane: split creation is an explicit user action that
 requests an additional structured Pane. It does not permit status-driven
 Raw-to-Flow transitions on already existing Panes.
 
+## Proposed 2026-11-05 amendment — tab-wide Blocks after split (#1454)
+
+**Status:** Proposed in the combined multipane implementation PR. The product
+owner has explicitly accepted the behavior for this change; it becomes
+normative when that PR merges. This amendment supersedes the new-leaf-only
+selection above for successful split actions.
+
+After a successful explicit split, every trusted, Flow-capable Pane in the
+affected Tab, including the source Pane and any other existing Raw Pane,
+selects Flow as its resting presentation. The split is the user's explicit
+opt-in for that Tab. Cold-start and new-Tab defaults remain governed by the
+existing policy. A different Tab retains its own resting choices.
+
+Each Pane continues to render only its own execution and BlockTimeline. A
+focus change changes input focus only: it cannot blank, copy, move, or swap
+another Pane's command body, live output, scroll position, or controller. A
+failed split leaves existing choices unchanged. One Pane's attach/recovery
+failure does not pause a healthy sibling.
+
+An active alternate-screen application remains full-Pane TUI through the
+split. The split stores Flow as that Pane's resting mode without replacing the
+live TUI; TUI exit restores Flow. Unsupported or untrusted shell integration
+retains the existing safe fallback until structured Block boundaries can be
+proven. No Raw viewport is exposed underneath or beside a Flow Pane.
+
+The ADR proposal and production change travel together in one PR. Required
+evidence is a headed packaged-app test with a 2×2 grid, multiple terminal tabs
+in each Pane, unique Pane tokens, numbered concurrent output, and at least ten
+focus changes. It must verify every output line and Block body in its owning
+Pane, preserve scroll state, exercise one-Pane failure/recovery while healthy
+siblings continue, and confirm TUI remains intact until exit. No new PTY, VT,
+process, copied-output, or Swift presentation authority is introduced.
+

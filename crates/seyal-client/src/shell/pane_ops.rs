@@ -66,6 +66,7 @@ impl ShellState {
             selected_terminal_tab: Some(terminal_id),
             allows_implicit_execution_bootstrap: false,
             presentation_mode: inherited_presentation,
+            resting_presentation_mode: inherited_presentation,
         };
         let id = pane.id;
         // ADR-021 §3: successful structural mutation clears zoom.

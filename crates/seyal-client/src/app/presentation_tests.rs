@@ -313,6 +313,71 @@ fn split_from_raw_defaults_new_supported_pane_to_flow() {
 }
 
 #[test]
+fn split_promotes_every_pane_in_only_the_active_tab_to_flow() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    let first_tab = root.snapshot().shell.windows[0].tabs[0].id;
+
+    root.apply(AppAction::CreateTab).unwrap();
+    let second_tab = root.snapshot().shell.windows[0].tabs[1].id;
+    let source = root.snapshot().shell.focused_pane;
+
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Right,
+    })
+    .unwrap();
+    let right = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::FocusPane { id: source }).unwrap();
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Down,
+    })
+    .unwrap();
+
+    let tabs = &root.snapshot().shell.windows[0].tabs;
+    let original = tabs.iter().find(|tab| tab.id == first_tab).unwrap();
+    assert_eq!(original.panes.len(), 1);
+    assert_eq!(original.panes[0].presentation_mode, PresentationMode::Raw);
+
+    let split_tab = tabs.iter().find(|tab| tab.id == second_tab).unwrap();
+    assert_eq!(split_tab.panes.len(), 3);
+    assert!(
+        split_tab
+            .panes
+            .iter()
+            .all(|pane| pane.presentation_mode == PresentationMode::Flow),
+        "splitting opts every existing and new Pane in this Tab into Blocks"
+    );
+    assert_ne!(right, source);
+}
+
+#[test]
+fn split_changes_tui_resting_mode_without_replacing_the_active_tui() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    invoke_presentation(&mut root, WorkspaceCommandId::PresentationSetFlow);
+    refresh(&mut root, true);
+    let source = root.snapshot().shell.focused_pane;
+
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Right,
+    })
+    .unwrap();
+
+    let tab = &root.snapshot().shell.windows[0].tabs[0];
+    let source_snapshot = tab.panes.iter().find(|pane| pane.id == source).unwrap();
+    assert_eq!(source_snapshot.presentation_mode, PresentationMode::Tui);
+    assert_eq!(
+        source_snapshot.resting_presentation_mode,
+        PresentationMode::Flow
+    );
+    assert!(tab
+        .panes
+        .iter()
+        .filter(|pane| pane.id != source)
+        .all(|pane| pane.presentation_mode == PresentationMode::Flow));
+}
+
+#[test]
 fn flow_split_survives_production_focus_activation_in_both_directions() {
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);

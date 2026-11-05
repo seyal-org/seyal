@@ -110,7 +110,8 @@ extension SecondaryLivePaneHost {
             lastBlockCount = 0
             return
         }
-        if visibleIndex > lastBlockCount, savedFollowing {
+        let addedBlock = visibleIndex > lastBlockCount
+        if addedBlock {
             clearPreservedDocumentHeight()
             scrollTranscriptToLiveEnd()
         } else {
@@ -126,6 +127,17 @@ extension SecondaryLivePaneHost {
             followingLiveEnd = savedFollowing
         }
         lastBlockCount = visibleIndex
+        if addedBlock {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.layoutSubtreeIfNeeded()
+                self.syncTranscriptDocumentSize()
+                if self.followingLiveEnd {
+                    self.scrollTranscriptToLiveEnd()
+                }
+                self.publishBlockOutputFrame()
+            }
+        }
     }
 
     func preserveDocumentHeight(_ height: CGFloat) {
@@ -214,6 +226,7 @@ extension SecondaryLivePaneHost {
         guard range.sourceDisplayHandle == 0 || range.sourceDisplayHandle == displayHandle else {
             return
         }
+      guard !range.rows.isEmpty else { return }
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
@@ -321,10 +334,18 @@ extension SecondaryLivePaneHost {
     /// left a permanent dead zone below cards once content shrank after
     /// growing tall.
     func syncTranscriptDocumentSize() {
+        let shouldFollowLiveEnd = followingLiveEnd
+        isProgrammaticTranscriptScroll = true
+        defer {
+            isProgrammaticTranscriptScroll = false
+            if shouldFollowLiveEnd {
+                scrollTranscriptToLiveEnd()
+            }
+        }
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
-        let contentHeight = max(fitted.height - transcriptLeadingSpacerHeight.constant, 0)
         let hasCards = !blockCards.isEmpty
+        let contentHeight = transcriptCardsContentHeight()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let height = max(contentHeight, viewportHeight, 1)
@@ -338,6 +359,18 @@ extension SecondaryLivePaneHost {
             transcript.reflectScrolledClipView(transcript.contentView)
             layoutSubtreeIfNeeded()
         }
+    }
+
+    /// Measure the current cards rather than subtracting the spacer from
+    /// `NSStackView.fittingSize`, which can retain the prior document frame
+    /// while Blocks are rebuilt after focus/projection changes (#1426).
+    func transcriptCardsContentHeight() -> CGFloat {
+        let cards = blocks.arrangedSubviews.filter { $0 !== transcriptLeadingSpacer }
+        guard !cards.isEmpty else { return 0 }
+        let cardHeight = cards.reduce(CGFloat.zero) { total, view in
+            total + max(view.fittingSize.height, view.bounds.height)
+        }
+        return cardHeight + CGFloat(max(cards.count - 1, 0)) * blocks.spacing
     }
 
     func transcriptDocumentScrollHeight() -> CGFloat {
@@ -374,9 +407,7 @@ extension SecondaryLivePaneHost {
     func scrollTranscriptToLiveEnd() {
         isProgrammaticTranscriptScroll = true
         defer { isProgrammaticTranscriptScroll = false }
-        let visible = transcript.contentView.bounds.height
-        let y = max(transcriptDocumentScrollHeight() - visible, 0)
-        transcript.contentView.scroll(to: NSPoint(x: 0, y: y))
+        transcript.scrollToEndOfDocument(nil)
         transcript.reflectScrolledClipView(transcript.contentView)
         followingLiveEnd = true
     }

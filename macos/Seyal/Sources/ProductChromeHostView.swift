@@ -183,13 +183,7 @@ final class ProductChromeHostView: NSView {
         blocks.translatesAutoresizingMaskIntoConstraints = false
         setupTranscriptTopSpacer()
         expose(blocks, identifier: "seyal-blocks")
-        transcriptLeadingSpacer.translatesAutoresizingMaskIntoConstraints = false
-        transcriptLeadingSpacer.setAccessibilityElement(false)
-        transcriptLeadingSpacerHeight = transcriptLeadingSpacer.heightAnchor.constraint(
-            equalToConstant: 0
-        )
-        transcriptLeadingSpacerHeight.isActive = true
-        blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
+        configureTranscriptLeadingSpacer()
         composer.setAccessibilityIdentifier("seyal-composer")
 
         let clip = TranscriptClipView()
@@ -340,23 +334,7 @@ final class ProductChromeHostView: NSView {
             blocks.leadingAnchor.constraint(equalTo: transcript.contentView.leadingAnchor),
             blocks.widthAnchor.constraint(equalTo: transcript.contentView.widthAnchor),
         ])
-        // The required chain transcript→sessionBootstrap→composer only fixes
-        // their COMBINED span; with sessionBootstrap's collapsed state using
-        // near-zero (fittingSizeCompression) priorities on both axes (by
-        // design, see above), the transcript/sessionBootstrap split is
-        // otherwise ambiguous and AppKit's solver can settle on sessionBootstrap
-        // absorbing the slack instead of transcript — leaving Blocks stacked
-        // at the top with a dead gap above the composer (#1426 follow-up).
-        // This advisory (non-required) pin breaks the tie deterministically
-        // toward "transcript fills to the composer" whenever the banner is
-        // collapsed; it cannot win over the banner's own required content
-        // pins when a banner is actually offered.
-        let transcriptFillsToComposer = transcript.bottomAnchor.constraint(
-            equalTo: composer.topAnchor,
-            constant: -12
-        )
-        transcriptFillsToComposer.priority = .defaultHigh
-        transcriptFillsToComposer.isActive = true
+        pinTranscriptToComposer()
         centerLeadingHost = centerColumn.leadingAnchor.constraint(equalTo: leadingAnchor)
         centerTrailingHost = centerColumn.trailingAnchor.constraint(equalTo: trailingAnchor)
         centerTopHost = centerColumn.topAnchor.constraint(equalTo: topAnchor)
@@ -445,17 +423,6 @@ final class ProductChromeHostView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("ProductChromeHostView is programmatic")
-    }
-
-    @objc func transcriptDidScroll() {
-        if !isProgrammaticTranscriptScroll {
-            followingLiveEnd = isNearLiveEnd()
-        }
-        // History instance origins are baked in surface pixels; scroll must
-        // re-publish clips/origins. A translate-in-place shortcut desynced
-        // Metal from AppKit card motion (stuck glyphs / fighting scroll).
-        publishBlockOutputFrame()
-        positionInlineComposerAtCurrentCursor()
     }
 
     override func viewDidChangeEffectiveAppearance() {

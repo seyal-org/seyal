@@ -20,6 +20,8 @@ mod leave_offer;
 mod leave_offer_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
+#[cfg(target_os = "macos")]
+mod live_history_apply;
 mod native_effect;
 mod palette_apply;
 mod pane_projection;

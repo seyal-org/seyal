@@ -1049,6 +1049,105 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// Load acceptance for the split-created Blocks workspace: two axes,
+    /// multiple terminal tabs in every Pane, concurrent numbered streams, and
+    /// repeated focus changes must preserve each Pane's live Block body.
+    func testFourPaneBlocksLoadWithMultipleTerminalTabsAndFocusChurn() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
+            app.menuBars.menuBarItems["View"].click()
+            app.menuItems["Toggle Raw"].click()
+        }
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+
+        // Build a 2×2 grid through both split directions.
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-down")
+        XCTAssertTrue(element(app, "seyal-pane-region-2").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-0").click()
+        waitForFocus(app, region: 0)
+        click(app, "seyal-split-down")
+        XCTAssertTrue(element(app, "seyal-pane-region-3").waitForExistence(timeout: 12))
+
+        let regions = (0..<4).map { element(app, "seyal-pane-region-\($0)") }
+        let strips = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
+        )
+        let stripsReady = expectation(for: NSPredicate(format: "count == 4"), evaluatedWith: strips, handler: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [stripsReady], timeout: 12), .completed)
+
+        // Give each independently provisioned Pane a second TerminalTab, then
+        // return each strip to its original live execution for the stream load.
+        for strip in strips.allElementsBoundByIndex {
+            let original = strip.buttons.matching(
+                NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
+            ).firstMatch
+            XCTAssertTrue(original.waitForExistence(timeout: 5))
+            strip.buttons.matching(
+                NSPredicate(format: "identifier CONTAINS %@", "-new-terminal")
+            ).firstMatch.click()
+            waitForUsablePty(in: app, timeout: 20)
+            original.click()
+            waitForUsablePty(in: app, timeout: 20)
+        }
+        let terminalTabs = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
+        )
+        let tabsReady = expectation(for: NSPredicate(format: "count == 8"), evaluatedWith: terminalTabs, handler: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [tabsReady], timeout: 12), .completed)
+
+        let markers = (0..<4).map { "MPLOAD_PANE_\($0)" }
+        for index in 0..<4 {
+            regions[index].click()
+            waitForFocus(app, region: index)
+            waitForUsablePty(in: app)
+            submitComposerCommand(
+                "for i in $(seq 1 6); do printf '\(markers[index]) %03d\\n' \"$i\"; sleep 0.2; done",
+                in: app,
+                blockMarker: markers[index]
+            )
+        }
+
+        for turn in 0..<12 {
+            let index = turn % 4
+            regions[index].click()
+            waitForFocus(app, region: index)
+            XCTAssertTrue(element(app, "seyal-composer").exists)
+            XCTAssertTrue(element(app, "seyal-blocks").exists)
+        }
+
+        // Verify every numbered line in each owning Block and exactly one AX
+        // Block per unique token, detecting both lost output and pane bleed.
+        for marker in markers {
+            let matchingBlocks = app.descendants(matching: .any).matching(
+                NSPredicate(
+                    format: "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label CONTAINS %@",
+                    "seyal-block-",
+                    "seyal-secondary-block-",
+                    marker
+                )
+            )
+            XCTAssertTrue(matchingBlocks.firstMatch.waitForExistence(timeout: 10), marker)
+            XCTAssertEqual(matchingBlocks.count, 1, "\(marker) must appear in one Pane only")
+            let body = blockBody(for: matchingBlocks.firstMatch, in: app)
+            for line in 1...6 {
+                let expected = String(format: "%@ %03d", marker, line)
+                XCTAssertTrue(
+                    body.waitForExistence(timeout: 5),
+                    "Block body must remain accessible for \(expected)"
+                )
+                XCTAssertTrue(
+                    NSPredicate(format: "label CONTAINS %@", expected).evaluate(with: body),
+                    "missing streamed line \(expected), body=\(body.label)"
+                )
+            }
+        }
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     func testClosePaneLivesInContextMenuWithoutToolbarIcon() throws {
         let app = hostedApp()
         let strip = app.descendants(matching: .any).matching(

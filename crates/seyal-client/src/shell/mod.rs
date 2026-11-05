@@ -225,6 +225,8 @@ pub struct PaneSnapshot {
     /// Compatibility projection of the selected terminal only.
     pub execution: Option<ExecutionId>,
     pub allows_implicit_bootstrap: bool,
+    pub presentation_mode: crate::presentation::PresentationMode,
+    pub resting_presentation_mode: crate::presentation::PresentationMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -291,6 +293,7 @@ impl ShellState {
             selected_terminal_tab: None,
             allows_implicit_execution_bootstrap: true,
             presentation_mode: crate::presentation::PresentationMode::Raw,
+            resting_presentation_mode: crate::presentation::PresentationMode::Raw,
         };
         let mut pane = pane;
         pane.selected_terminal_tab = pane.terminal_tabs.first().map(|row| row.id);

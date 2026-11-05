@@ -85,6 +85,10 @@ Other panes remain independently usable.
 For normal Block/transcript presentation, **each Pane owns one transcript scrollbar**.
 
 - Blocks grow intrinsically with output;
+- when the transcript has spare vertical space, its leading filler keeps the newest Block directly above that Pane's composer; the filler is not a Block and does not change history;
+- adding a new command Block brings that Block into view; subsequent output follows only while the user is at the live end;
+- when content exceeds the viewport, the same transcript scrolls;
+- focus changes preserve each Pane's transcript offset and live-end/follow state;
 - long-running normal-screen command output grows its Running Block;
 - there is no fixed-height nested output scrollbar inside each Block;
 - the user scrolls the Pane to navigate Blocks/output;

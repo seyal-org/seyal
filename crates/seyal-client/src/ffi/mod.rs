@@ -20,11 +20,16 @@
 mod app;
 mod attach_wakeup;
 mod display;
+#[cfg(test)]
+mod display_tests;
 mod errors;
 mod input;
 mod launch_policy;
 mod session;
 mod types;
+
+#[cfg(test)]
+mod poll_loss_tests;
 
 use std::{
     cell::{Cell, RefCell},

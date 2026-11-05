@@ -10,6 +10,24 @@
 use super::*;
 
 impl ApplicationRoot {
+    /// An explicit split opts all panes in its Tab into Flow. TUI remains the
+    /// visible takeover while this updates the stored resting choice.
+    pub(super) fn select_split_tab_flow_resting_mode(&mut self, pane: seyal_core::PaneId) {
+        let snap = self.shell.snapshot();
+        if let Some(tab) = snap
+            .windows
+            .iter()
+            .flat_map(|window| &window.tabs)
+            .find(|tab| tab.panes.iter().any(|candidate| candidate.id == pane))
+        {
+            for candidate in &tab.panes {
+                let _ = self
+                    .shell
+                    .set_resting_presentation_mode(candidate.id, PresentationMode::Flow);
+            }
+        }
+    }
+
     /// Resolve presentation independently from composer visibility. Composer
     /// mode is Hidden for several reasons (including an unfocused pane and an
     /// ended execution); it is not a valid proxy for the pane's selected
@@ -125,5 +143,8 @@ impl ApplicationRoot {
         let pane = self.shell.snapshot().focused_pane;
         let mode = self.presentation.snapshot().mode;
         let _ = self.shell.set_presentation_mode(pane, mode);
+        if mode != PresentationMode::Tui {
+            let _ = self.shell.set_resting_presentation_mode(pane, mode);
+        }
     }
 }

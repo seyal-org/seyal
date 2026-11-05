@@ -39,6 +39,38 @@ enum HistoryRangeRouting {
 
 @MainActor
 extension ProductChromeHostView {
+    @objc func transcriptDidScroll() {
+        guard !isProgrammaticTranscriptScroll else {
+            publishBlockOutputFrame()
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isProgrammaticTranscriptScroll else { return }
+            self.followingLiveEnd = self.isNearLiveEnd()
+            self.publishBlockOutputFrame()
+            self.positionInlineComposerAtCurrentCursor()
+        }
+    }
+
+    func configureTranscriptLeadingSpacer() {
+        transcriptLeadingSpacer.translatesAutoresizingMaskIntoConstraints = false
+        transcriptLeadingSpacer.setAccessibilityElement(false)
+        transcriptLeadingSpacerHeight = transcriptLeadingSpacer.heightAnchor.constraint(
+            equalToConstant: 0
+        )
+        transcriptLeadingSpacerHeight.isActive = true
+        blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
+    }
+
+    func pinTranscriptToComposer() {
+        let fillsToComposer = transcript.bottomAnchor.constraint(
+            equalTo: composer.topAnchor,
+            constant: -12
+        )
+        fillsToComposer.priority = .defaultHigh
+        fillsToComposer.isActive = true
+    }
+
     private var activeBlockDisplayHandle: UInt64 {
         let bridge = pane.inputSurface.bridge
         let focusedHandle = bridge?.windowFocusedDisplayHandle ?? 0
@@ -466,7 +498,7 @@ extension ProductChromeHostView {
         guard range.sourceDisplayHandle == 0
             || range.sourceDisplayHandle == activeBlockDisplayHandle
         else { return }
-        if let card = blockCards[range.blockID] {
+        if let card = blockCards[range.blockID], !range.rows.isEmpty {
             card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
             card.setBodyTranscript(range.transcriptText)
         }
