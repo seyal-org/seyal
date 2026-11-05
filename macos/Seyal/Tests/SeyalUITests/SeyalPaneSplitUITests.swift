@@ -157,6 +157,52 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// Splitting a Pane creates an independent empty Block timeline; the source
+    /// keeps its completed history without copying it into the new Pane.
+    func testSplitStartsEmptyPaneWithoutCopyingSourceBlocks() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+
+        let marker = "split-origin-\(String(UUID().uuidString.prefix(6)))"
+        submitComposerCommand(
+            "printf '\(marker)\\n'",
+            in: app,
+            expectBlock: true,
+            blockMarker: marker
+        )
+        let sourceBlock = blockCommand(in: app, containing: marker)
+        XCTAssertTrue(sourceBlock.waitForExistence(timeout: 8))
+        waitForBodyMarker(blockBody(for: sourceBlock, in: app), marker: marker)
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-blocks").exists)
+
+        let focusedPaneCopy = blockCommand(in: app, containing: marker)
+        XCTAssertFalse(focusedPaneCopy.exists, "the new Pane must start with empty Block history")
+        let retainedSource = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                "seyal-secondary-block-",
+                marker
+            )
+        ).firstMatch
+        XCTAssertTrue(retainedSource.waitForExistence(timeout: 8))
+        let allCopies = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label CONTAINS %@",
+                "seyal-block-",
+                "seyal-secondary-block-",
+                marker
+            )
+        )
+        XCTAssertEqual(allCopies.count, 1, "only the source Pane retains its prior Block")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// A live Flow command must remain a Block when its pane becomes a
     /// secondary pane during a split. Repeated focus changes must keep the
     /// command and streamed output in that pane's transcript.
