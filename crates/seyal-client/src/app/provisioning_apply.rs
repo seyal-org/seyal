@@ -95,22 +95,30 @@ impl ApplicationRoot {
         self.wire_client.as_mut()
     }
 
-    /// Create a Tab whose terminal leaf begins one C1 provisioning intent and
-    /// admits the resulting type-36 create on the wire client (same request id).
-    pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
-        self.shell
-            .apply_product_create_tab()
-            .map_err(|_| AppError::TabCreationUnavailable)?;
-        self.drain_shell_effects();
+    /// Begin #994 provisioning for the focused Pane's selected terminal when it
+    /// is still unbound. Used by CreateTab / CreateWindow / zero-window Dock
+    /// create (ADR-018 §3.3a). No-ops when already bound or no selected terminal.
+    /// Does not adopt Unpresented executions.
+    pub(super) fn begin_provisioning_for_focused_unbound_terminal(
+        &mut self,
+    ) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
-        let tab = snap.active_tab;
-        let terminal_tab = self
+        let Some(terminal_tab) = self
             .shell
             .selected_terminal_tab(pane)
             .map_err(|_| AppError::UnknownPane)?
-            .ok_or(AppError::UnboundUnauthorized)?;
-        // ADR-028 §2.5: 0 = default Workspace; nonzero must be Runtime-admitted.
+        else {
+            return Ok(());
+        };
+        if self
+            .shell
+            .terminal_execution(pane, terminal_tab)
+            .map_err(|_| AppError::UnknownPane)?
+            .is_some()
+        {
+            return Ok(());
+        }
         let workspace_id = self.wire_workspace_id();
         self.seed_provisioning_request_floor_from_wire();
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
@@ -120,11 +128,6 @@ impl ApplicationRoot {
         {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.shell.apply(ShellAction::CloseTab {
-                    id: tab,
-                    containment_generation: self.shell.containment_generation(),
-                });
-                let _ = self.shell.take_removed_tab_panes();
                 self.provisioning.note_rejected_without_retry(pane, failure);
                 return Err(provisioning_app_error(failure));
             }
@@ -136,11 +139,6 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.shell.apply(ShellAction::CloseTab {
-                id: tab,
-                containment_generation: self.shell.containment_generation(),
-            });
-            let _ = self.shell.take_removed_tab_panes();
             if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
                 let _ = self.provisioning.apply_create_result(
                     intent.owner,
@@ -148,6 +146,26 @@ impl ApplicationRoot {
                     CreateOutcome::Failed(ErrorCode::InvalidState),
                 );
             }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Create a Tab whose terminal leaf begins one C1 provisioning intent and
+    /// admits the resulting type-36 create on the wire client (same request id).
+    pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
+        self.shell
+            .apply_product_create_tab()
+            .map_err(|_| AppError::TabCreationUnavailable)?;
+        self.drain_shell_effects();
+        let snap = self.shell.snapshot();
+        let tab = snap.active_tab;
+        if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+            let _ = self.shell.apply(ShellAction::CloseTab {
+                id: tab,
+                containment_generation: self.shell.containment_generation(),
+            });
+            let _ = self.shell.take_removed_tab_panes();
             return Err(error);
         }
         let _ = self

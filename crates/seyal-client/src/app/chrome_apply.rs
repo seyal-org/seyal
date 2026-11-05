@@ -158,10 +158,30 @@ impl ApplicationRoot {
     }
 
     pub(super) fn select_workspace(&mut self, id: WorkspaceId) -> Result<(), AppError> {
+        // ADR-018 §3.3a: ActivateWorkspace raise vs create. Only the create path
+        // must begin #994 provisioning for the new empty terminal tab.
+        let created = !self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .any(|window| window.workspace == id);
         self.shell
             .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         self.drain_shell_effects();
+        if created {
+            if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+                if let Ok(window) = self.shell.product_window_id() {
+                    let _ = self.shell.apply(crate::shell::ShellAction::CloseWindow {
+                        id: window,
+                        containment_generation: self.shell.containment_generation(),
+                    });
+                    self.drain_shell_effects();
+                }
+                return Err(error);
+            }
+        }
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         let _ = self
@@ -472,6 +492,18 @@ impl ApplicationRoot {
             ShellError::WindowCreationUnavailable => AppError::WindowCreationUnavailable,
             _ => AppError::UnknownChromeWorkspace,
         })?;
+        self.drain_shell_effects();
+        if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+            if let Ok(window) = self.shell.product_window_id() {
+                let _ = self.apply_shell(ShellAction::CloseWindow {
+                    id: window,
+                    containment_generation: self.shell.containment_generation(),
+                });
+            }
+            return Err(error);
+        }
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
