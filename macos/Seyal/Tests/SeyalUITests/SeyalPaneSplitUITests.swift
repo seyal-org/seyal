@@ -1114,7 +1114,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
             waitForFocus(app, region: index)
             waitForUsablePty(in: app)
             submitComposerCommand(
-                "for i in $(seq 1 20); do printf '\(markers[index])-%02d\\n' \"$i\"; sleep 0.75; done",
+                "for i in $(seq 1 100); do printf '\(markers[index])-%03d\\n' \"$i\"; sleep 0.15; done",
                 in: app,
                 blockMarker: markers[index]
             )
@@ -1130,7 +1130,9 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         // Verify every numbered line in each owning Block and exactly one AX
         // Block per unique token, detecting both lost output and pane bleed.
-        // Twenty short rows fit under CommandBlockView's bounded AX summary.
+        // The Block AX summary retains the newest 240 characters. With these
+        // short unique markers, rows 77...100 fit in that tail, including the
+        // line lost by the headed focus-churn run at 62c10894.
         for (index, marker) in markers.enumerated() {
             let matchingBlocks = app.descendants(matching: .any).matching(
                 NSPredicate(
@@ -1143,8 +1145,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
             XCTAssertTrue(matchingBlocks.firstMatch.waitForExistence(timeout: 10), marker)
             XCTAssertEqual(matchingBlocks.count, 1, "\(marker) must appear in one Pane only")
             let body = blockBody(for: matchingBlocks.firstMatch, in: app)
-            for line in 1...20 {
-                let expected = String(format: "%@-%02d", marker, line)
+            for line in 77...100 {
+                let expected = String(format: "%@-%03d", marker, line)
                 XCTAssertTrue(
                     body.waitForExistence(timeout: 5),
                     "Block body must remain accessible for \(expected)"
