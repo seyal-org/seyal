@@ -1145,6 +1145,17 @@ final class SeyalPaneSplitUITests: XCTestCase {
             XCTAssertTrue(matchingBlocks.firstMatch.waitForExistence(timeout: 10), marker)
             XCTAssertEqual(matchingBlocks.count, 1, "\(marker) must appear in one Pane only")
             let body = blockBody(for: matchingBlocks.firstMatch, in: app)
+            let finalLine = String(format: "%@-%03d", marker, 100)
+            let completedTail = expectation(
+                for: NSPredicate(format: "label CONTAINS %@", finalLine),
+                evaluatedWith: body,
+                handler: nil
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [completedTail], timeout: 15),
+                .completed,
+                "Block history must publish the final stream line before checking its tail; body=\(body.label)"
+            )
             for line in 77...100 {
                 let expected = String(format: "%@-%03d", marker, line)
                 XCTAssertTrue(
