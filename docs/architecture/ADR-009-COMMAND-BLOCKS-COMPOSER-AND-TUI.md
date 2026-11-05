@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384 (Accepted on merge of this acceptance PR by a non-author maintainer; normative; read through ADR-026; an author or agent comment is not acceptance); Raw-choice amendment under #1404 recorded 2026-11-01 and **superseded** by the grid-first resting-presentation amendment under #1438 (normative on merge of its architecture-only acceptance PR)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1482,4 +1482,24 @@ execution. Change the **resting** policy to **grid-first**:
    resting choices can be correct under focus changes.
 4. Only after the headed Raw gate is green, schedule Flow reliability work
    against the promotion gate—not as the cold-start default.
+
+## 2026-11-05 amendment — Flow for split-created Panes (#1426)
+
+**Status:** Accepted by the product owner on 2026-11-05 as a narrow
+multipane usability correction. This amendment changes only split creation;
+it does not change Raw as the cold-start or new-Tab default and does not waive
+the broader Flow promotion gate above.
+
+When a user creates a split Pane, the new leaf selects Flow once its own
+trusted execution establishes current Flow eligibility. If that execution is
+unsupported or untrusted, it remains Raw. This applies regardless of whether
+the source Pane is resting in Raw, Flow, or TUI. Existing Panes retain their
+own selected resting mode; focus changes never promote or demote them. The new
+leaf retains its Flow selection while another Pane owns focus, and its Blocks
+continue to project from its own execution and history Controller.
+
+This is a deliberately bounded exception to #1438's explicit-Flow selection
+rule for an existing Raw Pane: split creation is an explicit user action that
+requests an additional structured Pane. It does not permit status-driven
+Raw-to-Flow transitions on already existing Panes.
 

@@ -222,9 +222,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// #1426: a Pane that opts into Flow after the split stays in Blocks when
-    /// another Pane takes focus, including while its command is still running.
-    func testExistingPaneFlowModeStaysBlocksDuringUnfocusedStream() throws {
+    /// #1426: splitting a Raw Pane creates a Blocks Pane when its own shell
+    /// integration is trusted, and that Pane retains a numbered live stream
+    /// when focus returns to its Raw sibling.
+    func testRawSplitCreatesBlocksPaneAndKeepsUnfocusedStream() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         if element(app, "seyal-composer").waitForExistence(timeout: 2) {
@@ -236,16 +237,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
         waitForFocus(app, region: 1)
         waitForUsablePty(in: app)
-        XCTAssertFalse(
-            element(app, "seyal-composer").waitForExistence(timeout: 2),
-            "a sibling split from Raw starts Raw"
+        XCTAssertTrue(
+            element(app, "seyal-composer").waitForExistence(timeout: 8),
+            "a trusted split from Raw starts in Blocks"
         )
-
-        // Opt the existing sibling into Flow only after it has been created.
-        app.menuBars.menuBarItems["View"].click()
-        XCTAssertTrue(app.menuItems["Toggle Raw"].waitForExistence(timeout: 5))
-        app.menuItems["Toggle Raw"].click()
-        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
         XCTAssertTrue(element(app, "seyal-blocks").exists)
 
         let marker = "switchflow1426-\(String(UUID().uuidString.prefix(6)))"
@@ -276,7 +271,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForBodyMarker(body, marker: "\(marker)-16")
 
         let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        shot.name = "1426-existing-flow-pane-remains-blocks-while-unfocused"
+        shot.name = "1426-raw-split-blocks-remains-while-unfocused"
         shot.lifetime = .keepAlways
         add(shot)
         XCTAssertEqual(app.state, .runningForeground)

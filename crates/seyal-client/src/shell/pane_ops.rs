@@ -50,22 +50,11 @@ impl ShellState {
             return Err(ShellError::UnknownPane);
         }
         let pane_count = tab.panes.len();
-        let inherited_presentation = match tab
-            .panes
-            .get(&pane_id)
-            .expect("focused pane must exist before split")
-            .presentation_mode
-        {
-            crate::presentation::PresentationMode::Flow => {
-                crate::presentation::PresentationMode::Flow
-            }
-            // TUI is an execution-local takeover. A newly created shell has
-            // no alternate-screen application to inherit, so it starts Raw.
-            crate::presentation::PresentationMode::Raw
-            | crate::presentation::PresentationMode::Tui => {
-                crate::presentation::PresentationMode::Raw
-            }
-        };
+        // Creating a split is an explicit request for another structured Pane.
+        // Its own bind decides whether trusted Flow is eligible; unsupported
+        // integration will fall back to Raw in the presentation reducer.
+        // Never inherit TUI takeover or the source Pane's Raw selection.
+        let inherited_presentation = crate::presentation::PresentationMode::Flow;
         let terminal_id = TerminalTabId::new();
         let pane = Pane {
             id: PaneId::new(),

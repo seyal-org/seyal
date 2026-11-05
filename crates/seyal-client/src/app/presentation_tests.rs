@@ -239,7 +239,7 @@ fn split_from_flow_inherits_flow_for_the_new_terminal_pane() {
 }
 
 #[test]
-fn a_pane_opted_into_flow_after_split_stays_flow_when_unfocused() {
+fn a_split_pane_keeps_flow_when_unfocused() {
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);
     let source = root.snapshot().shell.focused_pane;
@@ -256,11 +256,11 @@ fn a_pane_opted_into_flow_after_split_stays_flow_when_unfocused() {
     .unwrap();
     assert_eq!(
         root.snapshot().shell.windows[0].tabs[0].panes[1].presentation_mode,
-        PresentationMode::Raw,
-        "a sibling split from Raw starts in Raw"
+        PresentationMode::Flow,
+        "a sibling split from Raw starts in Flow"
     );
 
-    // Flow is explicitly selected for this Pane after it already exists.
+    // Explicit selection remains valid for the already Flow split Pane.
     invoke_presentation(&mut root, WorkspaceCommandId::PresentationSetFlow);
     assert_eq!(
         root.presentation_eligibility_for_pane(sibling),
@@ -272,6 +272,43 @@ fn a_pane_opted_into_flow_after_split_stays_flow_when_unfocused() {
         root.presentation_eligibility_for_pane(sibling),
         PresentationEligibility::Flow,
         "focus changes must preserve a Flow selection made on an existing Pane"
+    );
+}
+
+#[test]
+fn split_from_raw_defaults_new_supported_pane_to_flow() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    let source = root.snapshot().shell.focused_pane;
+
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Right,
+    })
+    .unwrap();
+    let sibling = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(9, true, false),
+    })
+    .unwrap();
+
+    let split = root.snapshot();
+    let sibling_snapshot = split.shell.windows[0].tabs[0]
+        .panes
+        .iter()
+        .find(|pane| pane.id == sibling)
+        .expect("split creates a sibling Pane");
+    assert_eq!(sibling_snapshot.presentation_mode, PresentationMode::Flow);
+    assert_eq!(
+        root.presentation_eligibility_for_pane(sibling),
+        PresentationEligibility::Flow
+    );
+
+    root.apply(AppAction::FocusPane { id: source }).unwrap();
+    assert_eq!(
+        root.presentation_eligibility_for_pane(sibling),
+        PresentationEligibility::Flow,
+        "new split panes must keep Blocks while their sibling owns focus"
     );
 }
 
