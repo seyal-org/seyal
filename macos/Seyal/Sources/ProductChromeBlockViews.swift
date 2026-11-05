@@ -62,17 +62,20 @@ final class CommandBlockView: NSView {
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
     var isSelected = false {
         didSet {
-            setAccessibilityValue(isSelected ? "selected" : "")
+            updateAccessibilityValue()
             if let theme { apply(theme: theme) }
         }
     }
+    /// Projected from the Rust block row's SEYAL_APP_BLOCK_SESSION flag.
+    private var isSessionBlock: Bool
     private let header = NSView()
     private let prompt = NSTextField(labelWithString: "")
     private let command = NSTextField(labelWithString: "")
     private let status = NSTextField(labelWithString: "")
     private let seam = NSView()
-    private let state: UInt16
+    private var state: UInt16
     private var bodyHeight: NSLayoutConstraint!
+    private var seamTopConstraint: NSLayoutConstraint!
     private var theme: NativeTheme?
 
     init(
@@ -85,11 +88,13 @@ final class CommandBlockView: NSView {
         session: Bool
     ) {
         self.state = state
+        self.isSessionBlock = session
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = false
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
+        updateAccessibilityValue()
         self.prompt.stringValue = prompt
         self.prompt.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
         self.prompt.setContentHuggingPriority(.required, for: .horizontal)
@@ -125,10 +130,10 @@ final class CommandBlockView: NSView {
         bodyHeight = body.heightAnchor.constraint(
             equalToConstant: max(cellHeight, 1) * CGFloat(max(lines, 1))
         )
-        // Rust sets SEYAL_APP_BLOCK_SESSION. Swift only indents; it does not choose copy.
-        let inset: CGFloat = session ? 16 : 0
+        // Rust owns session classification; SSH Blocks retain the normal Block geometry.
+        seamTopConstraint = seam.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 12)
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.topAnchor.constraint(equalTo: topAnchor),
             header.heightAnchor.constraint(greaterThanOrEqualToConstant: 22),
@@ -140,12 +145,12 @@ final class CommandBlockView: NSView {
             status.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             command.trailingAnchor.constraint(lessThanOrEqualTo: status.leadingAnchor, constant: -12),
             body.leadingAnchor.constraint(equalTo: command.leadingAnchor),
-            body.trailingAnchor.constraint(equalTo: trailingAnchor),
+            body.trailingAnchor.constraint(equalTo: header.trailingAnchor),
             body.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
             bodyHeight,
-            seam.leadingAnchor.constraint(equalTo: leadingAnchor),
-            seam.trailingAnchor.constraint(equalTo: trailingAnchor),
-            seam.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 12),
+            seam.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            seam.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            seamTopConstraint,
             seam.bottomAnchor.constraint(equalTo: bottomAnchor),
             seam.heightAnchor.constraint(equalToConstant: 1),
         ])
@@ -168,6 +173,13 @@ final class CommandBlockView: NSView {
         bodyTranscript.setAccessibilityValue(ax)
     }
 
+    private func updateAccessibilityValue() {
+        var traits: [String] = []
+        if isSessionBlock { traits.append("session") }
+        if isSelected { traits.append("selected") }
+        setAccessibilityValue(traits.joined(separator: ", "))
+    }
+
     private static func accessibilitySummary(for text: String, limit: Int = 240) -> String {
         guard text.count > limit else { return text }
         // Prefer the live tail so streaming Blocks keep late lines AX-visible.
@@ -183,18 +195,31 @@ final class CommandBlockView: NSView {
         bodyHeight.constant = max(cellHeight, 1) * CGFloat(max(lines, 1))
     }
 
+    func updatePresentation(prompt: String, title: String, detail: String, state: UInt16, session: Bool) {
+        self.prompt.stringValue = prompt
+        command.stringValue = title.isEmpty ? "command" : title
+        setAccessibilityLabel(command.stringValue)
+        status.stringValue = detail
+        status.isHidden = detail.isEmpty
+        self.state = state
+        isSessionBlock = session
+        updateAccessibilityValue()
+        if let theme { apply(theme: theme) }
+    }
+
     override func accessibilityChildren() -> [Any]? {
         // The card is itself an accessibility element, so XCUI cannot see the
         // body (the live-tail target) without an explicit child list. Header
         // labels stay in the tree so VoiceOver still hears prompt, command, and status.
-        [prompt, command, status, bodyTranscript]
+        return [prompt, command, status, bodyTranscript]
     }
 
     /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must
     /// own the click. XCUI (and a user) hit the card center, which is the body
     /// once output exists — a header-only gesture never sees that click.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) == nil ? nil : self
+        let hit = super.hitTest(point)
+        return hit == nil ? nil : self
     }
 
     /// `hitTest` returns `self` for selection, which would otherwise swallow

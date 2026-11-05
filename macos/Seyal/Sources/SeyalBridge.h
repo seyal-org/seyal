@@ -124,6 +124,15 @@ typedef struct SeyalComposerStatus {
     uint8_t reserved[7];
 } SeyalComposerStatus;
 
+/* Read-only target for placing the one composer editor beside a live Relay Block. */
+typedef struct SeyalComposerTarget {
+    uint64_t block_id;
+    uint64_t target_generation;
+    uint64_t revision;
+    uint8_t mode;
+    uint8_t reserved[7];
+} SeyalComposerTarget;
+
 /* ADR-026 session affordance. kind: 0 none, 1 enable Blocks, 2 offer. */
 typedef struct SeyalSessionSurface {
     uint8_t kind;
@@ -284,6 +293,7 @@ uint8_t seyal_bridge_history_range_consume_for_handle(
 );
 SeyalComposerResult seyal_bridge_composer_result(void);
 SeyalComposerStatus seyal_bridge_composer_status(void);
+SeyalComposerTarget seyal_bridge_composer_target(void);
 SeyalSessionSurface seyal_bridge_session_surface(void);
 const char *seyal_bridge_session_copy(uint8_t kind);
 int32_t seyal_bridge_session_request(void);

@@ -128,8 +128,15 @@ extension RustDisplayBridge {
       attachmentIDHigh: status.attachment_id_high
     )
     guard shouldRelay else { return }
+    let target = seyal_bridge_composer_target()
     let accepted = onComposerStatus(
-      NativeComposerStatus(eligibility: status.eligibility, revision: status.revision)
+      NativeComposerStatus(
+        eligibility: status.eligibility,
+        revision: status.revision,
+        targetBlockID: target.block_id,
+        targetGeneration: target.target_generation,
+        targetMode: target.mode
+      )
     )
     if !accepted {
       composerStatusRelayTracker.abandonClaim()

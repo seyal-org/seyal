@@ -217,8 +217,13 @@ struct NativeComposerResult: Equatable {
 struct NativeComposerStatus: Equatable {
   let eligibility: UInt8
   let revision: UInt64
+  let targetBlockID: UInt64
+  let targetGeneration: UInt64
+  let targetMode: UInt8
 
-  static let cleared = NativeComposerStatus(eligibility: 0, revision: 0)
+  static let cleared = NativeComposerStatus(
+    eligibility: 0, revision: 0, targetBlockID: 0, targetGeneration: 0, targetMode: 0
+  )
 }
 
 /// Geometry for one canonical Block projection on the Pane-owned Metal
@@ -228,6 +233,7 @@ struct NativeTranscriptRegion: Equatable {
   let id: UInt64
   let origin: NSPoint
   let clip: NSRect
+  var suppressesCursor: Bool = false
 }
 
 struct NativeTranscriptFrame: Equatable {

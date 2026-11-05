@@ -269,6 +269,7 @@ extension MetalTerminalRenderer {
                     }
                     // Cursor only inside the running Block clip.
                     if frame.cursorVisible,
+                       !region.suppressesCursor,
                        row == frame.cursorRow,
                        column == frame.cursorColumn,
                        !presentationPlan.drawsCursorOutsideBlockRegions

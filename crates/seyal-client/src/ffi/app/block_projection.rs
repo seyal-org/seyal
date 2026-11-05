@@ -96,7 +96,14 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
             })
             .unwrap_or(LiveTailProjection::FailClosed)
         } else {
-            project_block_output_until(mode, block.start_line, block.end_line, false, &[], None)
+            project_block_output_until(
+                mode,
+                block.start_line,
+                block.end_line,
+                false,
+                &[],
+                exclusive_end,
+            )
         };
         match projection {
             LiveTailProjection::PrimaryFrame(clip) => SeyalAppBlockProjection {
@@ -146,21 +153,23 @@ fn with_fence_matched_client<R>(
 
 /// Borrow the client's LineIds only when they pair with the committed display
 /// by generation and row count; otherwise the running clip fails closed.
-/// First session Block after a local Running host. Its start line is the
-/// exclusive end of the host live clip so one terminal line is one card.
+/// First session Block nested under a local host. Its start line is the
+/// exclusive end of the host projection so a terminal line is owned by one
+/// card even after the SSH process completes. A later local command begins a
+/// new host and ends this host's session-child search.
 fn following_session_start(
     composer: Option<&crate::composer::ComposerSnapshot>,
     index: usize,
 ) -> Option<u64> {
-    use crate::composer::BlockPresentationState;
     use seyal_protocol::framing::BlockScope;
     let composer = composer?;
     let host = composer.blocks.get(index)?;
-    if host.scope != BlockScope::Local || host.state != BlockPresentationState::Running {
+    if host.scope != BlockScope::Local {
         return None;
     }
     composer.blocks[index + 1..]
         .iter()
+        .take_while(|block| block.scope == BlockScope::Session)
         .find(|block| block.scope == BlockScope::Session)
         .map(|block| block.start_line)
 }
@@ -550,6 +559,54 @@ mod tests {
         let session_row = seyal_app_block_row(handle, 1);
         assert_ne!(session_row.flags & BLOCK_SESSION, 0);
         assert_eq!(seyal_app_block_row(handle, 0).flags & BLOCK_SESSION, 0);
+
+        // Once SSH exits, its local host history remains bounded before the
+        // remote command history instead of repainting the whole session.
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: Some(vec![
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x41; 16]),
+                            command: "ssh host".into(),
+                            start_line: 10,
+                            end_line: Some(80),
+                            running: false,
+                            exit_status: Some(0),
+                            canvas_floor: false,
+                            scope: BlockScope::Local,
+                        },
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x42; 16]),
+                            command: "echo session-ok".into(),
+                            start_line: 30,
+                            end_line: Some(40),
+                            running: false,
+                            exit_status: Some(0),
+                            canvas_floor: false,
+                            scope: BlockScope::Session,
+                        },
+                    ]),
+                })
+                .unwrap();
+        });
+        let completed_host = seyal_app_block_projection(handle, 0);
+        let completed_session = seyal_app_block_projection(handle, 1);
+        assert_eq!(completed_host.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(
+            (completed_host.start_line, completed_host.end_line),
+            (10, 29)
+        );
+        assert_eq!(completed_session.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(
+            (completed_session.start_line, completed_session.end_line),
+            (30, 40)
+        );
 
         crate::ffi::CLIENTS.with(|clients| {
             clients.borrow_mut().remove(&owner);

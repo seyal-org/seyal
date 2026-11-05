@@ -22,6 +22,12 @@ accumulate under Raw; Timeline existence does not require Flow to be visible.
 The same Pane and `ExecutionId` remain authoritative throughout. A command Block
 is not a terminal session and does not contain copied terminal state.
 
+For a trusted SSH session, the local host Block owns only the transcript before
+the first session-scoped command Block. Its output range ends immediately before
+that Block's start anchor, even after the SSH process exits. Remote command
+output belongs only to its session-scoped Block and must never be repeated in
+the host Block. Session command Blocks remain ordered in the same Pane history.
+
 Under the accepted #858 amendment (as amended by #1438), Flow, Raw and TUI are
 mutually exclusive user-visible presentations:
 
@@ -113,6 +119,25 @@ not another viewport added to Flow.
 **Accepted ADR-026 (#1384):** labeled Relay is not
 Raw and does not satisfy this section. Raw remains the full-Pane
 character-level presentation.
+
+**User-confirmed #1398 SSH Flow UX requirement:** While a trusted, line-oriented
+foreground program is in Relay, the existing Pane composer is presented on the
+Running Block's active terminal cursor row and column. The terminal-painted
+cursor is suppressed for that row while the composer owns input, so the user
+sees one input location. The Running Block remains the active terminal surface
+and becomes completed history only after the command exits. When the transcript
+is shorter than its viewport, its Blocks are bottom-aligned to the live input
+surface; overflowing history retains normal scrolling and live-end following.
+While Relay is inline, the transcript viewport extends to the Pane's bottom
+inset so the running prompt remains visually connected to the Pane edge.
+This is presentation over the same ExecutionId and PTY, not a second input
+engine or Block-owned terminal state.
+
+The composer remains a Pane-level input component and is painted above the
+terminal surface. Its frame follows the active cursor after transcript scroll,
+terminal frame updates, and Pane resize. The accessibility tree must continue
+to expose the one Pane composer independently from the Running Block; the Block
+owns output and history, while the Pane composer owns editable input.
 
 Leaving Raw re-evaluates current structured eligibility. Existing trusted Block
 history remains stable; untrusted raw interaction is not retroactively turned
@@ -224,6 +249,17 @@ snapshot.
   such semantics are required;
 - IME/first-responder/accessibility/mouse ownership follows the active
   presentation mode and section 3.4 transition fence.
+
+When the current Flow input target is `ForegroundProgram(b)` with an admitted
+line-level Relay, the Pane's single Rust-owned composer/editor is visually
+anchored over the terminal cursor in Running Block `b`, beside its live output.
+The composer remains the distinct Pane-level input component and keeps its
+existing draft, IME and target-generation authority; the Block owns only the
+displayed program output and scope. Submitted lines appear through the
+program's PTY output in that same Running Block and do not create child Blocks.
+When the target returns to
+`TrustedShell(session)`, the composer returns to the Pane input position. TUI
+takeover hides the composer and yields the full Pane to the terminal program.
 
 Direct-terminal event classification, committed-text atomicity, composition-only
 IME document semantics, key encoding, queue bounds and resize transactions remain
@@ -430,6 +466,7 @@ a different execution, attachment or presentation epoch.
 | Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
 | unsupported/nested SSH interaction | full-Pane Raw fallback; no simultaneous Flow + raw viewport |
 | consented session (ADR-026) | Discrete session-scoped Blocks under the host Running Block, and a retained composer (`Submit`) at a session-trusted prompt (Accepted ADR-026). **Accepted #1396:** same after Decision item 4 auto-arm (no Enable Blocks); while a session command is Running, Block-scoped line input to that program is primary for line-oriented interactive work |
+| trusted SSH session completes | Host Block history stops before the first session-scoped Block; each remote command and its output appears only in its own session Block, without duplicate remote transcript in the host |
 | declined session (ADR-026) | Labeled relay; no guessed Block. **Accepted #1396:** “declined” applies to companion install (#1385), typed-path decline, or bootstrap *failure* — not to skipping Enable Blocks; ordinary SSH Continues with Blocks when Decision item 4 auto-arm succeeds |
 | forged remote `A`/`D` (ADR-026) | Ignored; no secret match, so no trusted session transition |
 | depth-two session (ADR-026) | Relay or Raw; no second session secret. A candidate requires F4 ∈ {None, Declined, Failed}; arming while `Trusted(_)` is forbidden |

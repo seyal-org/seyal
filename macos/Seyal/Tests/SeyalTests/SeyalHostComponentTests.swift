@@ -55,6 +55,8 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.attachment_id_high), 16)
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.eligibility), 24)
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.reserved), 25)
+        XCTAssertEqual(MemoryLayout<SeyalComposerTarget>.size, 32)
+        XCTAssertEqual(MemoryLayout<SeyalComposerTarget>.offset(of: \.block_id), 0)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 120)
         XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
@@ -967,6 +969,33 @@ final class SeyalHostComponentTests: XCTestCase {
         scrollTarget.noteRegistryPolled()
         XCTAssertEqual(ObjectIdentifier(scrollTarget), beforePoll)
         XCTAssertEqual(scrollTarget.transcriptDocumentOffsetY, retainedOffset, accuracy: 1)
+    }
+
+    @MainActor
+    func testSessionBlockAlignsWithLocalBlock() {
+        func makeCard(session: Bool) -> CommandBlockView {
+            let card = CommandBlockView(
+                prompt: "$", title: "echo output", detail: "", state: 0,
+                cellHeight: 14, lines: 2, session: session
+            )
+            card.frame = NSRect(x: 0, y: 0, width: 600, height: 80)
+            card.layoutSubtreeIfNeeded()
+            return card
+        }
+
+        let local = makeCard(session: false)
+        let session = makeCard(session: true)
+        let localHeader = local.subviews[0]
+        let sessionHeader = session.subviews[0]
+        let localSeam = local.subviews[2]
+        let sessionSeam = session.subviews[2]
+
+        XCTAssertEqual(sessionHeader.frame.minX, localHeader.frame.minX, accuracy: 1)
+        XCTAssertEqual(sessionHeader.frame.maxX, localHeader.frame.maxX, accuracy: 1)
+        XCTAssertEqual(session.body.frame.minX, local.body.frame.minX, accuracy: 1)
+        XCTAssertEqual(session.body.frame.maxX, local.body.frame.maxX, accuracy: 1)
+        XCTAssertEqual(sessionSeam.frame.minX, localSeam.frame.minX, accuracy: 1)
+        XCTAssertEqual(sessionSeam.frame.maxX, localSeam.frame.maxX, accuracy: 1)
     }
 
     /// #1424: focus ownership updates must not recreate Block views or scroll.
@@ -4559,9 +4588,9 @@ extension SeyalHostComponentTests {
         let enable = String(cString: seyal_bridge_session_copy(4))
         let accept = String(cString: seyal_bridge_session_copy(2))
         let decline = String(cString: seyal_bridge_session_copy(3))
-        XCTAssertEqual(title, "Enable Blocks for this session")
-        XCTAssertEqual(enable, "Enable Blocks")
-        XCTAssertEqual(accept, "Enable for this session")
+        XCTAssertEqual(title, "Set up this SSH session")
+        XCTAssertEqual(enable, "Set up SSH session")
+        XCTAssertEqual(accept, "Set up this session")
         XCTAssertEqual(decline, "Not now")
         let surface = seyal_bridge_session_surface()
         XCTAssertEqual(surface.kind, 0)

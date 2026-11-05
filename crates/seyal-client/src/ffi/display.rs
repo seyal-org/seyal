@@ -6,8 +6,8 @@ use crate::LocalDisplayClient;
 use super::{
     error_code, with_active_client, with_active_client_mut, with_display_client,
     with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
-    SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange, SeyalHistoryRow,
-    SeyalHistorySidecar, SeyalPreparedFrame, SeyalSessionSurface,
+    SeyalComposerTarget, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange,
+    SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame, SeyalSessionSurface,
 };
 
 #[unsafe(no_mangle)]
@@ -284,6 +284,24 @@ pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
         .unwrap_or_else(SeyalComposerStatus::empty)
 }
 
+/// Read-only Runtime target used to anchor the single line Relay editor to its
+/// live Block. Rust retains admission authority; this value only positions UI.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_composer_target() -> SeyalComposerTarget {
+    with_display_client(|client| client.projected_composer_target())
+        .flatten()
+        .map(
+            |(block_id, target_generation, revision, mode)| SeyalComposerTarget {
+                block_id,
+                target_generation,
+                revision,
+                mode,
+                reserved: [0; 7],
+            },
+        )
+        .unwrap_or_else(SeyalComposerTarget::empty)
+}
+
 /// ADR-026 session affordance for the thin host. Kind 0 means hide the banner.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_session_surface() -> SeyalSessionSurface {
@@ -303,11 +321,11 @@ pub extern "C" fn seyal_bridge_session_surface() -> SeyalSessionSurface {
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_session_copy(kind: u8) -> *const std::ffi::c_char {
     let text: &'static [u8] = match kind {
-        0 => b"Enable Blocks for this session\0",
-        1 => b"Seyal will type one setup line into this session. That line may enter the remote shell's history. Seyal writes no remote file and installs only in-memory hooks until that shell exits. Direct input including Raw is held while bootstrap runs. Afterward Raw and labeled relay remain available. Relay is plaintext to the foreground program.\0",
-        2 => b"Enable for this session\0",
+        0 => b"Set up this SSH session\0",
+        1 => b"To group commands into session Blocks, Seyal will type one setup line into this session. That line may enter the remote shell's history. Seyal writes no remote file and installs only in-memory hooks until that shell exits. Direct input including Raw is held while setup runs. Afterward Raw and labeled relay remain available. Relay is plaintext to the foreground program.\0",
+        2 => b"Set up this session\0",
         3 => b"Not now\0",
-        4 => b"Enable Blocks\0",
+        4 => b"Set up SSH session\0",
         _ => b"\0",
     };
     text.as_ptr().cast()

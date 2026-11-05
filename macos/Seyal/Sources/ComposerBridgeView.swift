@@ -45,6 +45,12 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     private let execute = NSButton(title: "", target: nil, action: nil)
     private let history = NSButton(title: "", target: nil, action: nil)
     private var heightConstraint: NSLayoutConstraint!
+    private var textViewLeadingConstraint: NSLayoutConstraint!
+    private var textViewTopConstraint: NSLayoutConstraint!
+    private var textViewBottomConstraint: NSLayoutConstraint!
+    private var textViewDockTrailingConstraint: NSLayoutConstraint!
+    private var textViewInlineTrailingConstraint: NSLayoutConstraint!
+    private var inlineRelayPresentation = false
     private var lastEpoch: UInt64 = 0
     private var focusEligibilityGeneration: UInt64 = 0
     private var hasReconciledComposerState = false
@@ -131,15 +137,26 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         history.translatesAutoresizingMaskIntoConstraints = false
         execute.translatesAutoresizingMaskIntoConstraints = false
         heightConstraint = heightAnchor.constraint(equalToConstant: 40)
+        textViewLeadingConstraint = textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14)
+        textViewTopConstraint = textView.topAnchor.constraint(equalTo: topAnchor, constant: 8)
+        textViewBottomConstraint = textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
+        textViewDockTrailingConstraint = textView.trailingAnchor.constraint(
+            equalTo: history.leadingAnchor,
+            constant: -8
+        )
+        textViewInlineTrailingConstraint = textView.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -1
+        )
         NSLayoutConstraint.activate([
             heightConstraint,
-            textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            textView.trailingAnchor.constraint(equalTo: history.leadingAnchor, constant: -8),
+            textViewLeadingConstraint,
+            textViewDockTrailingConstraint,
             history.trailingAnchor.constraint(equalTo: execute.leadingAnchor, constant: -4),
             history.centerYAnchor.constraint(equalTo: centerYAnchor),
             history.heightAnchor.constraint(equalToConstant: 28),
-            textView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            textViewTopConstraint,
+            textViewBottomConstraint,
             placeholder.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
             placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
             execute.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
@@ -158,6 +175,10 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     func focusEditor() -> Bool {
         window?.makeFirstResponder(textView) ?? false
     }
+
+  var editorIsFirstResponder: Bool {
+    window?.firstResponder === textView
+  }
 
     /// Multipane focused host uses the primary `seyal-composer` AX id so XCUI
     /// and existing host assertions keep working; unfocused keeps pane-scoped id.
@@ -191,6 +212,26 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         textView.insertionPointColor = theme.accent
         execute.font = .systemFont(ofSize: theme.uiFontSize, weight: .medium)
         paintChrome()
+    }
+
+    func setInlineRelayPresentation(_ inline: Bool) {
+        guard inlineRelayPresentation != inline else { return }
+        inlineRelayPresentation = inline
+        textViewDockTrailingConstraint.isActive = !inline
+        textViewInlineTrailingConstraint.isActive = inline
+        heightConstraint.constant = inline ? 24 : 40
+        textViewLeadingConstraint.constant = inline ? 0 : 14
+        textViewTopConstraint.constant = inline ? 1 : 8
+        textViewBottomConstraint.constant = inline ? -1 : -8
+        history.isHidden = inline
+        execute.isHidden = inline
+        if inline {
+            placeholder.stringValue = ""
+        } else {
+            placeholder.stringValue = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
+        }
+        paintChrome()
+        needsLayout = true
     }
 
     private func readComposer() -> SeyalAppComposer {
@@ -237,7 +278,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let recall = seyal_app_composer_history(appHandle)
         history.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_HISTORY))
         history.isEnabled = available && recall.flags & UInt16(SEYAL_APP_HISTORY_HAS_ENTRIES) != 0
-        placeholder.stringValue = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
+        placeholder.stringValue = inlineRelayPresentation
+            ? "" : copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
         setAccessibilityValue(
             relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden"))
         )
@@ -379,6 +421,12 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
 
     private func paintChrome() {
         guard let theme else { return }
+        if inlineRelayPresentation {
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderWidth = 0
+            layer?.cornerRadius = 0
+            return
+        }
         layer?.backgroundColor = theme.elevated.cgColor
         layer?.borderWidth = 1
         layer?.borderColor = editing
@@ -407,7 +455,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         else { return }
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container).height
-        heightConstraint.constant = min(max(40, used + 16), 120)
+        heightConstraint.constant = inlineRelayPresentation
+            ? min(max(24, used + 2), 120) : min(max(40, used + 16), 120)
     }
 
     private func copyString(_ kind: UInt16) -> String {

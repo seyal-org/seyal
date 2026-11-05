@@ -328,6 +328,19 @@ impl LocalDisplayClient {
         Some((eligibility, revision, status.attachment_id.to_bytes()))
     }
 
+    pub fn projected_composer_target(&self) -> Option<(u64, u64, u64, u8)> {
+        if !self.session_bootstrap_negotiated {
+            return None;
+        }
+        let target = self.composer_target?;
+        Some((
+            target.block_id,
+            target.target_generation,
+            target.revision,
+            target.mode as u8,
+        ))
+    }
+
     pub(crate) fn note_composer_projection(&mut self) {
         let Some(status) = self.composer_status else {
             return;
@@ -602,5 +615,8 @@ fn reconstruction_probe_client_with_stream(
     }
 }
 
+#[cfg(test)]
+#[path = "tests/composer_target.rs"]
+mod composer_target_tests;
 #[cfg(test)]
 mod tests;
