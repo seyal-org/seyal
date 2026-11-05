@@ -1573,6 +1573,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        // Raw is the cold-start resting mode. This test exercises a user
+        // selected Flow host before checking that nested TUI refresh hides it.
+        XCTAssertEqual(seyal_app_invoke_workspace_command(handle, 12, 0, 0), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
         XCTAssertFalse(composer.isHidden, "Flow bind must show composer")
@@ -4413,12 +4416,22 @@ final class SeyalHostComponentTests: XCTestCase {
         let checkConnected = {
             let eligibility = seyal_app_snapshot(pane.appHandle).eligibility
             if !connectedOnce, view.terminalBridgeIsConnected,
-                view.terminalCurrentFrame() != nil,
-                eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                view.terminalCurrentFrame() != nil
             {
-                connectedOnce = true
-                connected.fulfill()
-                return
+                if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+                    seyal_app_invoke_workspace_command(pane.appHandle, 12, 0, 0) == 0
+                {
+                    // The scroll invariant is specifically about Flow. The
+                    // app now starts Raw, so select Flow as a user would.
+                    host.reconcileChrome()
+                }
+                if seyal_app_snapshot(pane.appHandle).eligibility
+                    == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                {
+                    connectedOnce = true
+                    connected.fulfill()
+                    return
+                }
             }
             if !connectedOnce, !didRetryExhaustedRecovery,
                 seyal_app_snapshot(pane.appHandle).recovery_stage
