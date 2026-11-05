@@ -507,7 +507,12 @@ final class ProductChromeHostView: NSView {
         reconcilePaneHosts(paneCount: Int(shell.pane_count))
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        if !direct {
+        if shell.pane_count > 1 {
+            // Every visible Pane, including the focused one, has its own
+            // durable presentation host. The legacy single-pane transcript
+            // must not publish a second AX copy of the focused Pane's Blocks.
+            clearLegacyTranscriptProjectionForMultipane()
+        } else if !direct {
             rebuildBlocks()
         }
         applyTranscriptPresentation(snapshot)

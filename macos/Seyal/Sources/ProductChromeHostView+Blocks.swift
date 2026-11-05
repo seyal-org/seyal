@@ -125,6 +125,21 @@ extension ProductChromeHostView {
         _ = seyal_app_apply(pane.appHandle, &action)
     }
 
+    /// Multipane Flow uses one durable presentation host per Pane. Remove the
+    /// legacy focused-pane cards from the hidden single-pane transcript so
+    /// accessibility exposes each Block only through its owning pane host.
+    /// Keep retained history in the input surface: if the layout collapses to
+    /// one Pane, `rebuildBlocks()` can project it again without another fetch.
+    func clearLegacyTranscriptProjectionForMultipane() {
+        for card in blockCards.values {
+            blocks.removeArrangedSubview(card)
+            card.removeFromSuperview()
+        }
+        blockCards.removeAll()
+        lastBlockCount = 0
+        syncTranscriptDocumentSize()
+    }
+
     /// Relay Runtime's composer eligibility into the Rust root unchanged
     /// (#978). Rust decides what the composer shows; this only carries it.
     @discardableResult

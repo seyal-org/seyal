@@ -27,6 +27,9 @@ Every Pane continues to project its own execution and BlockTimeline. Adding
 splits or terminal tabs must preserve each Pane's mode, Block bodies, live
 output, and transcript scroll state. Focus changes affect only input focus and
 composer target. A Pane failure or recovery cannot suspend a healthy sibling.
+A Block has exactly one visible and accessible projection, owned by the Pane
+whose timeline contains it; hidden single-pane chrome must not duplicate a
+focused multipane Block or expose a sibling's contents as the focused Pane's.
 A Pane still has one composer; when the user has
 opted into Flow and trusted shell integration reports a supported structured
 command-entry state, submitting the composer creates one new logical command

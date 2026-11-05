@@ -481,16 +481,23 @@ final class SecondaryLivePaneHost: NSView {
         let frame = seyal_bridge_frame_for(displayHandle)
         guard frame.cells != nil, frame.cell_count > 0 else { return }
         surface.consumeBridgeFrame(frame)
-        // Include execution= so multipane XCUI can identity Controllers without
-        // the hidden liveContent `terminal-input` surface (#1424).
-        let execution = String(
-            format: "%016llx%016llx",
-            seyal_bridge_execution_id_high(),
-            seyal_bridge_execution_id_low()
-        )
+        // Include this Pane's binding identity so multipane XCUI and recovery
+        // diagnostics never label a sibling's frame through the process-wide
+        // focused-display selector (#1424).
+        let execution = paneExecutionIdentity()
         setAccessibilityValue(
             "rows=\(frame.rows) columns=\(frame.columns) execution=\(execution) "
         )
+    }
+
+    private func paneExecutionIdentity() -> String {
+        let paneCount = Int(seyal_app_shell(appHandle).pane_count)
+        for index in 0..<paneCount {
+            let binding = seyal_app_pane_binding(appHandle, UInt32(index))
+            guard binding.pane_lo == paneLo, binding.pane_hi == paneHi else { continue }
+            return String(format: "%016llx%016llx", binding.execution_hi, binding.execution_lo)
+        }
+        return String(repeating: "0", count: 32)
     }
 
     private func updateAvailabilityPresentation() {
