@@ -31,6 +31,14 @@ private final class BundledRuntimeLaunchErrorBox: NSObject {
   }
 }
 
+/// TCC responsibility disclaim for the helper spawn (does not leave the process
+/// coalition; headed Quit still terminates the GUI-spawned helper for Dock clear).
+@_silgen_name("responsibility_spawnattrs_setdisclaim")
+private func seyal_responsibility_spawnattrs_setdisclaim(
+  _ attr: UnsafeMutablePointer<posix_spawnattr_t?>?,
+  _ disclaim: Int32
+) -> Int32
+
 /// Launches the one permanent Runtime helper without transferring Runtime or
 /// execution lifetime to the GUI. The Rust RecoveryCoordinator owns episode-level
 /// launch-once accounting; this type owns package trust and spawn hygiene.
@@ -38,6 +46,52 @@ final class BundledRuntimeLauncher {
   static let helperIdentifier = "dev.seyal.Seyal.runtime"
   static let helperRelativePath = "Contents/Helpers/seyal-runtime"
   static let systemPath = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+  // Quit/crash paths may observe this from the main actor or a reaper queue;
+  // NSLock serializes access. Swift 6 requires an explicit unsafe annotation.
+  nonisolated(unsafe) private static let launchedHelperLock = NSLock()
+  nonisolated(unsafe) private static var launchedHelperPid: pid_t = 0
+
+  /// Test seam: record a PID as the GUI-spawned helper without spawning.
+  static func recordLaunchedHelperPidForTests(_ pid: pid_t) {
+    launchedHelperLock.lock()
+    launchedHelperPid = pid
+    launchedHelperLock.unlock()
+  }
+
+  /// Intentional headed Quit must end the GUI-spawned helper so LaunchServices
+  /// does not keep `Seyal.app` as `(exited-with-subordinates)` / Dock-lit.
+  /// Crash paths that skip this leave the SETPGROUP helper alive.
+  static func terminateLaunchedHelperForHeadedQuit() {
+    launchedHelperLock.lock()
+    let pid = launchedHelperPid
+    launchedHelperPid = 0
+    launchedHelperLock.unlock()
+    guard pid > 1 else { return }
+    // Helper was spawned with SETPGROUP (new group leader == pid).
+    _ = kill(-pid, SIGTERM)
+    let deadline = Date().addingTimeInterval(0.4)
+    var status: Int32 = 0
+    while Date() < deadline {
+      let waited = waitpid(pid, &status, WNOHANG)
+      if waited == pid { return }
+      if waited == -1 && errno == ECHILD { return }
+      Thread.sleep(forTimeInterval: 0.01)
+    }
+    _ = kill(-pid, SIGKILL)
+    while true {
+      let waited = waitpid(pid, &status, 0)
+      if waited == pid || (waited == -1 && errno == ECHILD) { return }
+      if waited == -1 && errno == EINTR { continue }
+      return
+    }
+  }
+
+  private static func rememberLaunchedHelper(_ pid: pid_t) {
+    launchedHelperLock.lock()
+    launchedHelperPid = pid
+    launchedHelperLock.unlock()
+  }
 
   #if DEBUG
     /// Set by `IsolatedHostedRuntime` on `XCUIApplication.launchEnvironment`.
@@ -97,6 +151,7 @@ final class BundledRuntimeLauncher {
       try Self.validateCodeSignature(bundleURL: bundleURL, helperURL: helperURL)
       let environment = try Self.launchEnvironment()
       let pid = try Self.spawn(helperURL: helperURL, environment: environment)
+      Self.rememberLaunchedHelper(pid)
       reapWhenExited(pid)
       Self.recordLaunchError(nil)
       return .success(pid)
@@ -341,7 +396,8 @@ final class BundledRuntimeLauncher {
 
     let flags = Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP)
     guard posix_spawnattr_setflags(&attributes, flags) == 0,
-      posix_spawnattr_setpgroup(&attributes, 0) == 0
+      posix_spawnattr_setpgroup(&attributes, 0) == 0,
+      seyal_responsibility_spawnattrs_setdisclaim(&attributes, 1) == 0
     else { throw BundledRuntimeLaunchError.launchDenied }
 
     let executable = helperURL.path

@@ -2030,8 +2030,9 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// W4b: production window admission + last-window-close stay-alive.
-    func testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit() throws {
+    /// W4b: production window admission + last-window close quits headed app
+    /// (ADR-018 §2.5 / #1451). Dock reopen after Quit is a fresh launch.
+    func testNewWindowAdmissionCreatesSecondWindowAndLastCloseQuits() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         XCTAssertEqual(app.windows.count, 1, "bootstrap realizes exactly one headed window")
@@ -2041,7 +2042,6 @@ final class SeyalHostUITests: XCTestCase {
         newWindow.click()
         waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
         // #1395: File owns Close Terminal / Close Tab; Window owns Close Window.
-        // Hierarchical last-window stay-alive is WindowClose, not AppCloseFocused.
         let windowMenu = app.menuBars.menuBarItems["Window"]
         XCTAssertTrue(windowMenu.waitForExistence(timeout: 5))
         windowMenu.click()
@@ -2055,19 +2055,10 @@ final class SeyalHostUITests: XCTestCase {
         windowMenu.click()
         XCTAssertTrue(closeWindow.waitForExistence(timeout: 5))
         closeWindow.click()
-        waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
-        RunLoop.current.run(until: Date().addingTimeInterval(2))
-        XCTAssertEqual(app.state, .runningForeground, "last-window close must not quit")
-        let fileMenu = app.menuBars.menuBarItems["File"]
-        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
         XCTAssertTrue(
-            newWindow.waitForExistence(timeout: 5),
-            "File → New Window stays available after the last window closes"
+            app.wait(for: .notRunning, timeout: 8),
+            "closing the last window must quit the headed app (macOS-default)"
         )
-        XCTAssertTrue(newWindow.isEnabled, "zero-window re-entry remains admitted")
-        fileMenu.click()
-        newWindow.click()
-        waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
     }
 
     func testTitleBarCloseForwardsThroughWindowCloseDelegate() throws {

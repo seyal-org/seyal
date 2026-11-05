@@ -1682,6 +1682,30 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(BundledRuntimeLauncher.helperIdentifier, "dev.seyal.Seyal.runtime")
     }
 
+    func testTerminateLaunchedHelperForHeadedQuitEndsTrackedProcessGroup() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["30"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let pid = process.processIdentifier
+        XCTAssertGreaterThan(pid, 1)
+        BundledRuntimeLauncher.recordLaunchedHelperPidForTests(pid)
+        BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit()
+        let deadline = Date().addingTimeInterval(2)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        XCTAssertFalse(
+            process.isRunning,
+            "headed Quit must end the GUI-spawned helper so Dock clears"
+        )
+        // Second call with no tracked pid is a no-op.
+        BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit()
+    }
+
     @MainActor
     func testSplitPaneTerminalTabTitlesUseDistinctPaneIdentity() {
         XCTAssertEqual(

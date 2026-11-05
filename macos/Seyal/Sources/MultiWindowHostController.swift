@@ -502,6 +502,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         for key in Array(realizations.keys) {
             destroyRealization(key)
         }
+        // ADR-018 §4.0 / §13: intentional headed Quit must clear Dock. A
+        // GUI-spawned helper left alive keeps Seyal as (exited-with-subordinates).
+        BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit()
     }
 
     @discardableResult
