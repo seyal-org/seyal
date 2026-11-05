@@ -113,7 +113,8 @@ pub fn project_block_output(
     project_block_output_until(mode, start_line, end_line, running, viewport_line_ids, None)
 }
 
-/// Project one Block, optionally ending a running clip before `exclusive_end_line`.
+/// Project one Block, optionally ending its live or history range before
+/// `exclusive_end_line`.
 pub fn project_block_output_until(
     mode: PresentationMode,
     start_line: u64,
@@ -138,10 +139,21 @@ pub fn project_block_output_until(
                 None => LiveTailProjection::FailClosed,
             }
         }
-        (false, Some(end)) if end >= start_line => LiveTailProjection::History(HistorySpan {
-            start_line,
-            end_line: end,
-        }),
+        (false, Some(end)) if end >= start_line => {
+            let end_line = match exclusive_end_line {
+                Some(exclusive_end) if exclusive_end > start_line => end.min(exclusive_end - 1),
+                Some(_) => return LiveTailProjection::FailClosed,
+                None => end,
+            };
+            if end_line < start_line {
+                LiveTailProjection::FailClosed
+            } else {
+                LiveTailProjection::History(HistorySpan {
+                    start_line,
+                    end_line,
+                })
+            }
+        }
         _ => LiveTailProjection::FailClosed,
     }
 }
@@ -268,6 +280,19 @@ mod tests {
         let session_lines =
             &ids[session_clip.first_row as usize..][..session_clip.row_count as usize];
         assert!(host_lines.iter().all(|line| !session_lines.contains(line)));
+    }
+
+    #[test]
+    fn completed_ssh_host_history_stops_before_session_output() {
+        let host =
+            project_block_output_until(PresentationMode::Flow, 10, Some(80), false, &[], Some(30));
+        assert_eq!(
+            host,
+            LiveTailProjection::History(HistorySpan {
+                start_line: 10,
+                end_line: 29,
+            })
+        );
     }
 
     #[test]

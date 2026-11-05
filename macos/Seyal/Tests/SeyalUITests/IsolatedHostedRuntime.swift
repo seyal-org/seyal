@@ -45,7 +45,9 @@ enum IsolatedHostedRuntime {
   /// integration. The account `pw_shell` on hosted runners is bash, which
   /// SPEC-008 presents as full-pane Raw. The argv command only seeds the
   /// first execution; profile 0 (Split Right) reads `[shell].program`.
-  static func makeLaunchArguments() -> [String] { [flag, makeDirectory(), "/bin/zsh"] }
+  static func makeLaunchArguments(command: String = "/bin/zsh") -> [String] {
+    [flag, makeDirectory(), command]
+  }
 
   static let runtimeConfigEnvironmentKey = "SEYAL_UI_TEST_RUNTIME_CONFIG"
 
@@ -71,7 +73,10 @@ enum IsolatedHostedRuntime {
 
 extension XCUIApplication {
   @discardableResult
-  func launchIsolatedHost(environment: [String: String] = [:]) -> XCUIApplication {
+  func launchIsolatedHost(
+    environment: [String: String] = [:],
+    helperCommand: String = "/bin/zsh"
+  ) -> XCUIApplication {
     // Multi-window / multi-PTY cases can leave the previous Seyal.app shutting
     // down for >1s. Launching the next isolated host before `.notRunning`
     // races Runtime bootstrap and surfaces as `connection=disconnected
@@ -84,7 +89,7 @@ extension XCUIApplication {
     // Always mint a fresh `--runtime-dir`. Reconnect-without-kill cases reuse
     // arguments via `terminate()` + `launch()` and must not call this helper.
     stripIsolatedRuntimeLaunchArguments()
-    launchArguments += IsolatedHostedRuntime.makeLaunchArguments()
+    launchArguments += IsolatedHostedRuntime.makeLaunchArguments(command: helperCommand)
     for (key, value) in environment {
       launchEnvironment[key] = value
     }

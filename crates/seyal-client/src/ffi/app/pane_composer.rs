@@ -123,11 +123,12 @@ fn encode_pane_block_rows(state: &mut AppHandle, composer: &ComposerSnapshot) {
 fn following_session_start(composer: &ComposerSnapshot, index: usize) -> Option<u64> {
     use seyal_protocol::framing::BlockScope;
     let host = composer.blocks.get(index)?;
-    if host.scope != BlockScope::Local || host.state != BlockPresentationState::Running {
+    if host.scope != BlockScope::Local {
         return None;
     }
     composer.blocks[index + 1..]
         .iter()
+        .take_while(|block| block.scope == BlockScope::Session)
         .find(|block| block.scope == BlockScope::Session)
         .map(|block| block.start_line)
 }
@@ -273,7 +274,14 @@ pub extern "C" fn seyal_app_block_projection_for_pane(
             })
             .unwrap_or(LiveTailProjection::FailClosed)
         } else {
-            project_block_output_until(mode, block.start_line, block.end_line, false, &[], None)
+            project_block_output_until(
+                mode,
+                block.start_line,
+                block.end_line,
+                false,
+                &[],
+                exclusive_end,
+            )
         };
         match projection {
             LiveTailProjection::PrimaryFrame(clip) => SeyalAppBlockProjection {

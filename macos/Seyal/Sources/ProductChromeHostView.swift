@@ -72,6 +72,12 @@ final class ProductChromeHostView: NSView {
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
     var chromeNeedsReconcile = false
     var blockCards: [UInt64: CommandBlockView] = [:]
+    var composerDockConstraints: [NSLayoutConstraint] = []
+    var transcriptRelayBottomConstraint: NSLayoutConstraint?
+    let transcriptTopSpacer = NSView(frame: .zero)
+    var transcriptTopSpacerHeight: NSLayoutConstraint!
+    var relayTarget: (blockID: UInt64, generation: UInt64, mode: UInt8) = (0, 0, 0)
+    var composerInlineBlockID: UInt64 = 0
     var transcriptFrameRevision: UInt64 = 0
     /// Bounds zero-clip async republish so layout stalls cannot spin forever (#1379).
     var blockOutputZeroClipRetries: Int = 0
@@ -175,6 +181,7 @@ final class ProductChromeHostView: NSView {
         blocks.spacing = 22
         blocks.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         blocks.translatesAutoresizingMaskIntoConstraints = false
+        setupTranscriptTopSpacer()
         expose(blocks, identifier: "seyal-blocks")
         transcriptLeadingSpacer.translatesAutoresizingMaskIntoConstraints = false
         transcriptLeadingSpacer.setAccessibilityElement(false)
@@ -247,6 +254,7 @@ final class ProductChromeHostView: NSView {
         // Topmost subview: the palette floats above every other region,
         // including the inspector, when Rust opens it.
         addSubview(commandPalette)
+        setupComposerDockConstraints()
         NSLayoutConstraint.activate([
             commandPalette.leadingAnchor.constraint(equalTo: leadingAnchor),
             commandPalette.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -320,16 +328,14 @@ final class ProductChromeHostView: NSView {
             // 12pt below transcript. When the banner is visible it grows in
             // place without shifting Metal/PTY geometry for the idle path.
             sessionBootstrap.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
-            composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
-            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
-            composer.topAnchor.constraint(equalTo: sessionBootstrap.bottomAnchor),
-            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
+            composerDockConstraints[0], composerDockConstraints[1],
+            composerDockConstraints[2], composerDockConstraints[3],
             newShellButton.centerXAnchor.constraint(equalTo: composer.centerXAnchor),
             newShellButton.centerYAnchor.constraint(equalTo: composer.centerYAnchor),
             newShellButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
-            historyOverlay.bottomAnchor.constraint(equalTo: sessionBootstrap.topAnchor, constant: -8),
+            historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
             blocks.topAnchor.constraint(equalTo: transcript.contentView.topAnchor),
             blocks.leadingAnchor.constraint(equalTo: transcript.contentView.leadingAnchor),
             blocks.widthAnchor.constraint(equalTo: transcript.contentView.widthAnchor),
@@ -404,11 +410,7 @@ final class ProductChromeHostView: NSView {
         historyOverlay.onDismissed = { [weak self] in
             self?.composer.focusEditor()
         }
-        pane.inputSurface.onTimelineChanged = { [weak self] in
-            self?.projectRuntimeBlocks()
-            self?.reconcileChrome()
-            self?.refreshRunningBlockOutput()
-        }
+        installTimelineChangeHandler()
         pane.inputSurface.onHistoryRangeChanged = { [weak self] range in
             guard let self else { return }
             if self.pane.inputSurface.renderRawScrollbackHistoryIfNeeded(range) {
@@ -424,14 +426,7 @@ final class ProductChromeHostView: NSView {
             }
             self?.reconcileChrome()
         }
-        pane.inputSurface.onComposerStatusChanged = { [weak self] status in
-            guard let self else { return false }
-            let accepted = self.relayComposerStatus(status)
-            if accepted {
-                self.reconcileChrome()
-            }
-            return accepted
-        }
+        installComposerStatusHandler()
         pane.onProductChanged = { [weak self] in
             self?.reconcileChrome()
             // Frame advances (and ViewportLineIds remaps) arrive here via
@@ -460,6 +455,7 @@ final class ProductChromeHostView: NSView {
         // re-publish clips/origins. A translate-in-place shortcut desynced
         // Metal from AppKit card motion (stuck glyphs / fighting scroll).
         publishBlockOutputFrame()
+        positionInlineComposerAtCurrentCursor()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -515,6 +511,7 @@ final class ProductChromeHostView: NSView {
         let eligibilityChanged = snapshot.eligibility != lastEligibility
         if snapshot.generation == lastSnapshotGeneration && !eligibilityChanged {
             composer.reconcile()
+            applyComposerPlacement()
             sessionBootstrap.reconcile()
             historyOverlay.reconcile()
             commandPalette.reconcile()
@@ -548,6 +545,7 @@ final class ProductChromeHostView: NSView {
         }
         applyTranscriptPresentation(snapshot)
         composer.reconcile()
+        applyComposerPlacement()
         sessionBootstrap.reconcile()
         historyOverlay.reconcile()
         commandPalette.reconcile()

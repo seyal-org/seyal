@@ -84,7 +84,7 @@ Mutation evidence: with step 2 removed, `typeahead_behind_readiness_fails_closed
 
 ## Fallbacks and when no rewrite happens
 
-- **Not rewritten** (ordinary submission; the existing #1388 `Candidate` → Enable Blocks typed-consent path still applies):
+- **Not rewritten** (ordinary submission; the Candidate → consented, one-session shell-setup path still applies when spawn-time delivery is unavailable):
   - shell syntax of any kind: quotes, `$`, globs, `;`, `|`, `&`, backslash, redirections, assignments
   - `command ssh`, `\ssh`, `/usr/bin/ssh`
   - a remote command operand
@@ -92,7 +92,7 @@ Mutation evidence: with step 2 removed, `typeahead_behind_readiness_fails_closed
   - `-o RemoteCommand|RequestTTY|SessionType|StdinNull|ForkAfterAuthentication`
   - an unfenced submission (client without session bootstrap)
   - F4 not in `None`/`Declined`/`Failed`/`Ended`
-- **Remote zsh** → `Failed` → existing banner (kind 1) → explicit Enable Blocks → typed stager with consent (Decision item 9 re-request path).
+- **Remote zsh** → `Failed` → SSH session setup offer → typed stager with one-session consent (Decision item 9 re-request path).
 - **Remote bash < 4.1, sh, fish, csh, and others** → `SpawnArmed` stays silent. Raw works, and S is revoked when ssh exits. No banner is shown, because the typed stager also needs bash ≥ 4.1 or zsh.
 
 ## ADR-009 mechanism-4 compatibility (needs reviewer decision)
@@ -148,7 +148,7 @@ Follow the runtime hygiene in the #1388 headed note before each run.
 1. Composer `ssh <host>` to a bash ≥ 4.1 login shell: no banner. Authenticate in the terminal. The remote prompt arrives, and `echo session-ok` from the composer is a session Block under the host.
 2. The same with `ssh -J <bastion> <host>` and with a password or OTP prompt: input reaches ssh while authenticating.
 3. Type quickly during login: the typed text is discarded, and Blocks still arrive.
-4. Remote zsh login shell: the Enable Blocks banner appears. Enabling it gives Blocks through the typed path.
+4. Remote zsh login shell: the SSH session setup offer appears. Accepting the disclosed one-time setup gives session Blocks through the typed path; no remote files are created.
 5. A remote shell that is not bash or zsh, or bash 3.2: no banner, Raw works, and exiting ssh completes the host Block.
 6. `ssh <host> uptime`, `command ssh <host>`, and a host with `RemoteCommand` in `ssh_config` (use `command ssh`): no rewrite.
 7. Exit the remote shell: the host Block completes and the session ends.

@@ -65,7 +65,12 @@ extension MetalSurfaceView {
         width: region.clip.width * scale,
         height: region.clip.height * scale
       )
-      return NativeTranscriptRegion(id: region.id, origin: pixelClip.origin, clip: pixelClip)
+      return NativeTranscriptRegion(
+        id: region.id,
+        origin: pixelClip.origin,
+        clip: pixelClip,
+        suppressesCursor: region.suppressesCursor
+      )
     }
   }
 }

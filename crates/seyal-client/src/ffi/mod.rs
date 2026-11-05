@@ -67,10 +67,10 @@ impl ClientRegistryHandle {
 }
 
 pub(crate) use types::{
-    SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus, SeyalCopiedText,
-    SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange, SeyalHistoryRow,
-    SeyalHistorySidecar, SeyalPass9DiagSnapshot, SeyalPreparedFrame, SeyalRecoveryResult,
-    SeyalSessionSurface,
+    SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus, SeyalComposerTarget,
+    SeyalCopiedText, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange,
+    SeyalHistoryRow, SeyalHistorySidecar, SeyalPass9DiagSnapshot, SeyalPreparedFrame,
+    SeyalRecoveryResult, SeyalSessionSurface,
 };
 
 #[allow(unused_imports)]

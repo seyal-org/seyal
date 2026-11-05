@@ -2,6 +2,44 @@ import AppKit
 
 @MainActor
 extension ProductChromeHostView {
+    func setupTranscriptTopSpacer() {
+        transcriptTopSpacer.translatesAutoresizingMaskIntoConstraints = false
+        transcriptTopSpacerHeight = transcriptTopSpacer.heightAnchor.constraint(equalToConstant: 0)
+        transcriptTopSpacerHeight.isActive = true
+        blocks.addArrangedSubview(transcriptTopSpacer)
+    }
+
+    func setupComposerDockConstraints() {
+        composerDockConstraints = [
+            composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
+            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
+            composer.topAnchor.constraint(equalTo: sessionBootstrap.bottomAnchor),
+            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
+        ]
+    }
+
+    func installTimelineChangeHandler() {
+        pane.inputSurface.onTimelineChanged = { [weak self] in
+            self?.projectRuntimeBlocks()
+            self?.reconcileChrome()
+            self?.refreshRunningBlockOutput()
+        }
+    }
+
+    func installComposerStatusHandler() {
+        pane.inputSurface.onComposerStatusChanged = { [weak self] status in
+            guard let self else { return false }
+            let blockID = status.eligibility == 4 && status.targetMode == 2
+                ? status.targetBlockID : 0
+            self.relayTarget = (blockID, status.targetGeneration, status.targetMode)
+            let accepted = self.relayComposerStatus(status)
+            if accepted {
+                self.reconcileChrome()
+            }
+            return accepted
+        }
+    }
+
     func projectRuntimeBlocks() {
         let snapshot = seyal_app_snapshot(pane.appHandle)
         var action = SeyalAppAction()
@@ -58,10 +96,10 @@ extension ProductChromeHostView {
     }
 
     func rebuildBlocks() {
-        // Leading spacer stays; it is not a Block card (#1426 follow-up).
+        let previousCards = blockCards
         blocks.arrangedSubviews
             .filter { $0 !== transcriptLeadingSpacer }
-            .forEach { $0.removeFromSuperview() }
+            .forEach { blocks.removeArrangedSubview($0) }
         blockCards.removeAll()
         let composer = seyal_app_composer(pane.appHandle)
         let count = Int(composer.block_count)
@@ -103,13 +141,20 @@ extension ProductChromeHostView {
             let promptRow = seyal_app_copy(pane.appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
             let lines = outputLineCount(projection: projection)
-            let card = CommandBlockView(
+            let card = previousCards[blockID] ?? CommandBlockView(
                 prompt: prompt,
                 title: title,
                 detail: detail,
                 state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                 cellHeight: cellHeight,
                 lines: lines,
+                session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
+            )
+            card.updatePresentation(
+                prompt: prompt,
+                title: title,
+                detail: detail,
+                state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
             card.setAccessibilityIdentifier("seyal-block-\(visibleIndex)")
@@ -130,6 +175,9 @@ extension ProductChromeHostView {
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
             }
         }
+        for (blockID, card) in previousCards where blockCards[blockID] == nil {
+            card.removeFromSuperview()
+        }
         pane.inputSurface.discardHistoryRequests(except: retained)
         // Prune retained history to the timeline Block set (including
         // floor-hidden cards) so New shell / eviction cannot paint a prior
@@ -143,6 +191,7 @@ extension ProductChromeHostView {
             scrollTranscriptToLiveEnd()
         }
         lastBlockCount = visibleIndex
+        applyComposerPlacement()
         // clear→exit: card heights change after live-tail drop and History
         // settle; one async republish re-encodes retained history against the
         // final AppKit clips so prior origins cannot stick to earlier cards.
@@ -151,6 +200,110 @@ extension ProductChromeHostView {
             self.layoutSubtreeIfNeeded()
             self.syncTranscriptDocumentSize()
             self.publishBlockOutputFrame()
+        }
+    }
+
+    func applyComposerPlacement() {
+        let shouldRestoreEditorFocus = composer.editorIsFirstResponder
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+            || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        let target = relayTarget.mode == 2 && relayTarget.generation != 0
+            ? blockCards[relayTarget.blockID] : nil
+        guard !direct, relayTarget.blockID != 0, let target else {
+            setRelayTranscriptViewportBottomAnchored(false)
+            if composerInlineBlockID != 0 {
+                composerInlineBlockID = 0
+                composer.setInlineRelayPresentation(false)
+                composer.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate(composerDockConstraints)
+                if shouldRestoreEditorFocus { composer.focusEditor() }
+            }
+            return
+        }
+        // Relay positions the Pane composer over the running prompt. Keep the
+        // transcript as the full-height Pane viewport so the short live Block
+        // and its prompt stay bottom-aligned like Warp's live input surface.
+        setRelayTranscriptViewportBottomAnchored(true)
+        if composerInlineBlockID == relayTarget.blockID {
+            positionInlineComposerAtCurrentCursor()
+            return
+        }
+        NSLayoutConstraint.deactivate(composerDockConstraints)
+        composer.setInlineRelayPresentation(true)
+        // Keep the one Pane composer above the full-pane Metal surface. A
+        // Block is an output/history projection and is underneath that surface;
+        // reparenting the editor into its body makes AX see input that pixels
+        // cannot paint. The converted cursor rect follows transcript scrolling.
+        composer.translatesAutoresizingMaskIntoConstraints = true
+        liveContent.addSubview(composer, positioned: .above, relativeTo: pane)
+        composerInlineBlockID = relayTarget.blockID
+        layoutSubtreeIfNeeded()
+        positionInlineComposerAtCurrentCursor()
+        syncTranscriptDocumentSize()
+        if followingLiveEnd {
+            scrollTranscriptToLiveEnd()
+        }
+        positionInlineComposerAtCurrentCursor()
+        if shouldRestoreEditorFocus { composer.focusEditor() }
+    }
+
+    func setRelayTranscriptViewportBottomAnchored(_ anchored: Bool) {
+        if anchored {
+            let constraint = transcriptRelayBottomConstraint ?? {
+                let constraint = transcript.bottomAnchor.constraint(
+                    equalTo: liveContent.bottomAnchor,
+                    constant: -16
+                )
+                constraint.identifier = "seyal-flow-relay-transcript-bottom-inset"
+                transcriptRelayBottomConstraint = constraint
+                return constraint
+            }()
+            if !constraint.isActive {
+                constraint.isActive = true
+            }
+        } else if let constraint = transcriptRelayBottomConstraint, constraint.isActive {
+            constraint.isActive = false
+        }
+    }
+
+    func positionInlineComposerAtCurrentCursor() {
+        guard relayTarget.mode == 2,
+              relayTarget.blockID != 0,
+              let card = blockCards[relayTarget.blockID],
+              let frame = pane.inputSurface.terminalCurrentFrame()
+        else { return }
+        let composer = seyal_app_composer(pane.appHandle)
+        for index in 0..<Int(composer.block_count) {
+            let row = seyal_app_block_row(pane.appHandle, UInt32(index))
+            guard row.id_lo == relayTarget.blockID else { continue }
+            let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
+            guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP) else { return }
+            let rowOffset = Int(frame.cursor_row) - Int(projection.reserved0)
+            guard rowOffset >= 0, rowOffset < Int(projection.reserved1) else { return }
+            let cellSize = pane.inputSurface.terminalPresentationCellSize()
+            let column = max(Int(frame.cursor_column), 0)
+            let localY = card.body.isFlipped
+                ? CGFloat(rowOffset) * cellSize.height
+                : card.body.bounds.maxY - CGFloat(rowOffset + 1) * cellSize.height
+            let cursorCell = NSRect(
+                x: CGFloat(column) * cellSize.width,
+                y: localY,
+                width: cellSize.width,
+                height: cellSize.height
+            )
+            let cursorInLiveContent = card.body.convert(cursorCell, to: liveContent)
+            let composerHeight: CGFloat = 24
+            let origin = NSPoint(
+                x: cursorInLiveContent.minX,
+                y: cursorInLiveContent.midY - composerHeight / 2
+            )
+            self.composer.setFrameSize(NSSize(
+                width: max(liveContent.bounds.maxX - origin.x - 20, cellSize.width),
+                height: composerHeight
+            ))
+            self.composer.setFrameOrigin(origin)
+            return
         }
     }
 
@@ -191,6 +344,7 @@ extension ProductChromeHostView {
             card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
         }
         syncTranscriptDocumentSize()
+        positionInlineComposerAtCurrentCursor()
         publishBlockOutputFrame()
     }
 
@@ -354,7 +508,12 @@ extension ProductChromeHostView {
         for (blockID, card) in blockCards {
             let clip = card.body.convert(card.body.bounds, to: surface)
             guard clip.width > 0, clip.height > 0 else { continue }
-            regions.append(NativeTranscriptRegion(id: blockID, origin: clip.origin, clip: clip))
+            regions.append(NativeTranscriptRegion(
+                id: blockID,
+                origin: clip.origin,
+                clip: clip,
+                suppressesCursor: blockID == relayTarget.blockID && relayTarget.mode == 2
+            ))
         }
         return regions
     }

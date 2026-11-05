@@ -9,7 +9,6 @@ use std::os::unix::net::UnixStream;
 
 #[path = "tests/delivery.rs"]
 mod delivery;
-
 pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
     LocalDisplayClient {
         stream,
