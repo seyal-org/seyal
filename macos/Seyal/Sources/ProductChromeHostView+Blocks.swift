@@ -1,5 +1,30 @@
 import AppKit
 
+enum HistoryRangeRouting {
+    enum Destination: Equatable {
+        case primary
+        case secondary(UInt64)
+        case discard
+    }
+
+    static func destination(
+        sourceDisplayHandle: UInt64,
+        primaryDisplayHandle: UInt64,
+        secondaryDisplayHandles: Set<UInt64>
+    ) -> Destination {
+        if sourceDisplayHandle == 0 {
+            return secondaryDisplayHandles.isEmpty ? .primary : .discard
+        }
+        if sourceDisplayHandle == primaryDisplayHandle, primaryDisplayHandle != 0 {
+            return .primary
+        }
+        if secondaryDisplayHandles.contains(sourceDisplayHandle) {
+            return .secondary(sourceDisplayHandle)
+        }
+        return .discard
+    }
+}
+
 @MainActor
 extension ProductChromeHostView {
     func setupTranscriptTopSpacer() {
@@ -390,21 +415,24 @@ extension ProductChromeHostView {
     }
 
     func applyHistoryRange(_ range: NativeHistoryRange) {
-        // Multipane: route by the Controller that produced the range (#1426).
-        // Block ids alone collide across executions and caused cross-pane bodies.
-        if range.sourceDisplayHandle != 0,
-            let host = centerColumn.secondaryHost(displayHandle: range.sourceDisplayHandle)
-        {
+        let bridge = pane.inputSurface.bridge
+        let focusedDisplayHandle = bridge?.windowFocusedDisplayHandle ?? 0
+        let primaryDisplayHandle = focusedDisplayHandle != 0
+            ? focusedDisplayHandle : bridge?.clientHandle ?? 0
+        let secondaryDisplayHandles = Set(centerColumn.secondaryHosts.map(\.displayHandle))
+        switch HistoryRangeRouting.destination(
+            sourceDisplayHandle: range.sourceDisplayHandle,
+            primaryDisplayHandle: primaryDisplayHandle,
+            secondaryDisplayHandles: secondaryDisplayHandles
+        ) {
+        case .secondary(let handle):
+            guard let host = centerColumn.secondaryHost(displayHandle: handle) else { return }
             host.applyHistoryRange(range)
             return
-        }
-        if centerColumn.secondaryHosts.count > 1,
-            let host = centerColumn.secondaryHosts.first(where: {
-                $0.blockCards[range.blockID] != nil
-            })
-        {
-            host.applyHistoryRange(range)
+        case .discard:
             return
+        case .primary:
+            break
         }
         pane.inputSurface.retainHistoryRange(range)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height

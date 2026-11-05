@@ -247,6 +247,7 @@ extension RustDisplayBridge {
     for _ in 0..<8 {
       // Presentation/history reads select the focused terminal below. Keep
       // readiness polling pinned to this bridge's original Controller.
+      let polledHandle = clientHandle
       guard selectClient() else { return }
       let result = seyal_bridge_poll()
       // Shell exit (-6): Lifecycle Finalized arrives after the final display /
@@ -255,20 +256,25 @@ extension RustDisplayBridge {
       // for stop — #1379 clear→exit). Other losses unregister inside poll;
       // APPLY_RUNTIME_BLOCKS with no client retains the composer timeline.
       if result < 0 {
+        // This readiness source polled clientHandle even when another pane was
+        // focused. Drain its completed history before a shell-exit disconnect;
+        // focused-display lookup would strand or misroute the response (#1426).
+        publishHistoryRanges(forDisplayHandle: polledHandle)
         _ = selectPresentedClient()
-        publishHistoryRanges()
         onTimeline()
         // Rebuild may have issued fresh history requests for settled Blocks;
-        // one more publish picks up anything already buffered on the client.
-        _ = selectPresentedClient()
-        publishHistoryRanges()
+        // one more addressed publish picks up buffered responses on the polled
+        // Controller without reading a sibling's same-numbered Block.
+        publishHistoryRanges(forDisplayHandle: polledHandle)
         onError(result)
         stop(reconnect: result == -18)
         return
       }
       runtimeBlockMetadata = currentBlockMetadata()
+      // Publish this poll source before selecting the focused presentation
+      // client. Pane-local Block ids are only meaningful on their Controller.
+      publishHistoryRanges(forDisplayHandle: polledHandle)
       _ = selectPresentedClient()
-      publishHistoryRanges()
       publishComposerResult()
       publishComposerStatus()
       if let text = copiedText() {

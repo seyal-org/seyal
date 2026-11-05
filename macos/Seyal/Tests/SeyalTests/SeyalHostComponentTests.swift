@@ -2476,8 +2476,85 @@ final class SeyalHostComponentTests: XCTestCase {
         let blocksPath = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
         let blocksText = (try? String(contentsOf: blocksPath, encoding: .utf8)) ?? ""
         XCTAssertTrue(
-            blocksText.contains("secondaryHost(displayHandle: range.sourceDisplayHandle)"),
+            blocksText.contains("secondaryHost(displayHandle: handle)"),
             "history delivery must route by source display handle"
+        )
+        XCTAssertTrue(
+            blocksText.contains("HistoryRangeRouting.destination"),
+            "unknown nonzero source handles must be dropped instead of falling back to a colliding Block id"
+        )
+        XCTAssertFalse(
+            blocksText.contains("secondaryHosts.first(where:"),
+            "Block ids are pane-local and cannot choose a history destination"
+        )
+    }
+
+    func testHistoryRangeRoutingRejectsUnknownControllersAndAmbiguousLegacyReplies() {
+        let secondaryHandles: Set<UInt64> = [22, 33]
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 11,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: secondaryHandles
+            ),
+            .primary
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 22,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: secondaryHandles
+            ),
+            .secondary(22)
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 99,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: secondaryHandles
+            ),
+            .discard,
+            "a stale reply must not fall back to a pane with the same local Block id"
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 0,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: secondaryHandles
+            ),
+            .discard,
+            "an unaddressed reply is ambiguous while secondary panes exist"
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 0,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: []
+            ),
+            .primary,
+            "legacy unaddressed replies remain valid for a single-pane window"
+        )
+    }
+
+    /// The primary readiness source polls `clientHandle`; focus selection must
+    /// not redirect its history response lookup to another Controller.
+    @MainActor
+    func testPrimaryHistoryDeliveryUsesPolledControllerHandle() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let inputPath = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
+        let inputText = (try? String(contentsOf: inputPath, encoding: .utf8)) ?? ""
+        XCTAssertFalse(inputText.isEmpty, "RustDisplayBridge+Input.swift must be readable")
+        XCTAssertTrue(
+            inputText.contains("let polledHandle = clientHandle"),
+            "primary history delivery must retain the handle selected for readiness polling"
+        )
+        XCTAssertTrue(
+            inputText.contains("publishHistoryRanges(forDisplayHandle: polledHandle)"),
+            "polling an unfocused Controller must publish its own completed history"
         )
     }
 

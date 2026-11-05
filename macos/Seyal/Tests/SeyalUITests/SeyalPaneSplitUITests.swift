@@ -307,6 +307,15 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testCompletedBlockHistoryStaysOnProducingUnfocusedPane() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
+        // New workspaces now start in Raw. This acceptance covers per-Pane
+        // completed Blocks, so select Flow through the product View menu.
+        let viewMenu = app.menuBars.menuBarItems["View"]
+        XCTAssertTrue(viewMenu.waitForExistence(timeout: 5))
+        viewMenu.click()
+        let toggleRaw = app.menuItems["Toggle Raw"]
+        XCTAssertTrue(toggleRaw.waitForExistence(timeout: 5), app.debugDescription)
+        toggleRaw.click()
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 12))
         let markerA = "seyal-1426-hist-a-\(String(UUID().uuidString.prefix(6)))"
         let markerB = "seyal-1426-hist-b-\(String(UUID().uuidString.prefix(6)))"
         click(app, "seyal-split-right")
