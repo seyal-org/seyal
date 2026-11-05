@@ -272,6 +272,21 @@ final class SeyalPaneSplitUITests: XCTestCase {
             "\(secondaryBlock.identifier)-body"
         ].firstMatch
         XCTAssertTrue(secondaryBody.waitForExistence(timeout: 8))
+        let firstLine = "\(marker) 01"
+        let firstLineRendered = expectation(
+            for: NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", firstLine, firstLine),
+            evaluatedWith: secondaryBody,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [firstLineRendered], timeout: 8),
+            .completed,
+            "the inactive Flow Block receives live output before the command exits"
+        )
+        let inactiveStreamScreenshot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        inactiveStreamScreenshot.name = "1426-inactive-flow-block-during-numbered-stream"
+        inactiveStreamScreenshot.lifetime = .keepAlways
+        add(inactiveStreamScreenshot)
         for line in 1...12 {
             let expected = String(format: "%@ %02d", marker, line)
             let containsLine = expectation(
