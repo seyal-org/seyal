@@ -419,8 +419,32 @@ impl ApplicationRoot {
         for pane in panes {
             self.latch_execution_ended_on_pane(pane);
             self.settle_running_blocks_after_exit(pane);
-            self.note_pane_attachment_loss(pane, handle);
-            self.unregister_extra_pane_client(pane);
+            // A finalized execution is not an attachment-recovery candidate.
+            // Retain its terminal-tab identity long enough for the host to
+            // drain the final addressed history, then let that host disconnect
+            // the registry handle.
+            let ended_terminal_tab =
+                self.terminal_client_raws
+                    .iter()
+                    .find_map(|(terminal_tab, raw)| {
+                        (*raw == handle
+                            && self
+                                .extra_terminal_clients
+                                .get(terminal_tab)
+                                .is_some_and(|owned| owned.raw() == handle)
+                            && self
+                                .terminal_authorities
+                                .get(terminal_tab)
+                                .is_some_and(|authority| authority.pane == pane))
+                        .then_some(*terminal_tab)
+                    });
+            if let Some(terminal_tab) = ended_terminal_tab {
+                self.extra_terminal_clients.remove(&terminal_tab);
+                self.terminal_client_raws.remove(&terminal_tab);
+                self.pane_client_raws.remove(&pane);
+            } else {
+                self.unregister_extra_pane_client(pane);
+            }
             if self
                 .client_handle
                 .as_ref()
@@ -479,7 +503,30 @@ impl ApplicationRoot {
             .collect();
         for pane in panes {
             self.note_pane_attachment_loss(pane, handle);
-            self.unregister_extra_pane_client(pane);
+            let lost_terminal_tab =
+                self.terminal_client_raws
+                    .iter()
+                    .find_map(|(terminal_tab, raw)| {
+                        (*raw == handle
+                            && self
+                                .extra_terminal_clients
+                                .get(terminal_tab)
+                                .is_some_and(|owned| owned.raw() == handle)
+                            && self
+                                .terminal_authorities
+                                .get(terminal_tab)
+                                .is_some_and(|authority| authority.pane == pane))
+                        .then_some(*terminal_tab)
+                    });
+            if let Some(terminal_tab) = lost_terminal_tab {
+                // Keep the terminal/pane authority and execution binding for
+                // the recovery fence, but remove the lost Controller handle.
+                self.extra_terminal_clients.remove(&terminal_tab);
+                self.terminal_client_raws.remove(&terminal_tab);
+                self.pane_client_raws.remove(&pane);
+            } else {
+                self.unregister_extra_pane_client(pane);
+            }
             if self
                 .client_handle
                 .as_ref()

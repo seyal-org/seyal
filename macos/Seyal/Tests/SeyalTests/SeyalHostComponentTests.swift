@@ -2462,6 +2462,64 @@ final class SeyalHostComponentTests: XCTestCase {
             "history request must target the named Controller"
         )
         XCTAssertTrue(
+            historyText.contains("finishAddressedMutation(\n      seyal_bridge_request_history_range_for("),
+            "a failure on a secondary history Controller must not stop the bridge's primary Controller"
+        )
+        XCTAssertEqual(
+            historyText.components(separatedBy: "finishAddressedMutation(").count - 1,
+            2,
+            "initial and continuation requests must share the per-Controller failure boundary"
+        )
+        let inputPath = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
+        let inputText = (try? String(contentsOf: inputPath, encoding: .utf8)) ?? ""
+        let helperRange = inputText.range(
+            of: "func finishAddressedMutation(_ result: Int32, forDisplayHandle handle: UInt64)"
+        )
+        XCTAssertNotNil(helperRange, "addressed history mutation helper must exist")
+        if let helperRange {
+            let helperEnd = inputText[helperRange.lowerBound...].range(
+                of: "func drainReadyDisplayWork()"
+            )?.lowerBound ?? inputText.endIndex
+            let helperBody = inputText[helperRange.lowerBound..<helperEnd]
+            XCTAssertTrue(helperBody.contains("guard handle == clientHandle else"))
+            XCTAssertFalse(
+                helperBody.contains("onError(result)"),
+                "secondary failures must not be routed through the primary Pane's error callback"
+            )
+            XCTAssertTrue(helperBody.contains("onStatusChanged()"))
+            XCTAssertTrue(
+                helperBody.contains("return finishMutation(result)"),
+                "only the primary Controller may tear down the shared bridge"
+            )
+        }
+        let inputDrain = inputText.range(of: "func drainReadyDisplayWork()")
+        XCTAssertNotNil(inputDrain, "primary display readiness path must exist")
+        if let inputDrain {
+            let inputDrainBody = inputText[inputDrain.lowerBound...]
+            XCTAssertTrue(
+                inputDrainBody.contains("handlePrimaryRegistryRemovalIfNeeded()"),
+                "a primary handle removed by Rust sibling polling must enter recovery"
+            )
+            XCTAssertEqual(
+                inputDrainBody.components(separatedBy: "handlePrimaryRegistryRemovalIfNeeded()")
+                    .count - 1,
+                2,
+                "both the initial select and bounded repoll must route primary registry loss into recovery"
+            )
+        }
+        let bridgePath = sourceRoot.appendingPathComponent("RustDisplayBridge.swift")
+        let bridgeText = (try? String(contentsOf: bridgePath, encoding: .utf8)) ?? ""
+        let auxiliaryRead = bridgeText.range(of: "func armAuxiliaryReadSources()")
+        XCTAssertNotNil(auxiliaryRead, "sibling Controller read sources must remain available")
+        if let auxiliaryRead {
+            let auxiliaryBody = bridgeText[auxiliaryRead.lowerBound...]
+            XCTAssertTrue(auxiliaryBody.contains("self.auxiliaryReadSources[handle] != nil"))
+            XCTAssertFalse(
+                auxiliaryBody.prefix(180).contains("guard isConnected"),
+                "sibling polling must not depend on the primary bridge connection"
+            )
+        }
+        XCTAssertTrue(
             historyText.contains("seyal_bridge_history_range_peek_for_handle("),
             "history peek must read the named Controller cache"
         )
@@ -2487,6 +2545,33 @@ final class SeyalHostComponentTests: XCTestCase {
             blocksText.contains("secondaryHosts.first(where:"),
             "Block ids are pane-local and cannot choose a history destination"
         )
+    }
+
+    /// #1426: an addressed secondary failure must not tear down the bridge's
+    /// primary Controller or cancel sibling-pane polling.
+    @MainActor
+    func testSecondaryControllerFailurePreservesPrimaryBridge() {
+        var errors: [Int32] = []
+        var statusChanges = 0
+        let bridge = RustDisplayBridge(
+            onFrame: { _ in },
+            onError: { errors.append($0) },
+            onStatusChanged: { statusChanges += 1 },
+            paneID: "primary"
+        )
+        bridge.clientHandle = 0xA
+        bridge.isConnected = true
+
+        let result = bridge.finishAddressedMutation(-10, forDisplayHandle: 0xB)
+
+        XCTAssertEqual(result, -10)
+        XCTAssertTrue(
+            errors.isEmpty,
+            "an addressed secondary failure must not be reported through the primary Pane callback"
+        )
+        XCTAssertEqual(statusChanges, 1)
+        XCTAssertTrue(bridge.isConnected)
+        XCTAssertEqual(bridge.clientHandle, 0xA)
     }
 
     func testHistoryRangeRoutingRejectsUnknownControllersAndAmbiguousLegacyReplies() {

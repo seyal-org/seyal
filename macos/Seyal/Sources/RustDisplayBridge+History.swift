@@ -27,9 +27,11 @@ extension RustDisplayBridge {
     // poll/flush; focused history FFI would hit FOCUSED_DISPLAY_HANDLE (#1426).
     let requestID = seyal_bridge_next_history_request_id_for(handle)
     guard requestID != 0 else { return -4 }
-    let result = finishMutation(
+    let result = finishAddressedMutation(
       seyal_bridge_request_history_range_for(
-        handle, blockID, startLine, endLine, 512, 131_072, 0))
+        handle, blockID, startLine, endLine, 512, 131_072, 0),
+      forDisplayHandle: handle
+    )
     if result == 0 {
       let requestKey = PaneHistoryRequestKey(
         displayHandle: handle, paneID: paneID, requestID: requestID)
@@ -60,6 +62,14 @@ extension RustDisplayBridge {
     historyContinuations = historyContinuations.filter { requestKey, _ in
       requestedHistoryRanges[requestKey] != nil
     }
+  }
+
+  /// Retire only correlations owned by a Controller whose registry entry was
+  /// lost. Other visible Pane histories keep their in-flight requests.
+  func discardHistoryRequests(forDisplayHandle handle: UInt64) {
+    requestedHistoryRanges = requestedHistoryRanges.filter { $0.key.displayHandle != handle }
+    historyRevisions = historyRevisions.filter { $0.key.displayHandle != handle }
+    historyContinuations = historyContinuations.filter { $0.key.displayHandle != handle }
   }
 
   /// Publish buffered history for the focused/presented Controller.
@@ -134,10 +144,12 @@ extension RustDisplayBridge {
         let nextStart = (previous?.startUnit ?? 0) + leads
         let nextID = seyal_bridge_next_history_request_id_for(handle)
         if nextID != 0 {
-          let continued = finishMutation(
+          let continued = finishAddressedMutation(
             seyal_bridge_request_history_range_for(
               handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
-              nextStart))
+              nextStart),
+            forDisplayHandle: handle
+          )
           if continued == 0 {
             let nextKey = PaneHistoryRequestKey(
               displayHandle: handle, paneID: paneID, requestID: nextID)
