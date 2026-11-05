@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384 (Accepted on merge of this acceptance PR by a non-author maintainer; normative; read through ADR-026; an author or agent comment is not acceptance); Raw-choice amendment under #1404 recorded 2026-11-01 and **superseded** by the grid-first resting-presentation amendment under #1438 (normative on merge of its architecture-only acceptance PR)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384 (Accepted on merge of this acceptance PR by a non-author maintainer; normative; read through ADR-026; an author or agent comment is not acceptance); Raw-choice amendment under #1404 recorded 2026-11-01 and **superseded** by the grid-first resting-presentation amendment under #1438 (normative on merge of its architecture-only acceptance PR); proposed 2026-11-05 multipane split amendment under #1454 (not normative until a separate architecture-only acceptance PR)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); multipane split amendment proposed 2026-11-05 (#1454)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1482,4 +1482,88 @@ execution. Change the **resting** policy to **grid-first**:
    resting choices can be correct under focus changes.
 4. Only after the headed Raw gate is green, schedule Flow reliability work
    against the promotion gate—not as the cold-start default.
+
+## Proposed 2026-11-05 amendment — Tab-wide Flow on explicit split (#1454)
+
+**Status:** Proposed. This amendment is not normative until it is accepted in
+this Architecture/R&D Issue's separate ADR-only PR by a non-author maintainer
+and the product owner. It must not be mixed with production implementation.
+
+### Problem
+
+The accepted split-created-Flow behavior selects Flow only for the new leaf.
+When a user splits a supported Raw Pane, the new leaf shows Blocks while the
+source and any other eligible Raw panes in the same Tab remain Raw. That leaves
+a mixed Raw/Blocks workspace after the explicit action users take to create a
+multipane Blocks surface. Existing Block history may remain available under
+Raw, but it is not visible as the requested Blocks presentation.
+
+### Proposed decision
+
+Keep Raw as the cold-start and new-Tab resting default. Treat an explicit split
+as the user's opt-in to a Blocks workspace for that Tab:
+
+1. On a successful split action, Rust sets the stored resting presentation to
+   Flow for every Pane in that Tab whose underlying execution has current
+   trusted Flow eligibility, including existing panes and the new leaf. The
+   split event, rather than a shell-status or prompt event, is the opt-in.
+2. The transition applies only to the affected Tab. Other Tabs retain their
+   own presentation choices. A later explicit Raw selection remains latched
+   until another direct user action changes it.
+3. Unsupported or untrusted executions remain full-Pane Raw and receive no
+   guessed Blocks. An active alternate-screen application remains full-Pane
+   TUI during the split; its stored resting presentation becomes Flow only
+   when its underlying execution is eligible, and TUI exit restores that
+   stored Flow choice.
+4. Each Pane continues to project its own execution and BlockTimeline. Flow
+   mode selection must not clear, move, copy, or recreate another Pane's
+   command bodies, output, or scroll state. Focus changes alter only input
+   focus and composer target.
+5. Eligibility or split failure is fail-closed per Pane: that Pane remains in
+   its prior safe presentation, and healthy siblings keep their own
+   presentation, history, output, and input routes.
+
+This amendment changes only split-triggered resting selection. It does not
+make Flow the default for a cold start or new Tab, change shell-integration
+trust rules, create a second terminal authority, or replace an active TUI.
+
+### Consequences
+
+- A supported Tab enters an all-Flow resting presentation after the user
+  explicitly splits it; focus churn cannot expose a sibling Raw surface.
+- Existing BlockTimeline data accumulated under Raw becomes visible through
+  each eligible Pane's Flow transcript without copying terminal state.
+- A Tab may still contain Raw or TUI leaves where per-execution eligibility
+  or active alternate-screen state requires those full-Pane modes.
+- The decision does not claim Flow reliability is generally promoted: a
+  single-Pane cold start and a newly created Tab remain Raw.
+
+### Alternatives considered
+
+- **Flow only for the new split leaf.** Rejected for this multipane product
+  goal because the source and any other eligible Raw panes remain Raw after
+  the user explicitly creates a Blocks workspace.
+- **Make Flow the cold-start/new-Tab default.** Rejected as a broader change
+  than the evidence requires and contrary to the accepted #1438 quarantine.
+- **Require one explicit Flow selection per Pane.** Rejected for this product
+  goal because the split action would leave a mixed workspace and require
+  repeated mode changes.
+- **Keep Raw as the universal multipane mode and render Block decorations on
+  the grid.** Deferred; it changes the presentation architecture and needs a
+  separate design, acceptance contract, and headed evidence.
+
+### Required implementation evidence if accepted
+
+- Architecture-only acceptance of this amendment before implementation.
+- After acceptance, update SPEC-008 and the owning implementation Issue before
+  production changes.
+- Tests for split from Raw, Flow, and TUI; trusted and unsupported executions;
+  two or more panes and multiple terminal tabs; and per-Pane mode, Block-body,
+  and scroll-state retention across at least 10 focus switches.
+- A headed packaged-app stream test with unique pane tokens and a numbered
+  command, including one-Pane attachment failure/recovery while a healthy
+  sibling continues streaming. Block output must be verified line by line;
+  build-only or unit-only evidence is insufficient.
+- No additional PTY, VT, process, copied-output, or presentation authority;
+  preserve Rust product authority and the accepted Raw/TUI fallbacks.
 
