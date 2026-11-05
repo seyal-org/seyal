@@ -2834,6 +2834,26 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
+    func testRepeatedPanePollDoesNotReRequestSettledBlockHistory() {
+        var requests = HistoryProjectionRequestBook()
+        let key = HistoryProjectionRequestKey(
+            displayHandle: 22,
+            blockID: 7,
+            startLine: 1,
+            endLine: 100
+        )
+
+        XCTAssertTrue(requests.begin(key), "the first projection requests its history")
+        XCTAssertFalse(requests.begin(key), "a repeated registry poll must not duplicate an in-flight request")
+        requests.complete(key)
+        XCTAssertFalse(requests.begin(key), "a settled projection must not fetch the same body on every poll")
+
+        requests.retain(blockIDs: [], forDisplayHandle: 22)
+        XCTAssertTrue(requests.begin(key), "evicting the Block drops its request deduplication state")
+        requests.retry(key)
+        XCTAssertTrue(requests.begin(key), "a failed history request remains retryable")
+    }
+
     /// The primary readiness source polls `clientHandle`; focus selection must
     /// not redirect its history response lookup to another Controller.
     @MainActor

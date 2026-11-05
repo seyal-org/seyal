@@ -21,6 +21,51 @@ struct PaneBlockProjectionFingerprint: Equatable {
     let rows: [Row]
 }
 
+struct HistoryProjectionRequestKey: Hashable {
+    let displayHandle: UInt64
+    let blockID: UInt64
+    let startLine: UInt64
+    let endLine: UInt64
+}
+
+/// Deduplicates stable completed-Block history requests across registry polls.
+/// A request stays remembered after its reply so an unchanged projection does
+/// not repeatedly refill the shared bridge queue during focus churn.
+struct HistoryProjectionRequestBook {
+    private var inFlight = Set<HistoryProjectionRequestKey>()
+    private var settled = Set<HistoryProjectionRequestKey>()
+
+    mutating func begin(_ key: HistoryProjectionRequestKey) -> Bool {
+        guard !inFlight.contains(key), !settled.contains(key) else { return false }
+        inFlight.insert(key)
+        return true
+    }
+
+    mutating func complete(_ key: HistoryProjectionRequestKey) {
+        inFlight.remove(key)
+        settled.insert(key)
+    }
+
+    mutating func retry(_ key: HistoryProjectionRequestKey) {
+        inFlight.remove(key)
+        settled.remove(key)
+    }
+
+    mutating func retain(blockIDs: Set<UInt64>, forDisplayHandle handle: UInt64) {
+        inFlight = inFlight.filter {
+            $0.displayHandle != handle || blockIDs.contains($0.blockID)
+        }
+        settled = settled.filter {
+            $0.displayHandle != handle || blockIDs.contains($0.blockID)
+        }
+    }
+
+    mutating func discard(forDisplayHandle handle: UInt64) {
+        inFlight = inFlight.filter { $0.displayHandle != handle }
+        settled = settled.filter { $0.displayHandle != handle }
+    }
+}
+
 /// Pane-owned Flow presentation host for a visible multipane leaf (#936 / #1424).
 ///
 /// The ApplicationRoot already owns the Controller in the bridge registry
@@ -57,6 +102,7 @@ final class SecondaryLivePaneHost: NSView {
     var isProgrammaticTranscriptScroll = false
     var transcriptFrameRevision: UInt64 = 0
     var blockOutputZeroClipRetries = 0
+    var historyProjectionRequests = HistoryProjectionRequestBook()
     static let blockOutputZeroClipRetryLimit = 4
     /// When true, this host owns keyboard/composer interaction for its Pane.
     private(set) var inputOwned = false
@@ -347,6 +393,7 @@ final class SecondaryLivePaneHost: NSView {
 
     func updateDisplayHandle(_ handle: UInt64) {
         guard handle != displayHandle else { return }
+        historyProjectionRequests.discard(forDisplayHandle: displayHandle)
         displayHandle = handle
         updateAvailabilityPresentation()
         needsLayout = true

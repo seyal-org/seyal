@@ -95,6 +95,7 @@ extension SecondaryLivePaneHost {
         }
         // Bridgeless surfaces: discard through the borrowed window bridge,
         // scoped to this pane's own handle (#1426 residual).
+        historyProjectionRequests.retain(blockIDs: retained, forDisplayHandle: displayHandle)
         historyBridge?.discardHistoryRequests(except: retained, forDisplayHandle: displayHandle)
         surface.removeTranscriptRegions(except: retained)
         syncTranscriptDocumentSize()
@@ -216,12 +217,22 @@ extension SecondaryLivePaneHost {
         else { return }
         // Surfaces intentionally have bridge == nil; borrow the window bridge
         // and address this pane's Controller (#1424).
-        _ = historyBridge?.requestHistoryRange(
+        let key = HistoryProjectionRequestKey(
+            displayHandle: displayHandle,
+            blockID: blockID,
+            startLine: projection.start_line,
+            endLine: projection.end_line
+        )
+        guard historyProjectionRequests.begin(key) else { return }
+        let result = historyBridge?.requestHistoryRange(
             forDisplayHandle: displayHandle,
             startLine: projection.start_line,
             endLine: projection.end_line,
             blockID: blockID
-        )
+        ) ?? -10
+        if result != 0 {
+            historyProjectionRequests.retry(key)
+        }
     }
 
     /// Deliver a completed history range into this leaf's Metal surface + card.
@@ -229,7 +240,17 @@ extension SecondaryLivePaneHost {
         guard range.sourceDisplayHandle == 0 || range.sourceDisplayHandle == displayHandle else {
             return
         }
-      guard !range.rows.isEmpty else { return }
+        let key = HistoryProjectionRequestKey(
+            displayHandle: range.sourceDisplayHandle == 0 ? displayHandle : range.sourceDisplayHandle,
+            blockID: range.blockID,
+            startLine: range.startLine,
+            endLine: range.endLine
+        )
+        guard !range.rows.isEmpty else {
+            historyProjectionRequests.retry(key)
+            return
+        }
+        historyProjectionRequests.complete(key)
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
