@@ -49,7 +49,6 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::TabSelectNext
         | WorkspaceCommandId::PaneSplitRight
         | WorkspaceCommandId::PaneSplitDown
-        | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationToggleTui
         | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
         WorkspaceCommandId::AppCloseFocused
@@ -82,6 +81,7 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneEqualizeTab
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
+        | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationSetFlow
         | WorkspaceCommandId::PresentationSetRaw
         | WorkspaceCommandId::PresentationSetTui
@@ -126,7 +126,6 @@ fn menu_visible_commands() -> impl Iterator<Item = WorkspaceCommand> {
         WorkspaceCommandId::TabSelectNext,
         WorkspaceCommandId::PaneSplitRight,
         WorkspaceCommandId::PaneSplitDown,
-        WorkspaceCommandId::PresentationToggleRaw,
         WorkspaceCommandId::PresentationToggleTui,
         WorkspaceCommandId::GotoOpen,
         WorkspaceCommandId::TerminalCloseFocused,

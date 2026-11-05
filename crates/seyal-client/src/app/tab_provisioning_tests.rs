@@ -783,7 +783,7 @@ fn newly_bound_pane_keeps_spec_008_presentation_fence() {
         alternate_screen: false,
     })
     .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
 
     root.apply(AppAction::Refresh {
         fence: root.fence(),

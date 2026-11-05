@@ -443,8 +443,8 @@ fn bind_through_explicit_handle_does_not_use_implicit_select() {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &action) }, 0);
     let bound = seyal_app_snapshot(handle);
-    assert_eq!(bound.eligibility, 2); // Raw default (#1438)
-    assert_eq!(bound.flags & SNAP_COMPOSER, 0);
+    assert_eq!(bound.eligibility, 1); // Blocks-first supported-session default (#1426)
+    assert_eq!(bound.flags & SNAP_COMPOSER, SNAP_COMPOSER);
     assert_eq!(bound.flags & SNAP_HAS_EXECUTION, SNAP_HAS_EXECUTION);
     action.kind = 0;
     assert_eq!(unsafe { seyal_app_apply(handle, &action) }, -4);
@@ -775,7 +775,7 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
     let bound = seyal_app_snapshot(handle);
-    assert_eq!(bound.eligibility, 2); // Raw default (#1438)
+    assert_eq!(bound.eligibility, 1); // Blocks-first supported-session default (#1426)
     let mut refresh = identity_fence(2, &bound);
     refresh.flags |= FLAG_ALTERNATE_SCREEN;
     assert_eq!(unsafe { seyal_app_apply(handle, &refresh) }, 0);
@@ -786,7 +786,7 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
     refresh.flags &= !FLAG_ALTERNATE_SCREEN;
     refresh.fence_epoch = tui.epoch;
     assert_eq!(unsafe { seyal_app_apply(handle, &refresh) }, 0);
-    assert_eq!(seyal_app_snapshot(handle).eligibility, 2);
+    assert_eq!(seyal_app_snapshot(handle).eligibility, 1);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 

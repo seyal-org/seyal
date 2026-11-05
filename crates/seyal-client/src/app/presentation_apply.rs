@@ -107,14 +107,12 @@ impl ApplicationRoot {
     }
 
     pub(super) fn recompute_resting(&mut self) {
-        // Grid-first (#1438): Raw is the default resting presentation. Flow is
-        // explicit opt-in only, and unsupported integration always forces Raw.
+        // Blocks-first: trusted sessions rest in Flow automatically. Raw is
+        // reserved for the safe fallback when integration is unsupported.
         self.resting = if self.integration_unsupported {
             PresentationMode::Raw
-        } else if self.explicit_flow {
-            PresentationMode::Flow
         } else {
-            PresentationMode::Raw
+            PresentationMode::Flow
         };
     }
 
@@ -133,11 +131,14 @@ impl ApplicationRoot {
         self.derive_presentation(self.alternate_screen)
     }
 
-    /// `Some` only while a Pane is bound. `true` means resting Raw (offer Flow);
-    /// `false` means resting Flow (offer Raw).
+    /// `Some(true)` only while a Pane is in unsupported Raw fallback, so the
+    /// palette may offer Flow if trust state later permits it. Supported Flow
+    /// panes never expose a Raw choice.
     pub(super) fn resting_palette_choice(&self) -> Option<bool> {
-        self.authority
-            .map(|_| self.resting == PresentationMode::Raw)
+        (self.authority.is_some()
+            && self.integration_unsupported
+            && self.resting == PresentationMode::Raw)
+            .then_some(true)
     }
 
     pub(super) fn sync_focused_presentation_mode(&mut self) {

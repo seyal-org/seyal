@@ -163,10 +163,6 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testRunningFlowBlockStaysInSecondaryPaneDuringFocusSwitches() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
-            app.menuBars.menuBarItems["View"].click()
-            app.menuItems["Toggle Raw"].click()
-        }
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
 
         // Keep the twelve-line body under the bounded AX summary so every
@@ -222,16 +218,12 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// #1426: splitting a Raw Pane creates a Blocks Pane when its own shell
-    /// integration is trusted, and that Pane retains a numbered live stream
-    /// when focus returns to its Raw sibling.
-    func testRawSplitCreatesBlocksPaneAndKeepsUnfocusedStream() throws {
+    /// #1426: fresh supported panes and both sides of a split present Blocks;
+    /// the source pane retains its numbered live stream through focus changes.
+    func testBlocksSplitKeepsUnfocusedStream() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        if element(app, "seyal-composer").waitForExistence(timeout: 2) {
-            app.menuBars.menuBarItems["View"].click()
-            app.menuItems["Toggle Raw"].click()
-        }
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
 
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
@@ -239,7 +231,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForUsablePty(in: app)
         XCTAssertTrue(
             element(app, "seyal-composer").waitForExistence(timeout: 8),
-            "a trusted split from Raw starts in Blocks"
+            "a trusted split creates an independent Blocks pane"
         )
         XCTAssertTrue(element(app, "seyal-blocks").exists)
 
@@ -283,10 +275,6 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testFlowSplitSiblingStaysBlocksWhileUnfocusedDuringStream() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
-            app.menuBars.menuBarItems["View"].click()
-            app.menuItems["Toggle Raw"].click()
-        }
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
 
         click(app, "seyal-split-right")
@@ -384,10 +372,6 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testTerminalTabBlocksStayBoundToTheirOwnExecution() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
-            app.menuBars.menuBarItems["View"].click()
-            app.menuItems["Toggle Raw"].click()
-        }
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
 
         let tokenA = "pane-a-\(String(UUID().uuidString.prefix(6)))"
@@ -569,10 +553,6 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testUnfocusedPaneStreamKeepsUpdatingSameBlock() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
-            app.menuBars.menuBarItems["View"].click()
-            app.menuItems["Toggle Raw"].click()
-        }
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
         let token = "stream-marker-\(String(UUID().uuidString.prefix(6)))"
         click(app, "seyal-split-right")
@@ -640,14 +620,6 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testCompletedBlockHistoryStaysOnProducingUnfocusedPane() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        // New workspaces now start in Raw. This acceptance covers per-Pane
-        // completed Blocks, so select Flow through the product View menu.
-        let viewMenu = app.menuBars.menuBarItems["View"]
-        XCTAssertTrue(viewMenu.waitForExistence(timeout: 5))
-        viewMenu.click()
-        let toggleRaw = app.menuItems["Toggle Raw"]
-        XCTAssertTrue(toggleRaw.waitForExistence(timeout: 5), app.debugDescription)
-        toggleRaw.click()
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 12))
         let markerA = "seyal-1426-hist-a-\(String(UUID().uuidString.prefix(6)))"
         let markerB = "seyal-1426-hist-b-\(String(UUID().uuidString.prefix(6)))"
@@ -1055,10 +1027,6 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testFourPaneBlocksLoadWithMultipleTerminalTabsAndFocusChurn() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
-            app.menuBars.menuBarItems["View"].click()
-            app.menuItems["Toggle Raw"].click()
-        }
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
 
         // Build a 2×2 grid through both split directions.

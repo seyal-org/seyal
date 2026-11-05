@@ -2,7 +2,8 @@
 
 use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
-use crate::app::{AppAction, AppError, ApplicationRoot, BindingEvidence};
+use crate::app::{AppAction, AppError, ApplicationRoot, BindingEvidence, PresentationEligibility};
+use crate::presentation::InputRoute;
 use crate::shell::{
     FocusDirection, ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed,
     ShellWorkspaceSeed, SplitAxis,
@@ -92,11 +93,11 @@ fn directional_focus_moves_execution_and_input_authority_together() {
     assert_eq!(active.execution, Some(execution_b));
     assert!(active.controller);
 
-    root.apply(AppAction::SelectRestingPresentation {
-        fence: root.fence(),
-        raw: true,
-    })
-    .expect("select B raw input route");
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+    assert_eq!(
+        root.presentation.snapshot().input_route,
+        InputRoute::Composer
+    );
     assert_eq!(
         root.apply(AppAction::SubmitInput {
             fence: fence_a,
@@ -114,6 +115,6 @@ fn directional_focus_moves_execution_and_input_authority_together() {
             fence: fence_b,
             text: "current B input".to_owned(),
         }),
-        Err(AppError::NoLiveClient)
+        Err(AppError::DirectInputUnauthorized)
     );
 }

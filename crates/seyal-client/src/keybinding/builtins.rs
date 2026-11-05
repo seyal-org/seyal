@@ -204,12 +204,6 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             context: APP,
         },
         BuiltinRow {
-            keys_notation: "cmd+enter",
-            id: WorkspaceCommandId::PresentationToggleRaw,
-            ordinal: None,
-            context: APP,
-        },
-        BuiltinRow {
             keys_notation: "cmd+opt+enter",
             id: WorkspaceCommandId::PresentationToggleTui,
             ordinal: None,

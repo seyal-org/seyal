@@ -1,20 +1,27 @@
 # SPEC-008 — M003 command Blocks, Pane composer and presentation modes
 
-- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`), the duration / shell-metadata boundary amendment accepted by #686 / PR #1022, the grid-first resting-presentation amendment accepted under #1438 / PR #1439 (implemented by #1440), and the proposed tab-wide split-to-Flow amendment under #1454, included with implementation in the combined multipane PR.
-- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 alignment accepted 2026-10-29 (#1384); grid-first resting presentation 2026-11-04 (#1438/#1440); split-created Flow 2026-11-05 (#1426)
+- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`), the duration / shell-metadata boundary amendment accepted by #686 / PR #1022, the Blocks-first supported-shell amendment for #1426, and tab-wide split-to-Flow behavior included with implementation in PR #1448.
+- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 alignment accepted 2026-10-29 (#1384); grid-first resting presentation 2026-11-04 (#1438/#1440); split-created Flow and Blocks-first default 2026-11-05/06 (#1426)
 - **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract. Accepted ADR-026 (#1384) is the authority for the session-bootstrap and input-target amendments in §3.1, §3.2, §3.5, §4, §5.5, §8 and §10.
 - **Depends on:** accepted SPEC-001 through SPEC-007 and completed Pass 7
 
 ## 1. Observable contract
 
-Under the accepted #1438 grid-first amendment, a newly started terminal
-session or a Pane created in a new Tab remains **Raw** by default. A successful
-explicit split opts the affected Tab into Flow for every trusted,
-Flow-capable Pane in that Tab, including existing Raw panes and the new leaf.
-Other Tabs retain their own choices. An active TUI remains full-Pane through
-the split and restores the newly stored Flow resting mode on exit. Unsupported
-or untrusted integration retains the existing safe fallback. Shell-integration
-status alone never promotes a Pane; the explicit split is the opt-in.
+Under the 2026-11-06 ADR-009 amendment, a newly started trusted,
+Flow-capable, non-TUI terminal session presents **Flow/Blocks by default**.
+Users do not need to split a Pane or manually leave a Raw terminal view to get
+Blocks. The full-Pane Raw viewport is not shown during normal supported shell
+operation and is never visible underneath or beside Flow; supported-shell
+menus, palette commands, and built-in shortcuts do not offer Raw. A full-screen
+alternate-screen application takes over its Pane as TUI and restores Flow on
+exit. Unsupported or untrusted integration retains the existing safe fallback
+until structured Block boundaries can be proven.
+
+A successful explicit split opts the affected Tab into Flow for every
+trusted, Flow-capable Pane in that Tab, including existing panes and the new
+leaf. Other Tabs retain their own presentation state. An active TUI remains
+full-Pane through the split and restores the newly stored Flow resting mode on
+exit.
 
 Every Pane continues to project its own execution and BlockTimeline. Adding
 splits or terminal tabs must preserve each Pane's mode, Block bodies, live
@@ -47,18 +54,21 @@ that Block's start anchor, even after the SSH process exits. Remote command
 output belongs only to its session-scoped Block and must never be repeated in
 the host Block. Session command Blocks remain ordered in the same Pane history.
 
-Under the accepted #858 amendment (as amended by #1438), Flow, Raw and TUI are
-mutually exclusive user-visible presentations:
+Flow, Raw and TUI remain mutually exclusive presentations over the same
+authoritative execution. For supported shell operation, Flow is the default;
+Raw is not exposed as a normal resting UI. Unsupported or untrusted
+integration retains the safe fallback, and full-screen alternate-screen
+applications receive TUI takeover:
 
 ```text
-default resting / unsupported integration / explicit Raw
-  -> Raw: full-Pane primary terminal grid
-
-explicit Flow opt-in + supported structured shell state
+supported trusted shell state / successful explicit split
   -> Flow: Block transcript + Pane composer
 
 alternate/full-screen application state
   -> TUI: full-Pane terminal application presentation
+
+unsupported or untrusted shell state
+  -> existing safe fallback until structured Block boundaries are proven
 ```
 
 A renderer/compositor may be reused internally across these modes, but the UI

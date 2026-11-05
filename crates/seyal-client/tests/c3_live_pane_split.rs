@@ -226,11 +226,12 @@ fn split_live_keeps_original_pane_connected_after_real_command_and_refocus() {
 
     // Produce real PTY output on the original pane before splitting, like
     // the `ls -lta` / `pwd` the user ran before Split Right.
-    root.apply(seyal_client::app::AppAction::SelectRestingPresentation {
+    root.apply(seyal_client::app::AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
-        raw: true,
+        eligibility: Some(seyal_client::composer::RuntimeComposerEligibility::Unsupported),
+        revision: 1,
     })
-    .expect("select raw input route");
+    .expect("unsupported test shell retains the safe direct-terminal fallback");
     root.apply(seyal_client::app::AppAction::SubmitInput {
         fence: root.fence(),
         text: "echo SEYAL_1433_PROBE\n".to_owned(),

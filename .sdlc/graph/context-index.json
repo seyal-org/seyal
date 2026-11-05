@@ -126,7 +126,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "643c98c6ec5a8ecf4ba638bc90f5e01053f78501"
+          "fingerprint": "00a5111adc59f9a8dfd8d8f5a7ebdb60eb30c6e3"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
@@ -134,7 +134,7 @@
         },
         {
           "path": "docs/specs/SPEC-008-M003-COMMAND-BLOCKS.md",
-          "fingerprint": "4fd5f008ebc460216eea8e5d90c06064e59feb65"
+          "fingerprint": "ae82d7de60ac20bec61cf3e7ae0f8490f59e4bd9"
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "643c98c6ec5a8ecf4ba638bc90f5e01053f78501"
+          "fingerprint": "00a5111adc59f9a8dfd8d8f5a7ebdb60eb30c6e3"
         }
       ],
       "relationships": [
@@ -343,7 +343,7 @@
       "id": "DEC-ADR-026",
       "kind": "decision",
       "title": "ADR-026 consented session remote shell bootstrap",
-      "summary": "Accepted on merge of this acceptance PR by a non-author maintainer under #1384: orthogonal Block lifecycle, composer input target, and presentation, plus a consented session-only in-band bash/zsh bootstrap. ADR-025 remains a separate Proposed decision under #1382/#1381. Silent inject stays rejected (F-088); F-088a is Accepted direction. An author or agent comment is not acceptance. Bit 13 and types 42–45 are allocated and not yet shipped.",
+      "summary": "Accepted on merge of this acceptance PR by a non-author maintainer under #1384: orthogonal Block lifecycle, composer input target, and presentation, plus a consented session-only in-band bash/zsh bootstrap. ADR-025 remains a separate Proposed decision under #1382/#1381. Silent inject stays rejected (F-088); F-088a is Accepted direction. An author or agent comment is not acceptance. Bit 13 and types 42\u201345 are allocated and not yet shipped.",
       "tags": [
         "adr",
         "adr-026",

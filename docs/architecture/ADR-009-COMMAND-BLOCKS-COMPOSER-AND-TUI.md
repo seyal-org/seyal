@@ -1536,3 +1536,34 @@ Pane, preserve scroll state, exercise one-Pane failure/recovery while healthy
 siblings continue, and confirm TUI remains intact until exit. No new PTY, VT,
 process, copied-output, or Swift presentation authority is introduced.
 
+## 2026-11-06 amendment — Blocks as the default supported-shell presentation (#1426)
+
+**Status:** Accepted by the product owner on 2026-11-06 for the combined
+multipane PR #1448. This amendment supersedes #1438's Raw cold-start and
+new-Tab default for trusted, Flow-capable shell sessions. It retains the
+tab-wide split behavior above and the safe fallback for unsupported or
+untrusted integration.
+
+A newly started trusted, Flow-capable, non-TUI shell session presents Flow
+and its Block transcript/composer by default. Users do not need to split the
+Pane or manually leave a Raw terminal view to get Blocks. The full-Pane Raw
+viewport is not shown during normal supported shell operation and is never
+placed underneath or beside Flow. Supported-shell menus, palette commands,
+and built-in shortcuts do not offer a Raw presentation. A full-screen
+alternate-screen application such as nvim takes over its Pane as TUI; when it
+exits, that Pane restores Flow.
+
+Unsupported or untrusted shell integration retains the existing safe fallback
+until structured Block boundaries can be proven. This default change does not
+authorize guessed command boundaries, weaken trust checks, or change the
+single-ExecutionId/PTY/VT/TerminalState authority. Each Pane and terminal tab
+continues to own its own Blocks, live output, history, composer state, and
+scroll position; focus changes route input only.
+
+Required evidence for the combined implementation PR includes a fresh-session
+Blocks-first assertion; the existing four-Pane, two-axis, multi-terminal-tab
+numbered-stream load test with at least ten focus changes; complete per-Pane
+output and no cross-pane copies; scroll retention; and full-screen TUI
+takeover/return. A green unit or hosted run does not replace headed packaged
+app evidence.
+
