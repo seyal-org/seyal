@@ -239,6 +239,43 @@ fn split_from_flow_inherits_flow_for_the_new_terminal_pane() {
 }
 
 #[test]
+fn a_pane_opted_into_flow_after_split_stays_flow_when_unfocused() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    let source = root.snapshot().shell.focused_pane;
+
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Right,
+    })
+    .unwrap();
+    let sibling = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(9, true, false),
+    })
+    .unwrap();
+    assert_eq!(
+        root.snapshot().shell.windows[0].tabs[0].panes[1].presentation_mode,
+        PresentationMode::Raw,
+        "a sibling split from Raw starts in Raw"
+    );
+
+    // Flow is explicitly selected for this Pane after it already exists.
+    invoke_presentation(&mut root, WorkspaceCommandId::PresentationSetFlow);
+    assert_eq!(
+        root.presentation_eligibility_for_pane(sibling),
+        PresentationEligibility::Flow
+    );
+
+    root.focus_pane(source).unwrap();
+    assert_eq!(
+        root.presentation_eligibility_for_pane(sibling),
+        PresentationEligibility::Flow,
+        "focus changes must preserve a Flow selection made on an existing Pane"
+    );
+}
+
+#[test]
 fn flow_split_survives_production_focus_activation_in_both_directions() {
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);

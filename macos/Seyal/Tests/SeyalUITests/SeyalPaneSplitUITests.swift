@@ -222,6 +222,66 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// #1426: a Pane that opts into Flow after the split stays in Blocks when
+    /// another Pane takes focus, including while its command is still running.
+    func testExistingPaneFlowModeStaysBlocksDuringUnfocusedStream() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        if element(app, "seyal-composer").waitForExistence(timeout: 2) {
+            app.menuBars.menuBarItems["View"].click()
+            app.menuItems["Toggle Raw"].click()
+        }
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        XCTAssertFalse(
+            element(app, "seyal-composer").waitForExistence(timeout: 2),
+            "a sibling split from Raw starts Raw"
+        )
+
+        // Opt the existing sibling into Flow only after it has been created.
+        app.menuBars.menuBarItems["View"].click()
+        XCTAssertTrue(app.menuItems["Toggle Raw"].waitForExistence(timeout: 5))
+        app.menuItems["Toggle Raw"].click()
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(app, "seyal-blocks").exists)
+
+        let marker = "switchflow1426-\(String(UUID().uuidString.prefix(6)))"
+        submitComposerCommand(
+            "for i in $(seq 1 16); do printf '\(marker)-%02d\\n' \"$i\"; sleep 0.5; done",
+            in: app,
+            expectBlock: true,
+            blockMarker: marker
+        )
+        let running = anyPaneBlock(in: app, containing: marker)
+        XCTAssertTrue(running.waitForExistence(timeout: 6), "Flow command becomes a Block before exit")
+
+        element(app, "seyal-pane-region-0").click()
+        waitForFocus(app, region: 0)
+        let inactiveBlock = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                "seyal-secondary-block-",
+                marker
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            inactiveBlock.waitForExistence(timeout: 8),
+            "an existing Pane's Flow selection must not become Raw when focus moves"
+        )
+        let body = blockBody(for: inactiveBlock, in: app)
+        waitForBodyMarker(body, marker: "\(marker)-01")
+        waitForBodyMarker(body, marker: "\(marker)-16")
+
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1426-existing-flow-pane-remains-blocks-while-unfocused"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// #1426: a sibling split from Flow stays Flow when focus moves away from
     /// it. Run a live numbered stream in that sibling, switch to the source
     /// Pane, and verify the secondary transcript retains every output line.
@@ -514,6 +574,11 @@ final class SeyalPaneSplitUITests: XCTestCase {
     func testUnfocusedPaneStreamKeepsUpdatingSameBlock() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
+        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
+            app.menuBars.menuBarItems["View"].click()
+            app.menuItems["Toggle Raw"].click()
+        }
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
         let token = "stream-marker-\(String(UUID().uuidString.prefix(6)))"
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
@@ -630,10 +695,15 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForBodyMarker(bodyA, marker: markerA)
         waitForBodyMarker(bodyB, marker: markerB)
 
-        let unfocusedA = anyPaneBlock(in: app, containing: markerA)
-        XCTAssertTrue(unfocusedA.exists, "pane A completed Block must remain after focus move (#1426)")
+        let unfocusedA = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                "seyal-secondary-block-",
+                markerA
+            )
+        ).firstMatch
         XCTAssertTrue(
-            unfocusedA.identifier.hasPrefix("seyal-secondary-block-"),
+            unfocusedA.waitForExistence(timeout: 8),
             "pane A's inactive transcript must remain a visible Flow Block host"
         )
         let unfocusedBodyA = blockBody(for: unfocusedA, in: app)
@@ -662,19 +732,21 @@ final class SeyalPaneSplitUITests: XCTestCase {
             let target = cycle % 2 == 0 ? paneARegion : sibling
             element(app, "seyal-pane-region-\(target)").click()
             waitForFocus(app, region: target)
-            let blockA = anyPaneBlock(in: app, containing: markerA)
-            let blockB = anyPaneBlock(in: app, containing: markerB)
-            XCTAssertTrue(blockA.exists, "cycle \(cycle): pane A command stays in history")
-            XCTAssertTrue(blockB.exists, "cycle \(cycle): pane B command stays in history")
-            XCTAssertEqual(
-                blockA.identifier.hasPrefix("seyal-secondary-block-"),
-                target != paneARegion,
-                "cycle \(cycle): pane A Block stays on its own Flow transcript"
+            let paneAPrefix = target == paneARegion ? "seyal-block-" : "seyal-secondary-block-"
+            let paneBPrefix = target == sibling ? "seyal-block-" : "seyal-secondary-block-"
+            let blockA = app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", paneAPrefix, markerA)
+            ).firstMatch
+            let blockB = app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", paneBPrefix, markerB)
+            ).firstMatch
+            XCTAssertTrue(
+                blockA.waitForExistence(timeout: 8),
+                "cycle \(cycle): pane A command stays on its own Flow transcript"
             )
-            XCTAssertEqual(
-                blockB.identifier.hasPrefix("seyal-secondary-block-"),
-                target != sibling,
-                "cycle \(cycle): pane B Block stays on its own Flow transcript"
+            XCTAssertTrue(
+                blockB.waitForExistence(timeout: 8),
+                "cycle \(cycle): pane B command stays on its own Flow transcript"
             )
             let currentBodyA = blockBody(for: blockA, in: app)
             let currentBodyB = blockBody(for: blockB, in: app)
@@ -1119,7 +1191,14 @@ final class SeyalPaneSplitUITests: XCTestCase {
         expectBlock: Bool = true,
         blockMarker: String? = nil
     ) {
-        let editor = element(app, "seyal-composer-editor")
+        // Every pane's editor keeps the stable child ID for host reuse. Scope
+        // lookup through the focused composer so a duplicate inactive editor
+        // cannot steal synthetic input after a Pane focus change.
+        let focusedComposer = element(app, "seyal-composer")
+        XCTAssertTrue(focusedComposer.waitForExistence(timeout: 8), "focused composer missing")
+        let editor = focusedComposer.descendants(matching: .any)
+            .matching(identifier: "seyal-composer-editor")
+            .firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer editor missing")
         editor.click()
         // Prefer paste: XCUI typeText mangles quotes/`$()`/paths and only the
@@ -1137,7 +1216,9 @@ final class SeyalPaneSplitUITests: XCTestCase {
             .completed,
             "composer draft missing after paste; value=\(editor.value ?? "nil")"
         )
-        let submit = element(app, "seyal-composer-execute")
+        let submit = focusedComposer.descendants(matching: .any)
+            .matching(identifier: "seyal-composer-execute")
+            .firstMatch
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: submit, handler: nil)
         if XCTWaiter.wait(for: [enabled], timeout: 4) == .completed {
             submit.click()
