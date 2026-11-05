@@ -32,6 +32,7 @@ impl ApplicationRoot {
     /// mode is Hidden for several reasons (including an unfocused pane and an
     /// ended execution); it is not a valid proxy for the pane's selected
     /// Raw/Flow/TUI mode.
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn presentation_eligibility_for_pane(
         &self,
         pane: seyal_core::PaneId,

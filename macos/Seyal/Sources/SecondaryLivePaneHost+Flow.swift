@@ -407,7 +407,9 @@ extension SecondaryLivePaneHost {
     func scrollTranscriptToLiveEnd() {
         isProgrammaticTranscriptScroll = true
         defer { isProgrammaticTranscriptScroll = false }
-        transcript.scrollToEndOfDocument(nil)
+        let visible = transcript.contentView.bounds
+        let maxY = max(transcriptDocumentScrollHeight() - visible.height, 0)
+        transcript.contentView.scroll(to: NSPoint(x: visible.origin.x, y: maxY))
         transcript.reflectScrolledClipView(transcript.contentView)
         followingLiveEnd = true
     }

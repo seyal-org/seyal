@@ -1801,6 +1801,59 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testSecondaryPaneCanScrollTranscriptToLiveEnd() {
+        let host = SecondaryLivePaneHost(
+            appHandle: 0,
+            paneLo: 1,
+            paneHi: 2,
+            displayHandle: 11,
+            recoveryTarget: SeyalAppPaneRecoveryTarget()
+        )
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 240)
+        host.layoutSubtreeIfNeeded()
+        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
+
+        host.scrollTranscriptToLiveEnd()
+
+        XCTAssertTrue(host.isNearLiveEnd())
+    }
+
+    @MainActor
+    func testPaneBindingsFollowPaneIdentityWhenRegionOrderDiffers() {
+        let regions = [
+            PaneLayoutView.Region(paneLo: 3, paneHi: 0, rect: .zero, focused: false, live: true, title: "Pane 3"),
+            PaneLayoutView.Region(paneLo: 1, paneHi: 0, rect: .zero, focused: true, live: true, title: "Pane 1"),
+            PaneLayoutView.Region(paneLo: 2, paneHi: 0, rect: .zero, focused: false, live: true, title: "Pane 2"),
+        ]
+        let shellBindings = [
+            paneBinding(paneLo: 1, displayHandle: 101),
+            paneBinding(paneLo: 2, displayHandle: 202),
+            paneBinding(paneLo: 3, displayHandle: 303),
+        ]
+
+        let projected = ProductChromeHostView.bindingsInRegionOrder(
+            regions: regions,
+            shellBindings: shellBindings
+        )
+
+        XCTAssertEqual(projected.compactMap { $0?.display_handle }, [303, 101, 202])
+
+        let duplicatePaneBindings = shellBindings + [paneBinding(paneLo: 3, displayHandle: 999)]
+        let projectionWithDuplicate = ProductChromeHostView.bindingsInRegionOrder(
+            regions: regions,
+            shellBindings: duplicatePaneBindings
+        )
+        XCTAssertNil(projectionWithDuplicate[0], "ambiguous identity must not bind a sibling host")
+    }
+
+    private func paneBinding(paneLo: UInt64, displayHandle: UInt64) -> SeyalAppPaneBinding {
+        var binding = SeyalAppPaneBinding()
+        binding.pane_lo = paneLo
+        binding.display_handle = displayHandle
+        return binding
+    }
+
+    @MainActor
     func testSplitPaneTerminalTabTitlesUseDistinctPaneIdentity() {
         XCTAssertEqual(
             PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 1", index: 0, tabCount: 1),
