@@ -1079,9 +1079,15 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let stripsReady = expectation(for: NSPredicate(format: "count == 4"), evaluatedWith: strips, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [stripsReady], timeout: 12), .completed)
 
-        // Give each independently provisioned Pane a second TerminalTab, then
-        // return each strip to its original live execution for the stream load.
+        // Give each independently provisioned Pane a second TerminalTab and
+        // prove that tab's command history stays local before returning to the
+        // original execution for the concurrent stream load.
+        var secondTabMarkers: [Int: String] = [:]
         for strip in strips.allElementsBoundByIndex {
+            guard let paneIndex = regions.firstIndex(where: { $0.frame.contains(strip.frame) }) else {
+                XCTFail("terminal tab strip is outside all four Pane regions: \(strip.frame)")
+                continue
+            }
             let original = strip.buttons.matching(
                 NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
             ).firstMatch
@@ -1090,6 +1096,9 @@ final class SeyalPaneSplitUITests: XCTestCase {
                 NSPredicate(format: "identifier CONTAINS %@", "-new-terminal")
             ).firstMatch.click()
             waitForUsablePty(in: app, timeout: 20)
+            let marker = "MPTAB_\(paneIndex)"
+            secondTabMarkers[paneIndex] = marker
+            submitComposerCommand("printf '\(marker)\\n'", in: app, blockMarker: marker)
             original.click()
             waitForUsablePty(in: app, timeout: 20)
         }
@@ -1099,13 +1108,13 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let tabsReady = expectation(for: NSPredicate(format: "count == 8"), evaluatedWith: terminalTabs, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [tabsReady], timeout: 12), .completed)
 
-        let markers = (0..<4).map { "MPLOAD_PANE_\($0)" }
+        let markers = (0..<4).map { "MP\($0)" }
         for index in 0..<4 {
             regions[index].click()
             waitForFocus(app, region: index)
             waitForUsablePty(in: app)
             submitComposerCommand(
-                "for i in $(seq 1 6); do printf '\(markers[index]) %03d\\n' \"$i\"; sleep 0.2; done",
+                "for i in $(seq 1 20); do printf '\(markers[index])-%02d\\n' \"$i\"; sleep 0.75; done",
                 in: app,
                 blockMarker: markers[index]
             )
@@ -1121,7 +1130,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         // Verify every numbered line in each owning Block and exactly one AX
         // Block per unique token, detecting both lost output and pane bleed.
-        for marker in markers {
+        // Twenty short rows fit under CommandBlockView's bounded AX summary.
+        for (index, marker) in markers.enumerated() {
             let matchingBlocks = app.descendants(matching: .any).matching(
                 NSPredicate(
                     format: "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label CONTAINS %@",
@@ -1133,8 +1143,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
             XCTAssertTrue(matchingBlocks.firstMatch.waitForExistence(timeout: 10), marker)
             XCTAssertEqual(matchingBlocks.count, 1, "\(marker) must appear in one Pane only")
             let body = blockBody(for: matchingBlocks.firstMatch, in: app)
-            for line in 1...6 {
-                let expected = String(format: "%@ %03d", marker, line)
+            for line in 1...20 {
+                let expected = String(format: "%@-%02d", marker, line)
                 XCTAssertTrue(
                     body.waitForExistence(timeout: 5),
                     "Block body must remain accessible for \(expected)"
@@ -1144,6 +1154,29 @@ final class SeyalPaneSplitUITests: XCTestCase {
                     "missing streamed line \(expected), body=\(body.label)"
                 )
             }
+
+            let secondTab = try XCTUnwrap(secondTabMarkers[index])
+            let strip = try XCTUnwrap(strips.allElementsBoundByIndex.first {
+                regions[index].frame.contains($0.frame)
+            })
+            let tabs = strip.buttons.matching(
+                NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
+            )
+            XCTAssertEqual(tabs.count, 2)
+            tabs.element(boundBy: 1).click()
+            waitForUsablePty(in: app)
+            XCTAssertTrue(blockCommand(in: app, containing: secondTab).waitForExistence(timeout: 8))
+            XCTAssertFalse(
+                blockCommand(in: app, containing: marker).exists,
+                "\(marker) must stay in its original terminal tab"
+            )
+            tabs.element(boundBy: 0).click()
+            waitForUsablePty(in: app)
+            XCTAssertTrue(blockCommand(in: app, containing: marker).exists)
+            XCTAssertFalse(
+                blockCommand(in: app, containing: secondTab).exists,
+                "\(secondTab) must stay in its second terminal tab"
+            )
         }
         XCTAssertEqual(app.state, .runningForeground)
     }

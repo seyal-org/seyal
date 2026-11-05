@@ -1,17 +1,13 @@
 import AppKit
 
-/// Identity of a pane's Block/composer projection used to skip Block rebuilds
-/// when only focus/input ownership changed (#1424).
+/// Structural identity of a pane's Block/composer projection. Live output
+/// ranges are refreshed in place so streaming cannot recreate cards or reset
+/// a scrolled transcript (#1424).
 struct PaneBlockProjectionFingerprint: Equatable {
     struct Row: Equatable {
         let idLo: UInt64
         let idHi: UInt64
         let flags: UInt16
-        let kind: UInt16
-        let startLine: UInt64
-        let endLine: UInt64
-        let reserved0: UInt16
-        let reserved1: UInt32
     }
 
     let eligibility: UInt16
@@ -66,6 +62,10 @@ final class SecondaryLivePaneHost: NSView {
     private(set) var inputOwned = false
     private let statusLabel = NSTextField(labelWithString: "")
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private var surfaceLeadingToHost: NSLayoutConstraint!
+    private var surfaceLeadingToTranscript: NSLayoutConstraint!
+    private var surfaceTrailingToHost: NSLayoutConstraint!
+    private var surfaceTrailingToTranscript: NSLayoutConstraint!
     private var surfaceTopToHost: NSLayoutConstraint!
     private var surfaceTopToTranscript: NSLayoutConstraint!
     private var surfaceBottomToHost: NSLayoutConstraint!
@@ -159,8 +159,9 @@ final class SecondaryLivePaneHost: NSView {
         transcriptLeadingSpacerHeight.isActive = true
         blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
 
-        let clip = NSClipView()
+        let clip = TranscriptClipView()
         clip.drawsBackground = false
+        clip.copiesOnScroll = false
         clip.documentView = blocks
         transcript.contentView = clip
         transcript.drawsBackground = false
@@ -187,6 +188,10 @@ final class SecondaryLivePaneHost: NSView {
         addSubview(statusLabel)
         addSubview(retryButton)
 
+        surfaceLeadingToHost = surface.leadingAnchor.constraint(equalTo: leadingAnchor)
+        surfaceLeadingToTranscript = surface.leadingAnchor.constraint(equalTo: transcript.leadingAnchor)
+        surfaceTrailingToHost = surface.trailingAnchor.constraint(equalTo: trailingAnchor)
+        surfaceTrailingToTranscript = surface.trailingAnchor.constraint(equalTo: transcript.trailingAnchor)
         surfaceTopToHost = surface.topAnchor.constraint(equalTo: topAnchor)
         // Flow Block history is painted by Metal into the card body clips.
         // Keep the surface coextensive with the transcript viewport so those
@@ -210,12 +215,14 @@ final class SecondaryLivePaneHost: NSView {
             composer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             composer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             composer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            surfaceLeadingToTranscript,
+            surfaceTrailingToTranscript,
             surfaceTopToTranscript,
             surfaceBottomToTranscript,
         ]
         NSLayoutConstraint.activate([
-            surface.leadingAnchor.constraint(equalTo: leadingAnchor),
-            surface.trailingAnchor.constraint(equalTo: trailingAnchor),
+            surfaceLeadingToHost,
+            surfaceTrailingToHost,
             surfaceTopToHost,
             surfaceBottomToHost,
             statusLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -228,7 +235,12 @@ final class SecondaryLivePaneHost: NSView {
             blocks.widthAnchor.constraint(equalTo: transcript.contentView.widthAnchor),
         ] + flowConstraints)
         // Default Flow layout; Raw/TUI flips constraints in applyTranscriptPresentation.
-        NSLayoutConstraint.deactivate([surfaceTopToHost, surfaceBottomToHost])
+        NSLayoutConstraint.deactivate([
+            surfaceLeadingToHost,
+            surfaceTrailingToHost,
+            surfaceTopToHost,
+            surfaceBottomToHost,
+        ])
 
         updateRecoveryTarget(recoveryTarget)
         updateAvailabilityPresentation()
@@ -544,25 +556,15 @@ final class SecondaryLivePaneHost: NSView {
         rows.reserveCapacity(count)
         for index in 0..<count {
             let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
-            let projection = seyal_app_block_projection_for_pane(
-                appHandle,
-                paneLo,
-                paneHi,
-                UInt32(index)
-            )
             // Omit SEYAL_APP_BLOCK_SELECTED — focus/selection must not force a
-            // Block view rebuild (#1424).
+            // Block view rebuild (#1424). Projection ranges and live-tail rows
+            // also change during streaming and are updated in place below.
             let structuralFlags = row.flags & ~UInt16(SEYAL_APP_BLOCK_SELECTED)
             rows.append(
                 PaneBlockProjectionFingerprint.Row(
                     idLo: row.id_lo,
                     idHi: row.id_hi,
-                    flags: structuralFlags,
-                    kind: projection.kind,
-                    startLine: projection.start_line,
-                    endLine: projection.end_line,
-                    reserved0: projection.reserved0,
-                    reserved1: projection.reserved1
+                    flags: structuralFlags
                 )
             )
         }
@@ -585,19 +587,34 @@ final class SecondaryLivePaneHost: NSView {
     private func activateFlowConstraintsIfSized() {
         let sized = bounds.width >= 8 && bounds.height >= 8
         if sized {
-            NSLayoutConstraint.deactivate([surfaceTopToHost, surfaceBottomToHost])
+            NSLayoutConstraint.deactivate([
+                surfaceLeadingToHost,
+                surfaceTrailingToHost,
+                surfaceTopToHost,
+                surfaceBottomToHost,
+            ])
             NSLayoutConstraint.activate(flowConstraints)
         } else {
             // Benign interim: fill with Metal surface until PaneLayoutView
             // publishes a non-zero region frame in the same reconcile turn.
             NSLayoutConstraint.deactivate(flowConstraints)
-            NSLayoutConstraint.activate([surfaceTopToHost, surfaceBottomToHost])
+            NSLayoutConstraint.activate([
+                surfaceLeadingToHost,
+                surfaceTrailingToHost,
+                surfaceTopToHost,
+                surfaceBottomToHost,
+            ])
         }
     }
 
     private func activateDirectSurfaceConstraints() {
         NSLayoutConstraint.deactivate(flowConstraints)
-        NSLayoutConstraint.activate([surfaceTopToHost, surfaceBottomToHost])
+        NSLayoutConstraint.activate([
+            surfaceLeadingToHost,
+            surfaceTrailingToHost,
+            surfaceTopToHost,
+            surfaceBottomToHost,
+        ])
     }
 
     override func layout() {

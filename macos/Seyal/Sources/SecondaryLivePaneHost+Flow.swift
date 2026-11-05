@@ -111,14 +111,17 @@ extension SecondaryLivePaneHost {
             return
         }
         let addedBlock = visibleIndex > lastBlockCount
-        if addedBlock {
+        if addedBlock && savedFollowing {
             clearPreservedDocumentHeight()
             scrollTranscriptToLiveEnd()
         } else {
-            // rebuildBlocks clears cards before measuring; keep prior document
-            // extent so a mid-transcript offset is not clamped to zero while
-            // projection content is momentarily shorter (#1424).
-            if !savedFollowing, savedDocumentHeight > transcriptDocumentScrollHeight() + 0.5 {
+            // New Blocks must not pull a reader back to the live end. Keep the
+            // prior document extent and offset when the user has scrolled away,
+            // including while a stream or registry poll adds output (#1424).
+            let currentContentHeight = transcriptCardsContentHeight()
+            let viewportFloor = blockCards.isEmpty ? 0 : transcript.contentView.bounds.height
+            let currentDocumentMinimumHeight = max(max(currentContentHeight, viewportFloor), 1)
+            if !savedFollowing, savedDocumentHeight > currentDocumentMinimumHeight + 0.5 {
                 preserveDocumentHeight(savedDocumentHeight)
             } else {
                 clearPreservedDocumentHeight()
@@ -348,7 +351,8 @@ extension SecondaryLivePaneHost {
         let contentHeight = transcriptCardsContentHeight()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
-        let height = max(contentHeight, viewportHeight, 1)
+        let preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
+        let height = max(max(contentHeight, viewportHeight), max(preservedHeight, 1))
         let spacerHeight = max(height - contentHeight, 0)
         if abs(transcriptLeadingSpacerHeight.constant - spacerHeight) > 0.5 {
             transcriptLeadingSpacerHeight.constant = spacerHeight
@@ -381,6 +385,7 @@ extension SecondaryLivePaneHost {
     /// Stretch the transcript document so scroll-offset retention can be tested
     /// without depending on Runtime Block projection content.
     func ensureTranscriptScrollableForTests(minimumHeight: CGFloat = 2400) {
+        clearPreservedDocumentHeight()
         let marker = NSUserInterfaceItemIdentifier("seyal-test-scroll-spacer")
         blocks.arrangedSubviews
             .filter { $0.identifier == marker }
@@ -394,6 +399,7 @@ extension SecondaryLivePaneHost {
             spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 1),
         ])
         syncTranscriptDocumentSize()
+        preserveDocumentHeight(max(minimumHeight, transcriptDocumentScrollHeight()))
         layoutSubtreeIfNeeded()
         followingLiveEnd = false
     }

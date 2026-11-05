@@ -1005,7 +1005,16 @@ final class SeyalHostComponentTests: XCTestCase {
         let beforePoll = ObjectIdentifier(scrollTarget)
         scrollTarget.noteRegistryPolled()
         XCTAssertEqual(ObjectIdentifier(scrollTarget), beforePoll)
-        XCTAssertEqual(scrollTarget.transcriptDocumentOffsetY, retainedOffset, accuracy: 1)
+        XCTAssertEqual(
+            scrollTarget.transcriptDocumentOffsetY,
+            retainedOffset,
+            accuracy: 1,
+            "registry poll changed scroll: doc=\(scrollTarget.transcriptDocumentScrollHeight()), "
+                + "preserved=\(scrollTarget.preservedDocumentHeightConstraint?.constant ?? -1), "
+                + "following=\(scrollTarget.followingLiveEnd), "
+                + "clip=\(NSStringFromRect(scrollTarget.transcript.contentView.bounds)), "
+                + "blocks=\(NSStringFromRect(scrollTarget.blocks.frame))"
+        )
     }
 
     @MainActor
