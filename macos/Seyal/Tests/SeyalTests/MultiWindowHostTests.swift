@@ -37,6 +37,60 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_shell(handle).window_count, 3)
     }
 
+    func testQuitConfirmCancelLeavesHostRunning() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_windows_only(host.appHandle, 2), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 1)
+        host.quitConfirmationHandlerForTests = { false }
+        XCTAssertEqual(host.applicationShouldTerminate(), .terminateCancel)
+        XCTAssertEqual(host.orderedKeys.count, 2)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 0)
+    }
+
+    func testQuitConfirmContinueRunsBoundedDetach() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, 2), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 1)
+        host.quitConfirmationHandlerForTests = { true }
+        let replies = QuitReplyCounter()
+        host.quitTerminateReplyHandlerForTests = { replies.increment() }
+        let reply = host.applicationShouldTerminate()
+        XCTAssertEqual(reply, .terminateLater)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(replies.count, 1)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+    }
+
+    func testWarnBeforeQuitFalseSkipsConfirm() {
+        let config = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-warn-before-quit-\(UUID().uuidString).toml")
+        try? "[app]\nwarn_before_quit = false\n".write(to: config, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: config) }
+        XCTAssertEqual(reloadUiConfigForMultiWindowTests(path: config.path), 0)
+
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, 3), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 0)
+        var confirmCalled = false
+        host.quitConfirmationHandlerForTests = {
+            confirmCalled = true
+            return true
+        }
+        let replies = QuitReplyCounter()
+        host.quitTerminateReplyHandlerForTests = { replies.increment() }
+        let reply = host.applicationShouldTerminate()
+        XCTAssertEqual(reply, .terminateLater)
+        XCTAssertFalse(confirmCalled)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(replies.count, 1)
+    }
+
     func testQuitWithThreeWindowsAndAttachmentsRepliesOnce() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }

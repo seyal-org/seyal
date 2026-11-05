@@ -424,7 +424,17 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     // MARK: - Quit (ADR-018 §4)
 
+    /// Test seam for ADR-018 §4.0 confirm. Production uses `NSAlert.runModal`.
+    var quitConfirmationHandlerForTests: (() -> Bool)?
+    /// Test seam for §4.1 `reply(true)` without driving `NSApp.reply`.
+    var quitTerminateReplyHandlerForTests: (() -> Void)?
+
     func applicationShouldTerminate() -> NSApplication.TerminateReply {
+        if seyal_app_should_confirm_quit(appHandle) != 0 {
+            if !presentQuitConfirmation() {
+                return .terminateCancel
+            }
+        }
         // Drain any window effects so BoundedDetachThenTerminate is head.
         applyPendingEffects()
         return quitCoordinator.beginTerminateLater(
@@ -440,10 +450,29 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             ackUntilCleanupComplete: { [weak self] in
                 self?.ackUntilQuitCleanupComplete() ?? false
             },
-            reply: {
-                NSApp.reply(toApplicationShouldTerminate: true)
+            reply: { [weak self] in
+                if let handler = self?.quitTerminateReplyHandlerForTests {
+                    handler()
+                } else {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                }
             }
         )
+    }
+
+    /// ADR-018 §4.0 native adapter: Rust owns should-confirm; host only presents.
+    func presentQuitConfirmation() -> Bool {
+        if let handler = quitConfirmationHandlerForTests {
+            return handler()
+        }
+        let alert = NSAlert()
+        alert.messageText = "Quit Seyal?"
+        alert.informativeText =
+            "You have multiple windows or tabs open. Do you want to quit Seyal?"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Test access to the §4 coordinator without driving NSApp.reply.

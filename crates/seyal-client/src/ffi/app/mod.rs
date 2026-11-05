@@ -29,6 +29,7 @@ use crate::composer::{
     ComposerMode, BLOCK_PROMPT, COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL,
     COMPOSER_HISTORY_PLACEHOLDER,
 };
+use crate::app_policy::{process_app_policy, should_confirm_quit};
 use crate::input_policy::process_input_policy;
 
 use super::allocate_handle;
@@ -383,6 +384,24 @@ pub extern "C" fn seyal_app_option_as_alt(handle: u64) -> u8 {
         } else {
             0
         }
+    })
+}
+
+/// ADR-018 §4.0: whether headed Quit must show the native confirm alert.
+/// Combines cold `app.warn_before_quit` with live shell window/tab counts.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_should_confirm_quit(handle: u64) -> u8 {
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return 0;
+        };
+        let snap = state.root.snapshot().shell;
+        u8::from(should_confirm_quit(
+            process_app_policy().warn_before_quit,
+            snap.windows.len() as u16,
+            snap.tabs.len() as u16,
+        ))
     })
 }
 

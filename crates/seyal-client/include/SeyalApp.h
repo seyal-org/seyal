@@ -881,6 +881,8 @@ int32_t seyal_app_test_seed_windows_only(uint64_t handle, uint32_t windows);
 uint32_t seyal_app_test_live_attachment_count(uint64_t handle);
 
 uint8_t seyal_app_option_as_alt(uint64_t handle);
+/** ADR-018 §4.0: non-zero when Quit must show the native multi-window/tab confirm. */
+uint8_t seyal_app_should_confirm_quit(uint64_t handle);
 
 /*
  * SPEC-024 §11 shortcut projection (K5). Cold key equivalents / hints come from
