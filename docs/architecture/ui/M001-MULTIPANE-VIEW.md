@@ -104,6 +104,16 @@ Different panes may simultaneously show:
 
 No Pane presentation changes another Pane's terminal authority.
 
+Each Pane's selected resting presentation is retained independently of focus.
+Hiding a non-focused Pane's composer is a layout/input decision and does not
+select Raw. Focus changes may change the active composer and keyboard target,
+but must not replace an inactive Flow transcript with a Raw viewport.
+Splitting a Flow Pane creates a sibling in Flow, with independent execution,
+Blocks, composer, and scroll state. Splitting a Raw or TUI Pane creates a Raw
+sibling. New terminal sessions and Panes opened in a new Tab still start in
+Raw. Creating a Pane or terminal in one branch must leave the other branches'
+Block presentations and output visible.
+
 ## 8. Focus
 
 Exactly one Pane receives primary keyboard focus at a time.

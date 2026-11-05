@@ -10,6 +10,46 @@
 use super::*;
 
 impl ApplicationRoot {
+    /// Resolve presentation independently from composer visibility. Composer
+    /// mode is Hidden for several reasons (including an unfocused pane and an
+    /// ended execution); it is not a valid proxy for the pane's selected
+    /// Raw/Flow/TUI mode.
+    pub(crate) fn presentation_eligibility_for_pane(
+        &self,
+        pane: seyal_core::PaneId,
+    ) -> PresentationEligibility {
+        if pane == self.shell.snapshot().focused_pane {
+            // A pane becomes focused before its new Controller is attached.
+            // During that interval `ApplicationSnapshot.eligibility` still
+            // describes the previous pane's bound execution. Do not project
+            // that stale Flow/Raw state into the new pane.
+            if self.pane_authorities.get(&pane).copied() != self.authority {
+                return PresentationEligibility::Unbound;
+            }
+            return self.snapshot().eligibility;
+        }
+        if !self.pane_authorities.contains_key(&pane) {
+            return PresentationEligibility::Unbound;
+        }
+        let Some(mode) = self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .flat_map(|window| &window.tabs)
+            .flat_map(|tab| &tab.panes)
+            .find(|candidate| candidate.id == pane)
+            .map(|candidate| candidate.presentation_mode)
+        else {
+            return PresentationEligibility::Unbound;
+        };
+        match mode {
+            PresentationMode::Flow => PresentationEligibility::Flow,
+            PresentationMode::Raw => PresentationEligibility::Raw,
+            PresentationMode::Tui => PresentationEligibility::Tui,
+        }
+    }
+
     pub(super) fn derive_presentation(&mut self, alternate_screen: bool) -> Result<(), AppError> {
         self.alternate_screen = alternate_screen;
         let Some(bound) = self.authority else {

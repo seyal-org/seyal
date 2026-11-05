@@ -164,6 +164,122 @@ fn explicit_flow_opt_in_and_tui_exit_returns_to_flow() {
 }
 
 #[test]
+fn inactive_flow_pane_retains_its_presentation_when_composer_is_hidden() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    invoke_presentation(&mut root, WorkspaceCommandId::PresentationSetFlow);
+    let flow_pane = root.snapshot().shell.focused_pane;
+
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Right,
+    })
+    .unwrap();
+    let sibling = root.snapshot().shell.windows[0].tabs[0]
+        .panes
+        .iter()
+        .find(|pane| pane.id != flow_pane)
+        .expect("split creates a sibling pane")
+        .id;
+    root.apply(AppAction::FocusPane { id: flow_pane }).unwrap();
+    root.apply(AppAction::FocusPane { id: sibling }).unwrap();
+
+    assert_eq!(
+        root.presentation_eligibility_for_pane(flow_pane),
+        PresentationEligibility::Flow
+    );
+    assert_eq!(
+        root.snapshot().shell.windows[0].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Flow
+    );
+}
+
+#[test]
+fn split_from_flow_inherits_flow_for_the_new_terminal_pane() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    invoke_presentation(&mut root, WorkspaceCommandId::PresentationSetFlow);
+    let source = root.snapshot().shell.focused_pane;
+
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Right,
+    })
+    .unwrap();
+    let split = root.snapshot();
+    let new_pane = split.shell.focused_pane;
+    let new_pane_snapshot = split.shell.windows[0].tabs[0]
+        .panes
+        .iter()
+        .find(|pane| pane.id == new_pane)
+        .expect("split creates a new terminal Pane");
+
+    assert_ne!(new_pane, source);
+    assert_eq!(new_pane_snapshot.presentation_mode, PresentationMode::Flow);
+    assert_eq!(
+        root.presentation_eligibility_for_pane(new_pane),
+        PresentationEligibility::Unbound,
+        "the split must not borrow the source pane's bound presentation before attach"
+    );
+
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(9, true, false),
+    })
+    .unwrap();
+    assert_eq!(
+        root.presentation_eligibility_for_pane(new_pane),
+        PresentationEligibility::Flow
+    );
+
+    root.apply(AppAction::FocusPane { id: source }).unwrap();
+    assert_eq!(
+        root.presentation_eligibility_for_pane(new_pane),
+        PresentationEligibility::Flow,
+        "the sibling keeps its own Flow presentation after focus moves away"
+    );
+}
+
+#[test]
+fn flow_split_survives_production_focus_activation_in_both_directions() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    invoke_presentation(&mut root, WorkspaceCommandId::PresentationSetFlow);
+    let source = root.snapshot().shell.focused_pane;
+
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Right,
+    })
+    .unwrap();
+    let sibling = root.snapshot().shell.focused_pane;
+    // Exercise the same authority transition used by the production pane
+    // focus path before the new Controller is bound.
+    root.focus_pane(source).unwrap();
+    root.focus_pane(sibling).unwrap();
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(9, true, false),
+    })
+    .unwrap();
+
+    assert_eq!(
+        root.presentation_eligibility_for_pane(sibling),
+        PresentationEligibility::Flow,
+        "the newly focused pane presents Flow after its Controller becomes usable"
+    );
+    root.focus_pane(source).unwrap();
+    assert_eq!(
+        root.presentation_eligibility_for_pane(sibling),
+        PresentationEligibility::Flow,
+        "moving focus away leaves the sibling in Flow"
+    );
+    root.focus_pane(sibling).unwrap();
+    assert_eq!(
+        root.presentation_eligibility_for_pane(source),
+        PresentationEligibility::Flow,
+        "returning focus leaves the original pane in Flow"
+    );
+}
+
+#[test]
 fn unsupported_eligibility_selects_full_pane_raw() {
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);

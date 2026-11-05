@@ -17,12 +17,10 @@ struct RuntimeBlockMetadata: Equatable, Sendable {
 /// history request numbers are only unique within their owning execution.
 struct PaneBlockKey: Hashable, Sendable {
   let paneID: String
+  /// Controller execution that owns this timeline. Block ids are local to a
+  /// Runtime execution and can repeat when a Pane switches terminal tabs.
+  let displayHandle: UInt64
   let blockID: UInt64
-
-  init(paneID: String, blockID: UInt64) {
-    self.paneID = paneID
-    self.blockID = blockID
-  }
 
   var accessibilityIdentifier: String {
     "pane.\(paneID).block.\(blockID)"
@@ -231,6 +229,8 @@ struct NativeComposerStatus: Equatable {
 /// replace one history buffer at a time or expose a partially updated order.
 struct NativeTranscriptRegion: Equatable {
   let id: UInt64
+  /// Controller whose history should paint this local Block id.
+  var displayHandle: UInt64 = 0
   let origin: NSPoint
   let clip: NSRect
   var suppressesCursor: Bool = false

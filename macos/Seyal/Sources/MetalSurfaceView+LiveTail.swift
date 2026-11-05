@@ -29,7 +29,15 @@ extension MetalSurfaceView {
     // coordinates (convert already matches the shader); live-tail alone
     // uses top-left pixel clips.
     for region in frame.regions {
-      guard let range = historyRanges[PaneBlockKey(paneID: paneID, blockID: region.id)] else {
+      guard
+        let range = historyRanges[
+          PaneBlockKey(
+            paneID: paneID,
+            displayHandle: region.displayHandle,
+            blockID: region.id
+          )
+        ]
+      else {
         continue
       }
       renderHistoryRange(range, region: region)
@@ -67,6 +75,7 @@ extension MetalSurfaceView {
       )
       return NativeTranscriptRegion(
         id: region.id,
+        displayHandle: region.displayHandle,
         origin: pixelClip.origin,
         clip: pixelClip,
         suppressesCursor: region.suppressesCursor

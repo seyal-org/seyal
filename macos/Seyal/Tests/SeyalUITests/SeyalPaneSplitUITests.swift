@@ -157,6 +157,248 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// A live Flow command must remain a Block when its pane becomes a
+    /// secondary pane during a split. Repeated focus changes must keep the
+    /// command and streamed output in that pane's transcript.
+    func testRunningFlowBlockStaysInSecondaryPaneDuringFocusSwitches() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
+            app.menuBars.menuBarItems["View"].click()
+            app.menuItems["Toggle Raw"].click()
+        }
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+
+        // Keep the twelve-line body under the bounded AX summary so every
+        // streamed line remains observable to this assertion.
+        let marker = "stream1426"
+        submitComposerCommand(
+            "for i in $(seq 1 12); do printf '\(marker) %02d\\n' \"$i\"; sleep 1; done",
+            in: app,
+            expectBlock: true,
+            blockMarker: marker
+        )
+        let runningBlock = anyPaneBlock(in: app, containing: marker)
+        XCTAssertTrue(runningBlock.waitForExistence(timeout: 5))
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        let secondaryBlock = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                "seyal-secondary-block-",
+                marker
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            secondaryBlock.waitForExistence(timeout: 8),
+            "the running source pane must keep its Block when split focus moves to the sibling"
+        )
+
+        for _ in 0..<3 {
+            element(app, "seyal-pane-region-0").click()
+            waitForFocus(app, region: 0)
+            element(app, "seyal-pane-region-1").click()
+            waitForFocus(app, region: 1)
+            XCTAssertTrue(
+                secondaryBlock.exists,
+                "the inactive source pane must retain its Block after focus switches"
+            )
+        }
+        let secondaryBody = app.descendants(matching: .any)[
+            "\(secondaryBlock.identifier)-body"
+        ].firstMatch
+        XCTAssertTrue(
+            secondaryBody.waitForExistence(timeout: 5),
+            "the secondary Block must retain its pane-local output body"
+        )
+        for line in 1...12 {
+            let expected = String(format: "%@ %02d", marker, line)
+            XCTAssertTrue(
+                secondaryBody.label.contains(expected),
+                "the secondary Block retains streamed line \(line) after focus changes"
+            )
+        }
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// #1426: a sibling split from Flow stays Flow when focus moves away from
+    /// it. Run a live numbered stream in that sibling, switch to the source
+    /// Pane, and verify the secondary transcript retains every output line.
+    func testFlowSplitSiblingStaysBlocksWhileUnfocusedDuringStream() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
+            app.menuBars.menuBarItems["View"].click()
+            app.menuItems["Toggle Raw"].click()
+        }
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForFocus(app, region: 1)
+        XCTAssertTrue(
+            element(app, "seyal-pane-presentation-host").waitForExistence(timeout: 8),
+            "a pane split from Flow must inherit the Blocks presentation"
+        )
+        XCTAssertTrue(element(app, "seyal-composer").exists)
+        XCTAssertTrue(element(app, "seyal-blocks-scroll").exists)
+
+        let marker = "splitstream1426"
+        submitComposerCommand(
+            "for i in $(seq 1 12); do printf '\(marker) %02d\\n' \"$i\"; sleep 0.5; done",
+            in: app,
+            expectBlock: true,
+            blockMarker: marker
+        )
+        let secondaryPane = element(app, "seyal-pane-region-0")
+        secondaryPane.click()
+        waitForFocus(app, region: 0)
+
+        let secondaryBlocks = element(app, "seyal-secondary-blocks")
+        XCTAssertTrue(
+            secondaryBlocks.waitForExistence(timeout: 8),
+            "the inactive Flow sibling must remain a Block transcript, not Raw"
+        )
+        let secondaryBlock = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                "seyal-secondary-block-",
+                marker
+            )
+        ).firstMatch
+        XCTAssertTrue(secondaryBlock.waitForExistence(timeout: 8))
+        let secondaryBody = app.descendants(matching: .any)[
+            "\(secondaryBlock.identifier)-body"
+        ].firstMatch
+        XCTAssertTrue(secondaryBody.waitForExistence(timeout: 8))
+        for line in 1...12 {
+            let expected = String(format: "%@ %02d", marker, line)
+            let containsLine = expectation(
+                for: NSPredicate(format: "label CONTAINS %@", expected),
+                evaluatedWith: secondaryBody,
+                handler: nil
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [containsLine], timeout: 8),
+                .completed,
+                "the inactive Flow sibling retains streamed line \(line)"
+            )
+        }
+
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        XCTAssertTrue(anyPaneBlock(in: app, containing: marker).exists)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// A Pane's terminal tabs own separate Runtime timelines. Their local
+    /// Block ids may match, so switching executions must not reuse a sibling
+    /// tab's command card or history body.
+    func testTerminalTabBlocksStayBoundToTheirOwnExecution() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        if !element(app, "seyal-composer").waitForExistence(timeout: 2) {
+            app.menuBars.menuBarItems["View"].click()
+            app.menuItems["Toggle Raw"].click()
+        }
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+
+        let tokenA = "pane-a-\(String(UUID().uuidString.prefix(6)))"
+        submitComposerCommand(
+            "printf '\(tokenA)\\n'",
+            in: app,
+            expectBlock: true,
+            blockMarker: tokenA
+        )
+        let blockA = anyPaneBlock(in: app, containing: tokenA)
+        XCTAssertTrue(blockA.waitForExistence(timeout: 8))
+        waitForBodyMarker(blockBody(for: blockA, in: app), marker: tokenA)
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        let paneBRegion = try focusedRegionIndex(app, count: 2)
+        waitForUsablePty(in: app)
+
+        let tokenB1 = "pane-b1-\(String(UUID().uuidString.prefix(6)))"
+        submitComposerCommand(
+            "printf '\(tokenB1)\\n'",
+            in: app,
+            expectBlock: true,
+            blockMarker: tokenB1
+        )
+        let blockB1 = anyPaneBlock(in: app, containing: tokenB1)
+        XCTAssertTrue(blockB1.waitForExistence(timeout: 8))
+        waitForBodyMarker(blockBody(for: blockB1, in: app), marker: tokenB1)
+
+        let paneRegion = element(app, "seyal-pane-region-\(paneBRegion)")
+        let addButtons = app.buttons.matching(
+            NSPredicate(format: "identifier CONTAINS %@", "-new-terminal")
+        ).allElementsBoundByIndex
+        guard let addTerminal = addButtons.first(where: { paneRegion.frame.contains($0.frame) }) else {
+            XCTFail("Pane B must expose its pane-local New Terminal control")
+            return
+        }
+        addTerminal.click()
+        let tabTwo = app.buttons.matching(
+            NSPredicate(format: "label == %@", "Pane \(paneBRegion + 1) · 2")
+        ).firstMatch
+        XCTAssertTrue(tabTwo.waitForExistence(timeout: 10), "Pane B's second terminal tab must exist")
+        waitForUsablePty(in: app)
+
+        let tokenB2 = "pane-b2-\(String(UUID().uuidString.prefix(6)))"
+        submitComposerCommand(
+            "printf '\(tokenB2)\\n'",
+            in: app,
+            expectBlock: true,
+            blockMarker: tokenB2
+        )
+        let blockB2 = anyPaneBlock(in: app, containing: tokenB2)
+        XCTAssertTrue(blockB2.waitForExistence(timeout: 8))
+        waitForBodyMarker(blockBody(for: blockB2, in: app), marker: tokenB2)
+
+        let tabOne = app.buttons.matching(
+            NSPredicate(format: "label == %@", "Pane \(paneBRegion + 1) · 1")
+        ).firstMatch
+        XCTAssertTrue(tabOne.waitForExistence(timeout: 8))
+        tabOne.click()
+
+        let selectedB1 = element(app, "seyal-block-0")
+        XCTAssertTrue(
+            selectedB1.waitForExistence(timeout: 8),
+            "selected terminal 1 must keep a Block card"
+        )
+        let titleUpdated = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", tokenB1),
+            evaluatedWith: selectedB1,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [titleUpdated], timeout: 6),
+            .completed,
+            "selected terminal 1 must show its own command title; actual=\(selectedB1.label)"
+        )
+        XCTAssertFalse(selectedB1.label.contains(tokenB2), "terminal 1 command title must not bleed from terminal 2")
+        let selectedBodyB1 = blockBody(for: selectedB1, in: app)
+        waitForBodyMarker(selectedBodyB1, marker: tokenB1)
+        XCTAssertFalse(
+            "\(selectedBodyB1.label) \(selectedBodyB1.value ?? "")".contains(tokenB2),
+            "terminal 1 history body must not contain terminal 2 output"
+        )
+
+        element(app, "seyal-pane-region-0").click()
+        waitForFocus(app, region: 0)
+        let inactiveA = anyPaneBlock(in: app, containing: tokenA)
+        XCTAssertTrue(inactiveA.exists, "Pane A history stays visible when Pane B changes terminal tabs")
+        waitForBodyMarker(blockBody(for: inactiveA, in: app), marker: tokenA)
+
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1426-terminal-tab-block-isolation"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// #1424 scenario 2: focus churn keeps host/Block content and scroll mid-transcript.
     func testFocusChurnRetainsScrolledTranscriptAndPaneHosts() throws {
         let app = hostedApp()
@@ -321,6 +563,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         click(app, "seyal-split-right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
         waitForUsablePty(in: app)
+        let paneARegion = try focusedRegionIndex(app, count: 2)
 
         submitComposerCommand(
             "printf '\(markerA)\\n'",
@@ -336,8 +579,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(bodyA.waitForExistence(timeout: 8))
         let heightA = bodyA.frame.height
 
-        let focused = try focusedRegionIndex(app, count: 2)
-        let sibling = focused == 0 ? 1 : 0
+        let sibling = paneARegion == 0 ? 1 : 0
         element(app, "seyal-pane-region-\(sibling)").click()
         waitForFocus(app, region: sibling)
         waitForUsablePty(in: app)
@@ -352,8 +594,17 @@ final class SeyalPaneSplitUITests: XCTestCase {
             "pane B completed Block must appear"
         )
 
+        let bodyB = blockBody(for: anyPaneBlock(in: app, containing: markerB), in: app)
+        XCTAssertTrue(bodyB.waitForExistence(timeout: 8), "pane B completed body must appear")
+        waitForBodyMarker(bodyA, marker: markerA)
+        waitForBodyMarker(bodyB, marker: markerB)
+
         let unfocusedA = anyPaneBlock(in: app, containing: markerA)
         XCTAssertTrue(unfocusedA.exists, "pane A completed Block must remain after focus move (#1426)")
+        XCTAssertTrue(
+            unfocusedA.identifier.hasPrefix("seyal-secondary-block-"),
+            "pane A's inactive transcript must remain a visible Flow Block host"
+        )
         let unfocusedBodyA = blockBody(for: unfocusedA, in: app)
         XCTAssertTrue(unfocusedBodyA.exists, "pane A Block body must stay bound")
         XCTAssertGreaterThan(
@@ -371,6 +622,38 @@ final class SeyalPaneSplitUITests: XCTestCase {
             anyPaneBlock(in: app, containing: markerB).exists,
             "pane B Block must not steal or erase pane A history"
         )
+
+        // Exercise the actual focus boundary repeatedly. The focused leaf is
+        // also hosted by SecondaryLivePaneHost in multipane Flow; both
+        // completed bodies must stay in their producing pane as each leaf
+        // alternates between focused and unfocused ownership.
+        for cycle in 0..<10 {
+            let target = cycle % 2 == 0 ? paneARegion : sibling
+            element(app, "seyal-pane-region-\(target)").click()
+            waitForFocus(app, region: target)
+            let blockA = anyPaneBlock(in: app, containing: markerA)
+            let blockB = anyPaneBlock(in: app, containing: markerB)
+            XCTAssertTrue(blockA.exists, "cycle \(cycle): pane A command stays in history")
+            XCTAssertTrue(blockB.exists, "cycle \(cycle): pane B command stays in history")
+            XCTAssertEqual(
+                blockA.identifier.hasPrefix("seyal-secondary-block-"),
+                target != paneARegion,
+                "cycle \(cycle): pane A Block stays on its own Flow transcript"
+            )
+            XCTAssertEqual(
+                blockB.identifier.hasPrefix("seyal-secondary-block-"),
+                target != sibling,
+                "cycle \(cycle): pane B Block stays on its own Flow transcript"
+            )
+            let currentBodyA = blockBody(for: blockA, in: app)
+            let currentBodyB = blockBody(for: blockB, in: app)
+            waitForBodyMarker(currentBodyA, marker: markerA)
+            waitForBodyMarker(currentBodyB, marker: markerB)
+            let textA = "\(currentBodyA.label) \(currentBodyA.value ?? "")"
+            let textB = "\(currentBodyB.label) \(currentBodyB.value ?? "")"
+            XCTAssertFalse(textA.contains(markerB), "cycle \(cycle): pane A never shows pane B output")
+            XCTAssertFalse(textB.contains(markerA), "cycle \(cycle): pane B never shows pane A output")
+        }
 
         let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         shot.name = "1426-completed-history-on-producing-pane"
@@ -909,6 +1192,19 @@ final class SeyalPaneSplitUITests: XCTestCase {
         return block.descendants(matching: .any).matching(
             NSPredicate(format: "identifier ENDSWITH %@", "-body")
         ).firstMatch
+    }
+
+    private func waitForBodyMarker(_ body: XCUIElement, marker: String) {
+        let rendered = expectation(
+            for: NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", marker, marker),
+            evaluatedWith: body,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [rendered], timeout: 8),
+            .completed,
+            "completed Block body visibly contains its output marker: \(marker)"
+        )
     }
 
     private func waitForAbsence(_ element: XCUIElement, _ message: String) {

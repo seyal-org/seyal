@@ -249,12 +249,15 @@ pub extern "C" fn seyal_app_block_projection_for_pane(
         };
         let running = block.state == BlockPresentationState::Running;
         let exclusive_end = following_session_start(&composer, index as usize);
-        // Non-focused Flow leaves keep Flow projection unless that Pane's
-        // composer is Hidden (Raw/TUI takeover on that leaf).
-        let mode = if composer.mode == ComposerMode::Hidden {
-            PresentationMode::Raw
-        } else {
-            PresentationMode::Flow
+        // ComposerMode::Hidden describes composer/input availability, not the
+        // selected presentation. An unfocused Flow Pane keeps projecting its
+        // Blocks and history while another Pane owns input.
+        let mode = match state.root.presentation_eligibility_for_pane(pane) {
+            PresentationEligibility::Flow => PresentationMode::Flow,
+            PresentationEligibility::Tui => PresentationMode::Tui,
+            PresentationEligibility::Raw | PresentationEligibility::Unbound => {
+                PresentationMode::Raw
+            }
         };
         if mode != PresentationMode::Flow && running {
             return SeyalAppBlockProjection::fail_closed();
@@ -344,9 +347,8 @@ pub extern "C" fn seyal_app_sync_pane_runtime_blocks(
     })
 }
 
-/// Composer-mode proxy for non-focused presentation: Hidden → Raw-like full
-/// pane; anything else → Flow. Avoids requiring a second PresentationSession
-/// while still fencing TUI/Raw takeover on that leaf.
+/// Read the pane's own selected presentation. Composer visibility is focus and
+/// runtime state; it must not turn an unfocused Flow Pane into Raw.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_eligibility_for_pane(handle: u64, pane_lo: u64, pane_hi: u64) -> u16 {
     APPS.with(|apps| {
@@ -358,17 +360,7 @@ pub extern "C" fn seyal_app_eligibility_for_pane(handle: u64, pane_lo: u64, pane
             return eligibility_code(PresentationEligibility::Unbound);
         };
         let pane = PaneId::from_bytes(id);
-        let Some(composer) = state.root.composer_for_pane(pane) else {
-            return eligibility_code(PresentationEligibility::Unbound);
-        };
-        if composer.mode == ComposerMode::Hidden {
-            let focused = state.root.focused_pane_id();
-            if pane == focused {
-                return eligibility_code(state.root.snapshot().eligibility);
-            }
-            return eligibility_code(PresentationEligibility::Raw);
-        }
-        eligibility_code(PresentationEligibility::Flow)
+        eligibility_code(state.root.presentation_eligibility_for_pane(pane))
     })
 }
 

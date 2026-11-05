@@ -80,7 +80,11 @@ extension SecondaryLivePaneHost {
             card.onSelect = { [weak self] _ in
                 self?.onFocus?()
             }
-            if blockID != 0, let retainedRange = surface.retainedHistoryRange(blockID: blockID) {
+            if blockID != 0,
+               let retainedRange = surface.retainedHistoryRange(
+                   blockID: blockID,
+                   displayHandle: displayHandle
+               ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
             }
             blocks.addArrangedSubview(card)
@@ -164,7 +168,10 @@ extension SecondaryLivePaneHost {
                 UInt32(index)
             )
             card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
-            if let retainedRange = surface.retainedHistoryRange(blockID: row.id_lo) {
+            if let retainedRange = surface.retainedHistoryRange(
+                blockID: row.id_lo,
+                displayHandle: displayHandle
+            ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
             }
             applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
@@ -204,6 +211,9 @@ extension SecondaryLivePaneHost {
 
     /// Deliver a completed history range into this leaf's Metal surface + card.
     func applyHistoryRange(_ range: NativeHistoryRange) {
+        guard range.sourceDisplayHandle == 0 || range.sourceDisplayHandle == displayHandle else {
+            return
+        }
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
@@ -287,7 +297,14 @@ extension SecondaryLivePaneHost {
         for (blockID, card) in blockCards {
             let clip = card.body.convert(card.body.bounds, to: surface)
             guard clip.width > 0, clip.height > 0 else { continue }
-            regions.append(NativeTranscriptRegion(id: blockID, origin: clip.origin, clip: clip))
+            regions.append(
+                NativeTranscriptRegion(
+                    id: blockID,
+                    displayHandle: displayHandle,
+                    origin: clip.origin,
+                    clip: clip
+                )
+            )
         }
         return regions
     }

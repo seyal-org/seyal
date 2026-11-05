@@ -889,6 +889,43 @@ final class SeyalHostComponentTests: XCTestCase {
         let hostB = try XCTUnwrap(
             view.centerColumn.presentationHost(paneLo: second.pane_lo, paneHi: second.pane_hi)
         )
+        for host in [hostA, hostB] {
+            host.layoutSubtreeIfNeeded()
+            XCTAssertGreaterThan(
+                host.transcript.frame.height,
+                250,
+                "each Flow pane must give its Block transcript the available space above the composer"
+            )
+            let transcriptOverlay = host.transcript.convert(host.transcript.bounds, to: host.surface)
+            XCTAssertEqual(
+                transcriptOverlay.origin.x,
+                0,
+                accuracy: 1,
+                "pane Metal surface must cover the Block transcript horizontally"
+            )
+            XCTAssertEqual(
+                transcriptOverlay.origin.y,
+                0,
+                accuracy: 1,
+                "pane Metal surface must cover the Block transcript vertically so output glyphs paint"
+            )
+            XCTAssertGreaterThanOrEqual(
+                transcriptOverlay.minX,
+                -1,
+                "Block transcript must not begin left of its Metal surface"
+            )
+            XCTAssertEqual(
+                transcriptOverlay.size.height,
+                host.surface.bounds.height,
+                accuracy: 1,
+                "pane Metal surface height must match the Block transcript viewport"
+            )
+            XCTAssertLessThanOrEqual(
+                transcriptOverlay.maxX,
+                host.surface.bounds.maxX + 1,
+                "Block transcript must remain inside the Metal surface horizontally"
+            )
+        }
         let identityA = ObjectIdentifier(hostA)
         let identityB = ObjectIdentifier(hostB)
 
@@ -1680,6 +1717,87 @@ final class SeyalHostComponentTests: XCTestCase {
     func testBundledRuntimeLauncherUsesFixedHelperPath() {
         XCTAssertEqual(BundledRuntimeLauncher.helperRelativePath, "Contents/Helpers/seyal-runtime")
         XCTAssertEqual(BundledRuntimeLauncher.helperIdentifier, "dev.seyal.Seyal.runtime")
+    }
+
+    @MainActor
+    func testRetainedHistoryRangesAreScopedToTheirController() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-history-isolation"
+        )
+        func range(handle: UInt64, marker: UInt32) -> NativeHistoryRange {
+            NativeHistoryRange(
+                startLine: 1,
+                endLine: 1,
+                blockID: 1,
+                requestID: handle,
+                revision: 1,
+                rows: [[
+                    NativeHistoryRange.Cell(
+                        scalar: marker,
+                        foreground: 0,
+                        background: 0,
+                        flags: 0
+                    )
+                ]],
+                sourceDisplayHandle: handle
+            )
+        }
+        let first = range(handle: 11, marker: 65)
+        let second = range(handle: 22, marker: 66)
+
+        surface.retainHistoryRange(first)
+        surface.retainHistoryRange(second)
+
+        XCTAssertEqual(
+            surface.retainedHistoryRange(blockID: 1, displayHandle: 11),
+            first,
+            "a tab's range stays available under its own Controller"
+        )
+        XCTAssertEqual(
+            surface.retainedHistoryRange(blockID: 1, displayHandle: 22),
+            second,
+            "a second tab can reuse the local Block id without replacing the first"
+        )
+    }
+
+    @MainActor
+    func testSecondaryPaneReconcilesWhenItsControllerChanges() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let appHandle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(appHandle), 0) }
+        let pane = seyal_app_snapshot(appHandle)
+        let host = SecondaryLivePaneHost(
+            appHandle: appHandle,
+            paneLo: pane.pane_lo,
+            paneHi: pane.pane_hi,
+            displayHandle: 11,
+            recoveryTarget: SeyalAppPaneRecoveryTarget()
+        )
+        let eligibility = seyal_app_eligibility_for_pane(
+            appHandle,
+            pane.pane_lo,
+            pane.pane_hi
+        )
+        host.lastAppliedEligibility = eligibility
+        host.lastProjectionFingerprint = host.makeProjectionFingerprint(
+            eligibility: eligibility
+        )
+        XCTAssertEqual(host.lastProjectionFingerprint?.displayHandle, 11)
+
+        host.updateDisplayHandle(22)
+
+        XCTAssertEqual(host.displayHandle, 22)
+        XCTAssertEqual(
+            host.lastProjectionFingerprint?.displayHandle,
+            22,
+            "a same-pane terminal-tab switch must reconcile the new Controller's Blocks"
+        )
     }
 
     @MainActor
@@ -2575,20 +2693,24 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     func testHistoryRangeRoutingRejectsUnknownControllersAndAmbiguousLegacyReplies() {
-        let secondaryHandles: Set<UInt64> = [22, 33]
+        // In multipane Flow every visible leaf, including the focused one,
+        // has a SecondaryLivePaneHost. The focused handle must therefore
+        // route to its pane host even when it also matches the primary handle.
+        let multipaneHostHandles: Set<UInt64> = [11, 22, 33]
         XCTAssertEqual(
             HistoryRangeRouting.destination(
                 sourceDisplayHandle: 11,
                 primaryDisplayHandle: 11,
-                secondaryDisplayHandles: secondaryHandles
+                secondaryDisplayHandles: multipaneHostHandles
             ),
-            .primary
+            .primaryAndSecondary(11),
+            "focused-pane history reaches both the input and durable pane renderers"
         )
         XCTAssertEqual(
             HistoryRangeRouting.destination(
                 sourceDisplayHandle: 22,
                 primaryDisplayHandle: 11,
-                secondaryDisplayHandles: secondaryHandles
+                secondaryDisplayHandles: multipaneHostHandles
             ),
             .secondary(22)
         )
@@ -2596,7 +2718,7 @@ final class SeyalHostComponentTests: XCTestCase {
             HistoryRangeRouting.destination(
                 sourceDisplayHandle: 99,
                 primaryDisplayHandle: 11,
-                secondaryDisplayHandles: secondaryHandles
+                secondaryDisplayHandles: multipaneHostHandles
             ),
             .discard,
             "a stale reply must not fall back to a pane with the same local Block id"
@@ -2605,10 +2727,19 @@ final class SeyalHostComponentTests: XCTestCase {
             HistoryRangeRouting.destination(
                 sourceDisplayHandle: 0,
                 primaryDisplayHandle: 11,
-                secondaryDisplayHandles: secondaryHandles
+                secondaryDisplayHandles: multipaneHostHandles
             ),
             .discard,
             "an unaddressed reply is ambiguous while secondary panes exist"
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 11,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: []
+            ),
+            .primary,
+            "single-pane history still targets ProductChromeHostView"
         )
         XCTAssertEqual(
             HistoryRangeRouting.destination(

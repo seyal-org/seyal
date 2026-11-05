@@ -4,6 +4,7 @@ enum HistoryRangeRouting {
     enum Destination: Equatable {
         case primary
         case secondary(UInt64)
+        case primaryAndSecondary(UInt64)
         case discard
     }
 
@@ -15,11 +16,22 @@ enum HistoryRangeRouting {
         if sourceDisplayHandle == 0 {
             return secondaryDisplayHandles.isEmpty ? .primary : .discard
         }
-        if sourceDisplayHandle == primaryDisplayHandle, primaryDisplayHandle != 0 {
-            return .primary
+        // In multipane Flow, PaneLayoutView installs a durable
+        // SecondaryLivePaneHost for every visible leaf, including the focused
+        // pane. Its handle is also `primaryDisplayHandle` because that pane
+        // owns input, but its Block cards live in the per-pane host. Prefer
+        // the exact host before falling back to the single-pane transcript.
+        if secondaryDisplayHandles.contains(sourceDisplayHandle),
+           sourceDisplayHandle == primaryDisplayHandle,
+           primaryDisplayHandle != 0
+        {
+            return .primaryAndSecondary(sourceDisplayHandle)
         }
         if secondaryDisplayHandles.contains(sourceDisplayHandle) {
             return .secondary(sourceDisplayHandle)
+        }
+        if sourceDisplayHandle == primaryDisplayHandle, primaryDisplayHandle != 0 {
+            return .primary
         }
         return .discard
     }
@@ -27,6 +39,12 @@ enum HistoryRangeRouting {
 
 @MainActor
 extension ProductChromeHostView {
+    private var activeBlockDisplayHandle: UInt64 {
+        let bridge = pane.inputSurface.bridge
+        let focusedHandle = bridge?.windowFocusedDisplayHandle ?? 0
+        return focusedHandle != 0 ? focusedHandle : bridge?.clientHandle ?? 0
+    }
+
     func setupTranscriptTopSpacer() {
         transcriptTopSpacer.translatesAutoresizingMaskIntoConstraints = false
         transcriptTopSpacerHeight = transcriptTopSpacer.heightAnchor.constraint(equalToConstant: 0)
@@ -185,7 +203,11 @@ extension ProductChromeHostView {
             card.setAccessibilityIdentifier("seyal-block-\(visibleIndex)")
             card.setBodyAccessibilityIdentifier("seyal-block-\(visibleIndex)-body")
             visibleIndex += 1
-            if blockID != 0, let retainedRange = pane.inputSurface.retainedHistoryRange(blockID: blockID) {
+            if blockID != 0,
+               let retainedRange = pane.inputSurface.retainedHistoryRange(
+                   blockID: blockID,
+                   displayHandle: activeBlockDisplayHandle
+               ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
             }
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
@@ -416,9 +438,7 @@ extension ProductChromeHostView {
 
     func applyHistoryRange(_ range: NativeHistoryRange) {
         let bridge = pane.inputSurface.bridge
-        let focusedDisplayHandle = bridge?.windowFocusedDisplayHandle ?? 0
-        let primaryDisplayHandle = focusedDisplayHandle != 0
-            ? focusedDisplayHandle : bridge?.clientHandle ?? 0
+        let primaryDisplayHandle = activeBlockDisplayHandle
         let secondaryDisplayHandles = Set(centerColumn.secondaryHosts.map(\.displayHandle))
         switch HistoryRangeRouting.destination(
             sourceDisplayHandle: range.sourceDisplayHandle,
@@ -429,6 +449,13 @@ extension ProductChromeHostView {
             guard let host = centerColumn.secondaryHost(displayHandle: handle) else { return }
             host.applyHistoryRange(range)
             return
+        case .primaryAndSecondary(let handle):
+            // Multipane keeps a durable per-pane Block host while the focused
+            // input surface also paints the primary transcript. Feed both
+            // projections for the same Controller so a focus swap cannot
+            // reveal a host whose history buffer never received this range.
+            guard let host = centerColumn.secondaryHost(displayHandle: handle) else { return }
+            host.applyHistoryRange(range)
         case .discard:
             return
         case .primary:
@@ -436,6 +463,9 @@ extension ProductChromeHostView {
         }
         pane.inputSurface.retainHistoryRange(range)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
+        guard range.sourceDisplayHandle == 0
+            || range.sourceDisplayHandle == activeBlockDisplayHandle
+        else { return }
         if let card = blockCards[range.blockID] {
             card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
             card.setBodyTranscript(range.transcriptText)
@@ -538,6 +568,7 @@ extension ProductChromeHostView {
             guard clip.width > 0, clip.height > 0 else { continue }
             regions.append(NativeTranscriptRegion(
                 id: blockID,
+                displayHandle: activeBlockDisplayHandle,
                 origin: clip.origin,
                 clip: clip,
                 suppressesCursor: blockID == relayTarget.blockID && relayTarget.mode == 2

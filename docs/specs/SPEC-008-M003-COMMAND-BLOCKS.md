@@ -8,10 +8,13 @@
 ## 1. Observable contract
 
 Under the accepted #1438 grid-first amendment, the **default resting**
-presentation for a new Pane is **Raw** (full-Pane primary terminal grid with
-direct-terminal input). Flow/Blocks remains the structured product surface but
-is an **explicit opt-in** while quarantined: shell-integration status alone must
-not auto-promote Raw → Flow. A Pane still has one composer; when the user has
+presentation for a new terminal session or a Pane created in a new Tab is
+**Raw** (full-Pane primary terminal grid with direct-terminal input). Splitting
+an existing Flow Pane creates its sibling in Flow so a multipane Flow session
+does not silently fall back to Raw during pane creation. Splitting a Raw or TUI
+Pane creates its sibling in Raw. Flow/Blocks remains an explicit opt-in while
+quarantined: shell-integration status alone must not auto-promote Raw → Flow.
+A Pane still has one composer; when the user has
 opted into Flow and trusted shell integration reports a supported structured
 command-entry state, submitting the composer creates one new logical command
 Block. The Block displays the submitted command metadata and canonical terminal
@@ -21,6 +24,16 @@ accumulate under Raw; Timeline existence does not require Flow to be visible.
 
 The same Pane and `ExecutionId` remain authoritative throughout. A command Block
 is not a terminal session and does not contain copied terminal state.
+
+Presentation mode is stored per Pane and survives focus changes. A hidden
+composer on an unfocused Pane does not mean that Pane selected Raw: Flow panes
+keep rendering their Block transcript and completed output while another Pane
+owns keyboard focus. Focus changes only the active input/composer target and
+must not change another Pane's selected presentation or remove its Blocks.
+When a Flow Pane is split, its new sibling starts in Flow and receives its own
+Pane-scoped composer, terminal authority, Block timeline, and transcript. Adding
+another split or terminal tab must preserve every existing Pane's mode, Blocks,
+output, and transcript scroll state.
 
 For a trusted SSH session, the local host Block owns only the transcript before
 the first session-scoped command Block. Its output range ends immediately before

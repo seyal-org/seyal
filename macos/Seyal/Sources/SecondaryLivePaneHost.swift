@@ -15,6 +15,10 @@ struct PaneBlockProjectionFingerprint: Equatable {
     }
 
     let eligibility: UInt16
+    /// A Pane can switch between Runtime Controllers without changing its local
+    /// Block ids or projection rows. Include the selected Controller so a tab
+    /// switch rebuilds the pane's view from that execution's timeline.
+    let displayHandle: UInt64
     let blockCount: UInt32
     let floorLo: UInt64
     let floorHi: UInt64
@@ -65,7 +69,7 @@ final class SecondaryLivePaneHost: NSView {
     private var surfaceTopToHost: NSLayoutConstraint!
     private var surfaceTopToTranscript: NSLayoutConstraint!
     private var surfaceBottomToHost: NSLayoutConstraint!
-    private var surfaceBottomToComposer: NSLayoutConstraint!
+    private var surfaceBottomToTranscript: NSLayoutConstraint!
     private var flowConstraints: [NSLayoutConstraint] = []
     /// Keeps transcript document extent across Block rebuilds when the user has
     /// scrolled away from live end (#1424).
@@ -184,19 +188,30 @@ final class SecondaryLivePaneHost: NSView {
         addSubview(retryButton)
 
         surfaceTopToHost = surface.topAnchor.constraint(equalTo: topAnchor)
-        surfaceTopToTranscript = surface.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 8)
+        // Flow Block history is painted by Metal into the card body clips.
+        // Keep the surface coextensive with the transcript viewport so those
+        // overlay regions use valid surface coordinates, as on the primary
+        // Flow pane. Placing Metal below the transcript left command headers
+        // visible while every completed output body stayed blank (#1426).
+        surfaceTopToTranscript = surface.topAnchor.constraint(equalTo: transcript.topAnchor)
         surfaceBottomToHost = surface.bottomAnchor.constraint(equalTo: bottomAnchor)
-        surfaceBottomToComposer = surface.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8)
+        surfaceBottomToTranscript = surface.bottomAnchor.constraint(equalTo: transcript.bottomAnchor)
+        let transcriptFillsToComposer = transcript.bottomAnchor.constraint(
+            equalTo: composer.topAnchor,
+            constant: -12
+        )
+        transcriptFillsToComposer.priority = .defaultHigh
         flowConstraints = [
             transcript.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             transcript.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             transcript.topAnchor.constraint(equalTo: topAnchor, constant: 10),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
+            transcriptFillsToComposer,
             composer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             composer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             composer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
             surfaceTopToTranscript,
-            surfaceBottomToComposer,
+            surfaceBottomToTranscript,
         ]
         NSLayoutConstraint.activate([
             surface.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -320,27 +335,14 @@ final class SecondaryLivePaneHost: NSView {
 
     func updateDisplayHandle(_ handle: UInt64) {
         guard handle != displayHandle else { return }
-        let gainedHandle = displayHandle == 0 && handle != 0
         displayHandle = handle
         updateAvailabilityPresentation()
         needsLayout = true
         publishFrame()
-        // A 0→bound transition often lands after the first empty rebuild
-        // (split before Controller bind). Sync + fingerprint reconcile so
-        // HISTORY spans resize Block bodies; do not leave 1-line stubs (#1424).
-        if gainedHandle {
-            noteRegistryPolled()
-            return
-        }
-        let eligibility = lastAppliedEligibility
-            ?? seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
-        let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
-            || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        if !direct {
-            republishExistingBlockProjections()
-            publishLiveTailBlocks()
-            publishBlockOutputFrame()
-        }
+        // Both split-time binding (0→bound) and same-pane terminal-tab changes
+        // select a different Runtime timeline. Reconcile against that
+        // Controller so local Block ids cannot retain another tab's card/body.
+        noteRegistryPolled()
     }
 
     func updateRecoveryTarget(_ target: SeyalAppPaneRecoveryTarget) {
@@ -570,6 +572,7 @@ final class SecondaryLivePaneHost: NSView {
         let floorHi = composerSnap.block_count == 0 ? 0 : composerSnap.canvas_floor_block_id_hi
         return PaneBlockProjectionFingerprint(
             eligibility: eligibility,
+            displayHandle: displayHandle,
             blockCount: composerSnap.block_count,
             floorLo: floorLo,
             floorHi: floorHi,

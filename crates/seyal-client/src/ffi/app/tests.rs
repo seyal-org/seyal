@@ -118,7 +118,6 @@ fn window_event_rejects_unknown_reserved_bits_and_misplaced_occlusion_flag() {
     assert_eq!(super::decode::decode_action(&action), Err(-6));
 }
 
-
 fn opt_in_flow_handle(handle: u64) {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
