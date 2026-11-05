@@ -1740,6 +1740,51 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotEqual(a, b)
     }
 
+    func testExplicitRuntimeDirectoryPrepRepairsLaxModeAndCreatesParents() throws {
+        let leaf = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("seyal-1428-lax-\(ProcessInfo.processInfo.processIdentifier)")
+        let nested = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("seyal-1428-nest-\(ProcessInfo.processInfo.processIdentifier)")
+            .appendingPathComponent("child")
+        defer {
+            try? FileManager.default.removeItem(at: leaf)
+            try? FileManager.default.removeItem(
+                at: nested.deletingLastPathComponent()
+            )
+        }
+
+        try FileManager.default.createDirectory(at: leaf, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: leaf.path
+        )
+        XCTAssertTrue(
+            IsolatedRuntimeDirectory.prepareExplicitRuntimeDirectory(leaf.path),
+            "euid-owned 0755 leaf must be host-repaired to 0700"
+        )
+        let leafMode = try FileManager.default.attributesOfItem(atPath: leaf.path)[.posixPermissions]
+            as? NSNumber
+        XCTAssertEqual((leafMode?.intValue ?? -1) & 0o777, 0o700)
+
+        XCTAssertTrue(
+            IsolatedRuntimeDirectory.prepareExplicitRuntimeDirectory(nested.path),
+            "missing nested parents under /tmp must be created as 0700"
+        )
+        let nestedMode = try FileManager.default.attributesOfItem(atPath: nested.path)[
+            .posixPermissions
+        ] as? NSNumber
+        XCTAssertEqual((nestedMode?.intValue ?? -1) & 0o777, 0o700)
+
+        let symlink = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("seyal-1428-link-\(ProcessInfo.processInfo.processIdentifier)")
+        defer { try? FileManager.default.removeItem(at: symlink) }
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: leaf)
+        XCTAssertFalse(
+            IsolatedRuntimeDirectory.prepareExplicitRuntimeDirectory(symlink.path),
+            "symlink leaf must fail closed"
+        )
+    }
+
     func testIsolatedRuntimeDirectoryDoesNotWeakenProductionDiscovery() {
         XCTAssertEqual(
             IsolatedRuntimeDirectory.helperArguments(from: ["Seyal"], testHostLoaded: false),
