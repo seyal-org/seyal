@@ -2852,6 +2852,19 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(requests.begin(key), "evicting the Block drops its request deduplication state")
         requests.retry(key)
         XCTAssertTrue(requests.begin(key), "a failed history request remains retryable")
+
+        var continued = HistoryProjectionRequestBook()
+        XCTAssertTrue(continued.begin(key))
+        let partialReply = HistoryProjectionRequestKey(
+            displayHandle: key.displayHandle,
+            blockID: key.blockID,
+            startLine: key.startLine,
+            endLine: 32
+        )
+        continued.receive(partialReply, status: 1)
+        XCTAssertFalse(continued.begin(key), "a truncated reply must not race its continuation")
+        continued.receive(partialReply, status: 0)
+        XCTAssertFalse(continued.begin(key), "the completed continuation settles the original projection")
     }
 
     /// The primary readiness source polls `clientHandle`; focus selection must

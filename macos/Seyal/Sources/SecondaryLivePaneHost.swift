@@ -42,13 +42,33 @@ struct HistoryProjectionRequestBook {
     }
 
     mutating func complete(_ key: HistoryProjectionRequestKey) {
-        inFlight.remove(key)
+        let matching = Set(inFlight.filter {
+            $0.displayHandle == key.displayHandle && $0.blockID == key.blockID
+        })
+        inFlight.subtract(matching)
+        settled.formUnion(matching)
         settled.insert(key)
     }
 
+    mutating func receive(_ key: HistoryProjectionRequestKey, status: UInt32) {
+        switch status {
+        case 0:
+            complete(key)
+        case 1:
+            // Truncated history is still being continued by RustDisplayBridge.
+            break
+        default:
+            retry(key)
+        }
+    }
+
     mutating func retry(_ key: HistoryProjectionRequestKey) {
-        inFlight.remove(key)
-        settled.remove(key)
+        inFlight = Set(inFlight.filter {
+            $0.displayHandle != key.displayHandle || $0.blockID != key.blockID
+        })
+        settled = Set(settled.filter {
+            $0.displayHandle != key.displayHandle || $0.blockID != key.blockID
+        })
     }
 
     mutating func retain(blockIDs: Set<UInt64>, forDisplayHandle handle: UInt64) {

@@ -250,7 +250,7 @@ extension SecondaryLivePaneHost {
             historyProjectionRequests.retry(key)
             return
         }
-        historyProjectionRequests.complete(key)
+        historyProjectionRequests.receive(key, status: range.status)
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
