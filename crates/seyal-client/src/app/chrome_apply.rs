@@ -170,17 +170,15 @@ impl ApplicationRoot {
             .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         self.drain_shell_effects();
-        if created {
-            if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
-                if let Ok(window) = self.shell.product_window_id() {
-                    let _ = self.shell.apply(crate::shell::ShellAction::CloseWindow {
-                        id: window,
-                        containment_generation: self.shell.containment_generation(),
-                    });
-                    self.drain_shell_effects();
-                }
-                return Err(error);
+        if created && let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+            if let Ok(window) = self.shell.product_window_id() {
+                let _ = self.shell.apply(crate::shell::ShellAction::CloseWindow {
+                    id: window,
+                    containment_generation: self.shell.containment_generation(),
+                });
+                self.drain_shell_effects();
             }
+            return Err(error);
         }
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
