@@ -246,7 +246,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         let marker = "splitstream1426"
         submitComposerCommand(
-            "for i in $(seq 1 12); do printf '\(marker) %02d\\n' \"$i\"; sleep 0.5; done",
+            "for i in $(seq 1 24); do printf '\(marker) %02d\\n' \"$i\"; sleep 1; done; printf '\(marker) COMPLETE\\n'",
             in: app,
             expectBlock: true,
             blockMarker: marker
@@ -272,38 +272,54 @@ final class SeyalPaneSplitUITests: XCTestCase {
             "\(secondaryBlock.identifier)-body"
         ].firstMatch
         XCTAssertTrue(secondaryBody.waitForExistence(timeout: 8))
-        let firstLine = "\(marker) 01"
-        let firstLineRendered = expectation(
-            for: NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", firstLine, firstLine),
-            evaluatedWith: secondaryBody,
-            handler: nil
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [firstLineRendered], timeout: 8),
-            .completed,
-            "the inactive Flow Block receives live output before the command exits"
+        let runningComposer = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "seyal-composer-", "busy")
+        ).firstMatch
+        XCTAssertTrue(
+            runningComposer.waitForExistence(timeout: 5),
+            "the inactive pane remains in Blocks while its command is still running"
         )
         let inactiveStreamScreenshot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         inactiveStreamScreenshot.name = "1426-inactive-flow-block-during-numbered-stream"
         inactiveStreamScreenshot.lifetime = .keepAlways
         add(inactiveStreamScreenshot)
-        for line in 1...12 {
+        let finalLine = "\(marker) COMPLETE"
+        let streamFinished = expectation(
+            for: NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", finalLine, finalLine),
+            evaluatedWith: secondaryBody,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [streamFinished], timeout: 35),
+            .completed,
+            "the unfocused Flow Block receives the end of the stream"
+        )
+        for line in 1...24 {
             let expected = String(format: "%@ %02d", marker, line)
             let containsLine = expectation(
-                for: NSPredicate(format: "label CONTAINS %@", expected),
+                for: NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", expected, expected),
                 evaluatedWith: secondaryBody,
                 handler: nil
             )
             XCTAssertEqual(
                 XCTWaiter.wait(for: [containsLine], timeout: 8),
                 .completed,
-                "the inactive Flow sibling retains streamed line \(line)"
+                "the unfocused Flow Block retains streamed line \(line)"
             )
         }
+        let completedInactiveScreenshot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        completedInactiveScreenshot.name = "1426-complete-flow-block-while-inactive"
+        completedInactiveScreenshot.lifetime = .keepAlways
+        add(completedInactiveScreenshot)
 
         element(app, "seyal-pane-region-1").click()
         waitForFocus(app, region: 1)
-        XCTAssertTrue(anyPaneBlock(in: app, containing: marker).exists)
+        let completedBlock = anyPaneBlock(in: app, containing: marker)
+        XCTAssertTrue(completedBlock.waitForExistence(timeout: 8))
+        let completedStreamScreenshot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        completedStreamScreenshot.name = "1426-flow-block-after-stream-and-focus-return"
+        completedStreamScreenshot.lifetime = .keepAlways
+        add(completedStreamScreenshot)
         XCTAssertEqual(app.state, .runningForeground)
     }
 
