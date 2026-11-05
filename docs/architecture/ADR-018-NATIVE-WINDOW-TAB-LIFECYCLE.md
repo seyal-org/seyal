@@ -1,10 +1,10 @@
 # ADR-018 — Native window and tab lifecycle, identity and ordering
 
-- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1000. An author or agent comment is not that acceptance.
+- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1000. An author or agent comment is not that acceptance. **#1447 macOS quit-confirm / Dock-reopen-terminal amendment is Proposed** until its acceptance PR merges with independent non-author maintainer acceptance; until then the amendment section (§12) is not normative and authorizes no implementation. An author or agent comment is not that acceptance.
 - **Date:** 2026-09-24
-- **Issue:** #1000 (refinement); parent umbrella #674; epic #665
+- **Issue:** #1000 (refinement); parent umbrella #674; epic #665; amendment #1447
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-009, ADR-015, SPEC-004, SPEC-005, SPEC-006, SPEC-008, SPEC-009, [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md), [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
-- **Coordinates with:** #994 (pane/tab → `TerminalExecution` provisioning contract), #922, #923, #928, #936, #929
+- **Coordinates with:** #994 (pane/tab → `TerminalExecution` provisioning contract), #922, #923, #928, #936, #929, #676 (`warn_before_quit` config)
 - **Numbering note:** Final. ADR-017 (#994), ADR-018 (#1000, this ADR), ADR-019 (#1004), ADR-020 (#1003) and ADR-021 (#1001, PaneTree operations) are allocated on `master`. Complementary scopes: #994/ADR-017 owns how a leaf obtains an execution; this ADR owns how windows/tabs are identified, ordered and destroyed.
 
 ## Context
@@ -305,9 +305,24 @@ again. Normative requirements:
   constructs an `NSWindow` without a Rust effect and never chooses create versus
   raise from AppKit key-window or miniaturization state;
 - Dock click / `applicationShouldHandleReopen(_:hasVisibleWindows:)` when
-  `hasVisibleWindows == false` and zero Windows exist forwards
-  `ActivateWorkspace { workspace: last_active_workspace }` rather than silently
-  no-oping or quitting;
+  `hasVisibleWindows == false`:
+  - if any product Window exists (including miniaturized or fully occluded),
+    Rust **raises** the MRU Window of `last_active_workspace` (or the
+    Workspace that owns that MRU Window) — deminiaturize / order-front /
+    make-key through existing native effects — and must **not** create a
+    duplicate Window;
+  - if zero Windows exist, forwards
+    `ActivateWorkspace { workspace: last_active_workspace }` (create path)
+    rather than silently no-oping or quitting;
+- **Dock / zero-window create must yield a usable terminal.** After the create
+  path materializes the new Window/Tab/Pane leaf, the portable app layer must
+  begin the same #994 / ADR-017 provisioning path used for an ordinary new
+  terminal leaf (for example `CreateTab`), so the user receives one new empty
+  interactive terminal tab — not blank chrome with an unbound Pane. Creating a
+  Window still does **not** itself create an execution (§8 invariant 2);
+  provisioning remains an explicit correlated #994 operation owned by Rust
+  product authority. Zero-window re-entry must **not** auto-adopt an
+  Unpresented execution; adoption stays the exact-`ExecutionId` W6 path;
 - until a Window exists, live-unpresented enumeration (§3.3) is reachable after
   re-entry creates a Window; the zero-Window state must not strand executions
   with no future adopt surface.
@@ -324,11 +339,37 @@ become an implicit side effect of a close action.
 
 ## 4. Application quit
 
+### 4.0 Quit confirmation (macOS-default headed UX)
+
+Before entering the bounded quit sequence below, Cmd-Q / menu Quit may require
+a native confirmation alert. Normative rules:
+
+- Rust owns the **should-confirm** decision from composition state plus cold
+  config. The host must not invent confirm policy from AppKit window counts
+  alone (tabs are Rust-owned; ADR-015).
+- Config key `warn_before_quit` (boolean, default **true**, `#676` catalog)
+  gates the prompt. When false, Quit proceeds with no alert.
+- When `warn_before_quit` is true **and** (`window_count > 1` **or** total
+  outer Tab count across the headed composition `> 1`), native shows one
+  standard Quit confirmation alert. Cancel →
+  `NSApplication.TerminateReply.terminateCancel` and no `RequestQuit`. Continue
+  → the §4.1 sequence. A single Window with a single Tab never prompts under
+  this rule.
+- Confirmation is **not** a terminate-on-close offer and does not kill
+  Runtime/executions by itself. Presentation close still needs no destructive
+  prompt (§3.1).
+- After a successful §4.1 completion (`reply(true)`), the headed `Seyal.app`
+  process must exit so Dock does not show Seyal as running. Headless Runtime
+  survival across Quit remains §8 invariant 6 / F-042; this amendment does not
+  authorize shutting down Runtime as a side effect of headed Quit.
+
+### 4.1 Bounded detach then headed terminate
+
 Quit is a bounded, Rust-owned sequence realized by the host:
 
 ```text
-1. Native recognizes Cmd-Q / menu Quit and returns
-   NSApplication.TerminateReply.terminateLater.
+1. Native recognizes Cmd-Q / menu Quit, completes §4.0 confirm if required,
+   and returns NSApplication.TerminateReply.terminateLater.
 2. Native forwards a typed RequestQuit action.
 3. Rust freezes input for every route in every Window and increments the
    presentation epoch; stale callbacks fail closed.
@@ -751,14 +792,42 @@ only the CreateWindow / zero-Window re-entry semantics those strokes dispatch.
 
 ## 12. Not in this ADR
 
-- the typed provisioning request that creates an execution for a new Tab or Pane
-  (#994);
+- the typed wire/request shape that creates an execution for a new Tab or Pane
+  (#994 / ADR-017) — this ADR may require that Dock/zero-window create **begin**
+  that path (§3.3a) without owning the protocol;
 - split ratio and drag-resize semantics (#928);
 - multiple simultaneously live Metal leaves (#936);
 - workspace chrome visual slices (#922) and split-tree host projection (#923);
 - durable presentation persistence (M004);
+- quit-on-last-window-close and terminate-on-tab-close configuration (remain
+  M004 / #676; last-window close still never quits in M003);
+- shutting down headless Runtime as a side effect of headed Quit (would reopen
+  F-042 / §8 invariant 6 under a separate Architecture Issue);
 - any absolute latency, CPU, RSS or deadline value. Those are derived and recorded
   by the owning implementation child.
+
+## 13. Amendment — macOS quit confirm and Dock reopen terminal (#1447)
+
+**Status:** Proposed under #1447 until the acceptance PR merges with independent
+non-author maintainer acceptance. Until then this section is not normative.
+
+**Decision.** Align headed lifecycle with common macOS app behavior without
+reversing presentation-close-is-not-terminate or Runtime-survives-Quit:
+
+1. §4.0 quit confirmation with `warn_before_quit` (default true) when
+   `window_count > 1` or outer Tab count `> 1`; Cancel skips `RequestQuit`.
+2. §3.3a Dock reopen raises an existing (including miniaturized) Window; zero
+   Windows create then begin #994 provisioning for one new empty terminal tab.
+3. Last-window close remains non-quit (§2.5 / §3.2).
+4. Successful headed Quit clears Dock presence for `Seyal.app`; Runtime may
+   remain without a Dock icon.
+
+**Rejected here.** Quit-on-last-window-close; host-local confirm from AppKit
+counts alone; implicit terminate of shells on headed Quit.
+
+**Implementation children (after acceptance):** quit-confirm + headed-exit
+evidence; Dock reopen raise vs create+provision. Config catalog entry under
+`#676`.
 
 A separate SPEC is deliberately not created in this refinement: the observable
 contract is carried by this ADR plus the already accepted SPEC-004, SPEC-006,
