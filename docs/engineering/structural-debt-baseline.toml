@@ -78,9 +78,9 @@ responsibility = "Published C ABI entry points stay one façade after decode/enc
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 814
+acknowledged_loc = 817
 issue = 1451
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149/#1388/#1440 lifecycle fixtures remain here. #1451 adds should_confirm_quit FFI proofs beside the existing AppHandle ABI cases."
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149/#1388/#1440 lifecycle fixtures remain here. #1451 adds should_confirm_quit FFI proofs beside the existing AppHandle ABI cases; rustfmt wrap raises three lines."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"

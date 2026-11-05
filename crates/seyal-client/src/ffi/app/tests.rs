@@ -118,7 +118,6 @@ fn window_event_rejects_unknown_reserved_bits_and_misplaced_occlusion_flag() {
     assert_eq!(super::decode::decode_action(&action), Err(-6));
 }
 
-
 fn opt_in_flow_handle(handle: u64) {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
@@ -409,7 +408,11 @@ fn explicit_handle_round_trip_and_unknown_handle_fail_closed() {
 #[test]
 fn should_confirm_quit_follows_window_count_under_default_policy() {
     let handle = seyal_app_create();
-    assert_eq!(seyal_app_should_confirm_quit(handle), 0, "single window/tab");
+    assert_eq!(
+        seyal_app_should_confirm_quit(handle),
+        0,
+        "single window/tab"
+    );
     assert_eq!(seyal_app_test_seed_windows_only(handle, 2), 0);
     assert_eq!(
         seyal_app_should_confirm_quit(handle),

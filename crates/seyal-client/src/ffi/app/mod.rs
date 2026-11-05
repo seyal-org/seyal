@@ -24,12 +24,12 @@ mod tests;
 use std::{cell::RefCell, collections::HashMap, ptr};
 
 use crate::app::{ApplicationRoot, APP_ABI_VERSION};
+use crate::app_policy::{process_app_policy, should_confirm_quit};
 use crate::chrome::{InspectorMode, LeftPanelMode};
 use crate::composer::{
     ComposerMode, BLOCK_PROMPT, COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL,
     COMPOSER_HISTORY_PLACEHOLDER,
 };
-use crate::app_policy::{process_app_policy, should_confirm_quit};
 use crate::input_policy::process_input_policy;
 
 use super::allocate_handle;
