@@ -244,7 +244,8 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
     let open_window = root.snapshot().shell.active_window.expect("new window");
     let open_pane = root.snapshot().shell.focused_pane;
     while !root.snapshot().pending_effects.is_empty() {
-        root.apply(AppAction::AckEffect).expect("ack CreateWindow effect");
+        root.apply(AppAction::AckEffect)
+            .expect("ack CreateWindow effect");
     }
     let deadline = Instant::now() + Duration::from_secs(7);
     while Instant::now() < deadline {
