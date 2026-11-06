@@ -1937,6 +1937,7 @@ final class SeyalHostComponentTests: XCTestCase {
         surface.activateTranscriptDisplayHandle(11)
         surface.setTranscriptFrame(frame(revision: 1, clip: clip))
         XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, 1)
+        let preparedHistoryBuffer = try XCTUnwrap(surface.renderer.historyRegions[1]?.buffer)
 
         surface.renderer.needsPresent = false
         surface.setTranscriptFrame(frame(revision: 2, clip: clip))
@@ -1951,6 +1952,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(
             surface.renderer.needsPresent,
             "changed Block geometry must still prepare and present the repositioned history"
+        )
+        XCTAssertTrue(
+            surface.renderer.historyRegions[1]?.buffer === preparedHistoryBuffer,
+            "moving an unchanged Block must preserve its prepared Metal buffer"
         )
     }
 

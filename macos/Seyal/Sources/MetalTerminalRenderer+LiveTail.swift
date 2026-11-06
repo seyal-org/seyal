@@ -24,6 +24,22 @@ struct LiveTailRenderState {
 }
 
 extension MetalTerminalRenderer {
+    /// Moves a prepared history region by replacing only its draw metadata.
+    @discardableResult
+    func setHistoryRegionGeometry(id: UInt64, origin: CGPoint, clip: CGRect) -> Bool {
+        guard let existing = historyRegions[id] else { return false }
+        let nextOrigin = SIMD2<Float>(Float(origin.x), Float(origin.y))
+        guard existing.origin != nextOrigin || existing.clip != clip else { return true }
+        historyRegions[id] = HistoryRenderRegion(
+            buffer: existing.buffer,
+            instanceCount: existing.instanceCount,
+            origin: nextOrigin,
+            clip: clip
+        )
+        needsPresent = true
+        return true
+    }
+
     /// Completed-history regions followed by running live-tail clips.
     var orderedBlockRegions: [HistoryRenderRegion] {
         historyRegionOrder.compactMap { historyRegions[$0] } + orderedLiveTailRegions
@@ -282,6 +298,7 @@ extension MetalTerminalRenderer {
             next[blockID] = HistoryRenderRegion(
                 buffer: buffer,
                 instanceCount: cells,
+                origin: .zero,
                 clip: region.clip
             )
         }

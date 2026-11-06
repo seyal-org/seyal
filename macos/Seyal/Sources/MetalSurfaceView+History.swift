@@ -28,17 +28,21 @@ extension MetalSurfaceView {
     retainHistoryRange(range)
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
     do {
+      let currentRegion = region ?? lastTranscriptFrameRegions?.first(where: {
+        $0.id == range.blockID
+          && ($0.displayHandle == 0 || $0.displayHandle == range.sourceDisplayHandle)
+      })
       let rendererRegion: NativeTranscriptRegion
-      if let region {
+      if let currentRegion {
         // AppKit uses a bottom-left origin; the terminal shader uses top-left pixels.
         let pixelClip = NSRect(
-          x: region.clip.minX * scale,
-          y: (bounds.height - region.clip.maxY) * scale,
-          width: region.clip.width * scale,
-          height: region.clip.height * scale
+          x: currentRegion.clip.minX * scale,
+          y: (bounds.height - currentRegion.clip.maxY) * scale,
+          width: currentRegion.clip.width * scale,
+          height: currentRegion.clip.height * scale
         )
         rendererRegion = NativeTranscriptRegion(
-          id: region.id,
+          id: currentRegion.id,
           origin: pixelClip.origin,
           clip: pixelClip
         )

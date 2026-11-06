@@ -243,6 +243,12 @@ extension MetalTerminalRenderer {
             && atlasTexture != nil
         if drawLiveGrid, let instanceBuffer {
             encoder.setVertexBuffer(instanceBuffer, offset: 0, index: 0)
+            var liveOrigin = SIMD2<Float>.zero
+            encoder.setVertexBytes(
+                &liveOrigin,
+                length: MemoryLayout<SIMD2<Float>>.stride,
+                index: 4
+            )
             encoder.drawPrimitives(
                 type: .triangle,
                 vertexStart: 0,
@@ -274,6 +280,12 @@ extension MetalTerminalRenderer {
         }
         for region in historyRegions where region.instanceCount > 0 && atlasTexture != nil {
             encoder.setVertexBuffer(region.buffer, offset: 0, index: 0)
+            var regionOrigin = region.origin
+            encoder.setVertexBytes(
+                &regionOrigin,
+                length: MemoryLayout<SIMD2<Float>>.stride,
+                index: 4
+            )
             let x = max(0, Int(region.clip.minX.rounded(.down)))
             let y = max(0, Int(region.clip.minY.rounded(.down)))
             let maxX = min(target.width, Int(region.clip.maxX.rounded(.up)))
