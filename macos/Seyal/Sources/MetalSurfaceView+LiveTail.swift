@@ -20,6 +20,14 @@ extension MetalSurfaceView {
     if frame.regions.isEmpty, !historyRanges.isEmpty {
       return
     }
+    // Host polling and projection refreshes can publish a newer frame revision
+    // without changing any Block geometry. Re-preparing every retained history
+    // range allocates replacement Metal buffers and dirties the drawable, which
+    // causes visible flashes during ordinary command updates. History-content
+    // changes still arrive through renderHistoryRange; geometry changes still
+    // fall through and re-encode the complete retained frame below.
+    guard lastTranscriptFrameRegions != frame.regions else { return }
+    lastTranscriptFrameRegions = frame.regions
     let regionIDs = Set(frame.regionIDs)
     // Do not drop `historyRanges` here when a body clip is briefly omitted —
     // that erased AX transcript + Metal source data after clear→exit while
