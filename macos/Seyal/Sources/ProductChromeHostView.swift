@@ -698,37 +698,7 @@ final class ProductChromeHostView: NSView {
                     )
                 }
             }
-            // Workspace Tabs are layout containers, not terminal sessions.
-            // Keep them reachable by pointer as compact C04 navigation rows
-            // without adding a competing terminal-looking top strip.
-            if shell.tab_count > 1 {
-                appendLeftSection(
-                    title: "LAYOUTS",
-                    identifier: "seyal-layouts-heading",
-                    topGap: true
-                ) {
-                    for index in 0..<Int(shell.tab_count) {
-                        let row = seyal_app_shell_row(
-                            pane.appHandle,
-                            UInt16(SEYAL_APP_ROW_TAB),
-                            UInt32(index)
-                        )
-                        let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Layout \(index + 1)"
-                        leftItems.addArrangedSubview(
-                            contextRow(
-                                primary: title,
-                                secondary: nil,
-                                identifier: "seyal-layout-\(index)",
-                                selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                                action: #selector(selectTab(_:)),
-                                kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
-                                idLo: row.id_lo,
-                                idHi: row.id_hi
-                            )
-                        )
-                    }
-                }
-            }
+            appendWorkspaceLayoutsIfNeeded(shell: shell)
             let chrome = seyal_app_chrome(pane.appHandle)
             if chrome.agent_count > 0 {
                 appendLeftSection(
