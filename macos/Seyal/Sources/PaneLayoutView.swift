@@ -331,10 +331,8 @@ final class PaneLayoutView: NSView {
     /// dividers from Rust and apply them. A zero-size row means Rust no longer
     /// has that index (stale count); reading stops rather than guessing.
     func reconcile(paneCount: Int) {
-        apply(
-            Self.readRegions(appHandle: appHandle, paneCount: paneCount),
-            dividers: Self.readDividers(appHandle: appHandle, count: max(paneCount - 1, 0))
-        )
+        apply(Self.readRegions(appHandle: appHandle, paneCount: paneCount),
+              dividers: Self.readDividers(appHandle: appHandle, count: max(paneCount - 1, 0)))
     }
 
     /// Forward a drag to Rust as the raw pointer coordinate along the
@@ -590,8 +588,7 @@ final class PaneLayoutView: NSView {
                 paneTitle: region.title,
                 tabs: region.terminalTabs,
                 focused: region.focused,
-                canSplit: region.focused
-                    && shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) != 0,
+                canSplit: region.focused && shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) != 0,
                 canClosePane: shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) != 0
             )
             strip.onSelect = { [weak self] tab in self?.onSelectTerminalTab?(key.lo, key.hi, tab.lo, tab.hi) }
