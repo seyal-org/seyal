@@ -28,6 +28,35 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-close-tab"].firstMatch.exists)
     }
 
+    /// C03/C05: outer layout navigation remains pointer reachable without
+    /// adding a second terminal-looking tab row above Pane TerminalTabs.
+    func testWorkspaceLayoutsUseContextRowsNotDuplicateTerminalChrome() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        showWorkspaces(in: app)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-layouts-heading"].exists)
+
+        clickNewTab(in: app)
+        waitForWorkspaceTabCountHint(in: app, atLeast: 2)
+        let layouts = app.descendants(matching: .any)["seyal-layouts-heading"].firstMatch
+        let first = app.descendants(matching: .any)["seyal-layout-0"].firstMatch
+        let second = app.descendants(matching: .any)["seyal-layout-1"].firstMatch
+        XCTAssertTrue(layouts.waitForExistence(timeout: 8))
+        XCTAssertTrue(first.waitForExistence(timeout: 8))
+        XCTAssertTrue(second.waitForExistence(timeout: 8))
+        XCTAssertTrue(first.isHittable)
+        first.click()
+        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-0"].firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-strip"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
+            ).firstMatch.waitForExistence(timeout: 8),
+            "Pane-local terminal strip survives outer layout navigation"
+        )
+    }
+
     func testCommandTCreatesPaneTerminalAndCommandNCreatesWindow() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
