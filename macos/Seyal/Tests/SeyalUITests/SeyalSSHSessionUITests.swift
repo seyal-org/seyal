@@ -82,6 +82,7 @@ final class SeyalSSHSessionUITests: XCTestCase {
             .completed,
             "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil"); app=\n\(app.debugDescription)"
         )
+        app.ensureFlowBlocksPresentation()
 
         submitComposerCommand(app, "command -v ssh")
         let pathBody = app.descendants(matching: .any).matching(
@@ -392,6 +393,7 @@ final class SeyalSSHSessionUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [usable], timeout: 20), .completed)
+        app.ensureFlowBlocksPresentation()
 
         submitComposerCommand(app, "ssh -p 2222 me@test-host")
         let host = blockCommand(app, containing: "ssh -p 2222 me@test-host")
@@ -476,6 +478,7 @@ final class SeyalSSHSessionUITests: XCTestCase {
         expectedComposerValue: String = "available",
         beforeSubmit: ((XCUIElement) -> Void)? = nil
     ) {
+        app.ensureFlowBlocksPresentation()
         let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         waitForComposerValue(composer, expectedComposerValue, timeout: 20)
         let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch

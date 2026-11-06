@@ -58,11 +58,11 @@ acknowledged_loc = 967
 issue = 1398
 reason = "Portable provisioning reducer remains the cold-path request/result authority after #1381 moves tab-specific binding operations into terminal_bindings.rs; #1379 adds release_dead_binding so New shell can Create+Bind an ended Pane without enqueueing terminate or leaving a binding that blocks a later split leaf; #1398 keeps Close Terminal pending-terminate lookup/take on the terminal_bindings sibling so this reducer stays under the 1,000 LOC production ceiling."
 
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 990
-issue = 1413
-reason = "Create/close/terminate/split adapter retains terminal-tab routing (#1381) and now encodes ADR-028 active-workspace wire ids for CreateExecution."
+ceiling_loc = 1008
+issue = 1451
+responsibility = "Create/close/terminate/split adapter retains terminal-tab routing (#1381) and ADR-028 active-workspace wire ids (#1413); #1451 adds CreateWindow / zero-window Dock ActivateWorkspace begin-provisioning on the same CreateTab admission path rather than a second provisioning façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -78,15 +78,15 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1117
-issue = 1424
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction; #1424 adds pane-scoped composer/block scratch on AppHandle while pane-addressed encode lives in pane_composer.rs."
+ceiling_loc = 1136
+issue = 1451
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424); #1451 adds seyal_app_should_confirm_quit on that façade so Rust owns warn_before_quit composition policy without a second ABI module."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 800
-issue = 1440
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shell composition cases aside. #1388 BlockScope and #1440 Raw-default resting projection proofs stay beside the existing lifecycle ABI fixtures."
+acknowledged_loc = 817
+issue = 1451
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149/#1388/#1440 lifecycle fixtures remain here. #1451 adds should_confirm_quit FFI proofs beside the existing AppHandle ABI cases; rustfmt wrap raises three lines."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
@@ -240,9 +240,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 940
+acknowledged_loc = 968
 issue = 1442
-reason = "Thin AppKit chrome host stays one cold-path façade; #1442 routes Raw correlation history ranges through renderRawScrollbackHistoryIfNeeded before Flow applyHistoryRange so Block bodies and Raw scroll cannot split-brain on the same surface."
+reason = "Thin AppKit chrome host stays one cold-path façade; #1442 routes Raw correlation history ranges through renderRawScrollbackHistoryIfNeeded before Flow applyHistoryRange so Block bodies and Raw scroll cannot split-brain on the same surface. Tip already ships 968 LOC; ratchet acknowledged_loc to the measured tip so silent headroom cannot hide further growth."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
@@ -311,9 +311,9 @@ reason = "The existing connection writer remains the single owner of bounded con
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MultiWindowHostController.swift"
-acknowledged_loc = 769
-issue = 1158
-reason = "The macOS host stays one AppKit adapter. #1158 adds CloseWindow forwarding, deferred AppKit destruction, Dock reopen, and hierarchical close on the activation and resize host already owned here. The W5 occlusion-hidden forwarding was restored by this landing."
+acknowledged_loc = 801
+issue = 1451
+reason = "The macOS host stays one AppKit adapter (#1158 CloseWindow/Dock/hierarchical close). #1450/#1451 add quit-confirm presentation, Dock reopen provisioning handoff, and intentional Quit helper teardown on that same host rather than a second window controller."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/local/ingress.rs"

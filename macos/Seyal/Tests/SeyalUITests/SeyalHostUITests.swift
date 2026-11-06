@@ -1286,12 +1286,8 @@ final class SeyalHostUITests: XCTestCase {
         let presentation = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
         let terminal = app.descendants(matching: .any)["terminal-input"]
         if presentation.waitForExistence(timeout: 2) {
-            XCTAssertTrue(
-                app.descendants(matching: .any)["seyal-composer"].firstMatch.waitForExistence(timeout: timeout),
-                "focused Flow presentation host must expose a composer"
-            )
             // Prefer host execution= once published; fall back to terminal-input
-            // when Raw/TUI still exposes the interactive surface.
+            // when Raw resting still exposes the interactive surface (#1445).
             let hostUsable = NSPredicate(format: "value CONTAINS 'execution='")
             let hostReady = expectation(for: hostUsable, evaluatedWith: presentation, handler: nil)
             if XCTWaiter.wait(for: [hostReady], timeout: min(timeout, 8)) != .completed,
@@ -1341,6 +1337,7 @@ final class SeyalHostUITests: XCTestCase {
     /// Headed XCUI must stay on Flow/Blocks. A leftover Runtime in alternate
     /// screen, or a Raw-only launch, looks like a normal terminal and is a fail.
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
+        app.ensureFlowBlocksPresentation(timeout: timeout)
         let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
@@ -2030,8 +2027,9 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// W4b: production window admission + last-window-close stay-alive.
-    func testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit() throws {
+    /// W4b: production window admission + last-window close quits headed app
+    /// (ADR-018 §2.5 / #1451). Dock reopen after Quit is a fresh launch.
+    func testNewWindowAdmissionCreatesSecondWindowAndLastCloseQuits() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         XCTAssertEqual(app.windows.count, 1, "bootstrap realizes exactly one headed window")
@@ -2041,7 +2039,6 @@ final class SeyalHostUITests: XCTestCase {
         newWindow.click()
         waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
         // #1395: File owns Close Terminal / Close Tab; Window owns Close Window.
-        // Hierarchical last-window stay-alive is WindowClose, not AppCloseFocused.
         let windowMenu = app.menuBars.menuBarItems["Window"]
         XCTAssertTrue(windowMenu.waitForExistence(timeout: 5))
         windowMenu.click()
@@ -2055,19 +2052,10 @@ final class SeyalHostUITests: XCTestCase {
         windowMenu.click()
         XCTAssertTrue(closeWindow.waitForExistence(timeout: 5))
         closeWindow.click()
-        waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
-        RunLoop.current.run(until: Date().addingTimeInterval(2))
-        XCTAssertEqual(app.state, .runningForeground, "last-window close must not quit")
-        let fileMenu = app.menuBars.menuBarItems["File"]
-        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
         XCTAssertTrue(
-            newWindow.waitForExistence(timeout: 5),
-            "File → New Window stays available after the last window closes"
+            app.wait(for: .notRunning, timeout: 8),
+            "closing the last window must quit the headed app (macOS-default)"
         )
-        XCTAssertTrue(newWindow.isEnabled, "zero-window re-entry remains admitted")
-        fileMenu.click()
-        newWindow.click()
-        waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
     }
 
     func testTitleBarCloseForwardsThroughWindowCloseDelegate() throws {

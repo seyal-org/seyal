@@ -226,13 +226,16 @@ The host must not, locally:
 - destroy a Window on its own. `windowShouldClose(_:)` returns `false`, forwards a
   typed `CloseWindow` action, and destroys the realization only when Rust's next
   snapshot or effect says that `WindowId` is gone;
-- decide that closing the last Window quits the application.
-  `applicationShouldTerminateAfterLastWindowClosed` returns `false`. The M003
-  policy is fixed here: closing the last Window **never** produces a quit
-  intent; the application keeps running with zero Windows (§3.2) and re-entry
-  follows §3.3a. Rust must not emit quit from last-window-close in M003; any
-  quit-on-last-close option is M004 config policy (#676) and requires amending
-  this ADR;
+- invent last-window quit **outside** the AppKit delegate contract below.
+  `applicationShouldTerminateAfterLastWindowClosed` returns **`true`** so
+  closing the last Window starts the normal headed Quit path
+  (`applicationShouldTerminate` → §4.0 confirm if owed → §4.1). Rust still
+  must not emit a parallel quit intent from `CloseWindow` itself; AppKit
+  owns the last-window → terminate handoff. Zero-window residence without
+  Quit remains possible only until AppKit delivers that terminate (crash
+  paths and tests that close without AppKit may still observe zero Windows);
+  Dock reopen after a completed Quit is a fresh app launch, not §3.3a
+  in-process ActivateWorkspace;
 - terminate the process while bounded cleanup is owed (§4), except through the
   single Rust-armed backstop timer that §4 defines;
 - create, reorder, group or renumber tabs or windows;
@@ -269,7 +272,7 @@ forbidden by this section.
 | Close Pane leaf | leaf destroyed, parent split collapsed, surviving sibling keeps focus/draft state | unbound, attachment released, execution stays live |
 | Close Tab | Tab and its whole `PaneTree` destroyed | every bound execution unbound and detached, all stay live |
 | Close Window | Window, its Tabs and their `PaneTree`s destroyed | every bound execution unbound and detached, all stay live |
-| Close last Window | Window destroyed; application keeps running with zero Windows, zero attachments, zero Controller leases and no hidden input route (SPEC-009 §6). Re-entry is mandatory (§3.3a) | all stay live |
+| Close last Window | Window destroyed; AppKit then asks the host to terminate (`applicationShouldTerminateAfterLastWindowClosed` → true → §4). Until that terminate completes, attachments/Controller leases are already released by the close (SPEC-009 §6). After Quit, Dock click is a fresh launch | all stay live across headed Quit (Runtime survives); headed process exits |
 | Application quit | all presentation destroyed after §4 | all stay live |
 | Explicit terminate | unchanged by itself | named execution terminated through the ADR-005 path |
 
@@ -359,9 +362,14 @@ a native confirmation alert. Normative rules:
   Runtime/executions by itself. Presentation close still needs no destructive
   prompt (§3.1).
 - After a successful §4.1 completion (`reply(true)`), the headed `Seyal.app`
-  process must exit so Dock does not show Seyal as running. Headless Runtime
-  survival across Quit remains §8 invariant 6 / F-042; this amendment does not
-  authorize shutting down Runtime as a side effect of headed Quit.
+  process must exit so Dock does not show Seyal as running. The GUI-spawned
+  `Contents/Helpers/seyal-runtime` helper is terminated on that intentional
+  headed Quit path so LaunchServices cannot keep Seyal as
+  `(exited-with-subordinates)`. A future launchd-/LSUIElement-packaged headless
+  Runtime (separate Architecture Issue) may outlive headed Quit without a Dock
+  icon; until then, intentional Quit ends the GUI-spawned helper. GUI crash /
+  detach paths that skip §4.1 still must not kill Runtime as a side effect of
+  presentation teardown alone (F-042 / §8 invariant 6 for non-Quit detach).
 
 ### 4.1 Bounded detach then headed terminate
 
@@ -799,10 +807,11 @@ only the CreateWindow / zero-Window re-entry semantics those strokes dispatch.
 - multiple simultaneously live Metal leaves (#936);
 - workspace chrome visual slices (#922) and split-tree host projection (#923);
 - durable presentation persistence (M004);
-- quit-on-last-window-close and terminate-on-tab-close configuration (remain
-  M004 / #676; last-window close still never quits in M003);
-- shutting down headless Runtime as a side effect of headed Quit (would reopen
-  F-042 / §8 invariant 6 under a separate Architecture Issue);
+- terminate-on-tab-close configuration (remains M004 / #676; last-window
+  headed quit is §2.5 / §13);
+- packaging a launchd/LSUIElement headless Runtime that outlives headed Quit
+  without a Dock icon (separate Architecture Issue; until then §4.0 ends the
+  GUI-spawned helper on intentional Quit);
 - any absolute latency, CPU, RSS or deadline value. Those are derived and recorded
   by the owning implementation child.
 
@@ -818,12 +827,18 @@ reversing presentation-close-is-not-terminate or Runtime-survives-Quit:
    `window_count > 1` or outer Tab count `> 1`; Cancel skips `RequestQuit`.
 2. §3.3a Dock reopen raises an existing (including miniaturized) Window; zero
    Windows create then begin #994 provisioning for one new empty terminal tab.
-3. Last-window close remains non-quit (§2.5 / §3.2).
-4. Successful headed Quit clears Dock presence for `Seyal.app`; Runtime may
-   remain without a Dock icon.
+3. Last-window close quits the headed app via
+   `applicationShouldTerminateAfterLastWindowClosed` → true → §4
+   (§2.5 / §3.2). Zero-window residence without Quit is no longer the
+   steady-state product path; Dock click after Quit is a fresh launch.
+4. Successful headed Quit clears Dock presence for `Seyal.app` by exiting the
+   headed process and terminating the GUI-spawned Runtime helper that would
+   otherwise keep the ASN as `(exited-with-subordinates)`.
 
-**Rejected here.** Quit-on-last-window-close; host-local confirm from AppKit
-counts alone; implicit terminate of shells on headed Quit.
+**Rejected here.** Host-local confirm from AppKit counts alone; killing Runtime
+as a side effect of presentation close (non-Quit). Intentional headed Quit
+ending the GUI-spawned helper is required for Dock clear until a separate
+headless Runtime packaging ADR lands.
 
 **Implementation children (after acceptance):** quit-confirm + headed-exit
 evidence; Dock reopen raise vs create+provision. Config catalog entry under

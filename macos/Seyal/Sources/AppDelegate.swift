@@ -17,8 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // ADR-018 §2.5: last-window-close never quits in M003 (W4b).
-        false
+        // macOS-default: closing the last window quits the headed app so Dock
+        // does not keep Seyal as "Running in Background". Cmd-Q still runs the
+        // ADR-018 §4 confirm + bounded detach path via applicationShouldTerminate.
+        true
     }
 
     func applicationShouldHandleReopen(
@@ -80,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.commandPaletteOpen, host: host))
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.gotoOpen, host: host))
         viewMenu.addItem(NSMenuItem.separator())
-        viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.presentationToggleRaw, host: host))
+        // Toggle Raw / Set Flow are key-only (SPEC-024 is_menu_visible); Toggle TUI stays in View.
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.presentationToggleTui, host: host))
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.paneSplitRight, host: host))
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.paneSplitDown, host: host))

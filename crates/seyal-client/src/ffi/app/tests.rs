@@ -402,6 +402,24 @@ fn explicit_handle_round_trip_and_unknown_handle_fail_closed() {
     let missing = seyal_app_snapshot(handle);
     assert_eq!(missing.generation, 0);
     assert_eq!(seyal_app_option_as_alt(u64::MAX), 0);
+    assert_eq!(seyal_app_should_confirm_quit(u64::MAX), 0);
+}
+
+#[test]
+fn should_confirm_quit_follows_window_count_under_default_policy() {
+    let handle = seyal_app_create();
+    assert_eq!(
+        seyal_app_should_confirm_quit(handle),
+        0,
+        "single window/tab"
+    );
+    assert_eq!(seyal_app_test_seed_windows_only(handle, 2), 0);
+    assert_eq!(
+        seyal_app_should_confirm_quit(handle),
+        1,
+        "two windows under default warn_before_quit"
+    );
+    assert_eq!(seyal_app_destroy(handle), 0);
 }
 
 #[test]

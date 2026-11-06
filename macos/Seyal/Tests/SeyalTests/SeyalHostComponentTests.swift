@@ -147,6 +147,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
         var refresh = SeyalAppAction()
@@ -207,6 +208,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(
             seyal_app_snapshot(handle).eligibility,
             UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
@@ -278,6 +280,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(
             relayComposerStatus(
                 handle,
@@ -802,15 +805,9 @@ final class SeyalHostComponentTests: XCTestCase {
     @MainActor
     func testSplitFlowPanesEachExposeBlocksAndComposer() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
-        view.reconcileChrome()
-        view.layoutSubtreeIfNeeded()
         let handle = view.pane.appHandle
-
-        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
-        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
-        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks-scroll"))
-
         // LIVE hosts require a bound Controller (same as #936 multipane).
+        // SelectRestingPresentation requires authority — opt into Flow after BIND.
         var snap = seyal_app_snapshot(handle)
         var bind = SeyalAppAction()
         bind.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -824,6 +821,13 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 0x2222_2222_2222_2222
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks-scroll"))
 
         var split = SeyalAppAction()
         split.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -1582,7 +1586,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         // Raw is the cold-start resting mode. This test exercises a user
         // selected Flow host before checking that nested TUI refresh hides it.
-        XCTAssertEqual(seyal_app_invoke_workspace_command(handle, 12, 0, 0), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
         XCTAssertFalse(composer.isHidden, "Flow bind must show composer")
@@ -1625,6 +1629,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -1703,6 +1708,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
 
@@ -1753,6 +1759,30 @@ final class SeyalHostComponentTests: XCTestCase {
     func testBundledRuntimeLauncherUsesFixedHelperPath() {
         XCTAssertEqual(BundledRuntimeLauncher.helperRelativePath, "Contents/Helpers/seyal-runtime")
         XCTAssertEqual(BundledRuntimeLauncher.helperIdentifier, "dev.seyal.Seyal.runtime")
+    }
+
+    func testTerminateLaunchedHelperForHeadedQuitEndsTrackedProcessGroup() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["30"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let pid = process.processIdentifier
+        XCTAssertGreaterThan(pid, 1)
+        BundledRuntimeLauncher.recordLaunchedHelperPidForTests(pid)
+        BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit()
+        let deadline = Date().addingTimeInterval(2)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        XCTAssertFalse(
+            process.isRunning,
+            "headed Quit must end the GUI-spawned helper so Dock clears"
+        )
+        // Second call with no tracked pid is a no-op.
+        BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit()
     }
 
     @MainActor
@@ -3543,6 +3573,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
         let window = NSWindow(
@@ -3598,6 +3629,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
@@ -3806,6 +3838,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         for command in commands {
             let bound = seyal_app_snapshot(handle)
@@ -3839,6 +3872,18 @@ final class SeyalHostComponentTests: XCTestCase {
             XCTAssertEqual(seyal_app_apply(handle, &result), 0)
         }
         return handle
+    }
+
+    /// Grid-first (#1438/#1445): default resting is Raw. Mirror Rust `opt_in_flow`
+    /// via the production `presentation.set_flow` WorkspaceCommand.
+    @discardableResult
+    private func optInFlow(_ handle: UInt64) -> Int32 {
+        seyal_app_invoke_workspace_command(
+            handle,
+            KeybindingShortcutRealization.presentationSetFlow,
+            0,
+            0
+        )
     }
 
     /// Relay a Runtime composer status exactly as `ProductChromeHostView`
@@ -3877,6 +3922,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
 
         var composer = seyal_app_composer(handle)
         XCTAssertEqual(composer.mode, UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue))
@@ -3946,6 +3992,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -4561,9 +4608,28 @@ final class SeyalHostComponentTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
         checkConnected()
-        await fulfillment(of: [connected], timeout: 30)
-        guard connectedOnce else { return }
+        // SelectRestingPresentation needs a bound authority; latch Flow once connected.
+        let flowLatch = expectation(description: "Raw resting latched to Flow")
+        var latchedFlow = false
+        let latchPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+            let snap = seyal_app_snapshot(pane.appHandle)
+            if snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+                if !latchedFlow {
+                    latchedFlow = true
+                    flowLatch.fulfill()
+                }
+                return
+            }
+            if view.terminalBridgeIsConnected {
+                _ = optInFlow(pane.appHandle)
+            }
+            checkConnected()
+        }
+        defer { latchPoll.invalidate() }
+        await fulfillment(of: [connected, flowLatch], timeout: 30)
+        guard connectedOnce, latchedFlow else { return }
         connectPoll.invalidate()
+        latchPoll.invalidate()
 
         // Wait until prepared geometry/cursor stop moving so a later PTY
         // frame cannot be mistaken for scroll mutation.
