@@ -283,16 +283,38 @@ extension ProductChromeHostView {
     func configureChromeButtons() {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
+        createWorkspaceButton.bezelStyle = .inline
+        createWorkspaceButton.isBordered = false
+        createWorkspaceButton.title = ""
+        createWorkspaceButton.image = NSImage(
+            systemSymbolName: "folder.badge.plus",
+            accessibilityDescription: "Create Workspace"
+        )
+        createWorkspaceButton.imagePosition = .imageOnly
+        createWorkspaceButton.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        createWorkspaceButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
         createWorkspaceButton.setAccessibilityIdentifier("seyal-create-workspace")
         createWorkspaceButton.setAccessibilityLabel("Create Workspace")
         createWorkspaceButton.toolTip = "Create Workspace"
         createWorkspaceButton.target = self
         createWorkspaceButton.action = #selector(createWorkspace)
+        newTabButton.title = ""
+        newTabButton.image = NSImage(
+            systemSymbolName: "plus.square",
+            accessibilityDescription: "New Tab"
+        )
+        newTabButton.imagePosition = .imageOnly
         newTabButton.setAccessibilityIdentifier("seyal-new-tab")
         newTabButton.setAccessibilityLabel("New Tab")
         newTabButton.toolTip = "New Tab"
         newTabButton.target = self
         newTabButton.action = #selector(createTab)
+        closeTabButton.title = ""
+        closeTabButton.image = NSImage(
+            systemSymbolName: "xmark.square",
+            accessibilityDescription: "Close Tab"
+        )
+        closeTabButton.imagePosition = .imageOnly
         closeTabButton.setAccessibilityIdentifier("seyal-close-tab")
         closeTabButton.setAccessibilityLabel("Close Tab")
         closeTabButton.toolTip = "Close Tab"
@@ -468,15 +490,24 @@ extension ProductChromeHostView {
             ])
         }
 
-        // C16 status glyph: filled disc + ring so status is not colour-only.
-        let dot = NSView()
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 4
-        dot.layer?.backgroundColor = NSColor.systemGreen.cgColor
-        dot.layer?.borderWidth = 1
-        dot.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.35).cgColor
-        dot.setAccessibilityElement(false)
+        // Navigation identities have no generic "healthy/running" state.
+        // A green dot on every Workspace/Tab fabricated connection status.
+        // Use a neutral type glyph; real attention belongs to Rust flags.
+        let symbol: String
+        switch kind {
+        case UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue):
+            symbol = "square.stack.3d.up"
+        case UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue):
+            symbol = "rectangle.on.rectangle"
+        default:
+            symbol = "terminal"
+        }
+        let glyph = NSImageView()
+        glyph.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        glyph.imageScaling = .scaleProportionallyDown
+        glyph.contentTintColor = selected ? .labelColor : .tertiaryLabelColor
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        glyph.setAccessibilityElement(false)
 
         let primaryLabel = NSTextField(labelWithString: primary)
         primaryLabel.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .medium)
@@ -516,7 +547,7 @@ extension ProductChromeHostView {
         hit.setContentHuggingPriority(.defaultLow, for: .horizontal)
         hit.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        row.addSubview(dot)
+        row.addSubview(glyph)
         row.addSubview(primaryLabel)
         row.addSubview(secondaryLabel)
         row.addSubview(hit)
@@ -524,13 +555,13 @@ extension ProductChromeHostView {
         let hasSecondary = !(secondary?.isEmpty ?? true)
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: hasSecondary ? 46 : 36),
-            dot.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
-            dot.centerYAnchor.constraint(
+            glyph.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            glyph.centerYAnchor.constraint(
                 equalTo: hasSecondary ? primaryLabel.centerYAnchor : row.centerYAnchor
             ),
-            dot.widthAnchor.constraint(equalToConstant: 8),
-            dot.heightAnchor.constraint(equalToConstant: 8),
-            primaryLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
+            glyph.widthAnchor.constraint(equalToConstant: 13),
+            glyph.heightAnchor.constraint(equalToConstant: 13),
+            primaryLabel.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: 8),
             primaryLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
             primaryLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: hasSecondary ? 8 : 10),
             secondaryLabel.leadingAnchor.constraint(equalTo: primaryLabel.leadingAnchor),
