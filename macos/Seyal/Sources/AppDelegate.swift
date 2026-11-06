@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.commandPaletteOpen, host: host))
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.gotoOpen, host: host))
         viewMenu.addItem(NSMenuItem.separator())
-        viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.presentationToggleRaw, host: host))
+        // Toggle Raw / Set Flow are key-only (SPEC-024 is_menu_visible); Toggle TUI stays in View.
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.presentationToggleTui, host: host))
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.paneSplitRight, host: host))
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.paneSplitDown, host: host))

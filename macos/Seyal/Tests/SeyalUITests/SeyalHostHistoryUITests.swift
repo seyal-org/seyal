@@ -198,6 +198,11 @@ final class SeyalHostHistoryUITests: XCTestCase {
 
         let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         let blocks = app.descendants(matching: .any)["seyal-blocks"].firstMatch
+        // Unfocus the composer editor so cmd+enter routes as Toggle Raw, not submit.
+        let chrome = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        if chrome.waitForExistence(timeout: 2), chrome.isHittable {
+            chrome.click()
+        }
         app.typeKey("\r", modifierFlags: .command)
         let leftFlow = expectation(
             for: NSPredicate(format: "isHittable == false OR exists == false"),

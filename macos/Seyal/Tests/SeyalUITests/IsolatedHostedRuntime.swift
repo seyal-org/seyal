@@ -75,10 +75,16 @@ extension XCUIApplication {
   /// Grid-first Raw resting (#1438/#1445): Flow/Blocks XCUI must latch Flow via
   /// the production `presentation.toggle_raw` chord (`cmd+enter`) when the
   /// composer is absent or not hittable. No-ops when already on Flow.
+  /// Prefer unfocusing the terminal first so the chord is not swallowed as
+  /// composer/PTY input.
   func ensureFlowBlocksPresentation(timeout: TimeInterval = 8) {
     let composer = descendants(matching: .any)["seyal-composer"].firstMatch
     if composer.waitForExistence(timeout: 1), composer.isHittable {
       return
+    }
+    let chrome = descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+    if chrome.waitForExistence(timeout: 2), chrome.isHittable {
+      chrome.click()
     }
     typeKey("\r", modifierFlags: .command)
     XCTAssertTrue(

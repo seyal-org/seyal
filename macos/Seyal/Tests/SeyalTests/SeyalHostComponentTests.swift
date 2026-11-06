@@ -806,16 +806,8 @@ final class SeyalHostComponentTests: XCTestCase {
     func testSplitFlowPanesEachExposeBlocksAndComposer() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         let handle = view.pane.appHandle
-        // Grid-first Raw resting (#1445): latch Flow before asserting Flow chrome.
-        XCTAssertEqual(optInFlow(handle), 0)
-        view.reconcileChrome()
-        view.layoutSubtreeIfNeeded()
-
-        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
-        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
-        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks-scroll"))
-
         // LIVE hosts require a bound Controller (same as #936 multipane).
+        // SelectRestingPresentation requires authority — opt into Flow after BIND.
         var snap = seyal_app_snapshot(handle)
         var bind = SeyalAppAction()
         bind.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -829,6 +821,13 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 0x2222_2222_2222_2222
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks-scroll"))
 
         var split = SeyalAppAction()
         split.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -4608,12 +4607,29 @@ final class SeyalHostComponentTests: XCTestCase {
         defer { connectPoll.invalidate() }
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
-        // Grid-first Raw resting (#1445): latch Flow before requiring Flow eligibility.
-        XCTAssertEqual(optInFlow(pane.appHandle), 0)
         checkConnected()
-        await fulfillment(of: [connected], timeout: 30)
-        guard connectedOnce else { return }
+        // SelectRestingPresentation needs a bound authority; latch Flow once connected.
+        let flowLatch = expectation(description: "Raw resting latched to Flow")
+        var latchedFlow = false
+        let latchPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+            let snap = seyal_app_snapshot(pane.appHandle)
+            if snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+                if !latchedFlow {
+                    latchedFlow = true
+                    flowLatch.fulfill()
+                }
+                return
+            }
+            if view.terminalBridgeIsConnected {
+                _ = optInFlow(pane.appHandle)
+            }
+            checkConnected()
+        }
+        defer { latchPoll.invalidate() }
+        await fulfillment(of: [connected, flowLatch], timeout: 30)
+        guard connectedOnce, latchedFlow else { return }
         connectPoll.invalidate()
+        latchPoll.invalidate()
 
         // Wait until prepared geometry/cursor stop moving so a later PTY
         // frame cannot be mistaken for scroll mutation.
