@@ -192,10 +192,7 @@ extension ProductChromeHostView {
         let savedOffsetY = transcript.contentView.bounds.origin.y
         let savedFollowing = followingLiveEnd
         let previousCards = blockCards
-        blocks.arrangedSubviews
-            .filter { $0 !== transcriptLeadingSpacer }
-            .forEach { blocks.removeArrangedSubview($0) }
-        blockCards.removeAll()
+        blockCards.removeAll(keepingCapacity: true)
         let composer = seyal_app_composer(pane.appHandle)
         let count = Int(composer.block_count)
         let floorLo = composer.canvas_floor_block_id_lo
@@ -236,15 +233,21 @@ extension ProductChromeHostView {
             let promptRow = seyal_app_copy(pane.appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
             let lines = outputLineCount(projection: projection)
-            let card = previousCards[blockID] ?? CommandBlockView(
-                prompt: prompt,
-                title: title,
-                detail: detail,
-                state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
-                cellHeight: cellHeight,
-                lines: lines,
-                session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
-            )
+            let card = CommandBlockStackReconciler.reuseOrCreate(
+                blockID: blockID,
+                previousCards: previousCards,
+                stack: blocks
+            ) {
+                CommandBlockView(
+                    prompt: prompt,
+                    title: title,
+                    detail: detail,
+                    state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
+                    cellHeight: cellHeight,
+                    lines: lines,
+                    session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
+                )
+            }
             card.updatePresentation(
                 prompt: prompt,
                 title: title,
@@ -252,6 +255,7 @@ extension ProductChromeHostView {
                 state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
+            card.setOutputLines(lines, cellHeight: cellHeight)
             card.setAccessibilityIdentifier("seyal-block-\(visibleIndex)")
             card.setBodyAccessibilityIdentifier("seyal-block-\(visibleIndex)-body")
             visibleIndex += 1
@@ -272,15 +276,16 @@ extension ProductChromeHostView {
             card.onSelect = { [weak self] selected in
                 self?.selectBlock(idLo: idLo, idHi: idHi, deselect: selected)
             }
-            blocks.addArrangedSubview(card)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
             }
         }
-        for (blockID, card) in previousCards where blockCards[blockID] == nil {
-            card.removeFromSuperview()
-        }
+        CommandBlockStackReconciler.removeStale(
+            previousCards: previousCards,
+            retainedBlockIDs: Set(blockCards.keys),
+            from: blocks
+        )
         pane.inputSurface.discardHistoryRequests(except: retained)
         // Prune retained history to the timeline Block set (including
         // floor-hidden cards) so New shell / eviction cannot paint a prior

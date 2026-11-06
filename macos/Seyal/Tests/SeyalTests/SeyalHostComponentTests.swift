@@ -2739,6 +2739,84 @@ final class SeyalHostComponentTests: XCTestCase {
     /// #1379: Block cards must own clicks for selection but forward wheel
     /// events to the transcript NSScrollView so long Flow output can scroll.
     @MainActor
+    func testMultipaneBlockProjectionReusesExistingCardViews() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        for name in ["ProductChromeHostView+Blocks.swift", "SecondaryLivePaneHost+Flow.swift"] {
+            let source = sourceRoot.appendingPathComponent(name)
+            let text = try String(contentsOf: source, encoding: .utf8)
+            let rebuildStart = try XCTUnwrap(text.range(of: "func rebuildBlocks()"))
+            let rebuildBody = text[rebuildStart.lowerBound...]
+            XCTAssertTrue(
+                rebuildBody.contains("CommandBlockStackReconciler.reuseOrCreate"),
+                "\(name) must update a Block view in place when Runtime republishes its projection"
+            )
+            XCTAssertTrue(
+                rebuildBody.contains("CommandBlockStackReconciler.removeStale"),
+                "\(name) must remove only Block views whose IDs left the projection"
+            )
+        }
+    }
+
+    @MainActor
+    func testBlockStackReconcilerPreservesIdentityAndRemovesOnlyStaleCards() {
+        let stack = NSStackView()
+        let original = CommandBlockView(
+            prompt: "$", title: "echo one", detail: "", state: 0,
+            cellHeight: 16, lines: 1, session: false
+        )
+        stack.addArrangedSubview(original)
+        var created = 0
+
+        let reused = CommandBlockStackReconciler.reuseOrCreate(
+            blockID: 1,
+            previousCards: [1: original],
+            stack: stack
+        ) {
+            created += 1
+            return CommandBlockView(
+                prompt: "$", title: "replacement", detail: "", state: 0,
+                cellHeight: 16, lines: 1, session: false
+            )
+        }
+        XCTAssertTrue(reused === original)
+        XCTAssertEqual(created, 0, "projection updates must keep the existing card object")
+        XCTAssertEqual(stack.arrangedSubviews.count, 1, "reusing a card must not detach or duplicate it")
+
+        let next = CommandBlockStackReconciler.reuseOrCreate(
+            blockID: 2,
+            previousCards: [1: original],
+            stack: stack
+        ) {
+            created += 1
+            return CommandBlockView(
+                prompt: "$", title: "echo two", detail: "", state: 0,
+                cellHeight: 16, lines: 1, session: false
+            )
+        }
+        CommandBlockStackReconciler.removeStale(
+            previousCards: [1: original],
+            retainedBlockIDs: [1, 2],
+            from: stack
+        )
+        XCTAssertEqual(created, 1)
+        XCTAssertTrue(original.superview === stack)
+        XCTAssertTrue(next.superview === stack)
+
+        CommandBlockStackReconciler.removeStale(
+            previousCards: [1: original, 2: next],
+            retainedBlockIDs: [2],
+            from: stack
+        )
+        XCTAssertNil(original.superview)
+        XCTAssertTrue(next.superview === stack)
+        XCTAssertEqual(stack.arrangedSubviews.count, 1)
+    }
+
+    @MainActor
     func testCommandBlockForwardsScrollWheelToTranscript() {
         let sourceRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

@@ -62,6 +62,7 @@ final class CommandBlockView: NSView {
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
     var isSelected = false {
         didSet {
+            guard oldValue != isSelected else { return }
             updateAccessibilityValue()
             if let theme { apply(theme: theme) }
         }
@@ -174,6 +175,7 @@ final class CommandBlockView: NSView {
     }
 
     func setBodyTranscript(_ text: String) {
+        guard bodyTranscript.stringValue != text else { return }
         bodyTranscript.stringValue = text
         // Bound AX payloads so tall Block bodies do not stall XCUI tree walks.
         let ax = Self.accessibilitySummary(for: text)
@@ -205,19 +207,31 @@ final class CommandBlockView: NSView {
     }
 
     func setOutputLines(_ lines: Int, cellHeight: CGFloat) {
-        bodyHeight.constant = max(cellHeight, 1) * CGFloat(max(lines, 1))
+        let height = max(cellHeight, 1) * CGFloat(max(lines, 1))
+        guard abs(bodyHeight.constant - height) > 0.5 else { return }
+        bodyHeight.constant = height
     }
 
     func updatePresentation(prompt: String, title: String, detail: String, state: UInt16, session: Bool) {
-        self.prompt.stringValue = prompt
-        command.stringValue = title.isEmpty ? "command" : title
-        setAccessibilityLabel(command.stringValue)
-        status.stringValue = detail
-        status.isHidden = detail.isEmpty
+        if self.prompt.stringValue != prompt {
+            self.prompt.stringValue = prompt
+        }
+        let resolvedTitle = title.isEmpty ? "command" : title
+        if command.stringValue != resolvedTitle {
+            command.stringValue = resolvedTitle
+            setAccessibilityLabel(resolvedTitle)
+        }
+        if status.stringValue != detail {
+            status.stringValue = detail
+        }
+        if status.isHidden != detail.isEmpty {
+            status.isHidden = detail.isEmpty
+        }
+        let appearanceChanged = self.state != state || isSessionBlock != session
         self.state = state
         isSessionBlock = session
         updateAccessibilityValue()
-        if let theme { apply(theme: theme) }
+        if appearanceChanged, let theme { apply(theme: theme) }
     }
 
     override func accessibilityChildren() -> [Any]? {
@@ -268,6 +282,40 @@ final class CommandBlockView: NSView {
         } else {
             status.textColor = theme.muted
             seam.layer?.backgroundColor = theme.seam.cgColor
+        }
+    }
+}
+
+/// Keeps AppKit Block cards alive while Runtime republishes their projections.
+/// Replacing the view on every poll/stream update tears down the transcript
+/// subtree and causes visible flashes in multipane Flow.
+@MainActor
+enum CommandBlockStackReconciler {
+    static func reuseOrCreate(
+        blockID: UInt64,
+        previousCards: [UInt64: CommandBlockView],
+        stack: NSStackView,
+        make: @MainActor () -> CommandBlockView
+    ) -> CommandBlockView {
+        if blockID != 0, let existing = previousCards[blockID] {
+            if !stack.arrangedSubviews.contains(where: { $0 === existing }) {
+                stack.addArrangedSubview(existing)
+            }
+            return existing
+        }
+        let card = make()
+        stack.addArrangedSubview(card)
+        return card
+    }
+
+    static func removeStale(
+        previousCards: [UInt64: CommandBlockView],
+        retainedBlockIDs: Set<UInt64>,
+        from stack: NSStackView
+    ) {
+        for (blockID, card) in previousCards where !retainedBlockIDs.contains(blockID) {
+            stack.removeArrangedSubview(card)
+            card.removeFromSuperview()
         }
     }
 }
