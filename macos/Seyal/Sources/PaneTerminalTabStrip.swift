@@ -36,6 +36,7 @@ final class PaneTerminalTabStrip: NSView {
         self.canClosePane = canClosePane
         self.focused = focused
         super.init(frame: .zero)
+        wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
