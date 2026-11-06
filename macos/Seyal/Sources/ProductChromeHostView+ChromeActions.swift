@@ -357,6 +357,30 @@ extension ProductChromeHostView {
         }
     }
 
+    /// Bound for left Tabs rows without growing `SeyalAppShell` ABI size.
+    func leftTerminalTabRowCount(shell: SeyalAppShell) -> Int {
+        var count = 0
+        for index in 0..<Int(shell.pane_count) {
+            let paneRow = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
+            count += Int(seyal_app_pane_terminal_tab_count(pane.appHandle, paneRow.id_lo, paneRow.id_hi))
+        }
+        return count
+    }
+
+    func paneIdFromTerminalTabRow(_ row: SeyalAppRow) -> (UInt64, UInt64) {
+        guard row.address_len >= 16 else { return (0, 0) }
+        let bytes = withUnsafeBytes(of: row.address_bytes) { Array($0.prefix(16)) }
+        var lo: UInt64 = 0
+        var hi: UInt64 = 0
+        withUnsafeMutableBytes(of: &lo) { dest in
+            dest.copyBytes(from: bytes[0..<8])
+        }
+        withUnsafeMutableBytes(of: &hi) { dest in
+            dest.copyBytes(from: bytes[8..<16])
+        }
+        return (UInt64(littleEndian: lo), UInt64(littleEndian: hi))
+    }
+
     func configureCloseButtons(shell: SeyalAppShell) {
         closeTabButton.idLo = shell.active_tab_lo
         closeTabButton.idHi = shell.active_tab_hi
