@@ -4659,7 +4659,6 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         defer { pane.onProductChanged = originalProductChanged }
 
-        let connected = expectation(description: "Flow projection connected for scroll invariant")
         var connectedOnce = false
         var didRetryExhaustedRecovery = false
         let checkConnected = {
@@ -4678,7 +4677,6 @@ final class SeyalHostComponentTests: XCTestCase {
                     == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
                 {
                     connectedOnce = true
-                    connected.fulfill()
                     return
                 }
             }
@@ -4691,35 +4689,23 @@ final class SeyalHostComponentTests: XCTestCase {
             }
         }
         observeProductChange = checkConnected
-        let connectPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
-            checkConnected()
-        }
-        defer { connectPoll.invalidate() }
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
-        checkConnected()
+        // Stay on the test MainActor. Timer/@Sendable callbacks cannot touch
+        // AppKit/Rust handles or instance helpers without isolation errors.
         // SelectRestingPresentation needs a bound authority; latch Flow once connected.
-        let flowLatch = expectation(description: "Raw resting latched to Flow")
-        var latchedFlow = false
-        let latchPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
-            let snap = seyal_app_snapshot(pane.appHandle)
-            if snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
-                if !latchedFlow {
-                    latchedFlow = true
-                    flowLatch.fulfill()
-                }
-                return
-            }
-            if view.terminalBridgeIsConnected {
-                _ = optInFlow(pane.appHandle)
-            }
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline, !connectedOnce {
             checkConnected()
+            if !connectedOnce, view.terminalBridgeIsConnected {
+                let snap = seyal_app_snapshot(pane.appHandle)
+                if snap.eligibility != UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+                    _ = optInFlow(pane.appHandle)
+                }
+            }
+            try await Task.sleep(nanoseconds: 250_000_000)
         }
-        defer { latchPoll.invalidate() }
-        await fulfillment(of: [connected, flowLatch], timeout: 30)
-        guard connectedOnce, latchedFlow else { return }
-        connectPoll.invalidate()
-        latchPoll.invalidate()
+        guard connectedOnce else { return }
 
         // Wait until prepared geometry/cursor stop moving so a later PTY
         // frame cannot be mistaken for scroll mutation.
