@@ -206,69 +206,59 @@ final class SeyalHostUITests: XCTestCase {
                 NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
             ).firstMatch.isHittable
         )
-        XCTAssertTrue(app.descendants(matching: .any)["seyal-left-tabs"].firstMatch.isHittable)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-left-tabs"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layouts-heading"].firstMatch.exists)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }
 
-    /// #1401/#1412: left C03 mode switcher is Workspaces ↔ Tabs; Workspaces omits
-    /// empty AGENTS and Pane dumps; Tabs lists pane-local TerminalTabs.
-    func testLeftContextWorkspacesAndTabsModeFollowC03Contracts() throws {
+    /// Default C03 navigation has one hierarchy, without a competing
+    /// terminal-tab inventory or a second top tab strip.
+    func testDefaultWorkspacesAndLayoutsKeepPaneTabsLocal() throws {
         let app = hostedApp()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         waitForUsablePty(in: app)
-
         let workspaces = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
-        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
         XCTAssertTrue(workspaces.waitForExistence(timeout: 5))
-        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
         XCTAssertTrue(workspaces.isHittable)
-        XCTAssertTrue(tabs.isHittable)
-        // Prefer AX label; fall back to title — attributed mode labels can vary by OS.
-        let workspacesName = (workspaces.label.isEmpty ? workspaces.title : workspaces.label)
-        let tabsName = (tabs.label.isEmpty ? tabs.title : tabs.label)
-        XCTAssertEqual(workspacesName, "Workspaces")
-        XCTAssertEqual(tabsName, "Tabs")
-        XCTAssertNotEqual(tabsName, "Layouts")
-
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-workspaces-heading"].firstMatch.waitForExistence(timeout: 5)
-        )
-        XCTAssertFalse(
-            app.descendants(matching: .any)["seyal-agents-heading"].exists,
-            "empty AGENTS chrome must stay omitted"
-        )
+        XCTAssertEqual(workspaces.label.isEmpty ? workspaces.title : workspaces.label, "Workspaces")
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-workspaces-heading"].firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layouts-heading"].firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-0"].firstMatch.exists)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-workspace-0"].firstMatch.exists)
-        XCTAssertFalse(
-            app.descendants(matching: .any)["seyal-pane-0"].exists,
-            "C03 must not list Pane rows in the left rail"
-        )
-
-        tabs.click()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-tabs-heading"].firstMatch.waitForExistence(timeout: 5)
-        )
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-terminal-tab-left-0"].firstMatch.waitForExistence(timeout: 5)
-        )
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-0"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-left-tabs"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tabs-heading"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-terminal-tab-left-0"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-strip"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["seyal-pane-0"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-workspaces-heading"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
+            ).firstMatch.waitForExistence(timeout: 5)
+        )
     }
 
-    /// #1412: left Tabs mode lists pane-local terminals, not outer Layout rows.
-    func testLeftTabsModeListsPaneLocalTerminalTabs() throws {
+    /// Advanced global command search still exposes the terminal inventory;
+    /// removing its permanent toggle must not remove the capability.
+    func testCommandPaletteOpensAdvancedTerminalInventory() throws {
         let app = hostedApp()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         waitForUsablePty(in: app)
-        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
-        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
-        XCTAssertEqual(tabs.label.isEmpty ? tabs.title : tabs.label, "Tabs")
-        tabs.click()
+        app.typeKey("k", modifierFlags: .command)
+        let query = app.descendants(matching: .any)["seyal-command-palette-query"].firstMatch
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.click()
+        query.typeText("Show Tabs in Left Panel")
+        let candidate = app.descendants(matching: .any)["seyal-command-palette-row-0"].firstMatch
+        XCTAssertTrue(candidate.waitForExistence(timeout: 5))
+        XCTAssertEqual(candidate.label, "Show Tabs in Left Panel")
+        app.typeKey("\r", modifierFlags: [])
         XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-terminal-tab-left-0"].firstMatch.waitForExistence(timeout: 5)
+            app.descendants(matching: .any)["seyal-terminal-tab-left-0"].firstMatch
+                .waitForExistence(timeout: 5)
         )
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-pane-0"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-0"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-left-tabs"].exists)
+        let workspaces = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        workspaces.click()
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layouts-heading"].firstMatch.waitForExistence(timeout: 5))
     }
 
     /// #923: the Tab's Rust PaneTree is projected into Pane regions. Before a
@@ -2008,22 +1998,13 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(create.waitForExistence(timeout: 5), "Create Workspace chrome must project")
         XCTAssertTrue(create.isHittable, "Create Workspace must be hittable on Workspaces panel")
 
-        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
-        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
-        tabs.click()
-        let deadline = Date().addingTimeInterval(3)
-        while Date() < deadline && create.exists && create.isHittable {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-        XCTAssertFalse(
-            create.exists && create.isHittable,
-            "Create Workspace leaves the rail while Tabs owns the left panel"
-        )
-
-        let workspaces = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
-        workspaces.click()
-        XCTAssertTrue(create.waitForExistence(timeout: 5))
-        XCTAssertTrue(create.isHittable)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-left-tabs"].exists)
+        let newLayout = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
+        XCTAssertTrue(newLayout.isHittable)
+        XCTAssertEqual(newLayout.label, "New Layout")
+        newLayout.click()
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-1"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(create.exists && create.isHittable, "Workspace creation remains available with multiple Layouts")
         XCTAssertEqual(app.state, .runningForeground)
     }
 
