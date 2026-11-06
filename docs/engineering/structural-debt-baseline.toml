@@ -299,9 +299,9 @@ reason = "ABI action decoding remains one versioned match surface; #1414 adds Ob
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"
-acknowledged_loc = 760
-issue = 1398
-reason = "Session adoption and Runtime attachment reconciliation also register exact terminal-tab bindings under #1381 so portable selected-terminal authority follows the attached execution; #1379 keeps the registry client after shell exit for Flow history drain; #1398 absorbs wire terminate before bailing on NoRunningExecution so Close Terminal can remove the focused Pane terminal tab."
+acknowledged_loc = 766
+issue = 1221
+reason = "ApplicationRoot attach/poll session stays one cold-path driver; #1221 polls attach-for-dispose clients that are not the displayed authority so Hidden→Unpresented termination still progresses without inventing a second session loop; #1381 registers exact terminal-tab bindings; #1379 keeps the registry client after shell exit for Flow history drain; #1398 absorbs wire terminate before bailing on NoRunningExecution so Close Terminal can remove the focused Pane terminal tab."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"

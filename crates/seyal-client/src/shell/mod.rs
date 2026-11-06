@@ -44,6 +44,8 @@ mod w2a_tests;
 #[cfg(test)]
 mod w5_tests;
 #[cfg(test)]
+mod w7_matrix_tests;
+#[cfg(test)]
 mod window_admission_tests;
 #[cfg(test)]
 mod workspace_ops_tests;

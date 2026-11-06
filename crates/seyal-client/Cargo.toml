@@ -49,3 +49,7 @@ harness = false
 [[bench]]
 name = "m003_provisioning"
 harness = false
+
+[[bench]]
+name = "m003_w7_lifecycle"
+harness = false

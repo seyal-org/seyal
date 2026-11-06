@@ -1,8 +1,8 @@
 //! ADR-018 §3.1 / §3.2 / §3.3a presentation removal (W2b).
 //!
 //! ClosePane / CloseTab / CloseWindow unbind and detach presentation only.
-//! Bound executions become live-unpresented; none of these paths emit
-//! [`ShellNativeEffect::TerminateExecution`].
+//! Bound executions become live-unpresented. ShellNativeEffect has no
+//! execution-termination variant; close must never invent one.
 
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
