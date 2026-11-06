@@ -35,7 +35,8 @@ vertex TerminalVertexOut seyal_terminal_vertex(
     uint instance_id [[instance_id]],
     const device TerminalInstance *instances [[buffer(0)]],
     constant float2 &viewport [[buffer(1)]],
-    constant uint &render_mode [[buffer(2)]])
+    constant uint &render_mode [[buffer(2)]],
+    constant float2 &instance_offset [[buffer(4)]])
 {
     constexpr float2 corners[6] = {
         float2(0.0, 0.0),
@@ -53,7 +54,7 @@ vertex TerminalVertexOut seyal_terminal_vertex(
     if (render_mode != 0u && (instance.flags & wide_glyph_flag) != 0u) {
         size.x *= 2.0;
     }
-    const float2 pixel = instance.origin + local * size;
+    const float2 pixel = instance.origin + instance_offset + local * size;
     const float2 ndc = float2(
         pixel.x / max(viewport.x, 1.0) * 2.0 - 1.0,
         1.0 - pixel.y / max(viewport.y, 1.0) * 2.0
