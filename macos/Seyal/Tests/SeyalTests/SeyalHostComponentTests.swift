@@ -4624,7 +4624,7 @@ final class SeyalHostComponentTests: XCTestCase {
                     return
                 }
                 if view.terminalBridgeIsConnected {
-                    _ = optInFlow(pane.appHandle)
+                    _ = self.optInFlow(pane.appHandle)
                 }
                 checkConnected()
             }
