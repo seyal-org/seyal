@@ -112,8 +112,10 @@ final class PaneTerminalTabStrip: NSView {
             close.setAccessibilityLabel("Close \(title)")
             close.toolTip = "Close Terminal"
             close.tag = index
-            close.alphaValue = tab.selected ? 1 : 0
-            close.isEnabled = tab.selected
+            // Only the focused Pane presents close chrome; unfocused panes
+            // keep the exact same tab geometry without inviting accidental termination.
+            close.alphaValue = tab.selected && focused ? 1 : 0
+            close.isEnabled = tab.selected && focused
             close.widthAnchor.constraint(equalToConstant: 18).isActive = true
             close.heightAnchor.constraint(equalToConstant: 24).isActive = true
             content.addArrangedSubview(close)
