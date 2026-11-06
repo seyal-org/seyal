@@ -137,7 +137,8 @@ final class ProductChromeHostView: NSView {
         modeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         leftModeRow.addArrangedSubview(workspacesButton)
         leftModeRow.addArrangedSubview(createWorkspaceButton)
-        leftModeRow.addArrangedSubview(tabsButton)
+        // Pane tabs are visible in their own strips; advanced inventory
+        // remains available from the command palette, not a second toggle.
         leftModeRow.addArrangedSubview(modeSpacer)
         leftModeRow.addArrangedSubview(newTabButton)
         leftModeRow.addArrangedSubview(closeTabButton)
@@ -221,7 +222,8 @@ final class ProductChromeHostView: NSView {
             self?.focusPaneRegion(lo: lo, hi: hi)
         }
         centerColumn.onSelectTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
-            self?.selectTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
+            guard let self, self.focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+            self.selectTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
         }
         centerColumn.onCloseTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
             self?.closeTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
@@ -652,8 +654,8 @@ final class ProductChromeHostView: NSView {
         } else {
             newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
             newTabButton.action = #selector(createTab)
-            newTabButton.setAccessibilityLabel("New Tab")
-            newTabButton.toolTip = "New Tab"
+            newTabButton.setAccessibilityLabel("New Layout")
+            newTabButton.toolTip = "New Layout"
             closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
         }
         configureCloseButtons(shell: shell)
