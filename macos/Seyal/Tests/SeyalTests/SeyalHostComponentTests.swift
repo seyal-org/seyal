@@ -2682,6 +2682,10 @@ final class SeyalHostComponentTests: XCTestCase {
             )?.lowerBound ?? inputText.endIndex
             let helperBody = inputText[helperRange.lowerBound..<helperEnd]
             XCTAssertTrue(helperBody.contains("guard handle == clientHandle else"))
+            XCTAssertTrue(
+                helperBody.contains("guard result != 0 else {\n      synchronizeWriteReadinessSource()\n      return result\n    }"),
+                "successful addressed history requests must arm write readiness for queued Controller frames"
+            )
             XCTAssertFalse(
                 helperBody.contains("onError(result)"),
                 "secondary failures must not be routed through the primary Pane's error callback"

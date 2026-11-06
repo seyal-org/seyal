@@ -242,7 +242,14 @@ extension RustDisplayBridge {
   /// only errors for `clientHandle` may stop this bridge (#1426).
   @discardableResult
   func finishAddressedMutation(_ result: Int32, forDisplayHandle handle: UInt64) -> Int32 {
-    guard result != 0 else { return result }
+    guard result != 0 else {
+      // A successful mutation can still leave control frames queued after a
+      // nonblocking write. Arm this Controller's auxiliary write source now;
+      // otherwise a history request for a quiet sibling can wait forever for
+      // a read event that cannot arrive until the request is flushed.
+      synchronizeWriteReadinessSource()
+      return result
+    }
     guard handle == clientHandle else {
       guard Self.isTerminalPollResult(result) else {
         onStatusChanged()

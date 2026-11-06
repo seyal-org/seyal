@@ -705,7 +705,13 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         let bodyB = blockBody(for: anyPaneBlock(in: app, containing: markerB), in: app)
         XCTAssertTrue(bodyB.waitForExistence(timeout: 8), "pane B completed body must appear")
-        waitForBodyMarker(bodyA, marker: markerA)
+        // Focus ownership retags the retained card and body from primary to
+        // secondary AX identifiers. Reacquire Pane A by its output marker so
+        // this assertion remains pane-bound after the focus switch.
+        let inactiveBlockA = anyPaneBlock(in: app, containing: markerA)
+        XCTAssertTrue(inactiveBlockA.waitForExistence(timeout: 8))
+        let inactiveBodyA = blockBody(for: inactiveBlockA, in: app)
+        waitForBodyMarker(inactiveBodyA, marker: markerA)
         waitForBodyMarker(bodyB, marker: markerB)
 
         let unfocusedA = app.descendants(matching: .any).matching(
@@ -1030,10 +1036,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForUsablePty(in: app)
         let pane0Host = element(app, "seyal-pane-presentation-host")
         XCTAssertTrue(pane0Host.waitForExistence(timeout: 8))
-        // Pane 1 still has the selected created tab from before the split.
+        // Pane 1 still has the original tab selected from before the split.
         XCTAssertEqual(
             try XCTUnwrap(executionIdentity(pane0Host.value as? String)),
-            createdExecution,
+            originalExecution,
             "returning to Pane 1 preserves its selected terminal"
         )
         original.click()
@@ -1150,9 +1156,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
         for (index, marker) in markers.enumerated() {
             let matchingBlocks = app.descendants(matching: .any).matching(
                 NSPredicate(
-                    format: "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label CONTAINS %@",
-                    "seyal-block-",
-                    "seyal-secondary-block-",
+                    format: "identifier MATCHES %@ AND label CONTAINS %@",
+                    "^(seyal-block|seyal-secondary-block)-[0-9]+$",
                     marker
                 )
             )
@@ -1447,9 +1452,8 @@ final class SeyalPaneSplitUITests: XCTestCase {
     private func anyPaneBlock(in app: XCUIApplication, containing command: String) -> XCUIElement {
         app.descendants(matching: .any).matching(
             NSPredicate(
-                format: "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label CONTAINS %@",
-                "seyal-block-",
-                "seyal-secondary-block-",
+                format: "identifier MATCHES %@ AND label CONTAINS %@",
+                "^(seyal-block|seyal-secondary-block)-[0-9]+$",
                 command
             )
         ).firstMatch
