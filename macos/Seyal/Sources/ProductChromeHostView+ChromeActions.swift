@@ -322,6 +322,41 @@ extension ProductChromeHostView {
         closeTabButton.action = #selector(closeActiveTab(_:))
     }
 
+    /// Project outer layout Tab identities without a competing terminal strip.
+    func appendWorkspaceLayoutsIfNeeded(shell: SeyalAppShell) {
+        // Workspace Tabs are layout containers, not terminal sessions.
+        // Keep them reachable by pointer as compact C04 navigation rows
+        // without adding a competing terminal-looking top strip.
+        if shell.tab_count > 1 {
+            appendLeftSection(
+                title: "LAYOUTS",
+                identifier: "seyal-layouts-heading",
+                topGap: true
+            ) {
+                for index in 0..<Int(shell.tab_count) {
+                    let row = seyal_app_shell_row(
+                        pane.appHandle,
+                        UInt16(SEYAL_APP_ROW_TAB),
+                        UInt32(index)
+                    )
+                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Layout \(index + 1)"
+                    leftItems.addArrangedSubview(
+                        contextRow(
+                            primary: title,
+                            secondary: nil,
+                            identifier: "seyal-layout-\(index)",
+                            selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                            action: #selector(selectTab(_:)),
+                            kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
+                            idLo: row.id_lo,
+                            idHi: row.id_hi
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     func configureCloseButtons(shell: SeyalAppShell) {
         closeTabButton.idLo = shell.active_tab_lo
         closeTabButton.idHi = shell.active_tab_hi
