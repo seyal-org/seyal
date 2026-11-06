@@ -120,13 +120,17 @@ final class ProductChromeHostView: NSView {
             button.bezelStyle = .inline
             button.isBordered = false
             button.font = .systemFont(ofSize: 11, weight: .regular)
+            button.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 22).isActive = true
         }
 
         left.translatesAutoresizingMaskIntoConstraints = false
         left.wantsLayer = true
         leftModeRow.orientation = .horizontal
         leftModeRow.alignment = .centerY
-        leftModeRow.spacing = 10
+        // Fit the full Workspace/Terminal mode switcher and backed actions in
+        // the 220 pt context rail without button compression or overlap.
+        leftModeRow.spacing = 4
         leftModeRow.translatesAutoresizingMaskIntoConstraints = false
         let modeSpacer = NSView()
         modeSpacer.translatesAutoresizingMaskIntoConstraints = false
@@ -692,6 +696,37 @@ final class ProductChromeHostView: NSView {
                             idHi: row.id_hi
                         )
                     )
+                }
+            }
+            // Workspace Tabs are layout containers, not terminal sessions.
+            // Keep them reachable by pointer as compact C04 navigation rows
+            // without adding a competing terminal-looking top strip.
+            if shell.tab_count > 1 {
+                appendLeftSection(
+                    title: "LAYOUTS",
+                    identifier: "seyal-layouts-heading",
+                    topGap: true
+                ) {
+                    for index in 0..<Int(shell.tab_count) {
+                        let row = seyal_app_shell_row(
+                            pane.appHandle,
+                            UInt16(SEYAL_APP_ROW_TAB),
+                            UInt32(index)
+                        )
+                        let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Layout \(index + 1)"
+                        leftItems.addArrangedSubview(
+                            contextRow(
+                                primary: title,
+                                secondary: nil,
+                                identifier: "seyal-layout-\(index)",
+                                selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                                action: #selector(selectTab(_:)),
+                                kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
+                                idLo: row.id_lo,
+                                idHi: row.id_hi
+                            )
+                        )
+                    }
                 }
             }
             let chrome = seyal_app_chrome(pane.appHandle)
