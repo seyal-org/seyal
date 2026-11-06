@@ -2044,6 +2044,45 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotEqual(a, b)
     }
 
+    @MainActor
+    func testPaneTerminalTabsUseBorderlessSelectedSeamsAndStableCloseSlots() throws {
+        let strip = PaneTerminalTabStrip(
+            paneLo: 4,
+            paneHi: 0,
+            paneTitle: "Pane 4",
+            tabs: [
+                PaneLayoutView.TerminalTab(lo: 10, hi: 0, selected: true),
+                PaneLayoutView.TerminalTab(lo: 11, hi: 0, selected: false),
+            ],
+            focused: true,
+            canSplit: true,
+            canClosePane: true
+        )
+        let first = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-10") as? NSButton
+        )
+        let second = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-11") as? NSButton
+        )
+        let activeClose = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-10-close") as? NSButton
+        )
+        let inactiveClose = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-11-close") as? NSButton
+        )
+        XCTAssertFalse(first.isBordered, "terminal tabs are not recessed cards")
+        XCTAssertFalse(second.isBordered, "inactive tabs retain quiet typography")
+        XCTAssertEqual(first.accessibilityValue() as? String, "selected")
+        XCTAssertEqual(second.accessibilityValue() as? String, "")
+        XCTAssertEqual(activeClose.alphaValue, 1)
+        XCTAssertTrue(activeClose.isEnabled)
+        XCTAssertEqual(inactiveClose.alphaValue, 0)
+        XCTAssertFalse(inactiveClose.isEnabled)
+        XCTAssertEqual(PaneTerminalTabStrip.height, 30, "one non-wrapping row")
+        strip.apply(theme: NativeThemeRealization.theme(for: NSAppearance(named: .darkAqua)!))
+        XCTAssertNotNil(strip.layer?.backgroundColor, "tabs use Rust-resolved utility surface")
+    }
+
     func testExplicitRuntimeDirectoryPrepRepairsLaxModeAndCreatesParents() throws {
         let leaf = URL(fileURLWithPath: "/tmp")
             .appendingPathComponent("seyal-1428-lax-\(ProcessInfo.processInfo.processIdentifier)")
