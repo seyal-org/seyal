@@ -345,6 +345,10 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertNotEqual(
             firstTitle, secondTitle, "split leaves must not both read as Terminal 1 (#1429)"
         )
+        let multipaneEvidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        multipaneEvidence.name = "1457-split-pane-terminal-tabs"
+        multipaneEvidence.lifetime = .keepAlways
+        add(multipaneEvidence)
     }
 
     /// Reads AX values only when the element is still in the tree. A hidden
