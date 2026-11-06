@@ -2,6 +2,14 @@ import Foundation
 
 @MainActor
 final class RustDisplayBridge {
+  nonisolated static func isTerminalPollResult(_ result: Int32) -> Bool {
+    result == -3 || result == -6 || result == -10
+  }
+
+  nonisolated static func pollResultClosesConnection(_ result: Int32) -> Bool {
+    isTerminalPollResult(result) || result == -4 || result == -18
+  }
+
   typealias FrameHandler = @MainActor (SeyalPreparedFrame) -> Void
   typealias TimelineHandler = @MainActor () -> Void
   typealias HistoryHandler = @MainActor (NativeHistoryRange) -> Void
@@ -403,6 +411,42 @@ final class RustDisplayBridge {
     onStatusChanged()
   }
 
+  /// Rust may discover a Pane's loss while polling a sibling Controller and
+  /// unregister this bridge's primary handle first. The primary read source
+  /// then wakes with no registry entry. Convert that state into the normal
+  /// recovery signal while leaving the other Pane handles and their sources
+  /// alive (#1426 / SPEC-009 §8.2.2).
+  @discardableResult
+  func handlePrimaryRegistryRemovalIfNeeded() -> Bool {
+    let lostHandle = clientHandle
+    guard isConnected, lostHandle != 0, seyal_bridge_socket_fd_for(lostHandle) < 0 else {
+      return false
+    }
+    isConnected = false
+    disconnectRuntimeReconstruction(continuityAppHandle)
+    runtimeBlockMetadata = nil
+    discardHistoryRequests(forDisplayHandle: lostHandle)
+    lastTimelineRevision = 0
+    lastComposerResultRequestID = 0
+    clearComposerStatus()
+    runtimeIdentityWords = (0, 0)
+    attachmentIdentityWords = (0, 0)
+    clientHandle = 0
+    handleBox.value = 0
+    socketFileDescriptor = -1
+    if let readSource {
+      self.readSource = nil
+      readSource.cancel()
+    }
+    if let writeSource {
+      self.writeSource = nil
+      writeSource.cancel()
+    }
+    onError(-10)
+    onStatusChanged()
+    return true
+  }
+
   /// Drops the live CLIENT handle immediately and clears teardown so `start()`
   /// is not blocked on async DispatchSource cancel hops.
   func completeEagerClientDisconnect() {
@@ -440,7 +484,6 @@ final class RustDisplayBridge {
   /// One DispatchSourceRead per live Controller fd. CreateTab's second
   /// client must not steal the first connection's readiness handler.
   func armAuxiliaryReadSources() {
-    guard isConnected else { return }
     var live = Set<UInt64>()
     var cursor: UInt64 = 0
     while true {
@@ -455,8 +498,13 @@ final class RustDisplayBridge {
       let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
       source.setEventHandler { [weak self] in
         seyalRunAsMainActorFromMainQueue {
-          guard let self, self.isConnected else { return }
+          guard let self, self.auxiliaryReadSources[handle] != nil else { return }
           let result = seyal_bridge_poll_for(handle)
+          if result < 0, !Self.pollResultClosesConnection(result) {
+            // Transient poll errors leave this Controller registered. Keep the
+            // source armed so the next readiness event can make progress.
+            return
+          }
           if result < 0 {
             // Level-trigger progress: EOF/disconnect must disarm this fd's
             // sources. Tab 1 stays up (do not stop()).

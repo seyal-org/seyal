@@ -75,6 +75,22 @@ action = "tab.create"
     assert_eq!(new_tab.hints[0].keys_notation, "cmd+shift+t>n");
 }
 
+#[test]
+fn supported_shell_menu_and_builtins_do_not_expose_raw_presentation() {
+    let table = load_keybinding_table(None);
+    let route = route_context_set(false, PresentationMode::Flow, false);
+    let projection = project_shortcuts(&table, route);
+
+    assert!(!projection
+        .items
+        .iter()
+        .any(|item| { item.command.id == WorkspaceCommandId::PresentationToggleRaw }));
+    assert!(!table
+        .bindings
+        .iter()
+        .any(|binding| { binding.action.id == WorkspaceCommandId::PresentationToggleRaw }));
+}
+
 /// SPEC-024 §14 item 19 (menu half): projection enabled bits for palette modal.
 #[test]
 fn item19_menu_half_projection_disables_non_palette_while_open() {

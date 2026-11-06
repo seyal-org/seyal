@@ -425,12 +425,7 @@ impl ApplicationRoot {
 
 #[cfg(target_os = "macos")]
 fn is_terminal_registry_loss(error: &crate::local::ClientError) -> bool {
-    matches!(
-        error,
-        crate::local::ClientError::Disconnected
-            | crate::local::ClientError::Io
-            | crate::local::ClientError::NoRunningExecution
-    )
+    error.is_terminal_registry_loss()
 }
 
 #[cfg(target_os = "macos")]

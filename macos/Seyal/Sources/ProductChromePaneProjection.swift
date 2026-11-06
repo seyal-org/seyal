@@ -1,7 +1,26 @@
 import AppKit
 
+private struct PaneBindingIdentity: Hashable {
+    let lo: UInt64
+    let hi: UInt64
+}
+
 @MainActor
 extension ProductChromeHostView {
+    /// Join shell bindings to visual regions by stable PaneId. Ambiguity fails closed.
+    static func bindingsInRegionOrder(
+        regions: [PaneLayoutView.Region],
+        shellBindings: [SeyalAppPaneBinding]
+    ) -> [SeyalAppPaneBinding?] {
+        let byPane = Dictionary(grouping: shellBindings) {
+            PaneBindingIdentity(lo: $0.pane_lo, hi: $0.pane_hi)
+        }
+        return regions.map {
+            let matches = byPane[PaneBindingIdentity(lo: $0.paneLo, hi: $0.paneHi)]
+            return matches?.count == 1 ? matches?.first : nil
+        }
+    }
+
     func reconcilePaneHosts(paneCount: Int) {
         centerColumn.reconcile(paneCount: paneCount)
         reconcileSecondaryLiveSurfaces(paneCount: paneCount)
@@ -14,9 +33,17 @@ extension ProductChromeHostView {
     /// projection fingerprint changes — focus churn must not recreate views.
     func reconcileSecondaryLiveSurfaces(paneCount: Int) {
         let handle = pane.appHandle
+        let shell = seyal_app_shell(handle)
+        let shellBindings = (0..<Int(shell.pane_count)).map { index in
+            seyal_app_pane_binding(handle, UInt32(index))
+        }
+        let bindingsInRegionOrder = Self.bindingsInRegionOrder(
+            regions: centerColumn.regions,
+            shellBindings: shellBindings
+        )
         var bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)] = []
-        for region in centerColumn.regions {
-            let binding = seyal_app_pane_binding(handle, UInt32(bindings.count))
+        for (region, binding) in zip(centerColumn.regions, bindingsInRegionOrder) {
+            guard let binding else { continue }
             bindings.append(
                 (
                     paneLo: region.paneLo,
@@ -36,8 +63,11 @@ extension ProductChromeHostView {
             self.driveRecovery()
             self.reconcilePaneHosts(paneCount: Int(seyal_app_shell(self.pane.appHandle).pane_count))
         }
-        centerColumn.reconcileSecondaryLiveHosts(bindings: bindings)
         let sharedBridge = pane.inputSurface.bridge
+        centerColumn.reconcileSecondaryLiveHosts(
+            bindings: bindings,
+            historyBridge: sharedBridge
+        )
         for host in centerColumn.secondaryHosts {
             // Bridgeless Metal surfaces borrow the window bridge for history.
             host.historyBridge = sharedBridge

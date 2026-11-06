@@ -10,6 +10,65 @@
 use super::*;
 
 impl ApplicationRoot {
+    /// An explicit split opts all panes in its Tab into Flow. TUI remains the
+    /// visible takeover while this updates the stored resting choice.
+    pub(super) fn select_split_tab_flow_resting_mode(&mut self, pane: seyal_core::PaneId) {
+        let snap = self.shell.snapshot();
+        if let Some(tab) = snap
+            .windows
+            .iter()
+            .flat_map(|window| &window.tabs)
+            .find(|tab| tab.panes.iter().any(|candidate| candidate.id == pane))
+        {
+            for candidate in &tab.panes {
+                let _ = self
+                    .shell
+                    .set_resting_presentation_mode(candidate.id, PresentationMode::Flow);
+            }
+        }
+    }
+
+    /// Resolve presentation independently from composer visibility. Composer
+    /// mode is Hidden for several reasons (including an unfocused pane and an
+    /// ended execution); it is not a valid proxy for the pane's selected
+    /// Raw/Flow/TUI mode.
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn presentation_eligibility_for_pane(
+        &self,
+        pane: seyal_core::PaneId,
+    ) -> PresentationEligibility {
+        if pane == self.shell.snapshot().focused_pane {
+            // A pane becomes focused before its new Controller is attached.
+            // During that interval `ApplicationSnapshot.eligibility` still
+            // describes the previous pane's bound execution. Do not project
+            // that stale Flow/Raw state into the new pane.
+            if self.pane_authorities.get(&pane).copied() != self.authority {
+                return PresentationEligibility::Unbound;
+            }
+            return self.snapshot().eligibility;
+        }
+        if !self.pane_authorities.contains_key(&pane) {
+            return PresentationEligibility::Unbound;
+        }
+        let Some(mode) = self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .flat_map(|window| &window.tabs)
+            .flat_map(|tab| &tab.panes)
+            .find(|candidate| candidate.id == pane)
+            .map(|candidate| candidate.presentation_mode)
+        else {
+            return PresentationEligibility::Unbound;
+        };
+        match mode {
+            PresentationMode::Flow => PresentationEligibility::Flow,
+            PresentationMode::Raw => PresentationEligibility::Raw,
+            PresentationMode::Tui => PresentationEligibility::Tui,
+        }
+    }
+
     pub(super) fn derive_presentation(&mut self, alternate_screen: bool) -> Result<(), AppError> {
         self.alternate_screen = alternate_screen;
         let Some(bound) = self.authority else {
@@ -48,14 +107,12 @@ impl ApplicationRoot {
     }
 
     pub(super) fn recompute_resting(&mut self) {
-        // Grid-first (#1438): Raw is the default resting presentation. Flow is
-        // explicit opt-in only, and unsupported integration always forces Raw.
+        // Blocks-first: trusted sessions rest in Flow automatically. Raw is
+        // reserved for the safe fallback when integration is unsupported.
         self.resting = if self.integration_unsupported {
             PresentationMode::Raw
-        } else if self.explicit_flow {
-            PresentationMode::Flow
         } else {
-            PresentationMode::Raw
+            PresentationMode::Flow
         };
     }
 
@@ -74,16 +131,22 @@ impl ApplicationRoot {
         self.derive_presentation(self.alternate_screen)
     }
 
-    /// `Some` only while a Pane is bound. `true` means resting Raw (offer Flow);
-    /// `false` means resting Flow (offer Raw).
+    /// `Some(true)` only while a Pane is in unsupported Raw fallback, so the
+    /// palette may offer Flow if trust state later permits it. Supported Flow
+    /// panes never expose a Raw choice.
     pub(super) fn resting_palette_choice(&self) -> Option<bool> {
-        self.authority
-            .map(|_| self.resting == PresentationMode::Raw)
+        (self.authority.is_some()
+            && self.integration_unsupported
+            && self.resting == PresentationMode::Raw)
+            .then_some(true)
     }
 
     pub(super) fn sync_focused_presentation_mode(&mut self) {
         let pane = self.shell.snapshot().focused_pane;
         let mode = self.presentation.snapshot().mode;
         let _ = self.shell.set_presentation_mode(pane, mode);
+        if mode != PresentationMode::Tui {
+            let _ = self.shell.set_resting_presentation_mode(pane, mode);
+        }
     }
 }

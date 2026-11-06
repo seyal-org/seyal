@@ -295,6 +295,10 @@ impl ApplicationRoot {
     /// target clears the active input route without deleting sibling bindings.
     pub(super) fn activate_focused_pane_authority(&mut self) {
         let focused = self.shell.snapshot().focused_pane;
+        let stored_mode = self.shell.resting_presentation_mode(focused);
+        // Restore the unbound Pane's mode before its first Controller bind.
+        self.explicit_flow = stored_mode == Some(crate::presentation::PresentationMode::Flow);
+        self.recompute_resting();
         if self.pane_recovery.expectations.contains_key(&focused) {
             self.authority = None;
             let _ = self.presentation.apply(PresentationAction::ClearIdentity);
@@ -332,18 +336,6 @@ impl ApplicationRoot {
         self.authority = Some(authority);
         // A live bind replaces any prior shell-exit latch on this Pane (#1379).
         self.clear_execution_ended_for_pane(focused);
-        let stored_mode = self
-            .shell
-            .snapshot()
-            .windows
-            .iter()
-            .flat_map(|window| &window.tabs)
-            .flat_map(|tab| &tab.panes)
-            .find(|pane| pane.id == focused)
-            .map(|pane| pane.presentation_mode);
-        // Per-pane stored mode → Flow opt-in latch (#1438). Raw/Tui/absent → not Flow.
-        self.explicit_flow = stored_mode == Some(crate::presentation::PresentationMode::Flow);
-        self.recompute_resting();
         let alternate = self.alternate_screen_for_pane(focused);
         let _ = self.derive_presentation(alternate);
         self.sync_composer_presentation();

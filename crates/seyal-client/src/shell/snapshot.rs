@@ -43,6 +43,7 @@ pub struct PaneLeafSnapshot {
     pub allows_implicit_bootstrap: bool,
     pub presentation_tier: PresentationTier,
     pub presentation_mode: crate::presentation::PresentationMode,
+    pub resting_presentation_mode: crate::presentation::PresentationMode,
 }
 
 impl ShellState {
@@ -99,6 +100,8 @@ impl ShellState {
                             selected_terminal_tab: pane.selected_terminal_tab,
                             execution: pane.execution(),
                             allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
+                            presentation_mode: pane.presentation_mode,
+                            resting_presentation_mode: pane.resting_presentation_mode,
                         })
                     })
                     .collect(),
@@ -231,6 +234,7 @@ fn leaf_snapshot(
         allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
         presentation_tier: tier_for_leaf(pane.id, tab, window, product_window),
         presentation_mode: pane.presentation_mode,
+        resting_presentation_mode: pane.resting_presentation_mode,
     }
 }
 

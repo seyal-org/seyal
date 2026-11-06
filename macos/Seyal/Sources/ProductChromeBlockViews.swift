@@ -78,6 +78,14 @@ final class CommandBlockView: NSView {
     private var seamTopConstraint: NSLayoutConstraint!
     private var theme: NativeTheme?
 
+    static func visibleOutputLineCount(_ text: String) -> Int {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        while let last = lines.last, last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.removeLast()
+        }
+        return max(lines.count, 1)
+    }
+
     init(
         prompt: String,
         title: String,
@@ -182,8 +190,13 @@ final class CommandBlockView: NSView {
 
     private static func accessibilitySummary(for text: String, limit: Int = 240) -> String {
         guard text.count > limit else { return text }
-        // Prefer the live tail so streaming Blocks keep late lines AX-visible.
-        return "…" + String(text.suffix(limit))
+        // Keep both command onset and the live/completed tail available to
+        // assistive technology. A tail-only summary made it impossible to
+        // verify the first output line after a long Block completed.
+        let prefixCount = limit / 10
+        let separator = "…\n"
+        let suffixCount = max(limit - prefixCount - separator.count, 0)
+        return String(text.prefix(prefixCount)) + separator + String(text.suffix(suffixCount))
     }
 
     override func layout() {
