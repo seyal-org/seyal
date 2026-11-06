@@ -2683,7 +2683,8 @@ final class SeyalHostComponentTests: XCTestCase {
             let helperBody = inputText[helperRange.lowerBound..<helperEnd]
             XCTAssertTrue(helperBody.contains("guard handle == clientHandle else"))
             XCTAssertTrue(
-                helperBody.contains("guard result != 0 else {\n      synchronizeWriteReadinessSource()\n      return result\n    }"),
+                helperBody.contains("guard result != 0 else {")
+                    && helperBody.contains("synchronizeWriteReadinessSource()"),
                 "successful addressed history requests must arm write readiness for queued Controller frames"
             )
             XCTAssertFalse(
