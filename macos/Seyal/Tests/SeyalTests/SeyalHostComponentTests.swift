@@ -4611,19 +4611,23 @@ final class SeyalHostComponentTests: XCTestCase {
         // SelectRestingPresentation needs a bound authority; latch Flow once connected.
         let flowLatch = expectation(description: "Raw resting latched to Flow")
         var latchedFlow = false
+        // Timer.scheduledTimer closures are @Sendable; hop back to MainActor
+        // because the timer is scheduled on the test's main run loop (#1453).
         let latchPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
-            let snap = seyal_app_snapshot(pane.appHandle)
-            if snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
-                if !latchedFlow {
-                    latchedFlow = true
-                    flowLatch.fulfill()
+            MainActor.assumeIsolated {
+                let snap = seyal_app_snapshot(pane.appHandle)
+                if snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+                    if !latchedFlow {
+                        latchedFlow = true
+                        flowLatch.fulfill()
+                    }
+                    return
                 }
-                return
+                if view.terminalBridgeIsConnected {
+                    _ = optInFlow(pane.appHandle)
+                }
+                checkConnected()
             }
-            if view.terminalBridgeIsConnected {
-                _ = optInFlow(pane.appHandle)
-            }
-            checkConnected()
         }
         defer { latchPoll.invalidate() }
         await fulfillment(of: [connected, flowLatch], timeout: 30)
