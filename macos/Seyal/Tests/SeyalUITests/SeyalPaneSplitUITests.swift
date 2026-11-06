@@ -1178,9 +1178,11 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForUsablePty(in: app)
         waitForAnyPaneBlock("SEYAL_TAB_TWO_MARKER", in: app, expected: true)
         waitForAnyPaneBlock("SEYAL_TAB_ONE_MARKER", in: app, expected: false)
+        // Multipane Flow keeps Pane 2 Blocks visible as secondary chrome (#1424).
+        // Assert isolation against the focused Pane's primary Block ids only.
         XCTAssertFalse(
-            anyPaneBlock(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists,
-            "Pane 2 command history stays out of Pane 1"
+            blockCommand(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists,
+            "Pane 2 command history stays out of focused Pane 1 Blocks"
         )
 
         element(app, "seyal-pane-region-1").click()
