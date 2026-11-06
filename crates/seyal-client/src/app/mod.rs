@@ -70,6 +70,8 @@ mod tests;
 #[cfg(test)]
 mod unpresented_tests;
 #[cfg(test)]
+mod w7_adversarial_tests;
+#[cfg(test)]
 mod workspace_create_tests;
 
 use std::collections::HashMap;
