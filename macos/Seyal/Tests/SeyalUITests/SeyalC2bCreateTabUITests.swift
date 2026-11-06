@@ -52,6 +52,10 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-0"].firstMatch.exists)
         XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-strip"].exists)
+        let layoutEvidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        layoutEvidence.name = "1457-workspace-layout-navigation"
+        layoutEvidence.lifetime = .keepAlways
+        add(layoutEvidence)
         XCTAssertTrue(
             app.descendants(matching: .any).matching(
                 NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
