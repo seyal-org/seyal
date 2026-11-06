@@ -328,14 +328,29 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(firstRegion.exists)
 
         func tabTitle(in region: XCUIElement) -> String? {
+            // Tab strips are siblings of pane regions under PaneLayoutView, not
+            // AX descendants of the region group — resolve by frame containment.
             let predicate = NSPredicate(
-                format: "identifier BEGINSWITH 'seyal-terminal-tab-' "
-                    + "AND NOT (identifier CONTAINS[c] 'left') "
-                    + "AND NOT (identifier ENDSWITH '-close')"
+                format: "identifier MATCHES %@",
+                "^seyal-terminal-tab-[0-9]+-[0-9]+$"
             )
-            let button = region.descendants(matching: .any).matching(predicate).firstMatch
-            guard button.waitForExistence(timeout: 8) else { return nil }
-            return button.label.isEmpty ? button.title : button.label
+            let regionFrame = region.frame
+            let deadline = Date().addingTimeInterval(8)
+            while Date() < deadline {
+                if let button = app.descendants(matching: .any)
+                    .matching(predicate)
+                    .allElementsBoundByIndex
+                    .first(where: {
+                        let frame = $0.frame
+                        return regionFrame.contains(CGPoint(x: frame.midX, y: frame.midY))
+                    })
+                {
+                    let label = button.label
+                    return label.isEmpty ? button.title : label
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            return nil
         }
 
         let firstTitle = tabTitle(in: firstRegion)

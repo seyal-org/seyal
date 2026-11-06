@@ -81,12 +81,12 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         waitForTerminalTabCount(app, 2, timeout: 12)
         XCTAssertEqual(app.windows.count, 1, "⌘T creates a Pane-local terminal, not a Layout or Window")
 
+        // File → New Window remains the primary admission (cmd+shift+n is an
+        // alias). Stacked multi-window close/quit is covered by HostUITests;
+        // this case only proves CreateWindow still admits after New Terminal.
         clickFileMenuItem(in: app, title: "New Window")
         waitForWindowCount(app, 2, timeout: 10)
-
-        // cmd+shift+n is an alias; File → New Window remains the primary admission.
-        clickFileMenuItem(in: app, title: "New Window")
-        waitForWindowCount(app, 3, timeout: 10)
+        XCTAssertEqual(app.windows.count, 2, "File → New Window creates a second headed window")
     }
 
     func testCommandWClosesOnlySelectedPaneTerminal() throws {
@@ -162,7 +162,10 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func clickFileMenuItem(in app: XCUIApplication, title: String) {
-        let item = app.menuBars.menuBarItems["File"].menuItems[title]
+        // Prefer the flat menuItems query used by HostUITests. Nested
+        // File → item clicks often stop at hover for shared
+        // `invokeProjectedWorkspaceCommand:` selectors (New Window).
+        let item = app.menuItems[title]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "File → \(title) must be projected")
         XCTAssertTrue(item.isEnabled, "File → \(title) must be enabled")
         item.click()
@@ -229,14 +232,11 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func terminalTabButtons(in app: XCUIApplication) -> XCUIElementQuery {
-        // Match title, not AX label: tab buttons set `title` ("Terminal 1") and
-        // leave accessibilityLabel unset; close buttons use title "×" / Close label.
+        // Pane-local chips use Rust pane titles ("Pane 1", "Pane 1 · 2") with
+        // stable `seyal-terminal-tab-<hi>-<lo>` ids. Close controls share the
+        // prefix plus `-close`; left-rail leftovers used a `left` token.
         app.descendants(matching: .any).matching(
-            NSPredicate(
-                format: "identifier BEGINSWITH %@ AND title BEGINSWITH %@",
-                "seyal-terminal-tab-",
-                "Terminal "
-            )
+            NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
         )
     }
 
@@ -267,7 +267,11 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
             evaluatedWith: app.windows,
             handler: nil
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [arrived], timeout: timeout), .completed)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [arrived], timeout: timeout),
+            .completed,
+            "Expected \(count) headed windows; actual=\(app.windows.count)"
+        )
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {

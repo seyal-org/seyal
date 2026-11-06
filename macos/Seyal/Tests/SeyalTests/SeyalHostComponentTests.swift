@@ -1371,7 +1371,9 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertGreaterThan(host.frame.width, 0)
         XCTAssertGreaterThan(host.frame.height, 0)
         XCTAssertTrue(host.isAccessibilityEnabled())
-        XCTAssertEqual(host.accessibilityRole(), .group)
+        // Unfocused live leaves are focus hit-targets (AXButton), not groups —
+        // matching SecondaryLivePaneHost.refreshInputOwnershipChrome.
+        XCTAssertEqual(host.accessibilityRole(), .button)
         XCTAssertEqual(host.accessibilityLabel(), "Focus secondary terminal pane")
         XCTAssertTrue(layout.hitTest(NSPoint(x: 375, y: 150)) === host)
     }
