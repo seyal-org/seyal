@@ -206,7 +206,8 @@ final class PaneLayoutView: NSView {
     /// frames; Raw/TUI on the focused leaf temporarily covers that leaf with
     /// `liveContent` without destroying the host.
     func reconcileSecondaryLiveHosts(
-        bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)]
+        bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)],
+        historyBridge: RustDisplayBridge? = nil
     ) {
         let multipane = bindings.count > 1
         if !multipane {
@@ -242,9 +243,11 @@ final class PaneLayoutView: NSView {
             }()
 
             let host: SecondaryLivePaneHost
+            var needsRegistrySeed = false
             if let existing = secondaryLiveHosts[key] {
                 host = existing
-                host.updateDisplayHandle(binding.displayHandle)
+                if let historyBridge { host.historyBridge = historyBridge }
+                _ = host.updateDisplayHandle(binding.displayHandle)
                 host.updateRecoveryTarget(binding.recoveryTarget)
             } else {
                 host = SecondaryLivePaneHost(
@@ -254,6 +257,8 @@ final class PaneLayoutView: NSView {
                     displayHandle: binding.displayHandle,
                     recoveryTarget: binding.recoveryTarget
                 )
+                if let historyBridge { host.historyBridge = historyBridge }
+                needsRegistrySeed = true
                 host.onFocus = { [weak self] in
                     self?.onFocusPane?(key.lo, key.hi)
                 }
@@ -268,8 +273,6 @@ final class PaneLayoutView: NSView {
                     host.frame = targetFrame
                 }
                 addSubview(host, positioned: .above, relativeTo: liveContent)
-                // Its composer may stop receiving focused Runtime Block polls after a split (#1426).
-                host.noteRegistryPolled()
             }
             // Zoom/occlusion must remove the leaf's surface; Raw/TUI covers the
             // focused host with liveContent without destroying it (#1424).
@@ -281,6 +284,12 @@ final class PaneLayoutView: NSView {
             // the AX target at its initial zero frame and unhittable to XCUI.
             if targetFrame.width > 1, targetFrame.height > 1 {
                 host.frame = targetFrame
+            }
+            // Seed only after the shared bridge is installed; otherwise the
+            // initial Block history request is rejected and an idle Controller
+            // may never produce another registry poll to retry it.
+            if needsRegistrySeed {
+                host.noteRegistryPolled()
             }
             // After Raw/TUI cover lifts, force a fresh bridge frame so the
             // revealed secondary surface matches the focused liveContent grid.

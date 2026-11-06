@@ -1801,6 +1801,73 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testControllerSwitchDoesNotPaintStaleSameIDHistoryBeforeReplacementArrives() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-history-tab-switch"
+        )
+        func range(handle: UInt64, marker: UInt32) -> NativeHistoryRange {
+            NativeHistoryRange(
+                startLine: 1,
+                endLine: 1,
+                blockID: 1,
+                requestID: handle,
+                revision: 1,
+                rows: [[
+                    NativeHistoryRange.Cell(
+                        scalar: marker,
+                        foreground: 0,
+                        background: 0,
+                        flags: 0
+                    )
+                ]],
+                sourceDisplayHandle: handle
+            )
+        }
+        func frame(handle: UInt64, revision: UInt64) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: revision,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: handle,
+                        origin: .zero,
+                        clip: NSRect(x: 0, y: 0, width: 320, height: 120)
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+
+        let first = range(handle: 11, marker: 65)
+        surface.retainHistoryRange(first)
+        surface.activateTranscriptDisplayHandle(11)
+        surface.setTranscriptFrame(frame(handle: 11, revision: 1))
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, 1)
+
+        // Tab 2 reuses local Block id 1, but its history has not arrived yet.
+        // The old tab's painted text must disappear during that gap. A frame
+        // already queued by tab 1 must not reactivate its controller.
+        surface.activateTranscriptDisplayHandle(22)
+        surface.setTranscriptFrame(frame(handle: 11, revision: 2))
+
+        XCTAssertEqual(
+            surface.inspectFlowPaint().historyInstanceCount,
+            0,
+            "a tab change must clear rendered history keyed by the previous tab's local Block id"
+        )
+        XCTAssertEqual(surface.transcriptDisplayHandle, 22)
+        XCTAssertEqual(
+            surface.retainedHistoryRange(blockID: 1, displayHandle: 11),
+            first,
+            "the inactive tab's canonical history remains available for its next selection"
+        )
+    }
+
+    @MainActor
     func testSecondaryPaneReconcilesWhenItsControllerChanges() throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal unavailable")

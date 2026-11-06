@@ -156,6 +156,7 @@ extension ProductChromeHostView {
     }
 
     func applyTranscriptPresentation(_ snapshot: SeyalAppSnapshot) {
+        pane.inputSurface.activateTranscriptDisplayHandle(activeBlockDisplayHandle)
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct

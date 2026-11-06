@@ -17,9 +17,17 @@ extension SecondaryLivePaneHost {
         }
         // Preserve scroll across projection rebuilds so focus/reconcile churn
         // does not jump the transcript (#1424).
-        let savedOffsetY = transcript.contentView.bounds.origin.y
-        let savedFollowing = followingLiveEnd
-        let savedDocumentHeight = transcriptDocumentScrollHeight()
+        let savedScrollState: PaneTranscriptScrollState = {
+            if restoresScrollForDisplayHandleChange {
+                restoresScrollForDisplayHandleChange = false
+                return transcriptScrollStates[displayHandle]
+                    ?? PaneTranscriptScrollState(offsetY: 0, documentHeight: 0, followsLiveEnd: true)
+            }
+            return currentTranscriptScrollState()
+        }()
+        let savedOffsetY = savedScrollState.offsetY
+        let savedFollowing = savedScrollState.followsLiveEnd
+        let savedDocumentHeight = savedScrollState.documentHeight
         blocks.arrangedSubviews
             .filter { $0 !== transcriptLeadingSpacer }
             .forEach { $0.removeFromSuperview() }
@@ -113,6 +121,7 @@ extension SecondaryLivePaneHost {
             setTranscriptDocumentOffsetY(0)
             followingLiveEnd = true
             lastBlockCount = 0
+            rememberTranscriptScrollState()
             return
         }
         let addedBlock = visibleIndex > lastBlockCount
@@ -139,6 +148,7 @@ extension SecondaryLivePaneHost {
             followingLiveEnd = savedFollowing
         }
         lastBlockCount = visibleIndex
+        rememberTranscriptScrollState()
         if addedBlock {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -148,8 +158,22 @@ extension SecondaryLivePaneHost {
                     self.scrollTranscriptToLiveEnd()
                 }
                 self.publishBlockOutputFrame()
+                self.rememberTranscriptScrollState()
             }
         }
+    }
+
+    func currentTranscriptScrollState() -> PaneTranscriptScrollState {
+        PaneTranscriptScrollState(
+            offsetY: transcript.contentView.bounds.origin.y,
+            documentHeight: transcriptDocumentScrollHeight(),
+            followsLiveEnd: followingLiveEnd
+        )
+    }
+
+    func rememberTranscriptScrollState() {
+        guard displayHandle != 0, !restoresScrollForDisplayHandleChange else { return }
+        transcriptScrollStates[displayHandle] = currentTranscriptScrollState()
     }
 
     func preserveDocumentHeight(_ height: CGFloat) {
@@ -446,6 +470,7 @@ extension SecondaryLivePaneHost {
         preserveDocumentHeight(max(minimumHeight, transcriptDocumentScrollHeight()))
         layoutSubtreeIfNeeded()
         followingLiveEnd = false
+        rememberTranscriptScrollState()
     }
 
     func isNearLiveEnd(tolerance: CGFloat = 24) -> Bool {
@@ -462,5 +487,6 @@ extension SecondaryLivePaneHost {
         transcript.contentView.scroll(to: NSPoint(x: visible.origin.x, y: maxY))
         transcript.reflectScrolledClipView(transcript.contentView)
         followingLiveEnd = true
+        rememberTranscriptScrollState()
     }
 }

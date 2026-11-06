@@ -64,6 +64,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var lastBridgeError: Int32?
   var lastRenderError: Error?
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
+  private(set) var transcriptDisplayHandle: UInt64 = 0
   var lastProposedGeometry = CGRect.null
   var proposingGeometry = false
   /// Presentation-local Raw scrollback rows above live origin (#1442).
@@ -241,6 +242,21 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     }
     renderer.removeHistoryRegions(except: kept)
     clearLiveTailWhenTranscriptEmpty(kept)
+  }
+
+  /// Clear renderer buffers when a pane switches terminal-tab Controllers.
+  /// Block ids are local to an execution, so the same id in another tab must
+  /// not inherit the previous tab's Metal paint while its history is loading.
+  /// Canonical retained ranges remain keyed by Pane + display handle for reuse.
+  func activateTranscriptDisplayHandle(_ handle: UInt64) {
+    guard handle != transcriptDisplayHandle else { return }
+    transcriptDisplayHandle = handle
+    renderer.removeHistoryRegions(except: [])
+    renderer.clearLiveTailPresentation()
+    hasRetainedHistoryPresentation = historyRanges.keys.contains {
+      $0.displayHandle == handle
+    }
+    renderer.requestPresent()
   }
 
   var terminalExecutionIdentity: String? {

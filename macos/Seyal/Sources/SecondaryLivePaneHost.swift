@@ -21,6 +21,12 @@ struct PaneBlockProjectionFingerprint: Equatable {
     let rows: [Row]
 }
 
+struct PaneTranscriptScrollState: Equatable {
+    let offsetY: CGFloat
+    let documentHeight: CGFloat
+    let followsLiveEnd: Bool
+}
+
 /// Pane-owned Flow presentation host for a visible multipane leaf (#936 / #1424).
 ///
 /// The ApplicationRoot already owns the Controller in the bridge registry
@@ -63,6 +69,8 @@ final class SecondaryLivePaneHost: NSView {
     var lastVisibleHistoryPixelCount = 0
     var lastHistoryPixelSampleAt = Date.distantPast
     var historyProjectionRequests = HistoryProjectionRequestBook()
+    var transcriptScrollStates: [UInt64: PaneTranscriptScrollState] = [:]
+    var restoresScrollForDisplayHandleChange = false
     static let blockOutputZeroClipRetryLimit = 4
     /// When true, this host owns keyboard/composer interaction for its Pane.
     private(set) var inputOwned = false
@@ -104,6 +112,7 @@ final class SecondaryLivePaneHost: NSView {
         )
         composer = ComposerBridgeView(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
         super.init(frame: .zero)
+        surface.activateTranscriptDisplayHandle(displayHandle)
         translatesAutoresizingMaskIntoConstraints = true
         clipsToBounds = true
         setAccessibilityElement(true)
@@ -313,6 +322,7 @@ final class SecondaryLivePaneHost: NSView {
         // Mid-transcript programmatic scrolls must clear follow-bottom so the
         // next rebuild does not jump to live end (#1424).
         followingLiveEnd = maxY > 0 && clamped >= maxY - 24
+        rememberTranscriptScrollState()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -343,6 +353,7 @@ final class SecondaryLivePaneHost: NSView {
     @objc private func transcriptBoundsDidChange(_ note: Notification) {
         guard !isProgrammaticTranscriptScroll else { return }
         followingLiveEnd = isNearLiveEnd()
+        rememberTranscriptScrollState()
         publishBlockOutputFrame()
     }
 
@@ -351,10 +362,14 @@ final class SecondaryLivePaneHost: NSView {
         fatalError("SecondaryLivePaneHost is programmatic")
     }
 
-    func updateDisplayHandle(_ handle: UInt64) {
-        guard handle != displayHandle else { return }
+    @discardableResult
+    func updateDisplayHandle(_ handle: UInt64) -> Bool {
+        guard handle != displayHandle else { return false }
+        rememberTranscriptScrollState()
         historyProjectionRequests.discard(forDisplayHandle: displayHandle)
+        surface.activateTranscriptDisplayHandle(handle)
         displayHandle = handle
+        restoresScrollForDisplayHandleChange = true
         updateAvailabilityPresentation()
         needsLayout = true
         publishFrame()
@@ -362,6 +377,7 @@ final class SecondaryLivePaneHost: NSView {
         // select a different Runtime timeline. Reconcile against that
         // Controller so local Block ids cannot retain another tab's card/body.
         noteRegistryPolled()
+        return true
     }
 
     func updateRecoveryTarget(_ target: SeyalAppPaneRecoveryTarget) {

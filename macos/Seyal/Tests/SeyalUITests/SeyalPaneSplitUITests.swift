@@ -193,11 +193,16 @@ final class SeyalPaneSplitUITests: XCTestCase {
             )
         ).firstMatch
         XCTAssertTrue(retainedSource.waitForExistence(timeout: 8))
+        let retainedSourceBody = blockBody(for: retainedSource, in: app)
+        waitForBodyMarker(
+            retainedSourceBody,
+            marker: marker,
+            message: "the source Block body must remain available after the new Pane is bound"
+        )
         let allCopies = app.descendants(matching: .any).matching(
             NSPredicate(
-                format: "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label CONTAINS %@",
-                "seyal-block-",
-                "seyal-secondary-block-",
+                format: "identifier MATCHES %@ AND label CONTAINS %@",
+                "^seyal-(secondary-)?block-[0-9]+$",
                 marker
             )
         )
@@ -213,11 +218,11 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForUsablePty(in: app)
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
 
-        // Keep the twelve-line body under the bounded AX summary so every
-        // streamed line remains observable to this assertion.
+        // Keep the completed body under the bounded AX summary. The running
+        // live tail is verified separately through its painted Metal region.
         let marker = "stream1426"
         submitComposerCommand(
-            "for i in $(seq 1 12); do printf '\(marker) %02d\\n' \"$i\"; sleep 1; done",
+            "for i in $(seq 1 12); do printf '\(marker) %02d\\n' \"$i\"; sleep 1; done; printf '\(marker) COMPLETE\\n'",
             in: app,
             expectBlock: true,
             blockMarker: marker
@@ -255,6 +260,12 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(
             secondaryBody.waitForExistence(timeout: 5),
             "the secondary Block must retain its pane-local output body"
+        )
+        waitForBodyMarker(
+            secondaryBody,
+            marker: "\(marker) COMPLETE",
+            timeout: 18,
+            message: "the live command must finish and retain its output after focus changes"
         )
         for line in 1...12 {
             let expected = String(format: "%@ %02d", marker, line)
@@ -1072,7 +1083,9 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         let original = terminalTabs.element(boundBy: 0)
         let created = terminalTabs.element(boundBy: 1)
-        XCTAssertNotEqual(original.identifier, created.identifier)
+        let originalTabID = original.identifier
+        let createdTabID = created.identifier
+        XCTAssertNotEqual(originalTabID, createdTabID)
         original.click()
         XCTAssertEqual(original.value as? String, "selected", "selection returns to the original live terminal")
         XCTAssertEqual(created.value as? String, "", "the other terminal remains unselected")
@@ -1133,19 +1146,25 @@ final class SeyalPaneSplitUITests: XCTestCase {
             originalExecution,
             "returning to Pane 1 preserves its selected terminal"
         )
-        original.click()
+        app.buttons.matching(identifier: originalTabID).firstMatch.click()
+        waitForSelectedTerminalTab(app, identifier: originalTabID)
+        waitForPaneExecution(app, presentationID: "seyal-pane-presentation-host", execution: originalExecution)
         waitForUsablePty(in: app)
         submitComposerCommand("echo SEYAL_TAB_ONE_MARKER", in: app)
-        created.click()
+        app.buttons.matching(identifier: createdTabID).firstMatch.click()
+        waitForSelectedTerminalTab(app, identifier: createdTabID)
+        waitForPaneExecution(app, presentationID: "seyal-pane-presentation-host", execution: createdExecution)
         waitForUsablePty(in: app)
         submitComposerCommand("echo SEYAL_TAB_TWO_MARKER", in: app)
-        original.click()
-        waitForSelectedTerminalTab(paneStrip, identifier: original.identifier)
+        app.buttons.matching(identifier: originalTabID).firstMatch.click()
+        waitForSelectedTerminalTab(app, identifier: originalTabID)
+        waitForPaneExecution(app, presentationID: "seyal-pane-presentation-host", execution: originalExecution)
         waitForUsablePty(in: app)
         waitForAnyPaneBlock("SEYAL_TAB_ONE_MARKER", in: app, expected: true)
         waitForAnyPaneBlock("SEYAL_TAB_TWO_MARKER", in: app, expected: false)
-        created.click()
-        waitForSelectedTerminalTab(paneStrip, identifier: created.identifier)
+        app.buttons.matching(identifier: createdTabID).firstMatch.click()
+        waitForSelectedTerminalTab(app, identifier: createdTabID)
+        waitForPaneExecution(app, presentationID: "seyal-pane-presentation-host", execution: createdExecution)
         waitForUsablePty(in: app)
         waitForAnyPaneBlock("SEYAL_TAB_TWO_MARKER", in: app, expected: true)
         waitForAnyPaneBlock("SEYAL_TAB_ONE_MARKER", in: app, expected: false)
@@ -1587,6 +1606,36 @@ final class SeyalPaneSplitUITests: XCTestCase {
         }
         value = button.value as? String
         XCTAssertEqual(value, "selected", "terminal tab \(identifier) must become selected")
+    }
+
+    private func waitForSelectedTerminalTab(_ app: XCUIApplication, identifier: String) {
+        let button = app.buttons.matching(identifier: identifier).firstMatch
+        let deadline = Date().addingTimeInterval(8)
+        var value: String?
+        while Date() < deadline {
+            value = button.value as? String
+            if value == "selected" { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        value = button.value as? String
+        XCTAssertEqual(value, "selected", "terminal tab \(identifier) must become selected")
+    }
+
+    private func waitForPaneExecution(
+        _ app: XCUIApplication,
+        presentationID: String,
+        execution: String,
+        timeout: TimeInterval = 12
+    ) {
+        let presentation = element(app, presentationID)
+        let deadline = Date().addingTimeInterval(timeout)
+        var actual: String?
+        while Date() < deadline {
+            actual = executionIdentity(presentation.value as? String)
+            if actual == execution { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTFail("\(presentationID) should bind execution \(execution), actual=\(actual ?? "nil")")
     }
 
     private func waitForAnyPaneBlock(_ command: String, in app: XCUIApplication, expected: Bool) {

@@ -63,8 +63,11 @@ extension ProductChromeHostView {
             self.driveRecovery()
             self.reconcilePaneHosts(paneCount: Int(seyal_app_shell(self.pane.appHandle).pane_count))
         }
-        centerColumn.reconcileSecondaryLiveHosts(bindings: bindings)
         let sharedBridge = pane.inputSurface.bridge
+        centerColumn.reconcileSecondaryLiveHosts(
+            bindings: bindings,
+            historyBridge: sharedBridge
+        )
         for host in centerColumn.secondaryHosts {
             // Bridgeless Metal surfaces borrow the window bridge for history.
             host.historyBridge = sharedBridge

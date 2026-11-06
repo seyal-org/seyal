@@ -8,6 +8,11 @@ extension MetalSurfaceView {
     else {
       return
     }
+    let displayHandles = Set(frame.regions.map(\.displayHandle).filter { $0 != 0 })
+    guard displayHandles.count <= 1 else { return }
+    if let displayHandle = displayHandles.first, displayHandle != transcriptDisplayHandle {
+      return
+    }
     // #1379: a transient empty region publish (zero-height Block bodies during
     // document-size sync) must not filter away retained history paint and leave
     // Flow titles with white bodies. Intentional clears use

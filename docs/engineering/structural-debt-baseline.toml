@@ -36,9 +36,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 710
+acknowledged_loc = 726
 issue = 1426
-reason = "The pane host remains the owner of its independent transcript viewport; #1426 resynchronizes that viewport after split/divider resizing and exposes pane-local render/clip evidence for the multi-pane acceptance tests."
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1426 preserves viewport position across focus/reconcile churn and restores each tab's own scroll position while its controller history is rebound."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
@@ -246,10 +246,10 @@ reason = "Thin AppKit chrome host stays one cold-path façade; #1442 routes Raw 
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
-acknowledged_loc = 716
-issue = 1429
-reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1424/#1440 multipane/Raw host wiring plus #1429 shell pane titles into PaneTerminalTabStrip stay on this thin AppKit layout surface."
-issue_url = "https://github.com/seyal-org/seyal/issues/1429"
+acknowledged_loc = 723
+issue = 1426
+reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1426 installs the shared history bridge before seeding a new secondary host so its initial Block-history request is accepted, alongside the existing multipane/Raw host wiring and pane-tab title projection."
+issue_url = "https://github.com/seyal-org/seyal/issues/1426"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
