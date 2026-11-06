@@ -327,7 +327,7 @@ extension ProductChromeHostView {
         // Workspace Tabs are layout containers, not terminal sessions.
         // Keep them reachable by pointer as compact C04 navigation rows
         // without adding a competing terminal-looking top strip.
-        if shell.tab_count > 1 {
+        if shell.tab_count > 0 {
             appendLeftSection(
                 title: "LAYOUTS",
                 identifier: "seyal-layouts-heading",
