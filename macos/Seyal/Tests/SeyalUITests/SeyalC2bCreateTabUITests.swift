@@ -22,8 +22,8 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         clickNewTab(in: app)
         waitForRunLoop(5)
         XCTAssertEqual(app.state, .runningForeground, "CreateTab must not crash Seyal.app")
-        // Left Tabs mode is TerminalTab inventory (#1412); outer Tab count stays
-        // on the Workspaces row secondary / close-tab affordance.
+        // Outer layout count stays on the Workspace row; pane terminals
+        // are represented only in their own pane headers at rest.
         waitForWorkspaceTabCountHint(in: app, atLeast: 2)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-close-tab"].firstMatch.exists)
     }
@@ -34,7 +34,10 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         let app = hostedApp()
         waitForUsablePty(in: app)
         showWorkspaces(in: app)
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-layouts-heading"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layouts-heading"].firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-0"].firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-layout-1"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-left-tabs"].exists)
 
         clickNewTab(in: app)
         waitForWorkspaceTabCountHint(in: app, atLeast: 2)
@@ -135,12 +138,12 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func clickNewTab(in app: XCUIApplication) {
-        // CreateTab lives on the left + while Workspaces mode is selected (#1412
-        // retargets + to NewTerminal only in Tabs mode).
+        // Create Layout uses the existing Rust CreateTab action; terminal
+        // session creation remains pane-local.
         showWorkspaces(in: app)
         let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
         XCTAssertTrue(newTab.waitForExistence(timeout: 8), "production composition shows New Tab")
-        XCTAssertEqual(newTab.label.isEmpty ? newTab.title : newTab.label, "New Tab")
+        XCTAssertEqual(newTab.label.isEmpty ? newTab.title : newTab.label, "New Layout")
         newTab.click()
     }
 
