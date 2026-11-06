@@ -2116,6 +2116,22 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(PaneTerminalTabStrip.height, 30, "one non-wrapping row")
         strip.apply(theme: NativeThemeRealization.theme(for: NSAppearance(named: .darkAqua)!))
         XCTAssertNotNil(strip.layer?.backgroundColor, "tabs use Rust-resolved utility surface")
+
+        let unfocused = PaneTerminalTabStrip(
+            paneLo: 5,
+            paneHi: 0,
+            paneTitle: "Pane 5",
+            tabs: [PaneLayoutView.TerminalTab(lo: 12, hi: 0, selected: true)],
+            focused: false,
+            canSplit: false,
+            canClosePane: true
+        )
+        let inactivePaneClose = try XCTUnwrap(
+            accessibilityChild(unfocused, identifier: "seyal-terminal-tab-0-12-close") as? NSButton
+        )
+        XCTAssertFalse(inactivePaneClose.isEnabled)
+        XCTAssertEqual(inactivePaneClose.alphaValue, 0,
+                       "unfocused pane close chrome must recede without shifting its tab row")
     }
 
     func testExplicitRuntimeDirectoryPrepRepairsLaxModeAndCreatesParents() throws {
