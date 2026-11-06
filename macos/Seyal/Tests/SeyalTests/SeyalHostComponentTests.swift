@@ -411,10 +411,11 @@ final class SeyalHostComponentTests: XCTestCase {
         view.reconcileChrome()
 
         let workspaces = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-left-workspaces") as? NSButton)
-        let tabs = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-left-tabs") as? NSButton)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"),
+                     "default navigation has no duplicate terminal-tab switcher")
         XCTAssertEqual(workspaces.title, "Workspaces")
-        XCTAssertEqual(tabs.title, "Tabs")
-        XCTAssertNotEqual(tabs.title, "Layouts")
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"),
+                        "even the first layout must remain discoverable")
 
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-workspaces-heading"))
         XCTAssertNil(
@@ -437,7 +438,7 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertTrue(
             view.newTabButton.isDescendant(of: view.leftModeRow),
-            "New Tab stays with the left mode row; pane terminal tabs stay pane-local"
+            "New Layout stays with Workspaces; pane terminal tabs stay pane-local"
         )
         // Prefer helpful root when Rust projects one; otherwise tab count.
         XCTAssertTrue(
@@ -446,6 +447,7 @@ final class SeyalHostComponentTests: XCTestCase {
                 || workspaceLabel.contains("~"),
             "active workspace secondary is helpful root or tab count: \(workspaceLabel)"
         )
+        XCTAssertEqual(view.newTabButton.accessibilityLabel(), "New Layout")
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(
             workspaceRow.superview?.bounds.width ?? 0,
@@ -454,6 +456,8 @@ final class SeyalHostComponentTests: XCTestCase {
             "C04 selection fill must span the left panel, not hug label intrinsic width"
         )
 
+        // The advanced terminal inventory remains available through the
+        // Rust command palette; it no longer occupies permanent chrome.
         view.showTabs()
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tabs-heading"))
         XCTAssertNil(
@@ -482,10 +486,7 @@ final class SeyalHostComponentTests: XCTestCase {
     func testLeftTabsModeProjectsPaneLocalTerminalTabs() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        XCTAssertEqual(
-            (accessibilityChild(view, identifier: "seyal-left-tabs") as? NSButton)?.title,
-            "Tabs"
-        )
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"))
         view.showTabs()
         XCTAssertNil(
             accessibilityChild(view, identifier: "seyal-pane-0"),
@@ -650,7 +651,10 @@ final class SeyalHostComponentTests: XCTestCase {
     func testWorkspaceLayoutRowsSelectOuterTabsWithoutSecondTabStrip() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
         view.reconcileChrome()
-        XCTAssertNil(accessibilityChild(view, identifier: "seyal-layouts-heading"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layout-0"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-layout-1"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"))
         let handle = view.pane.appHandle
 
         var create = SeyalAppAction()
