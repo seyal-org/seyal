@@ -110,6 +110,8 @@ final class SeyalDividerDragUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         let presentation = element(app, "seyal-pane-presentation-host")
         if presentation.waitForExistence(timeout: 2) {
+            // Raw resting is cold default (#1445); latch Flow before requiring composer.
+            app.ensureFlowBlocksPresentation(timeout: timeout)
             XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: timeout))
             XCTAssertEqual(app.state, .runningForeground)
             return
@@ -121,5 +123,6 @@ final class SeyalDividerDragUITests: XCTestCase {
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
         XCTAssertEqual(result, .completed, "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")")
+        app.ensureFlowBlocksPresentation(timeout: timeout)
     }
 }

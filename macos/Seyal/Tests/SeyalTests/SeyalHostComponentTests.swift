@@ -147,6 +147,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
         var refresh = SeyalAppAction()
@@ -207,6 +208,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(
             seyal_app_snapshot(handle).eligibility,
             UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
@@ -278,6 +280,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(
             relayComposerStatus(
                 handle,
@@ -802,9 +805,11 @@ final class SeyalHostComponentTests: XCTestCase {
     @MainActor
     func testSplitFlowPanesEachExposeBlocksAndComposer() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        let handle = view.pane.appHandle
+        // Grid-first Raw resting (#1445): latch Flow before asserting Flow chrome.
+        XCTAssertEqual(optInFlow(handle), 0)
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
-        let handle = view.pane.appHandle
 
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
@@ -1510,6 +1515,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
         XCTAssertFalse(composer.isHidden, "Flow bind must show composer")
@@ -1552,6 +1558,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -1630,6 +1637,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
 
@@ -3080,6 +3088,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
         let window = NSWindow(
@@ -3135,6 +3144,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
@@ -3343,6 +3353,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         for command in commands {
             let bound = seyal_app_snapshot(handle)
@@ -3376,6 +3387,18 @@ final class SeyalHostComponentTests: XCTestCase {
             XCTAssertEqual(seyal_app_apply(handle, &result), 0)
         }
         return handle
+    }
+
+    /// Grid-first (#1438/#1445): default resting is Raw. Mirror Rust `opt_in_flow`
+    /// via the production `presentation.set_flow` WorkspaceCommand.
+    @discardableResult
+    private func optInFlow(_ handle: UInt64) -> Int32 {
+        seyal_app_invoke_workspace_command(
+            handle,
+            KeybindingShortcutRealization.presentationSetFlow,
+            0,
+            0
+        )
     }
 
     /// Relay a Runtime composer status exactly as `ProductChromeHostView`
@@ -3414,6 +3437,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
 
         var composer = seyal_app_composer(handle)
         XCTAssertEqual(composer.mode, UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue))
@@ -3483,6 +3507,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.target_attachment_lo = 2
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -4087,6 +4112,8 @@ final class SeyalHostComponentTests: XCTestCase {
         defer { connectPoll.invalidate() }
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
+        // Grid-first Raw resting (#1445): latch Flow before requiring Flow eligibility.
+        XCTAssertEqual(optInFlow(pane.appHandle), 0)
         checkConnected()
         await fulfillment(of: [connected], timeout: 30)
         guard connectedOnce else { return }

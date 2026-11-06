@@ -605,6 +605,7 @@ final class SeyalHostWorkloadUITests: XCTestCase {
     }
 
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
+        app.ensureFlowBlocksPresentation(timeout: timeout)
         let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]

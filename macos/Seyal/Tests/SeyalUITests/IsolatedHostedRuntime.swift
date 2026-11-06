@@ -72,6 +72,21 @@ enum IsolatedHostedRuntime {
 }
 
 extension XCUIApplication {
+  /// Grid-first Raw resting (#1438/#1445): Flow/Blocks XCUI must latch Flow via
+  /// the production `presentation.toggle_raw` chord (`cmd+enter`) when the
+  /// composer is absent or not hittable. No-ops when already on Flow.
+  func ensureFlowBlocksPresentation(timeout: TimeInterval = 8) {
+    let composer = descendants(matching: .any)["seyal-composer"].firstMatch
+    if composer.waitForExistence(timeout: 1), composer.isHittable {
+      return
+    }
+    typeKey("\r", modifierFlags: .command)
+    XCTAssertTrue(
+      composer.waitForExistence(timeout: timeout),
+      "Cmd+Enter must latch Flow from Raw resting for Flow/Blocks XCUI"
+    )
+  }
+
   @discardableResult
   func launchIsolatedHost(
     environment: [String: String] = [:],

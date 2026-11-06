@@ -1286,12 +1286,8 @@ final class SeyalHostUITests: XCTestCase {
         let presentation = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
         let terminal = app.descendants(matching: .any)["terminal-input"]
         if presentation.waitForExistence(timeout: 2) {
-            XCTAssertTrue(
-                app.descendants(matching: .any)["seyal-composer"].firstMatch.waitForExistence(timeout: timeout),
-                "focused Flow presentation host must expose a composer"
-            )
             // Prefer host execution= once published; fall back to terminal-input
-            // when Raw/TUI still exposes the interactive surface.
+            // when Raw resting still exposes the interactive surface (#1445).
             let hostUsable = NSPredicate(format: "value CONTAINS 'execution='")
             let hostReady = expectation(for: hostUsable, evaluatedWith: presentation, handler: nil)
             if XCTWaiter.wait(for: [hostReady], timeout: min(timeout, 8)) != .completed,
@@ -1341,6 +1337,7 @@ final class SeyalHostUITests: XCTestCase {
     /// Headed XCUI must stay on Flow/Blocks. A leftover Runtime in alternate
     /// screen, or a Raw-only launch, looks like a normal terminal and is a fail.
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
+        app.ensureFlowBlocksPresentation(timeout: timeout)
         let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]

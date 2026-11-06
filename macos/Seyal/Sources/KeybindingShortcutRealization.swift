@@ -10,6 +10,8 @@ enum KeybindingShortcutRealization {
     static let tabSelectNext: UInt16 = 5
     static let paneSplitRight: UInt16 = 7
     static let paneSplitDown: UInt16 = 8
+    /// SPEC-024 / #1438: `presentation.set_flow` (explicit Flow latch; Raw is default resting).
+    static let presentationSetFlow: UInt16 = 12
     static let presentationToggleRaw: UInt16 = 15
     static let presentationToggleTui: UInt16 = 16
     static let gotoOpen: UInt16 = 21
@@ -72,6 +74,7 @@ enum KeybindingShortcutRealization {
         case tabSelectNext: return "Next Tab"
         case paneSplitRight: return "Split Right"
         case paneSplitDown: return "Split Down"
+        case presentationSetFlow: return "Flow"
         case presentationToggleRaw: return "Toggle Raw"
         case presentationToggleTui: return "Toggle TUI"
         case gotoOpen: return "Go to…"
