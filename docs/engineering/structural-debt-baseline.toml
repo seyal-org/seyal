@@ -35,6 +35,12 @@ issue = 1379
 reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and splits live-tail vs history Flow paint counts so clear→exit ink stays history-only."
 
 [[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
+acknowledged_loc = 710
+issue = 1426
+reason = "The pane host remains the owner of its independent transcript viewport; #1426 resynchronizes that viewport after split/divider resizing and exposes pane-local render/clip evidence for the multi-pane acceptance tests."
+
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
 acknowledged_loc = 834
 issue = 1117

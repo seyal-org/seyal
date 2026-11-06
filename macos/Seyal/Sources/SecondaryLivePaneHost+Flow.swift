@@ -86,6 +86,10 @@ extension SecondaryLivePaneHost {
                    displayHandle: displayHandle
                ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
+                card.setOutputLines(
+                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                    cellHeight: surface.terminalPresentationCellSize().height
+                )
             }
             blocks.addArrangedSubview(card)
             if blockID != 0 {
@@ -112,7 +116,11 @@ extension SecondaryLivePaneHost {
             return
         }
         let addedBlock = visibleIndex > lastBlockCount
-        if addedBlock && savedFollowing {
+        if savedFollowing {
+            // A pane split can shrink the transcript viewport without adding
+            // a Block. Keep a reader who was following live output at the new
+            // live end after that resize instead of restoring the old host's
+            // absolute scroll offset into the shortened viewport.
             clearPreservedDocumentHeight()
             scrollTranscriptToLiveEnd()
         } else {
@@ -122,7 +130,7 @@ extension SecondaryLivePaneHost {
             let currentContentHeight = transcriptCardsContentHeight()
             let viewportFloor = blockCards.isEmpty ? 0 : transcript.contentView.bounds.height
             let currentDocumentMinimumHeight = max(max(currentContentHeight, viewportFloor), 1)
-            if !savedFollowing, savedDocumentHeight > currentDocumentMinimumHeight + 0.5 {
+            if savedDocumentHeight > currentDocumentMinimumHeight + 0.5 {
                 preserveDocumentHeight(savedDocumentHeight)
             } else {
                 clearPreservedDocumentHeight()
@@ -189,6 +197,10 @@ extension SecondaryLivePaneHost {
                 displayHandle: displayHandle
             ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
+                card.setOutputLines(
+                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                    cellHeight: cellHeight
+                )
             }
             applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
         }
@@ -254,8 +266,11 @@ extension SecondaryLivePaneHost {
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
-            card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
             card.setBodyTranscript(range.transcriptText)
+            card.setOutputLines(
+                CommandBlockView.visibleOutputLineCount(range.transcriptText),
+                cellHeight: cellHeight
+            )
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()
@@ -319,6 +334,7 @@ extension SecondaryLivePaneHost {
         }
         blockOutputZeroClipRetries = 0
         regions.sort { $0.id < $1.id }
+        lastPublishedTranscriptRegions = regions
         transcriptFrameRevision &+= 1
         surface.setTranscriptFrame(
             NativeTranscriptFrame(
@@ -327,6 +343,13 @@ extension SecondaryLivePaneHost {
                 surfaceIdentity: ObjectIdentifier(surface)
             )
         )
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",
+           lastVisibleHistoryPixelCount == 0,
+           Date().timeIntervalSince(lastHistoryPixelSampleAt) >= 0.5
+        {
+            lastHistoryPixelSampleAt = Date()
+            lastVisibleHistoryPixelCount = surface.inspectFlowPaint(sampleGPU: true).opaquePixelsInsideClips
+        }
     }
 
     private func collectBlockOutputRegions() -> [NativeTranscriptRegion] {

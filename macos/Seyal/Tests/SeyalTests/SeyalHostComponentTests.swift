@@ -1018,6 +1018,13 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testVisibleOutputLineCountTrimsOnlyTrailingBlankRows() {
+        XCTAssertEqual(CommandBlockView.visibleOutputLineCount("first\n\nthird\n\n"), 3)
+        XCTAssertEqual(CommandBlockView.visibleOutputLineCount("\n\t\n"), 1)
+        XCTAssertEqual(CommandBlockView.visibleOutputLineCount("single line"), 1)
+    }
+
+    @MainActor
     func testSessionBlockAlignsWithLocalBlock() {
         func makeCard(session: Bool) -> CommandBlockView {
             let card = CommandBlockView(

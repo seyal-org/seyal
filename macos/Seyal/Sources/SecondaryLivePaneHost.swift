@@ -56,7 +56,12 @@ final class SecondaryLivePaneHost: NSView {
     var followingLiveEnd = true
     var isProgrammaticTranscriptScroll = false
     var transcriptFrameRevision: UInt64 = 0
+    private var lastTranscriptViewportSize: CGSize = .zero
+    private var hasPendingTranscriptViewportSync = false
     var blockOutputZeroClipRetries = 0
+    var lastPublishedTranscriptRegions: [NativeTranscriptRegion] = []
+    var lastVisibleHistoryPixelCount = 0
+    var lastHistoryPixelSampleAt = Date.distantPast
     var historyProjectionRequests = HistoryProjectionRequestBook()
     static let blockOutputZeroClipRetryLimit = 4
     /// When true, this host owns keyboard/composer interaction for its Pane.
@@ -485,8 +490,29 @@ final class SecondaryLivePaneHost: NSView {
         // diagnostics never label a sibling's frame through the process-wide
         // focused-display selector (#1424).
         let execution = paneExecutionIdentity()
+        let paint = surface.renderer.inspectFlowPaint()
+        let surfaceBounds = surface.bounds
+        let visibleHistoryClips = lastPublishedTranscriptRegions.filter {
+            $0.clip.intersects(surfaceBounds)
+        }.count
+        let clipSummary = lastPublishedTranscriptRegions.first.map {
+            String(
+                format: "clip=%.1f,%.1f,%.1f,%.1f",
+                $0.clip.minX,
+                $0.clip.minY,
+                $0.clip.width,
+                $0.clip.height
+            )
+        } ?? "clip=none"
         setAccessibilityValue(
             "rows=\(frame.rows) columns=\(frame.columns) execution=\(execution) "
+                + "flow-paint=\(paint.accessibilityToken) "
+                + "history-instances=\(paint.historyInstanceCount) "
+                + "history-regions-painted=\(paint.paintedHistoryRegionCount) "
+                + "history-clips=\(paint.historyClipsDistinct ? "ok" : "collapse") "
+                + "history-visible-pixels=\(lastVisibleHistoryPixelCount) "
+                + "surface-bounds=\(NSStringFromRect(surfaceBounds)) visible-history-clips=\(visibleHistoryClips) "
+                + clipSummary
         )
     }
 
@@ -634,6 +660,30 @@ final class SecondaryLivePaneHost: NSView {
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
             activateFlowConstraintsIfSized()
+            let viewportSize = transcript.contentView.bounds.size
+            if viewportSize.width > 8, viewportSize.height > 8,
+               abs(viewportSize.width - lastTranscriptViewportSize.width) > 0.5
+                || abs(viewportSize.height - lastTranscriptViewportSize.height) > 0.5
+            {
+                lastTranscriptViewportSize = viewportSize
+                if !hasPendingTranscriptViewportSync {
+                    hasPendingTranscriptViewportSync = true
+                    // A split or divider drag changes the visible transcript
+                    // viewport without changing the Block projection. Refit
+                    // its leading spacer after Auto Layout settles so the
+                    // live Block stays just above this Pane's composer and
+                    // each leaf keeps its own scroll extent (#1426).
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.hasPendingTranscriptViewportSync = false
+                        guard !self.isHidden else { return }
+                        self.syncTranscriptDocumentSize()
+                        self.publishBlockOutputFrame()
+                    }
+                }
+            }
+        } else {
+            lastTranscriptViewportSize = .zero
         }
         updateAvailabilityPresentation()
         guard displayHandle != 0, window != nil, !isHidden,

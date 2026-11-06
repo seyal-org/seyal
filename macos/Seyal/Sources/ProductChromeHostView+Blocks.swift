@@ -256,6 +256,10 @@ extension ProductChromeHostView {
                    displayHandle: activeBlockDisplayHandle
                ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
+                card.setOutputLines(
+                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                    cellHeight: pane.inputSurface.terminalPresentationCellSize().height
+                )
             }
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
@@ -514,8 +518,11 @@ extension ProductChromeHostView {
             || range.sourceDisplayHandle == activeBlockDisplayHandle
         else { return }
         if let card = blockCards[range.blockID], !range.rows.isEmpty {
-            card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
             card.setBodyTranscript(range.transcriptText)
+            card.setOutputLines(
+                CommandBlockView.visibleOutputLineCount(range.transcriptText),
+                cellHeight: cellHeight
+            )
         }
         // Paint with Auto Layout sizes first, then expand the document frame.
         // setFrameSize-before-publish can yield zero-height clips that wipe Metal

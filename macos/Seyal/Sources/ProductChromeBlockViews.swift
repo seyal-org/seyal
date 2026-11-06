@@ -78,6 +78,14 @@ final class CommandBlockView: NSView {
     private var seamTopConstraint: NSLayoutConstraint!
     private var theme: NativeTheme?
 
+    static func visibleOutputLineCount(_ text: String) -> Int {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        while let last = lines.last, last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.removeLast()
+        }
+        return max(lines.count, 1)
+    }
+
     init(
         prompt: String,
         title: String,

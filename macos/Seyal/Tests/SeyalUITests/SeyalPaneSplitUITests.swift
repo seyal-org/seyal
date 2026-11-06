@@ -1,5 +1,7 @@
 import AppKit
+import ImageIO
 import XCTest
+import Vision
 
 /// Issue #923 headed evidence: with production pane splitting (C3), Split
 /// Right/Down projects one region per Rust leaf, clicking a region focuses that
@@ -412,6 +414,94 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// #1426: splitting the Pane that owns a live command must not lose its
+    /// retained Block body when that Pane moves from the focused host to a
+    /// secondary host. This exercises the source Pane during split, not only
+    /// a sibling that was already idle when the split occurred.
+    func testSplitFromLivePaneRetainsSourceBlockBody() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        let sourceExecution = try XCTUnwrap(
+            executionIdentity(element(app, "seyal-pane-presentation-host").value as? String),
+            "focused split source must have an execution identity"
+        )
+
+        let marker = "split-live-source-1426"
+        submitComposerCommand(
+            "for i in $(seq 1 32); do printf '\(marker)-%02d\\n' \"$i\"; sleep 0.25; done; printf '\(marker)-COMPLETE\\n'",
+            in: app,
+            expectBlock: true,
+            blockMarker: marker
+        )
+        let liveBlock = anyPaneBlock(in: app, containing: marker)
+        XCTAssertTrue(liveBlock.waitForExistence(timeout: 8))
+
+        // Pane 2 is the split source. Splitting it while its command is live
+        // turns it into an inactive leaf while the new Pane takes focus.
+        click(app, "seyal-split-down")
+        XCTAssertTrue(element(app, "seyal-pane-region-2").waitForExistence(timeout: 12))
+        let sourcePane = element(app, "seyal-pane-region-1")
+        sourcePane.click()
+        waitForFocus(app, region: 1)
+
+        let sourceBlock = anyPaneBlock(in: app, containing: marker)
+        XCTAssertTrue(sourceBlock.waitForExistence(timeout: 8))
+        let sourceBody = blockBody(for: sourceBlock, in: app)
+        XCTAssertTrue(sourceBody.waitForExistence(timeout: 8))
+        let completion = "\(marker)-COMPLETE"
+        waitForBodyMarker(
+            sourceBody,
+            marker: completion,
+            timeout: 15,
+            message: "the split source Block must receive its final line after becoming a secondary Pane"
+        )
+        waitForBodyMarker(sourceBody, marker: "\(marker)-01")
+        waitForBodyMarker(sourceBody, marker: "\(marker)-32")
+        XCTAssertGreaterThan(
+            sourceBody.frame.height,
+            0,
+            "the source Block output region must remain laid out and paintable after split"
+        )
+
+        let sourceScroll = element(app, "seyal-blocks-scroll")
+        XCTAssertTrue(sourceScroll.exists)
+        XCTAssertTrue(
+            sourceBody.frame.intersects(sourceScroll.frame),
+            "the retained source Block body must stay inside its visible transcript after the split resize"
+        )
+        XCTAssertTrue(
+            sourceBlock.frame.intersects(sourceScroll.frame),
+            "the source Block card itself must remain visible after the split resize; "
+                + "block=\(sourceBlock.frame) transcript=\(sourceScroll.frame)"
+        )
+        let sourceHost = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "(identifier == %@ OR identifier == %@) AND value CONTAINS %@",
+                "seyal-pane-presentation-host",
+                "seyal-secondary-live-pane",
+                "execution=\(sourceExecution)"
+            )
+        ).firstMatch
+        waitForPaintedHistoryRegion(sourceHost, timeout: 8)
+        let screenshot = app.windows.firstMatch.screenshot()
+        let shot = XCTAttachment(screenshot: screenshot)
+        shot.name = "1426-live-split-source-retains-block-body"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let visibleLines = try recognizedText(in: screenshot)
+        XCTAssertTrue(
+            visibleLines.contains(completion),
+            "the retained source Block must render visible output pixels after split; OCR=\(visibleLines)"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// A Pane's terminal tabs own separate Runtime timelines. Their local
     /// Block ids may match, so switching executions must not reuse a sibling
     /// tab's command card or history body.
@@ -527,17 +617,18 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(element(app, "seyal-pane-presentation-host").waitForExistence(timeout: 8))
 
         let focusedIdx = try focusedRegionIndex(app, count: 2)
+        let regions = (0..<2).map { element(app, "seyal-pane-region-\($0)") }
         submitComposerCommand(
-            "printf '%s\\n' $(seq 1 24) 'seyal-1424-scroll-a'",
+            "printf '%s\\n' $(seq 1 96) 'seyal-1424-scroll-a'",
             in: app
         )
         let other = focusedIdx == 0 ? 1 : 0
         // Seed the newly focused sibling with its own tall transcript.
-        element(app, "seyal-pane-region-\(other)").click()
+        regions[other].click()
         waitForFocus(app, region: other)
         waitForUsablePty(in: app)
         submitComposerCommand(
-            "printf '%s\\n' $(seq 1 24) 'seyal-1424-scroll-b'",
+            "printf '%s\\n' $(seq 1 96) 'seyal-1424-scroll-b'",
             in: app
         )
 
@@ -545,48 +636,48 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let secondaryScroll = element(app, "seyal-secondary-blocks-scroll")
         XCTAssertTrue(primaryScroll.exists)
         XCTAssertTrue(secondaryScroll.exists)
-        // Scroll the focused transcript away from live end.
-        primaryScroll.scroll(byDeltaX: 0, deltaY: -420)
-        let primaryOriginBefore = primaryScroll.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)
-        ).screenPoint
-        let secondaryFrameBefore = secondaryScroll.frame
+        let marker = "seyal-1424-scroll-b"
+        let bodyBeforeScroll = blockBody(for: anyPaneBlock(in: app, containing: marker), in: app)
+        XCTAssertTrue(bodyBeforeScroll.waitForExistence(timeout: 8))
+        waitForBodyMarker(bodyBeforeScroll, marker: marker)
+        XCTAssertGreaterThan(
+            bodyBeforeScroll.frame.height,
+            primaryScroll.frame.height,
+            "the transcript must be taller than its viewport before testing scroll retention"
+        )
+        let bodyOffsetBeforeScroll = bodyBeforeScroll.frame.minY - regions[other].frame.minY
+        // 96 lines overflow the Pane viewport, so this must move actual Block
+        // content instead of scrolling a short transcript with no overflow.
+        primaryScroll.scroll(byDeltaX: 0, deltaY: 420)
+        let bodyAfterScroll = blockBody(for: anyPaneBlock(in: app, containing: marker), in: app)
+        let bodyOffsetAfterScroll = bodyAfterScroll.frame.minY - regions[other].frame.minY
+        XCTAssertGreaterThan(
+            abs(bodyOffsetAfterScroll - bodyOffsetBeforeScroll),
+            80,
+            "scrolling an overflowing transcript must move its Block body within its Pane"
+        )
         let blockA = anyPaneBlock(in: app, containing: "seyal-1424-scroll-a")
         let blockB = anyPaneBlock(in: app, containing: "seyal-1424-scroll-b")
         XCTAssertTrue(blockA.exists || blockB.exists)
 
-        for cycle in 0..<4 {
-            let target = cycle % 2
-            element(app, "seyal-pane-region-\(target)").click()
-            waitForFocus(app, region: target)
-            XCTAssertTrue(element(app, "seyal-pane-presentation-host").exists)
-            XCTAssertTrue(element(app, "seyal-secondary-live-pane").exists)
-            XCTAssertTrue(element(app, "seyal-composer").exists)
-            XCTAssertTrue(element(app, "seyal-blocks").exists)
-            XCTAssertTrue(element(app, "seyal-secondary-blocks").exists)
-            XCTAssertTrue(element(app, "seyal-secondary-blocks-scroll").exists)
-            XCTAssertTrue(
-                anyPaneBlock(in: app, containing: "seyal-1424-scroll-a").exists
-                    || anyPaneBlock(in: app, containing: "seyal-1424-scroll-b").exists,
-                "focus cycle \(cycle) must keep pane Block content"
-            )
-        }
-
-        // Mid-transcript scroll must not jump back to live end after focus churn.
-        let primaryOriginAfter = primaryScroll.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)
-        ).screenPoint
+        // Switching to the sibling and back must preserve the scrolled Block's
+        // location within its Pane, regardless of primary/secondary host role.
+        regions[focusedIdx].click()
+        waitForFocus(app, region: focusedIdx)
+        regions[other].click()
+        waitForFocus(app, region: other)
+        XCTAssertTrue(element(app, "seyal-pane-presentation-host").exists)
+        XCTAssertTrue(element(app, "seyal-secondary-live-pane").exists)
+        XCTAssertTrue(element(app, "seyal-composer").exists)
+        XCTAssertTrue(element(app, "seyal-blocks").exists)
+        XCTAssertTrue(element(app, "seyal-secondary-blocks").exists)
+        let bodyAfterFocus = blockBody(for: anyPaneBlock(in: app, containing: marker), in: app)
+        let bodyOffsetAfterFocus = bodyAfterFocus.frame.minY - regions[other].frame.minY
         XCTAssertEqual(
-            primaryOriginAfter.y,
-            primaryOriginBefore.y,
+            bodyOffsetAfterFocus,
+            bodyOffsetAfterScroll,
             accuracy: 48,
-            "focused transcript scroll position must survive focus ownership churn"
-        )
-        XCTAssertEqual(
-            secondaryScroll.frame.minY,
-            secondaryFrameBefore.minY,
-            accuracy: 8,
-            "secondary transcript host frame must stay stable"
+            "Pane B's mid-transcript scroll position must survive focus ownership churn"
         )
         let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         shot.name = "1424-focus-churn-scroll-retained"
@@ -1049,11 +1140,15 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForUsablePty(in: app)
         submitComposerCommand("echo SEYAL_TAB_TWO_MARKER", in: app)
         original.click()
-        XCTAssertTrue(blockCommand(in: app, containing: "SEYAL_TAB_ONE_MARKER").exists)
-        XCTAssertFalse(blockCommand(in: app, containing: "SEYAL_TAB_TWO_MARKER").exists)
+        waitForSelectedTerminalTab(paneStrip, identifier: original.identifier)
+        waitForUsablePty(in: app)
+        waitForAnyPaneBlock("SEYAL_TAB_ONE_MARKER", in: app, expected: true)
+        waitForAnyPaneBlock("SEYAL_TAB_TWO_MARKER", in: app, expected: false)
         created.click()
-        XCTAssertTrue(blockCommand(in: app, containing: "SEYAL_TAB_TWO_MARKER").exists)
-        XCTAssertFalse(blockCommand(in: app, containing: "SEYAL_TAB_ONE_MARKER").exists)
+        waitForSelectedTerminalTab(paneStrip, identifier: created.identifier)
+        waitForUsablePty(in: app)
+        waitForAnyPaneBlock("SEYAL_TAB_TWO_MARKER", in: app, expected: true)
+        waitForAnyPaneBlock("SEYAL_TAB_ONE_MARKER", in: app, expected: false)
         XCTAssertFalse(
             anyPaneBlock(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists,
             "Pane 2 command history stays out of Pane 1"
@@ -1082,17 +1177,24 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
 
         // Build a 2×2 grid through both split directions.
-        click(app, "seyal-split-right")
+        splitPane(app, "seyal-pane-region-0", direction: "right")
         XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
-        waitForUsablePty(in: app)
-        click(app, "seyal-split-down")
+        splitPane(app, "seyal-pane-region-1", direction: "down")
         XCTAssertTrue(element(app, "seyal-pane-region-2").waitForExistence(timeout: 12))
-        element(app, "seyal-pane-region-0").click()
-        waitForFocus(app, region: 0)
-        click(app, "seyal-split-down")
+        splitPane(app, "seyal-pane-region-0", direction: "down")
         XCTAssertTrue(element(app, "seyal-pane-region-3").waitForExistence(timeout: 12))
+        waitForExactlyOneFocusedRegion(app, count: 4)
 
         let regions = (0..<4).map { element(app, "seyal-pane-region-\($0)") }
+        let xCenters = Set(regions.map { Int($0.frame.midX.rounded()) })
+        let yCenters = Set(regions.map { Int($0.frame.midY.rounded()) })
+        XCTAssertEqual(xCenters.count, 2, "vertical split must create two columns")
+        XCTAssertEqual(yCenters.count, 2, "horizontal splits must create two rows")
+        XCTAssertEqual(
+            Set(regions.map { "\(Int($0.frame.midX.rounded()))/\(Int($0.frame.midY.rounded()))" }).count,
+            4,
+            "the four regions must occupy all four 2×2 grid positions"
+        )
         let strips = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
         )
@@ -1103,23 +1205,37 @@ final class SeyalPaneSplitUITests: XCTestCase {
         // prove that tab's command history stays local before returning to the
         // original execution for the concurrent stream load.
         var secondTabMarkers: [Int: String] = [:]
+        var secondTabIDs: [Int: String] = [:]
         for strip in strips.allElementsBoundByIndex {
             guard let paneIndex = regions.firstIndex(where: { $0.frame.contains(strip.frame) }) else {
                 XCTFail("terminal tab strip is outside all four Pane regions: \(strip.frame)")
                 continue
             }
+            regions[paneIndex].click()
+            waitForFocus(app, region: paneIndex)
             let original = strip.buttons.matching(
                 NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
             ).firstMatch
             XCTAssertTrue(original.waitForExistence(timeout: 5))
+            let originalTabID = original.identifier
             strip.buttons.matching(
                 NSPredicate(format: "identifier CONTAINS %@", "-new-terminal")
             ).firstMatch.click()
             waitForUsablePty(in: app, timeout: 20)
+            let tabButtons = strip.buttons.matching(
+                NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
+            )
+            guard let secondTab = tabButtons.allElementsBoundByIndex.first(where: {
+                $0.identifier != originalTabID
+            }) else {
+                XCTFail("new terminal tab was not provisioned for Pane \(paneIndex)")
+                continue
+            }
+            secondTabIDs[paneIndex] = secondTab.identifier
             let marker = "MPTAB_\(paneIndex)"
             secondTabMarkers[paneIndex] = marker
             submitComposerCommand("printf '\(marker)\\n'", in: app, blockMarker: marker)
-            original.click()
+            strip.buttons.matching(identifier: originalTabID).firstMatch.click()
             waitForUsablePty(in: app, timeout: 20)
         }
         let terminalTabs = app.descendants(matching: .any).matching(
@@ -1163,32 +1279,48 @@ final class SeyalPaneSplitUITests: XCTestCase {
             )
             XCTAssertTrue(matchingBlocks.firstMatch.waitForExistence(timeout: 10), marker)
             XCTAssertEqual(matchingBlocks.count, 1, "\(marker) must appear in one Pane only")
-            let body = blockBody(for: matchingBlocks.firstMatch, in: app)
+            let body = blockBody(for: matchingBlocks.firstMatch, in: app, expectedMarker: marker)
             let finalLine = String(format: "%@-%03d", marker, 100)
-            let completedTail = expectation(
-                for: NSPredicate(format: "label CONTAINS %@", finalLine),
-                evaluatedWith: body,
-                handler: nil
+            waitForBodyMarker(
+                body,
+                marker: finalLine,
+                timeout: 15,
+                message: "Block history must publish the final stream line before checking its tail"
+            )
+            let scroll = try XCTUnwrap(
+                element(
+                    app,
+                    matchingIdentifier: "^(seyal-blocks-scroll|seyal-secondary-blocks-scroll)$",
+                    in: regions[index]
+                ),
+                "Pane \(index + 1) must own a visible Blocks transcript viewport"
+            )
+            let composer = try XCTUnwrap(
+                element(app, matchingIdentifier: "^seyal-composer(?:-[0-9a-f]{16}-[0-9a-f]{16})?$", in: regions[index]),
+                "Pane \(index + 1) must own its composer"
+            )
+            XCTAssertTrue(
+                body.frame.intersects(scroll.frame),
+                "Pane \(index + 1) live Block body must intersect its own transcript viewport; "
+                    + "body=\(body.frame) scroll=\(scroll.frame)"
             )
             XCTAssertEqual(
-                XCTWaiter.wait(for: [completedTail], timeout: 15),
-                .completed,
-                "Block history must publish the final stream line before checking its tail; body=\(body.label)"
+                body.frame.maxY,
+                scroll.frame.maxY,
+                accuracy: 96,
+                "Pane \(index + 1) live tail should sit at the bottom above its composer; "
+                    + "composer=\(composer.frame) body=\(body.frame) scroll=\(scroll.frame)"
             )
-            let firstLine = String(format: "%@-%03d", marker, 1)
-            XCTAssertTrue(
-                NSPredicate(format: "label CONTAINS %@", firstLine).evaluate(with: body),
-                "Block history must retain the stream's first output line; body=\(body.label)"
-            )
+            let bodyText = "\(body.label) \(body.value ?? "")"
+            // The AX summary intentionally exposes only the newest 240
+            // characters, so full-history retention is asserted by the
+            // Runtime history projection and earlier smaller-stream tests.
+            // Here verify the complete visible tail after focus churn.
             for line in 77...100 {
                 let expected = String(format: "%@-%03d", marker, line)
                 XCTAssertTrue(
-                    body.waitForExistence(timeout: 5),
-                    "Block body must remain accessible for \(expected)"
-                )
-                XCTAssertTrue(
-                    NSPredicate(format: "label CONTAINS %@", expected).evaluate(with: body),
-                    "missing streamed line \(expected), body=\(body.label)"
+                    bodyText.contains(expected),
+                    "missing streamed line \(expected), body=\(bodyText)"
                 )
             }
 
@@ -1200,19 +1332,98 @@ final class SeyalPaneSplitUITests: XCTestCase {
                 NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
             )
             XCTAssertEqual(tabs.count, 2)
-            tabs.element(boundBy: 1).click()
+            regions[index].click()
+            waitForFocus(app, region: index)
+            let secondTabID = try XCTUnwrap(secondTabIDs[index])
+            strip.buttons.matching(identifier: secondTabID).firstMatch.click()
+            waitForSelectedTerminalTab(strip, identifier: secondTabID)
             waitForUsablePty(in: app)
-            XCTAssertTrue(blockCommand(in: app, containing: secondTab).waitForExistence(timeout: 8))
-            XCTAssertFalse(
-                blockCommand(in: app, containing: marker).exists,
-                "\(marker) must stay in its original terminal tab"
+            waitForAnyPaneBlock(secondTab, in: app, expected: true)
+            waitForAnyPaneBlock(marker, in: app, expected: false)
+            let originalTabID = try XCTUnwrap(
+                tabs.allElementsBoundByIndex.first(where: { $0.identifier != secondTabID })?.identifier
             )
-            tabs.element(boundBy: 0).click()
+            strip.buttons.matching(identifier: originalTabID).firstMatch.click()
+            waitForSelectedTerminalTab(strip, identifier: originalTabID)
             waitForUsablePty(in: app)
-            XCTAssertTrue(blockCommand(in: app, containing: marker).exists)
-            XCTAssertFalse(
-                blockCommand(in: app, containing: secondTab).exists,
-                "\(secondTab) must stay in its second terminal tab"
+            waitForAnyPaneBlock(marker, in: app, expected: true)
+            waitForAnyPaneBlock(secondTab, in: app, expected: false)
+            let restoredHost = try XCTUnwrap(
+                element(
+                    app,
+                    matchingIdentifier: "^(seyal-pane-presentation-host|seyal-secondary-live-pane)$",
+                    in: regions[index]
+                )
+            )
+            waitForPaintedHistoryRegion(restoredHost, timeout: 8)
+            let paneScreenshot = app.windows.firstMatch.screenshot()
+            let paneShot = XCTAttachment(screenshot: paneScreenshot)
+            paneShot.name = "1426-pane-\(index + 1)-after-terminal-tab-restore"
+            paneShot.lifetime = .keepAlways
+            add(paneShot)
+            let visibleLines = try recognizedText(in: paneScreenshot)
+            XCTAssertTrue(
+                visibleLines.contains("\(marker)-100"),
+                "Pane \(index + 1) must visibly render its stream tail in the headed screenshot; "
+                    + "OCR=\(visibleLines)"
+            )
+        }
+
+        // Pane 2 and Pane 4 own separate transcript scroll positions. Scroll
+        // them by different amounts, then revisit both after focus changes.
+        let liveGrid = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        liveGrid.name = "1426-four-pane-live-blocks-above-composers"
+        liveGrid.lifetime = .keepAlways
+        add(liveGrid)
+
+        var scrolledOffsets: [Int: CGFloat] = [:]
+        let paneScrollDeltas: [(Int, CGFloat)] = [(1, 260), (3, 520)]
+        for (paneIndex, deltaY) in paneScrollDeltas {
+            regions[paneIndex].click()
+            waitForFocus(app, region: paneIndex)
+            let marker = markers[paneIndex]
+            let block = app.descendants(matching: .any).matching(
+                NSPredicate(
+                    format: "identifier MATCHES %@ AND label CONTAINS %@",
+                    "^(seyal-block|seyal-secondary-block)-[0-9]+$",
+                    marker
+                )
+            ).firstMatch
+            XCTAssertTrue(block.waitForExistence(timeout: 8), "Pane \(paneIndex + 1) Block exists")
+            let body = blockBody(for: block, in: app, expectedMarker: marker)
+            let before = body.frame.minY - regions[paneIndex].frame.minY
+            element(app, "seyal-blocks-scroll").scroll(byDeltaX: 0, deltaY: deltaY)
+            let after = body.frame.minY - regions[paneIndex].frame.minY
+            XCTAssertGreaterThan(
+                abs(after - before),
+                80,
+                "Pane \(paneIndex + 1) scroll must move its own Block body"
+            )
+            scrolledOffsets[paneIndex] = after
+        }
+        XCTAssertGreaterThan(
+            abs(try XCTUnwrap(scrolledOffsets[1]) - XCTUnwrap(scrolledOffsets[3])),
+            100,
+            "Pane 2 and Pane 4 must retain distinct, independent scroll positions"
+        )
+        for paneIndex in [1, 3] {
+            regions[paneIndex].click()
+            waitForFocus(app, region: paneIndex)
+            let marker = markers[paneIndex]
+            let paneBlock = app.descendants(matching: .any).matching(
+                NSPredicate(
+                    format: "identifier MATCHES %@ AND label CONTAINS %@",
+                    "^(seyal-block|seyal-secondary-block)-[0-9]+$",
+                    marker
+                )
+            ).firstMatch
+            XCTAssertTrue(paneBlock.waitForExistence(timeout: 8), "Pane \(paneIndex + 1) Block remains visible")
+            let body = blockBody(for: paneBlock, in: app, expectedMarker: marker)
+            XCTAssertEqual(
+                body.frame.minY - regions[paneIndex].frame.minY,
+                try XCTUnwrap(scrolledOffsets[paneIndex]),
+                accuracy: 48,
+                "Pane \(paneIndex + 1) must restore its own scroll offset"
             )
         }
         XCTAssertEqual(app.state, .runningForeground)
@@ -1304,19 +1515,92 @@ final class SeyalPaneSplitUITests: XCTestCase {
         app.descendants(matching: .any)[identifier].firstMatch
     }
 
+    private func element(
+        _ app: XCUIApplication,
+        matchingIdentifier identifierPattern: String,
+        in region: XCUIElement
+    ) -> XCUIElement? {
+        let regionFrame = region.frame
+        return app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES %@", identifierPattern)
+        ).allElementsBoundByIndex.first { candidate in
+            let frame = candidate.frame
+            return regionFrame.contains(CGPoint(x: frame.midX, y: frame.midY))
+        }
+    }
+
     private func click(_ app: XCUIApplication, _ identifier: String) {
         let control = element(app, identifier)
         XCTAssertTrue(control.waitForExistence(timeout: 8), "\(identifier) is shown")
         control.click()
     }
 
+    private func splitPane(_ app: XCUIApplication, _ paneIdentifier: String, direction: String) {
+        let region = element(app, paneIdentifier)
+        XCTAssertTrue(region.waitForExistence(timeout: 8), "\(paneIdentifier) is shown")
+        guard let strip = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs"))
+            .allElementsBoundByIndex.first(where: { region.frame.contains($0.frame) })
+        else {
+            XCTFail("terminal tab strip must belong to \(paneIdentifier)")
+            return
+        }
+        let button = strip.buttons.matching(identifier: "seyal-split-\(direction)").firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 8), "Split \(direction) is shown in \(paneIdentifier)")
+        button.click()
+    }
+
     private func waitForFocus(_ app: XCUIApplication, region index: Int) {
-        let focused = expectation(
-            for: NSPredicate(format: "value == 'focused'"),
-            evaluatedWith: element(app, "seyal-pane-region-\(index)"),
-            handler: nil
+        let region = element(app, "seyal-pane-region-\(index)")
+        let deadline = Date().addingTimeInterval(8)
+        var currentValue: String?
+        while Date() < deadline {
+            currentValue = region.value as? String
+            if currentValue == "focused" { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        currentValue = region.value as? String
+        XCTAssertEqual(currentValue, "focused", "region \(index) takes Rust focus")
+    }
+
+    private func waitForExactlyOneFocusedRegion(_ app: XCUIApplication, count: Int) {
+        let regions = (0..<count).map { element(app, "seyal-pane-region-\($0)") }
+        let deadline = Date().addingTimeInterval(8)
+        var focusedCount = 0
+        while Date() < deadline {
+            focusedCount = regions.filter { $0.value as? String == "focused" }.count
+            if focusedCount == 1 { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        focusedCount = regions.filter { $0.value as? String == "focused" }.count
+        XCTAssertEqual(focusedCount, 1, "exactly one region takes Rust focus")
+    }
+
+    private func waitForSelectedTerminalTab(_ strip: XCUIElement, identifier: String) {
+        let button = strip.buttons.matching(identifier: identifier).firstMatch
+        let deadline = Date().addingTimeInterval(8)
+        var value: String?
+        while Date() < deadline {
+            value = button.value as? String
+            if value == "selected" { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        value = button.value as? String
+        XCTAssertEqual(value, "selected", "terminal tab \(identifier) must become selected")
+    }
+
+    private func waitForAnyPaneBlock(_ command: String, in app: XCUIApplication, expected: Bool) {
+        let deadline = Date().addingTimeInterval(8)
+        var exists = anyPaneBlock(in: app, containing: command).exists
+        while Date() < deadline, exists != expected {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            exists = anyPaneBlock(in: app, containing: command).exists
+        }
+        XCTAssertEqual(
+            exists,
+            expected,
+            "Block command \(command) should \(expected ? "be visible" : "stay out of the selected terminal tab")"
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 8), .completed, "region \(index) takes Rust focus")
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
@@ -1459,27 +1743,116 @@ final class SeyalPaneSplitUITests: XCTestCase {
         ).firstMatch
     }
 
-    private func blockBody(for block: XCUIElement, in app: XCUIApplication) -> XCUIElement {
+    private func blockBody(
+        for block: XCUIElement,
+        in app: XCUIApplication,
+        expectedMarker: String? = nil,
+        paneRegion: XCUIElement? = nil
+    ) -> XCUIElement {
         let bodyId = "\(block.identifier)-body"
-        let body = app.descendants(matching: .any)[bodyId].firstMatch
-        if body.exists { return body }
+        let matchingBodies = app.descendants(matching: .any).matching(identifier: bodyId)
+        let blockFrame = block.frame
+        let paneFrame = paneRegion?.frame
+        // Focused/secondary Block row identifiers are intentionally stable for
+        // older UI assertions, so several panes can expose the same body id.
+        // Bind a body to its owning card by geometry before using a global AX
+        // firstMatch, which may otherwise read a sibling pane's same-index row.
+        if let body = matchingBodies.allElementsBoundByIndex.first(where: { candidate in
+            let frame = candidate.frame
+            let belongsToPane = paneFrame.map {
+                $0.contains(CGPoint(x: frame.midX, y: frame.midY))
+            } ?? true
+            let text = "\(candidate.label) \(candidate.value ?? "")"
+            let containsMarker = expectedMarker.map { text.contains($0) } ?? true
+            return belongsToPane && containsMarker && frame.intersects(blockFrame)
+        }) {
+            return body
+        }
         // Fallback: any body descendant under the same pane Block stack.
         return block.descendants(matching: .any).matching(
             NSPredicate(format: "identifier ENDSWITH %@", "-body")
         ).firstMatch
     }
 
-    private func waitForBodyMarker(_ body: XCUIElement, marker: String) {
-        let rendered = expectation(
-            for: NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", marker, marker),
-            evaluatedWith: body,
-            handler: nil
+    private func waitForBodyMarker(
+        _ body: XCUIElement,
+        marker: String,
+        timeout: TimeInterval = 8,
+        message: String? = nil
+    ) {
+        // XCTest's predicate expectation can retain the previous accessibility
+        // snapshot while a live Block is updating. Read the element directly
+        // on each bounded poll so the wait observes the newest AX projection.
+        let deadline = Date().addingTimeInterval(timeout)
+        var actual = ""
+        while Date() < deadline {
+            actual = "\(body.label) \(body.value ?? "")"
+            if actual.contains(marker) { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        actual = "\(body.label) \(body.value ?? "")"
+        XCTAssertTrue(
+            actual.contains(marker),
+            "\(message ?? "Block body must visibly contain its output marker") \(marker); body=\(actual)"
         )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [rendered], timeout: 8),
-            .completed,
-            "completed Block body visibly contains its output marker: \(marker)"
+    }
+
+    private func waitForPaintedHistoryRegion(_ paneHost: XCUIElement, timeout: TimeInterval) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var diagnostics = ""
+        while Date() < deadline {
+            diagnostics = paneHost.value as? String ?? ""
+            let countText = diagnostics.components(separatedBy: "history-regions-painted=").last?
+                .prefix(while: \.isNumber) ?? ""
+            let visibleCountText = diagnostics.components(separatedBy: "visible-history-clips=").last?
+                .prefix(while: \.isNumber) ?? ""
+            let pixelCountText = diagnostics.components(separatedBy: "history-visible-pixels=").last?
+                .prefix(while: \.isNumber) ?? ""
+            if let count = Int(countText), count > 0,
+               let visibleCount = Int(visibleCountText), visibleCount > 0,
+               let pixelCount = Int(pixelCountText), pixelCount > 0
+            {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        diagnostics = paneHost.value as? String ?? diagnostics
+        let countText = diagnostics.components(separatedBy: "history-regions-painted=").last?
+            .prefix(while: \.isNumber) ?? ""
+        let count = Int(countText) ?? 0
+        XCTAssertGreaterThan(
+            count,
+            0,
+            "the source Pane must paint its retained Block output; pane=\(diagnostics)"
         )
+        let visibleCountText = diagnostics.components(separatedBy: "visible-history-clips=").last?
+            .prefix(while: \.isNumber) ?? ""
+        let visibleCount = Int(visibleCountText) ?? 0
+        XCTAssertGreaterThan(
+            visibleCount,
+            0,
+            "the retained Block clip must intersect its pane's Metal surface; pane=\(diagnostics)"
+        )
+        let pixelCountText = diagnostics.components(separatedBy: "history-visible-pixels=").last?
+            .prefix(while: \.isNumber) ?? ""
+        let pixelCount = Int(pixelCountText) ?? 0
+        XCTAssertGreaterThan(
+            pixelCount,
+            0,
+            "the retained Block must produce opaque pixels inside its Metal clip; pane=\(diagnostics)"
+        )
+    }
+
+    private func recognizedText(in screenshot: XCUIScreenshot) throws -> String {
+        let source = try XCTUnwrap(
+            CGImageSourceCreateWithData(screenshot.pngRepresentation as CFData, nil)
+        )
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
     }
 
     private func waitForAbsence(_ element: XCUIElement, _ message: String) {
