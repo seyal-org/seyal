@@ -647,6 +647,37 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkspaceLayoutRowsSelectOuterTabsWithoutSecondTabStrip() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        view.reconcileChrome()
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-layouts-heading"))
+        let handle = view.pane.appHandle
+
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), 0)
+        view.reconcileChrome()
+        XCTAssertEqual(seyal_app_shell(handle).tab_count, 2)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"))
+
+        let first = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-layout-0") as? IdentityButton
+        )
+        let second = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-layout-1") as? IdentityButton
+        )
+        XCTAssertNotEqual(first.idLo, second.idLo)
+        view.selectTab(first)
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.active_tab_lo, first.idLo)
+        XCTAssertEqual(shell.active_tab_hi, first.idHi)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-tab-strip"),
+                     "layout navigation must not become a second terminal strip")
+    }
+
+    @MainActor
     func testCloseTabUsesSnapshotContainmentFence() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
