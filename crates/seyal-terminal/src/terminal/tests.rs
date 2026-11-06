@@ -368,6 +368,43 @@ fn primary_resize_reflows_active_soft_wrapped_source() {
 }
 
 #[test]
+fn resize_during_output_after_wrapped_command_preserves_every_output_row() {
+    let mut terminal = TerminalState::new(90, 39).unwrap();
+    terminal
+        .feed(
+            b"user-rc-ran\r\nfor i in $(seq 1 12); do printf 'RESIZE_BLOCK_LINE %02d\\n' \"$i\"; sleep 0.3; done\r\nRESIZE_BLOCK_LINE 01\r\nRESIZE_BLOCK_LINE 02\r\nRESIZE_BLOCK_LINE 03\r\n",
+        )
+        .unwrap();
+
+    terminal.resize(42, 39).unwrap();
+    terminal
+        .feed(
+            b"RESIZE_BLOCK_LINE 04\r\nRESIZE_BLOCK_LINE 05\r\nRESIZE_BLOCK_LINE 06\r\nRESIZE_BLOCK_LINE 07\r\nRESIZE_BLOCK_LINE 08\r\nRESIZE_BLOCK_LINE 09\r\nRESIZE_BLOCK_LINE 10\r\nRESIZE_BLOCK_LINE 11\r\nRESIZE_BLOCK_LINE 12\r\n",
+        )
+        .unwrap();
+
+    let text = terminal
+        .primary_history_range(LineId(1), LineId(u64::MAX), 128)
+        .unwrap()
+        .into_iter()
+        .map(|(_, cells)| {
+            cells
+                .into_iter()
+                .map(|cell| cell.character)
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    for line in 1..=12 {
+        let expected = format!("RESIZE_BLOCK_LINE {line:02}");
+        assert!(
+            text.contains(&expected),
+            "resize lost {expected} after a wrapped command echo:\n{text}"
+        );
+    }
+}
+
+#[test]
 fn alternate_screen_never_adds_primary_history() {
     let mut terminal = TerminalState::new(4, 1).unwrap();
     terminal.feed(b"primary\r\n").unwrap();

@@ -254,7 +254,7 @@ final class MultiWindowHostTests: XCTestCase {
                     && ($0.representedObject as? UInt16) != KeybindingShortcutRealization.windowSelectOrdinal
             }
 
-        XCTAssertEqual(projectedItems.count, 16)
+        XCTAssertEqual(projectedItems.count, 15)
         XCTAssertEqual(projectedItems.filter { $0.title == "New Terminal" }.count, 1)
         XCTAssertEqual(
             Set(projectedItems.compactMap { $0.representedObject as? UInt16 }),
@@ -272,7 +272,7 @@ final class MultiWindowHostTests: XCTestCase {
         )
         XCTAssertTrue(projectedItems.contains { $0.title == "Split Right" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Split Down" })
-        XCTAssertTrue(projectedItems.contains { $0.title == "Toggle Raw" })
+        XCTAssertFalse(projectedItems.contains { $0.title == "Toggle Raw" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Toggle TUI" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Go to…" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Previous Tab" })

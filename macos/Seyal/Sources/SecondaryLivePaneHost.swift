@@ -1,24 +1,30 @@
 import AppKit
 
-/// Identity of a pane's Block/composer projection used to skip Block rebuilds
-/// when only focus/input ownership changed (#1424).
+/// Structural identity of a pane's Block/composer projection. Live output
+/// ranges are refreshed in place so streaming cannot recreate cards or reset
+/// a scrolled transcript (#1424).
 struct PaneBlockProjectionFingerprint: Equatable {
     struct Row: Equatable {
         let idLo: UInt64
         let idHi: UInt64
         let flags: UInt16
-        let kind: UInt16
-        let startLine: UInt64
-        let endLine: UInt64
-        let reserved0: UInt16
-        let reserved1: UInt32
     }
 
     let eligibility: UInt16
+    /// A Pane can switch between Runtime Controllers without changing its local
+    /// Block ids or projection rows. Include the selected Controller so a tab
+    /// switch rebuilds the pane's view from that execution's timeline.
+    let displayHandle: UInt64
     let blockCount: UInt32
     let floorLo: UInt64
     let floorHi: UInt64
     let rows: [Row]
+}
+
+struct PaneTranscriptScrollState: Equatable {
+    let offsetY: CGFloat
+    let documentHeight: CGFloat
+    let followsLiveEnd: Bool
 }
 
 /// Pane-owned Flow presentation host for a visible multipane leaf (#936 / #1424).
@@ -56,16 +62,28 @@ final class SecondaryLivePaneHost: NSView {
     var followingLiveEnd = true
     var isProgrammaticTranscriptScroll = false
     var transcriptFrameRevision: UInt64 = 0
+    private var lastTranscriptViewportSize: CGSize = .zero
+    private var hasPendingTranscriptViewportSync = false
     var blockOutputZeroClipRetries = 0
+    var lastPublishedTranscriptRegions: [NativeTranscriptRegion] = []
+    var lastVisibleHistoryPixelCount = 0
+    var lastHistoryPixelSampleAt = Date.distantPast
+    var historyProjectionRequests = HistoryProjectionRequestBook()
+    var transcriptScrollStates: [UInt64: PaneTranscriptScrollState] = [:]
+    var restoresScrollForDisplayHandleChange = false
     static let blockOutputZeroClipRetryLimit = 4
     /// When true, this host owns keyboard/composer interaction for its Pane.
     private(set) var inputOwned = false
     private let statusLabel = NSTextField(labelWithString: "")
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private var surfaceLeadingToHost: NSLayoutConstraint!
+    private var surfaceLeadingToTranscript: NSLayoutConstraint!
+    private var surfaceTrailingToHost: NSLayoutConstraint!
+    private var surfaceTrailingToTranscript: NSLayoutConstraint!
     private var surfaceTopToHost: NSLayoutConstraint!
     private var surfaceTopToTranscript: NSLayoutConstraint!
     private var surfaceBottomToHost: NSLayoutConstraint!
-    private var surfaceBottomToComposer: NSLayoutConstraint!
+    private var surfaceBottomToTranscript: NSLayoutConstraint!
     private var flowConstraints: [NSLayoutConstraint] = []
     /// Keeps transcript document extent across Block rebuilds when the user has
     /// scrolled away from live end (#1424).
@@ -94,6 +112,7 @@ final class SecondaryLivePaneHost: NSView {
         )
         composer = ComposerBridgeView(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
         super.init(frame: .zero)
+        surface.activateTranscriptDisplayHandle(displayHandle)
         translatesAutoresizingMaskIntoConstraints = true
         clipsToBounds = true
         setAccessibilityElement(true)
@@ -155,8 +174,9 @@ final class SecondaryLivePaneHost: NSView {
         transcriptLeadingSpacerHeight.isActive = true
         blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
 
-        let clip = NSClipView()
+        let clip = TranscriptClipView()
         clip.drawsBackground = false
+        clip.copiesOnScroll = false
         clip.documentView = blocks
         transcript.contentView = clip
         transcript.drawsBackground = false
@@ -183,24 +203,41 @@ final class SecondaryLivePaneHost: NSView {
         addSubview(statusLabel)
         addSubview(retryButton)
 
+        surfaceLeadingToHost = surface.leadingAnchor.constraint(equalTo: leadingAnchor)
+        surfaceLeadingToTranscript = surface.leadingAnchor.constraint(equalTo: transcript.leadingAnchor)
+        surfaceTrailingToHost = surface.trailingAnchor.constraint(equalTo: trailingAnchor)
+        surfaceTrailingToTranscript = surface.trailingAnchor.constraint(equalTo: transcript.trailingAnchor)
         surfaceTopToHost = surface.topAnchor.constraint(equalTo: topAnchor)
-        surfaceTopToTranscript = surface.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 8)
+        // Flow Block history is painted by Metal into the card body clips.
+        // Keep the surface coextensive with the transcript viewport so those
+        // overlay regions use valid surface coordinates, as on the primary
+        // Flow pane. Placing Metal below the transcript left command headers
+        // visible while every completed output body stayed blank (#1426).
+        surfaceTopToTranscript = surface.topAnchor.constraint(equalTo: transcript.topAnchor)
         surfaceBottomToHost = surface.bottomAnchor.constraint(equalTo: bottomAnchor)
-        surfaceBottomToComposer = surface.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8)
+        surfaceBottomToTranscript = surface.bottomAnchor.constraint(equalTo: transcript.bottomAnchor)
+        let transcriptFillsToComposer = transcript.bottomAnchor.constraint(
+            equalTo: composer.topAnchor,
+            constant: -12
+        )
+        transcriptFillsToComposer.priority = .defaultHigh
         flowConstraints = [
             transcript.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             transcript.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             transcript.topAnchor.constraint(equalTo: topAnchor, constant: 10),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
+            transcriptFillsToComposer,
             composer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             composer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             composer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            surfaceLeadingToTranscript,
+            surfaceTrailingToTranscript,
             surfaceTopToTranscript,
-            surfaceBottomToComposer,
+            surfaceBottomToTranscript,
         ]
         NSLayoutConstraint.activate([
-            surface.leadingAnchor.constraint(equalTo: leadingAnchor),
-            surface.trailingAnchor.constraint(equalTo: trailingAnchor),
+            surfaceLeadingToHost,
+            surfaceTrailingToHost,
             surfaceTopToHost,
             surfaceBottomToHost,
             statusLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -213,7 +250,12 @@ final class SecondaryLivePaneHost: NSView {
             blocks.widthAnchor.constraint(equalTo: transcript.contentView.widthAnchor),
         ] + flowConstraints)
         // Default Flow layout; Raw/TUI flips constraints in applyTranscriptPresentation.
-        NSLayoutConstraint.deactivate([surfaceTopToHost, surfaceBottomToHost])
+        NSLayoutConstraint.deactivate([
+            surfaceLeadingToHost,
+            surfaceTrailingToHost,
+            surfaceTopToHost,
+            surfaceBottomToHost,
+        ])
 
         updateRecoveryTarget(recoveryTarget)
         updateAvailabilityPresentation()
@@ -280,6 +322,7 @@ final class SecondaryLivePaneHost: NSView {
         // Mid-transcript programmatic scrolls must clear follow-bottom so the
         // next rebuild does not jump to live end (#1424).
         followingLiveEnd = maxY > 0 && clamped >= maxY - 24
+        rememberTranscriptScrollState()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -310,6 +353,7 @@ final class SecondaryLivePaneHost: NSView {
     @objc private func transcriptBoundsDidChange(_ note: Notification) {
         guard !isProgrammaticTranscriptScroll else { return }
         followingLiveEnd = isNearLiveEnd()
+        rememberTranscriptScrollState()
         publishBlockOutputFrame()
     }
 
@@ -318,29 +362,22 @@ final class SecondaryLivePaneHost: NSView {
         fatalError("SecondaryLivePaneHost is programmatic")
     }
 
-    func updateDisplayHandle(_ handle: UInt64) {
-        guard handle != displayHandle else { return }
-        let gainedHandle = displayHandle == 0 && handle != 0
+    @discardableResult
+    func updateDisplayHandle(_ handle: UInt64) -> Bool {
+        guard handle != displayHandle else { return false }
+        rememberTranscriptScrollState()
+        historyProjectionRequests.discard(forDisplayHandle: displayHandle)
+        surface.activateTranscriptDisplayHandle(handle)
         displayHandle = handle
+        restoresScrollForDisplayHandleChange = true
         updateAvailabilityPresentation()
         needsLayout = true
         publishFrame()
-        // A 0→bound transition often lands after the first empty rebuild
-        // (split before Controller bind). Sync + fingerprint reconcile so
-        // HISTORY spans resize Block bodies; do not leave 1-line stubs (#1424).
-        if gainedHandle {
-            noteRegistryPolled()
-            return
-        }
-        let eligibility = lastAppliedEligibility
-            ?? seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
-        let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
-            || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        if !direct {
-            republishExistingBlockProjections()
-            publishLiveTailBlocks()
-            publishBlockOutputFrame()
-        }
+        // Both split-time binding (0→bound) and same-pane terminal-tab changes
+        // select a different Runtime timeline. Reconcile against that
+        // Controller so local Block ids cannot retain another tab's card/body.
+        noteRegistryPolled()
+        return true
     }
 
     func updateRecoveryTarget(_ target: SeyalAppPaneRecoveryTarget) {
@@ -465,16 +502,44 @@ final class SecondaryLivePaneHost: NSView {
         let frame = seyal_bridge_frame_for(displayHandle)
         guard frame.cells != nil, frame.cell_count > 0 else { return }
         surface.consumeBridgeFrame(frame)
-        // Include execution= so multipane XCUI can identity Controllers without
-        // the hidden liveContent `terminal-input` surface (#1424).
-        let execution = String(
-            format: "%016llx%016llx",
-            seyal_bridge_execution_id_high(),
-            seyal_bridge_execution_id_low()
-        )
+        // Include this Pane's binding identity so multipane XCUI and recovery
+        // diagnostics never label a sibling's frame through the process-wide
+        // focused-display selector (#1424).
+        let execution = paneExecutionIdentity()
+        let paint = surface.renderer.inspectFlowPaint()
+        let surfaceBounds = surface.bounds
+        let visibleHistoryClips = lastPublishedTranscriptRegions.filter {
+            $0.clip.intersects(surfaceBounds)
+        }.count
+        let clipSummary = lastPublishedTranscriptRegions.first.map {
+            String(
+                format: "clip=%.1f,%.1f,%.1f,%.1f",
+                $0.clip.minX,
+                $0.clip.minY,
+                $0.clip.width,
+                $0.clip.height
+            )
+        } ?? "clip=none"
         setAccessibilityValue(
             "rows=\(frame.rows) columns=\(frame.columns) execution=\(execution) "
+                + "flow-paint=\(paint.accessibilityToken) "
+                + "history-instances=\(paint.historyInstanceCount) "
+                + "history-regions-painted=\(paint.paintedHistoryRegionCount) "
+                + "history-clips=\(paint.historyClipsDistinct ? "ok" : "collapse") "
+                + "history-visible-pixels=\(lastVisibleHistoryPixelCount) "
+                + "surface-bounds=\(NSStringFromRect(surfaceBounds)) visible-history-clips=\(visibleHistoryClips) "
+                + clipSummary
         )
+    }
+
+    private func paneExecutionIdentity() -> String {
+        let paneCount = Int(seyal_app_shell(appHandle).pane_count)
+        for index in 0..<paneCount {
+            let binding = seyal_app_pane_binding(appHandle, UInt32(index))
+            guard binding.pane_lo == paneLo, binding.pane_hi == paneHi else { continue }
+            return String(format: "%016llx%016llx", binding.execution_hi, binding.execution_lo)
+        }
+        return String(repeating: "0", count: 32)
     }
 
     private func updateAvailabilityPresentation() {
@@ -542,25 +607,15 @@ final class SecondaryLivePaneHost: NSView {
         rows.reserveCapacity(count)
         for index in 0..<count {
             let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
-            let projection = seyal_app_block_projection_for_pane(
-                appHandle,
-                paneLo,
-                paneHi,
-                UInt32(index)
-            )
             // Omit SEYAL_APP_BLOCK_SELECTED — focus/selection must not force a
-            // Block view rebuild (#1424).
+            // Block view rebuild (#1424). Projection ranges and live-tail rows
+            // also change during streaming and are updated in place below.
             let structuralFlags = row.flags & ~UInt16(SEYAL_APP_BLOCK_SELECTED)
             rows.append(
                 PaneBlockProjectionFingerprint.Row(
                     idLo: row.id_lo,
                     idHi: row.id_hi,
-                    flags: structuralFlags,
-                    kind: projection.kind,
-                    startLine: projection.start_line,
-                    endLine: projection.end_line,
-                    reserved0: projection.reserved0,
-                    reserved1: projection.reserved1
+                    flags: structuralFlags
                 )
             )
         }
@@ -570,6 +625,7 @@ final class SecondaryLivePaneHost: NSView {
         let floorHi = composerSnap.block_count == 0 ? 0 : composerSnap.canvas_floor_block_id_hi
         return PaneBlockProjectionFingerprint(
             eligibility: eligibility,
+            displayHandle: displayHandle,
             blockCount: composerSnap.block_count,
             floorLo: floorLo,
             floorHi: floorHi,
@@ -582,19 +638,34 @@ final class SecondaryLivePaneHost: NSView {
     private func activateFlowConstraintsIfSized() {
         let sized = bounds.width >= 8 && bounds.height >= 8
         if sized {
-            NSLayoutConstraint.deactivate([surfaceTopToHost, surfaceBottomToHost])
+            NSLayoutConstraint.deactivate([
+                surfaceLeadingToHost,
+                surfaceTrailingToHost,
+                surfaceTopToHost,
+                surfaceBottomToHost,
+            ])
             NSLayoutConstraint.activate(flowConstraints)
         } else {
             // Benign interim: fill with Metal surface until PaneLayoutView
             // publishes a non-zero region frame in the same reconcile turn.
             NSLayoutConstraint.deactivate(flowConstraints)
-            NSLayoutConstraint.activate([surfaceTopToHost, surfaceBottomToHost])
+            NSLayoutConstraint.activate([
+                surfaceLeadingToHost,
+                surfaceTrailingToHost,
+                surfaceTopToHost,
+                surfaceBottomToHost,
+            ])
         }
     }
 
     private func activateDirectSurfaceConstraints() {
         NSLayoutConstraint.deactivate(flowConstraints)
-        NSLayoutConstraint.activate([surfaceTopToHost, surfaceBottomToHost])
+        NSLayoutConstraint.activate([
+            surfaceLeadingToHost,
+            surfaceTrailingToHost,
+            surfaceTopToHost,
+            surfaceBottomToHost,
+        ])
     }
 
     override func layout() {
@@ -605,6 +676,30 @@ final class SecondaryLivePaneHost: NSView {
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
             activateFlowConstraintsIfSized()
+            let viewportSize = transcript.contentView.bounds.size
+            if viewportSize.width > 8, viewportSize.height > 8,
+               abs(viewportSize.width - lastTranscriptViewportSize.width) > 0.5
+                || abs(viewportSize.height - lastTranscriptViewportSize.height) > 0.5
+            {
+                lastTranscriptViewportSize = viewportSize
+                if !hasPendingTranscriptViewportSync {
+                    hasPendingTranscriptViewportSync = true
+                    // A split or divider drag changes the visible transcript
+                    // viewport without changing the Block projection. Refit
+                    // its leading spacer after Auto Layout settles so the
+                    // live Block stays just above this Pane's composer and
+                    // each leaf keeps its own scroll extent (#1426).
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.hasPendingTranscriptViewportSync = false
+                        guard !self.isHidden else { return }
+                        self.syncTranscriptDocumentSize()
+                        self.publishBlockOutputFrame()
+                    }
+                }
+            }
+        } else {
+            lastTranscriptViewportSize = .zero
         }
         updateAvailabilityPresentation()
         guard displayHandle != 0, window != nil, !isHidden,

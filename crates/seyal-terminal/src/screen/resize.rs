@@ -52,18 +52,24 @@ impl Screen {
         let mut mapped_cursor = None;
         if self.retain_history && (cols != old_cols || rows < old_rows) {
             // Trailing blank active rows are omitted when content exists so
-            // wrapped source still fills the new viewport. An entirely empty
-            // screen still includes those blanks so column-only resize cannot
-            // eat scrollback spacers (unwrap_or(0) pulled history onto row 0).
-            let last_source_row = (0..old_rows)
-                .rev()
-                .find(|row| {
-                    let start = usize::from(*row) * usize::from(old_cols);
-                    self.cells[start..start + usize::from(old_cols)]
-                        .iter()
-                        .any(|cell| cell.role != CellRole::Empty)
-                })
-                .unwrap_or(old_rows.saturating_sub(1));
+            // wrapped source still fills the new viewport. Keep the cursor row
+            // even when it is blank: after a newline, dropping that row leaves
+            // no source anchor for the cursor, so a width-changing resize can
+            // map subsequent output back over the last completed line.
+            // An entirely empty screen still includes all blank rows so
+            // column-only resize cannot eat scrollback spacers.
+            let last_content_row = (0..old_rows).rev().find(|row| {
+                let start = usize::from(*row) * usize::from(old_cols);
+                self.cells[start..start + usize::from(old_cols)]
+                    .iter()
+                    .any(|cell| cell.role != CellRole::Empty)
+            });
+            let last_source_row = last_content_row.unwrap_or(old_rows.saturating_sub(1));
+            let last_source_row = if rows >= old_rows {
+                last_source_row.max(self.cursor.row)
+            } else {
+                last_source_row
+            };
             let mut source_lines: Vec<HistoryLine> = Vec::new();
             let mut source_cells = HashMap::new();
             let mut source_offsets = HashMap::<LineId, u32>::new();
@@ -182,6 +188,16 @@ impl Screen {
             history_additions = history_prefix(&combined, retained_until);
             replace_history = true;
             for (row, projection) in reflowed.iter().skip(active_first).enumerate() {
+                if cursor_source.unit_offset == 0
+                    && projection.source_line_id == Some(cursor_source.line_id)
+                    && projection.anchors.is_empty()
+                {
+                    mapped_cursor = Some(Cursor {
+                        row: row as u16,
+                        col: self.cursor.col.min(cols.saturating_sub(1)),
+                        pending_wrap: false,
+                    });
+                }
                 let start = row * usize::from(cols);
                 let mut col = 0usize;
                 for anchor in &projection.anchors {

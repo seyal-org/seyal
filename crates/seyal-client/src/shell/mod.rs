@@ -225,6 +225,8 @@ pub struct PaneSnapshot {
     /// Compatibility projection of the selected terminal only.
     pub execution: Option<ExecutionId>,
     pub allows_implicit_bootstrap: bool,
+    pub presentation_mode: crate::presentation::PresentationMode,
+    pub resting_presentation_mode: crate::presentation::PresentationMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -290,7 +292,8 @@ impl ShellState {
             }],
             selected_terminal_tab: None,
             allows_implicit_execution_bootstrap: true,
-            presentation_mode: crate::presentation::PresentationMode::Raw,
+            presentation_mode: crate::presentation::PresentationMode::Flow,
+            resting_presentation_mode: crate::presentation::PresentationMode::Flow,
         };
         let mut pane = pane;
         pane.selected_terminal_tab = pane.terminal_tabs.first().map(|row| row.id);
@@ -826,47 +829,6 @@ impl ShellState {
             | ShellAction::ForgetUnpresented { .. }
             | ShellAction::AdoptExecution { .. } => self.dispatch_unpresented(action),
         }
-    }
-
-    fn split_pane(&mut self, pane_id: PaneId, axis: SplitAxis) -> Result<PaneId, ShellError> {
-        if !self.allows_pane_splitting {
-            return Err(ShellError::PaneSplitUnavailable);
-        }
-        let workspace = self.workspace_mut(self.active_workspace_id())?;
-        let tab = workspace.active_tab_mut()?;
-        if !tab.panes.contains_key(&pane_id) {
-            return Err(ShellError::UnknownPane);
-        }
-        let pane_count = tab.panes.len();
-        let terminal_id = TerminalTabId::new();
-        let pane = Pane {
-            id: PaneId::new(),
-            title: format!("Pane {}", pane_count + 1),
-            terminal_tabs: vec![workspace::TerminalTab {
-                id: terminal_id,
-                execution: None,
-            }],
-            selected_terminal_tab: Some(terminal_id),
-            allows_implicit_execution_bootstrap: false,
-            presentation_mode: crate::presentation::PresentationMode::Raw,
-        };
-        let id = pane.id;
-        // ADR-021 §3: successful structural mutation clears zoom.
-        tab.zoomed = None;
-        tab.panes.insert(id, pane);
-        tab.root = tab.root.replacing(
-            pane_id,
-            PaneTree::Split {
-                axis,
-                first: Box::new(PaneTree::Leaf(pane_id)),
-                second: Box::new(PaneTree::Leaf(id)),
-                ratio: SplitRatio::HALF,
-            },
-        );
-        tab.focused = id;
-        self.focus_history.record(id);
-        self.bump_containment_generation();
-        Ok(id)
     }
 
     fn focus_pane(&mut self, id: PaneId) -> Result<(), ShellError> {

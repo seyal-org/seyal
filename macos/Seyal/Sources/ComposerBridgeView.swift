@@ -127,7 +127,12 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         textView.textContainer?.widthTracksTextView = true
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.setAccessibilityElement(true)
-        textView.setAccessibilityIdentifier("seyal-composer-editor")
+        // Pane-bound editors start unfocused. Only the input-owned composer
+        // keeps `seyal-composer-editor`, so XCUI firstMatch cannot paste into
+        // a Busy sibling that is still streaming (#1433 / #1424).
+        textView.setAccessibilityIdentifier(
+            boundPaneLo == nil ? "seyal-composer-editor" : "seyal-secondary-composer-editor"
+        )
 
         addSubview(textView)
         addSubview(placeholder)
@@ -182,17 +187,22 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
 
     /// Multipane focused host uses the primary `seyal-composer` AX id so XCUI
     /// and existing host assertions keep working; unfocused keeps pane-scoped id.
+    /// The editor id follows the same rule: a visible Busy unfocused composer
+    /// must not stay `seyal-composer-editor` or firstMatch paste hits it (#1433).
     func setPrimaryAccessibilityIdentifier(_ primary: Bool) {
         guard let boundPaneLo, let boundPaneHi else {
             setAccessibilityIdentifier("seyal-composer")
+            textView.setAccessibilityIdentifier("seyal-composer-editor")
             return
         }
         if primary {
             setAccessibilityIdentifier("seyal-composer")
+            textView.setAccessibilityIdentifier("seyal-composer-editor")
         } else {
             setAccessibilityIdentifier(
                 String(format: "seyal-composer-%016llx-%016llx", boundPaneHi, boundPaneLo)
             )
+            textView.setAccessibilityIdentifier("seyal-secondary-composer-editor")
         }
     }
 

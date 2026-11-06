@@ -20,6 +20,8 @@ mod leave_offer;
 mod leave_offer_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
+#[cfg(target_os = "macos")]
+mod live_history_apply;
 mod native_effect;
 mod palette_apply;
 mod pane_projection;
@@ -311,8 +313,9 @@ pub struct ApplicationRoot {
     alternate_screen: bool,
     /// Flow or Raw used while alternate screen is off.
     resting: PresentationMode,
-    /// User explicitly opted into Flow (#1438 grid-first). Default resting is
-    /// Raw; shell-integration status alone must not set this.
+    /// Flow is the default for trusted supported shell sessions. The latch is
+    /// retained for Pane snapshots and recovery; unsupported integration still
+    /// forces the safe Raw fallback.
     explicit_flow: bool,
     /// Runtime reported unsupported shell integration. SPEC-008 requires
     /// full-Pane Raw until a later status says otherwise.
@@ -395,7 +398,7 @@ impl ApplicationRoot {
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
         let _ = composer.apply(ComposerAction::ApplyPresentation {
             pane,
-            mode: PresentationMode::Raw,
+            mode: PresentationMode::Flow,
             input_route: InputRoute::Frozen,
         });
         // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
@@ -408,7 +411,7 @@ impl ApplicationRoot {
         }
         let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
-            presentation: PresentationSession::new(None, PresentationMode::Raw),
+            presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
             authority: None,
             pane_authorities: HashMap::new(),
@@ -433,8 +436,8 @@ impl ApplicationRoot {
             goto: GotoState::new(),
             focus_history: FocusHistory::new(),
             alternate_screen: false,
-            resting: PresentationMode::Raw,
-            explicit_flow: false,
+            resting: PresentationMode::Flow,
+            explicit_flow: true,
             integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,

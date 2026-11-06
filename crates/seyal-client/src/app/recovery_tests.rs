@@ -149,7 +149,7 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
     assert_eq!(snapshot.recovery_stage, RecoveryStage::ExecutionEnded);
     // Keep resting authority and the shell bind. Unbinding here fail-closes
     // Block projection and blanks retained bodies. New shell releases later.
-    assert_eq!(snapshot.eligibility, PresentationEligibility::Raw);
+    assert_eq!(snapshot.eligibility, PresentationEligibility::Flow);
     assert!(root.authority.is_some());
     assert!(!snapshot.composer_eligible);
     assert_eq!(

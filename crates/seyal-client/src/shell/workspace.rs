@@ -15,7 +15,10 @@ pub(super) struct Pane {
     pub(super) terminal_tabs: Vec<TerminalTab>,
     pub(super) selected_terminal_tab: Option<TerminalTabId>,
     pub(super) allows_implicit_execution_bootstrap: bool,
+    /// Currently visible mode; TUI is a transient full-screen takeover.
     pub(super) presentation_mode: PresentationMode,
+    /// Resting mode restored after a TUI exits.
+    pub(super) resting_presentation_mode: PresentationMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,7 +169,8 @@ impl Workspace {
                         allows_implicit_execution_bootstrap: tab
                             .pane
                             .allows_implicit_execution_bootstrap,
-                        presentation_mode: PresentationMode::Raw,
+                        presentation_mode: PresentationMode::Flow,
+                        resting_presentation_mode: PresentationMode::Flow,
                     };
                     let mut composed = Tab::with_pane(tab.id, tab.title, pane);
                     composed.attention = tab.attention;
@@ -397,6 +401,33 @@ impl super::ShellState {
                 for tab in &mut window.tabs {
                     if let Some(pane) = tab.panes.get_mut(&pane_id) {
                         pane.presentation_mode = mode;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(ShellError::UnknownPane)
+    }
+
+    pub(crate) fn resting_presentation_mode(&self, pane_id: PaneId) -> Option<PresentationMode> {
+        self.pane(pane_id)
+            .ok()
+            .map(|pane| pane.resting_presentation_mode)
+    }
+
+    pub(crate) fn set_resting_presentation_mode(
+        &mut self,
+        pane_id: PaneId,
+        mode: PresentationMode,
+    ) -> Result<(), ShellError> {
+        for workspace in &mut self.workspaces {
+            for window in &mut workspace.windows {
+                for tab in &mut window.tabs {
+                    if let Some(pane) = tab.panes.get_mut(&pane_id) {
+                        pane.resting_presentation_mode = mode;
+                        if pane.presentation_mode != PresentationMode::Tui {
+                            pane.presentation_mode = mode;
+                        }
                         return Ok(());
                     }
                 }

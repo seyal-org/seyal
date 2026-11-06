@@ -17,9 +17,17 @@ extension SecondaryLivePaneHost {
         }
         // Preserve scroll across projection rebuilds so focus/reconcile churn
         // does not jump the transcript (#1424).
-        let savedOffsetY = transcript.contentView.bounds.origin.y
-        let savedFollowing = followingLiveEnd
-        let savedDocumentHeight = transcriptDocumentScrollHeight()
+        let savedScrollState: PaneTranscriptScrollState = {
+            if restoresScrollForDisplayHandleChange {
+                restoresScrollForDisplayHandleChange = false
+                return transcriptScrollStates[displayHandle]
+                    ?? PaneTranscriptScrollState(offsetY: 0, documentHeight: 0, followsLiveEnd: true)
+            }
+            return currentTranscriptScrollState()
+        }()
+        let savedOffsetY = savedScrollState.offsetY
+        let savedFollowing = savedScrollState.followsLiveEnd
+        let savedDocumentHeight = savedScrollState.documentHeight
         blocks.arrangedSubviews
             .filter { $0 !== transcriptLeadingSpacer }
             .forEach { $0.removeFromSuperview() }
@@ -80,8 +88,16 @@ extension SecondaryLivePaneHost {
             card.onSelect = { [weak self] _ in
                 self?.onFocus?()
             }
-            if blockID != 0, let retainedRange = surface.retainedHistoryRange(blockID: blockID) {
+            if blockID != 0,
+               let retainedRange = surface.retainedHistoryRange(
+                   blockID: blockID,
+                   displayHandle: displayHandle
+               ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
+                card.setOutputLines(
+                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                    cellHeight: surface.terminalPresentationCellSize().height
+                )
             }
             blocks.addArrangedSubview(card)
             if blockID != 0 {
@@ -91,6 +107,7 @@ extension SecondaryLivePaneHost {
         }
         // Bridgeless surfaces: discard through the borrowed window bridge,
         // scoped to this pane's own handle (#1426 residual).
+        historyProjectionRequests.retain(blockIDs: retained, forDisplayHandle: displayHandle)
         historyBridge?.discardHistoryRequests(except: retained, forDisplayHandle: displayHandle)
         surface.removeTranscriptRegions(except: retained)
         syncTranscriptDocumentSize()
@@ -104,16 +121,25 @@ extension SecondaryLivePaneHost {
             setTranscriptDocumentOffsetY(0)
             followingLiveEnd = true
             lastBlockCount = 0
+            rememberTranscriptScrollState()
             return
         }
-        if visibleIndex > lastBlockCount, savedFollowing {
+        let addedBlock = visibleIndex > lastBlockCount
+        if savedFollowing {
+            // A pane split can shrink the transcript viewport without adding
+            // a Block. Keep a reader who was following live output at the new
+            // live end after that resize instead of restoring the old host's
+            // absolute scroll offset into the shortened viewport.
             clearPreservedDocumentHeight()
             scrollTranscriptToLiveEnd()
         } else {
-            // rebuildBlocks clears cards before measuring; keep prior document
-            // extent so a mid-transcript offset is not clamped to zero while
-            // projection content is momentarily shorter (#1424).
-            if !savedFollowing, savedDocumentHeight > transcriptDocumentScrollHeight() + 0.5 {
+            // New Blocks must not pull a reader back to the live end. Keep the
+            // prior document extent and offset when the user has scrolled away,
+            // including while a stream or registry poll adds output (#1424).
+            let currentContentHeight = transcriptCardsContentHeight()
+            let viewportFloor = blockCards.isEmpty ? 0 : transcript.contentView.bounds.height
+            let currentDocumentMinimumHeight = max(max(currentContentHeight, viewportFloor), 1)
+            if savedDocumentHeight > currentDocumentMinimumHeight + 0.5 {
                 preserveDocumentHeight(savedDocumentHeight)
             } else {
                 clearPreservedDocumentHeight()
@@ -122,6 +148,32 @@ extension SecondaryLivePaneHost {
             followingLiveEnd = savedFollowing
         }
         lastBlockCount = visibleIndex
+        rememberTranscriptScrollState()
+        if addedBlock {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.layoutSubtreeIfNeeded()
+                self.syncTranscriptDocumentSize()
+                if self.followingLiveEnd {
+                    self.scrollTranscriptToLiveEnd()
+                }
+                self.publishBlockOutputFrame()
+                self.rememberTranscriptScrollState()
+            }
+        }
+    }
+
+    func currentTranscriptScrollState() -> PaneTranscriptScrollState {
+        PaneTranscriptScrollState(
+            offsetY: transcript.contentView.bounds.origin.y,
+            documentHeight: transcriptDocumentScrollHeight(),
+            followsLiveEnd: followingLiveEnd
+        )
+    }
+
+    func rememberTranscriptScrollState() {
+        guard displayHandle != 0, !restoresScrollForDisplayHandleChange else { return }
+        transcriptScrollStates[displayHandle] = currentTranscriptScrollState()
     }
 
     func preserveDocumentHeight(_ height: CGFloat) {
@@ -164,8 +216,15 @@ extension SecondaryLivePaneHost {
                 UInt32(index)
             )
             card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
-            if let retainedRange = surface.retainedHistoryRange(blockID: row.id_lo) {
+            if let retainedRange = surface.retainedHistoryRange(
+                blockID: row.id_lo,
+                displayHandle: displayHandle
+            ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
+                card.setOutputLines(
+                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                    cellHeight: cellHeight
+                )
             }
             applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
         }
@@ -194,21 +253,48 @@ extension SecondaryLivePaneHost {
         else { return }
         // Surfaces intentionally have bridge == nil; borrow the window bridge
         // and address this pane's Controller (#1424).
-        _ = historyBridge?.requestHistoryRange(
+        let key = HistoryProjectionRequestKey(
+            displayHandle: displayHandle,
+            blockID: blockID,
+            startLine: projection.start_line,
+            endLine: projection.end_line
+        )
+        guard historyProjectionRequests.begin(key) else { return }
+        let result = historyBridge?.requestHistoryRange(
             forDisplayHandle: displayHandle,
             startLine: projection.start_line,
             endLine: projection.end_line,
             blockID: blockID
-        )
+        ) ?? -10
+        if result != 0 {
+            historyProjectionRequests.retry(key)
+        }
     }
 
     /// Deliver a completed history range into this leaf's Metal surface + card.
     func applyHistoryRange(_ range: NativeHistoryRange) {
+        guard range.sourceDisplayHandle == 0 || range.sourceDisplayHandle == displayHandle else {
+            return
+        }
+        let key = HistoryProjectionRequestKey(
+            displayHandle: range.sourceDisplayHandle == 0 ? displayHandle : range.sourceDisplayHandle,
+            blockID: range.blockID,
+            startLine: range.startLine,
+            endLine: range.endLine
+        )
+        guard !range.rows.isEmpty else {
+            historyProjectionRequests.retry(key)
+            return
+        }
+        historyProjectionRequests.receive(key, status: range.status)
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
-            card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
             card.setBodyTranscript(range.transcriptText)
+            card.setOutputLines(
+                CommandBlockView.visibleOutputLineCount(range.transcriptText),
+                cellHeight: cellHeight
+            )
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()
@@ -272,6 +358,7 @@ extension SecondaryLivePaneHost {
         }
         blockOutputZeroClipRetries = 0
         regions.sort { $0.id < $1.id }
+        lastPublishedTranscriptRegions = regions
         transcriptFrameRevision &+= 1
         surface.setTranscriptFrame(
             NativeTranscriptFrame(
@@ -280,6 +367,13 @@ extension SecondaryLivePaneHost {
                 surfaceIdentity: ObjectIdentifier(surface)
             )
         )
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",
+           lastVisibleHistoryPixelCount == 0,
+           Date().timeIntervalSince(lastHistoryPixelSampleAt) >= 0.5
+        {
+            lastHistoryPixelSampleAt = Date()
+            lastVisibleHistoryPixelCount = surface.inspectFlowPaint(sampleGPU: true).opaquePixelsInsideClips
+        }
     }
 
     private func collectBlockOutputRegions() -> [NativeTranscriptRegion] {
@@ -287,7 +381,14 @@ extension SecondaryLivePaneHost {
         for (blockID, card) in blockCards {
             let clip = card.body.convert(card.body.bounds, to: surface)
             guard clip.width > 0, clip.height > 0 else { continue }
-            regions.append(NativeTranscriptRegion(id: blockID, origin: clip.origin, clip: clip))
+            regions.append(
+                NativeTranscriptRegion(
+                    id: blockID,
+                    displayHandle: displayHandle,
+                    origin: clip.origin,
+                    clip: clip
+                )
+            )
         }
         return regions
     }
@@ -304,13 +405,22 @@ extension SecondaryLivePaneHost {
     /// left a permanent dead zone below cards once content shrank after
     /// growing tall.
     func syncTranscriptDocumentSize() {
+        let shouldFollowLiveEnd = followingLiveEnd
+        isProgrammaticTranscriptScroll = true
+        defer {
+            isProgrammaticTranscriptScroll = false
+            if shouldFollowLiveEnd {
+                scrollTranscriptToLiveEnd()
+            }
+        }
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
-        let contentHeight = max(fitted.height - transcriptLeadingSpacerHeight.constant, 0)
         let hasCards = !blockCards.isEmpty
+        let contentHeight = transcriptCardsContentHeight()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
-        let height = max(contentHeight, viewportHeight, 1)
+        let preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
+        let height = max(max(contentHeight, viewportHeight), max(preservedHeight, 1))
         let spacerHeight = max(height - contentHeight, 0)
         if abs(transcriptLeadingSpacerHeight.constant - spacerHeight) > 0.5 {
             transcriptLeadingSpacerHeight.constant = spacerHeight
@@ -323,6 +433,18 @@ extension SecondaryLivePaneHost {
         }
     }
 
+    /// Measure the current cards rather than subtracting the spacer from
+    /// `NSStackView.fittingSize`, which can retain the prior document frame
+    /// while Blocks are rebuilt after focus/projection changes (#1426).
+    func transcriptCardsContentHeight() -> CGFloat {
+        let cards = blocks.arrangedSubviews.filter { $0 !== transcriptLeadingSpacer }
+        guard !cards.isEmpty else { return 0 }
+        let cardHeight = cards.reduce(CGFloat.zero) { total, view in
+            total + max(view.fittingSize.height, view.bounds.height)
+        }
+        return cardHeight + CGFloat(max(cards.count - 1, 0)) * blocks.spacing
+    }
+
     func transcriptDocumentScrollHeight() -> CGFloat {
         let document = transcript.documentView ?? blocks
         return max(document.frame.height, document.fittingSize.height, 1)
@@ -331,6 +453,7 @@ extension SecondaryLivePaneHost {
     /// Stretch the transcript document so scroll-offset retention can be tested
     /// without depending on Runtime Block projection content.
     func ensureTranscriptScrollableForTests(minimumHeight: CGFloat = 2400) {
+        clearPreservedDocumentHeight()
         let marker = NSUserInterfaceItemIdentifier("seyal-test-scroll-spacer")
         blocks.arrangedSubviews
             .filter { $0.identifier == marker }
@@ -344,8 +467,10 @@ extension SecondaryLivePaneHost {
             spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 1),
         ])
         syncTranscriptDocumentSize()
+        preserveDocumentHeight(max(minimumHeight, transcriptDocumentScrollHeight()))
         layoutSubtreeIfNeeded()
         followingLiveEnd = false
+        rememberTranscriptScrollState()
     }
 
     func isNearLiveEnd(tolerance: CGFloat = 24) -> Bool {
@@ -357,10 +482,11 @@ extension SecondaryLivePaneHost {
     func scrollTranscriptToLiveEnd() {
         isProgrammaticTranscriptScroll = true
         defer { isProgrammaticTranscriptScroll = false }
-        let visible = transcript.contentView.bounds.height
-        let y = max(transcriptDocumentScrollHeight() - visible, 0)
-        transcript.contentView.scroll(to: NSPoint(x: 0, y: y))
+        let visible = transcript.contentView.bounds
+        let maxY = max(transcriptDocumentScrollHeight() - visible.height, 0)
+        transcript.contentView.scroll(to: NSPoint(x: visible.origin.x, y: maxY))
         transcript.reflectScrolledClipView(transcript.contentView)
         followingLiveEnd = true
+        rememberTranscriptScrollState()
     }
 }

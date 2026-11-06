@@ -361,7 +361,8 @@ impl ShellState {
             }],
             selected_terminal_tab: Some(terminal_id),
             allows_implicit_execution_bootstrap: false,
-            presentation_mode: crate::presentation::PresentationMode::Raw,
+            presentation_mode: crate::presentation::PresentationMode::Flow,
+            resting_presentation_mode: crate::presentation::PresentationMode::Flow,
         };
         Tab::with_pane(TabId::new(), format!("Terminal {ordinal}"), pane)
     }

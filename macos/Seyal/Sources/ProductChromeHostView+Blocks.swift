@@ -1,7 +1,82 @@
 import AppKit
 
+enum HistoryRangeRouting {
+    enum Destination: Equatable {
+        case primary
+        case secondary(UInt64)
+        case primaryAndSecondary(UInt64)
+        case discard
+    }
+
+    static func destination(
+        sourceDisplayHandle: UInt64,
+        primaryDisplayHandle: UInt64,
+        secondaryDisplayHandles: Set<UInt64>
+    ) -> Destination {
+        if sourceDisplayHandle == 0 {
+            return secondaryDisplayHandles.isEmpty ? .primary : .discard
+        }
+        // In multipane Flow, PaneLayoutView installs a durable
+        // SecondaryLivePaneHost for every visible leaf, including the focused
+        // pane. Its handle is also `primaryDisplayHandle` because that pane
+        // owns input, but its Block cards live in the per-pane host. Prefer
+        // the exact host before falling back to the single-pane transcript.
+        if secondaryDisplayHandles.contains(sourceDisplayHandle),
+           sourceDisplayHandle == primaryDisplayHandle,
+           primaryDisplayHandle != 0
+        {
+            return .primaryAndSecondary(sourceDisplayHandle)
+        }
+        if secondaryDisplayHandles.contains(sourceDisplayHandle) {
+            return .secondary(sourceDisplayHandle)
+        }
+        if sourceDisplayHandle == primaryDisplayHandle, primaryDisplayHandle != 0 {
+            return .primary
+        }
+        return .discard
+    }
+}
+
 @MainActor
 extension ProductChromeHostView {
+    @objc func transcriptDidScroll() {
+        guard !isProgrammaticTranscriptScroll else {
+            publishBlockOutputFrame()
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isProgrammaticTranscriptScroll else { return }
+            self.followingLiveEnd = self.isNearLiveEnd()
+            self.publishBlockOutputFrame()
+            self.positionInlineComposerAtCurrentCursor()
+        }
+    }
+
+    func configureTranscriptLeadingSpacer() {
+        transcriptLeadingSpacer.translatesAutoresizingMaskIntoConstraints = false
+        transcriptLeadingSpacer.setAccessibilityElement(false)
+        transcriptLeadingSpacerHeight = transcriptLeadingSpacer.heightAnchor.constraint(
+            equalToConstant: 0
+        )
+        transcriptLeadingSpacerHeight.isActive = true
+        blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
+    }
+
+    func pinTranscriptToComposer() {
+        let fillsToComposer = transcript.bottomAnchor.constraint(
+            equalTo: composer.topAnchor,
+            constant: -12
+        )
+        fillsToComposer.priority = .defaultHigh
+        fillsToComposer.isActive = true
+    }
+
+    private var activeBlockDisplayHandle: UInt64 {
+        let bridge = pane.inputSurface.bridge
+        let focusedHandle = bridge?.windowFocusedDisplayHandle ?? 0
+        return focusedHandle != 0 ? focusedHandle : bridge?.clientHandle ?? 0
+    }
+
     func setupTranscriptTopSpacer() {
         transcriptTopSpacer.translatesAutoresizingMaskIntoConstraints = false
         transcriptTopSpacerHeight = transcriptTopSpacer.heightAnchor.constraint(equalToConstant: 0)
@@ -50,6 +125,21 @@ extension ProductChromeHostView {
         _ = seyal_app_apply(pane.appHandle, &action)
     }
 
+    /// Multipane Flow uses one durable presentation host per Pane. Remove the
+    /// legacy focused-pane cards from the hidden single-pane transcript so
+    /// accessibility exposes each Block only through its owning pane host.
+    /// Keep retained history in the input surface: if the layout collapses to
+    /// one Pane, `rebuildBlocks()` can project it again without another fetch.
+    func clearLegacyTranscriptProjectionForMultipane() {
+        for card in blockCards.values {
+            blocks.removeArrangedSubview(card)
+            card.removeFromSuperview()
+        }
+        blockCards.removeAll()
+        lastBlockCount = 0
+        syncTranscriptDocumentSize()
+    }
+
     /// Relay Runtime's composer eligibility into the Rust root unchanged
     /// (#978). Rust decides what the composer shows; this only carries it.
     @discardableResult
@@ -66,6 +156,7 @@ extension ProductChromeHostView {
     }
 
     func applyTranscriptPresentation(_ snapshot: SeyalAppSnapshot) {
+        pane.inputSurface.activateTranscriptDisplayHandle(activeBlockDisplayHandle)
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct
@@ -160,8 +251,16 @@ extension ProductChromeHostView {
             card.setAccessibilityIdentifier("seyal-block-\(visibleIndex)")
             card.setBodyAccessibilityIdentifier("seyal-block-\(visibleIndex)-body")
             visibleIndex += 1
-            if blockID != 0, let retainedRange = pane.inputSurface.retainedHistoryRange(blockID: blockID) {
+            if blockID != 0,
+               let retainedRange = pane.inputSurface.retainedHistoryRange(
+                   blockID: blockID,
+                   displayHandle: activeBlockDisplayHandle
+               ) {
                 card.setBodyTranscript(retainedRange.transcriptText)
+                card.setOutputLines(
+                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                    cellHeight: pane.inputSurface.terminalPresentationCellSize().height
+                )
             }
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
@@ -390,27 +489,41 @@ extension ProductChromeHostView {
     }
 
     func applyHistoryRange(_ range: NativeHistoryRange) {
-        // Multipane: route by the Controller that produced the range (#1426).
-        // Block ids alone collide across executions and caused cross-pane bodies.
-        if range.sourceDisplayHandle != 0,
-            let host = centerColumn.secondaryHost(displayHandle: range.sourceDisplayHandle)
-        {
+        let bridge = pane.inputSurface.bridge
+        let primaryDisplayHandle = activeBlockDisplayHandle
+        let secondaryDisplayHandles = Set(centerColumn.secondaryHosts.map(\.displayHandle))
+        switch HistoryRangeRouting.destination(
+            sourceDisplayHandle: range.sourceDisplayHandle,
+            primaryDisplayHandle: primaryDisplayHandle,
+            secondaryDisplayHandles: secondaryDisplayHandles
+        ) {
+        case .secondary(let handle):
+            guard let host = centerColumn.secondaryHost(displayHandle: handle) else { return }
             host.applyHistoryRange(range)
             return
-        }
-        if centerColumn.secondaryHosts.count > 1,
-            let host = centerColumn.secondaryHosts.first(where: {
-                $0.blockCards[range.blockID] != nil
-            })
-        {
+        case .primaryAndSecondary(let handle):
+            // Multipane keeps a durable per-pane Block host while the focused
+            // input surface also paints the primary transcript. Feed both
+            // projections for the same Controller so a focus swap cannot
+            // reveal a host whose history buffer never received this range.
+            guard let host = centerColumn.secondaryHost(displayHandle: handle) else { return }
             host.applyHistoryRange(range)
+        case .discard:
             return
+        case .primary:
+            break
         }
         pane.inputSurface.retainHistoryRange(range)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
-        if let card = blockCards[range.blockID] {
-            card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
+        guard range.sourceDisplayHandle == 0
+            || range.sourceDisplayHandle == activeBlockDisplayHandle
+        else { return }
+        if let card = blockCards[range.blockID], !range.rows.isEmpty {
             card.setBodyTranscript(range.transcriptText)
+            card.setOutputLines(
+                CommandBlockView.visibleOutputLineCount(range.transcriptText),
+                cellHeight: cellHeight
+            )
         }
         // Paint with Auto Layout sizes first, then expand the document frame.
         // setFrameSize-before-publish can yield zero-height clips that wipe Metal
@@ -510,6 +623,7 @@ extension ProductChromeHostView {
             guard clip.width > 0, clip.height > 0 else { continue }
             regions.append(NativeTranscriptRegion(
                 id: blockID,
+                displayHandle: activeBlockDisplayHandle,
                 origin: clip.origin,
                 clip: clip,
                 suppressesCursor: blockID == relayTarget.blockID && relayTarget.mode == 2

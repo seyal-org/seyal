@@ -84,6 +84,19 @@ pub enum ClientError {
     BlockMetadataConflict,
 }
 
+impl ClientError {
+    pub(crate) const fn is_terminal_registry_loss(&self) -> bool {
+        matches!(
+            self,
+            Self::Disconnected
+                | Self::Io
+                | Self::NoRunningExecution
+                | Self::Protocol
+                | Self::BlockMetadataConflict
+        )
+    }
+}
+
 /// Decode a server error at the protocol boundary. Unknown future codes are
 /// deliberately treated as protocol failures instead of being exposed as an
 /// untyped number with guessed retry semantics.
@@ -620,3 +633,10 @@ fn reconstruction_probe_client_with_stream(
 mod composer_target_tests;
 #[cfg(test)]
 mod tests;
+
+/// Build a local-client fixture for FFI registry tests without exposing the
+/// private local test module to sibling modules.
+#[cfg(test)]
+pub(crate) fn test_client_for_ffi(stream: std::os::unix::net::UnixStream) -> LocalDisplayClient {
+    tests::test_client(stream)
+}

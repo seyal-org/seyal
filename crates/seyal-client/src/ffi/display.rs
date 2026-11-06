@@ -423,8 +423,10 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
 
 /// Poll one registry handle without changing the selected readiness client.
 ///
-/// Terminal disconnect/IO unregisters that client so level-triggered sources
-/// stop refiring. Transient prepare errors stay on the live registry.
+/// Connection-fatal errors unregister that client so level-triggered sources
+/// stop refiring. Protocol and BlockMetadataConflict leave the offending frame
+/// unconsumed, so the same client can never make progress (SPEC-007 §12.1/§12.2);
+/// unregistering is the only level-trigger progress path (#1433).
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
     super::drain_attach_wakeup();
@@ -457,10 +459,7 @@ pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
 }
 
 fn is_terminal_client_loss(error: &ClientError) -> bool {
-    matches!(
-        error,
-        ClientError::Disconnected | ClientError::Io | ClientError::NoRunningExecution
-    )
+    error.is_terminal_registry_loss()
 }
 
 /// Ensure the initial PreparedSurface after attach snapshot commit. Idempotent.
@@ -650,26 +649,5 @@ fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedF
         grapheme_utf8: grapheme.as_ptr(),
         grapheme_utf8_len,
         reserved2: 0,
-    }
-}
-
-#[cfg(test)]
-mod handle_addressed_history_tests {
-    use super::{
-        seyal_bridge_history_range_consume_for_handle, seyal_bridge_history_range_peek_for_handle,
-        seyal_bridge_next_history_request_id_for, seyal_bridge_request_history_range_for,
-    };
-
-    #[test]
-    fn unknown_handle_history_apis_fail_closed() {
-        assert_eq!(seyal_bridge_next_history_request_id_for(0), 0);
-        assert_eq!(
-            seyal_bridge_request_history_range_for(0, 1, 1, 2, 512, 131_072, 0),
-            -1
-        );
-        let peek = seyal_bridge_history_range_peek_for_handle(0, 1, 1);
-        assert_eq!(peek.block_id, 0);
-        assert_eq!(peek.request_id, 0);
-        assert_eq!(seyal_bridge_history_range_consume_for_handle(0, 1, 1), 0);
     }
 }

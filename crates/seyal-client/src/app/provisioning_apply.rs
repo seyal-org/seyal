@@ -159,8 +159,7 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Split the focused terminal leaf and begin one C1 provisioning intent for
-    /// the new terminal leaf (ADR-017 §4.4 / C3). Sibling bindings are untouched.
+    /// Split the focused leaf and start its C1 provisioning intent (ADR-017 §4.4 / C3).
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
         self.shell
             .apply(ShellAction::SplitFocused {
@@ -207,6 +206,7 @@ impl ApplicationRoot {
             }
             return Err(error);
         }
+        self.select_split_tab_flow_resting_mode(pane);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

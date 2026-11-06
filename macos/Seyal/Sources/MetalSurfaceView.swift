@@ -64,6 +64,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var lastBridgeError: Int32?
   var lastRenderError: Error?
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
+  private(set) var transcriptDisplayHandle: UInt64 = 0
   var lastProposedGeometry = CGRect.null
   var proposingGeometry = false
   /// Presentation-local Raw scrollback rows above live origin (#1442).
@@ -241,6 +242,21 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     }
     renderer.removeHistoryRegions(except: kept)
     clearLiveTailWhenTranscriptEmpty(kept)
+  }
+
+  /// Clear renderer buffers when a pane switches terminal-tab Controllers.
+  /// Block ids are local to an execution, so the same id in another tab must
+  /// not inherit the previous tab's Metal paint while its history is loading.
+  /// Canonical retained ranges remain keyed by Pane + display handle for reuse.
+  func activateTranscriptDisplayHandle(_ handle: UInt64) {
+    guard handle != transcriptDisplayHandle else { return }
+    transcriptDisplayHandle = handle
+    renderer.removeHistoryRegions(except: [])
+    renderer.clearLiveTailPresentation()
+    hasRetainedHistoryPresentation = historyRanges.keys.contains {
+      $0.displayHandle == handle
+    }
+    renderer.requestPresent()
   }
 
   var terminalExecutionIdentity: String? {
@@ -752,22 +768,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     bridge?.nextComposerRequestID() ?? 0
   }
 
-  func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    bridge?.requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID) ?? -10
-  }
-
-  func retainHistoryRange(_ range: NativeHistoryRange) {
-    historyRanges[PaneBlockKey(paneID: paneID, blockID: range.blockID)] = range
-  }
-
-  func retainedHistoryRange(blockID: UInt64) -> NativeHistoryRange? {
-    historyRanges[PaneBlockKey(paneID: paneID, blockID: blockID)]
-  }
-
-  func discardHistoryRequests(except blockIDs: Set<UInt64>) {
-    bridge?.discardHistoryRequests(except: historyExceptPreservingRawScrollback(blockIDs))
-  }
-
   @discardableResult
   func terminalSubmitKey(kind: UInt16, scalar: UInt32) -> Int32 {
     bridge?.submitKey(kind: kind, scalar: scalar) ?? -10
@@ -864,60 +864,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// before the surrounding Block body is attached.
   func publishCurrentTerminalFrame() {
     bridge?.publishCurrentFrame()
-  }
-
-  /// Installs the bounded Runtime history projection into this Pane's one
-  /// Metal renderer. The callback is intentionally asynchronous at the
-  /// bridge boundary but preparation itself remains main-thread confined with
-  /// the rest of AppKit/Metal ownership.
-  func renderHistoryRange(_ range: NativeHistoryRange, region: NativeTranscriptRegion? = nil) {
-    retainHistoryRange(range)
-    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
-    do {
-      let rendererRegion: NativeTranscriptRegion
-      if let region {
-        // AppKit uses a bottom-left origin while the terminal shader
-        // consumes top-left pixel coordinates.
-        let pixelClip = NSRect(
-          x: region.clip.minX * scale,
-          y: (bounds.height - region.clip.maxY) * scale,
-          width: region.clip.width * scale,
-          height: region.clip.height * scale
-        )
-        rendererRegion = NativeTranscriptRegion(
-          id: region.id,
-          origin: pixelClip.origin,
-          clip: pixelClip
-        )
-      } else {
-        rendererRegion = NativeTranscriptRegion(
-          id: range.blockID,
-          origin: .zero,
-          clip: NSRect(
-            x: 0,
-            y: 0,
-            width: bounds.width * scale,
-            height: bounds.height * scale
-          )
-        )
-      }
-      try renderer.update(
-        historyRange: range,
-        region: rendererRegion,
-        backingScale: scale
-      )
-      // History-only Flow (shell-exit retain) has no Candidate-D live frame.
-      // Arm presentation without marking renderer-ready / Usable.
-      hasRetainedHistoryPresentation = true
-      if shouldRender {
-        renderer.requestPresent()
-        beginPresentationAttemptSeries()
-        armMetalDisplayLink()
-      }
-      refreshRecoveryAccessibilityValue()
-    } catch {
-      lastRenderError = error
-    }
   }
 
   func applyRendererPresentation(_ plan: RendererPresentationPlan) {

@@ -85,6 +85,10 @@ Other panes remain independently usable.
 For normal Block/transcript presentation, **each Pane owns one transcript scrollbar**.
 
 - Blocks grow intrinsically with output;
+- when the transcript has spare vertical space, its leading filler keeps the newest Block directly above that Pane's composer; the filler is not a Block and does not change history;
+- adding a new command Block brings that Block into view; subsequent output follows only while the user is at the live end;
+- when content exceeds the viewport, the same transcript scrolls;
+- focus changes preserve each Pane's transcript offset and live-end/follow state;
 - long-running normal-screen command output grows its Running Block;
 - there is no fixed-height nested output scrollbar inside each Block;
 - the user scrolls the Pane to navigate Blocks/output;
@@ -103,6 +107,16 @@ Different panes may simultaneously show:
 - future non-terminal surfaces.
 
 No Pane presentation changes another Pane's terminal authority.
+
+Each Pane's selected resting presentation is retained independently of focus.
+Hiding a non-focused Pane's composer is a layout/input decision and does not
+select Raw. Focus changes may change the active composer and keyboard target,
+but must not replace an inactive Flow transcript with a Raw viewport.
+Splitting a Flow Pane creates a sibling in Flow, with independent execution,
+Blocks, composer, and scroll state. Splitting a Raw or TUI Pane creates a Raw
+sibling. New terminal sessions and Panes opened in a new Tab still start in
+Raw. Creating a Pane or terminal in one branch must leave the other branches'
+Block presentations and output visible.
 
 ## 8. Focus
 

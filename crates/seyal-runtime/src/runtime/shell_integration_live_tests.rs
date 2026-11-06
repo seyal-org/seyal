@@ -381,6 +381,63 @@ fn block_body_range_excludes_the_prompt_and_echoed_command_row() {
 }
 
 #[test]
+fn completed_block_retains_all_stream_output_across_terminal_resize() {
+    let mut h = spawn("resize-running-block", PLAIN_RC, None);
+    h.wait_at_prompt();
+    h.runtime
+        .resize(h.id, WindowSize::cells(90, 39).expect("single pane size"))
+        .expect("establish single pane geometry");
+    h.wait_at_prompt();
+    let marker = "RESIZE_BLOCK_LINE";
+    let command =
+        format!("for i in $(seq 1 12); do printf '{marker} %02d\\n' \"$i\"; sleep 0.3; done");
+    assert!(matches!(h.submit(&command), ComposerAdmission::Accepted(_)));
+
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id]
+            .execution
+            .terminal()
+            .primary_history_range(LineId(1), LineId(u64::MAX), 4096)
+            .is_ok_and(|rows| {
+                rows.iter().any(|(_, cells)| {
+                    cells
+                        .iter()
+                        .map(|cell| cell.character)
+                        .collect::<String>()
+                        .contains(&format!("{marker} 07"))
+                })
+            })
+    });
+    h.pump_for(Duration::from_millis(100));
+    h.runtime
+        .resize(h.id, WindowSize::cells(42, 39).expect("split size"))
+        .expect("resize while Block is running");
+
+    assert_eq!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+    let body = h.block_body(0);
+    let record = h.runtime.entries[&h.id]
+        .block_timeline
+        .records()
+        .next()
+        .expect("Block record");
+    for line in 1..=12 {
+        let expected = format!("{marker} {line:02}");
+        assert!(
+            body.contains(&expected),
+            "resize lost {expected} from Block range {}..={:?}; Block body:\n{body}\ncanonical text:\n{}",
+            record.start_line,
+            record.end_line,
+            h.text()
+        );
+    }
+}
+
+#[test]
 fn zero_output_commands_complete_and_later_blocks_stay_exact() {
     // #1015 review: a command with no output finishes on the row it started
     // on. Its completion line used to back up before start_line, the

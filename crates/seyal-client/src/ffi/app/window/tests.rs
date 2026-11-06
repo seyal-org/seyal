@@ -474,8 +474,8 @@ fn per_leaf_presentation_mode_round_trips_for_inactive_leaves_and_windows() {
     let expected = shell.snapshot();
     install_shell(handle, shell);
 
-    // Wire: Flow=0, Raw=1, Tui=2. New panes default to Raw (#1438/#1440).
-    for (window, pane, mode) in [(0, 0, 1), (0, 1, 1), (1, 0, 2)] {
+    // Wire: Flow=0, Raw=1, Tui=2. New panes default to Flow (#1426).
+    for (window, pane, mode) in [(0, 0, 0), (0, 1, 1), (1, 0, 2)] {
         let record = seyal_app_pane_leaf(handle, window, 0, pane);
         assert_eq!(record.version, APP_ABI_VERSION);
         assert_eq!(record.size as usize, size_of::<SeyalAppPaneLeaf>());
@@ -483,7 +483,7 @@ fn per_leaf_presentation_mode_round_trips_for_inactive_leaves_and_windows() {
     }
     assert_eq!(
         expected.windows[0].tabs[0].panes[0].presentation_mode,
-        PresentationMode::Raw
+        PresentationMode::Flow
     );
     assert_eq!(
         expected.windows[0].tabs[0].panes[1].presentation_mode,

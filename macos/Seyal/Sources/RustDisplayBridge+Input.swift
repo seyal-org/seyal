@@ -225,17 +225,55 @@ extension RustDisplayBridge {
     synchronizeWriteReadinessSource()
     onStatusChanged()
     if result == -18 {
+      // A mutation conflict is retryable. Polling the unconsumed frame owns
+      // connection teardown; never stop the whole window from a sibling write.
       onError(result)
-      stop(reconnect: true)
-    } else if result == -3 || result == -10 {
+    } else if Self.isTerminalPollResult(result) {
       onError(result)
       stop()
     }
     return result
   }
 
+  /// Finish work addressed to one Controller without treating a sibling's
+  /// error as a failure of this bridge's primary connection. Multipane hosts
+  /// share the bridge, while readiness and history work are handle-addressed.
+  /// The target Controller's own read source owns loss detection and recovery;
+  /// only errors for `clientHandle` may stop this bridge (#1426).
+  @discardableResult
+  func finishAddressedMutation(_ result: Int32, forDisplayHandle handle: UInt64) -> Int32 {
+    guard result != 0 else {
+      // A successful mutation can still leave control frames queued after a
+      // nonblocking write. Arm this Controller's auxiliary write source now;
+      // otherwise a history request for a quiet sibling can wait forever for
+      // a read event that cannot arrive until the request is flushed.
+      synchronizeWriteReadinessSource()
+      return result
+    }
+    guard handle == clientHandle else {
+      guard Self.isTerminalPollResult(result) else {
+        onStatusChanged()
+        return result
+      }
+      if let source = auxiliaryWriteSources.removeValue(forKey: handle) {
+        // Stop a level-triggered writable error loop, including a handle
+        // removed between readiness and flush (reported as -1). The same
+        // Controller's read source owns loss detection; this primary Pane's
+        // error callback must not receive a sibling's failure.
+        source.cancel()
+      }
+      onStatusChanged()
+      return result
+    }
+    return finishMutation(result)
+  }
+
   func drainReadyDisplayWork() {
-    guard isConnected, selectClient() else { return }
+    guard isConnected else { return }
+    guard selectClient() else {
+      _ = handlePrimaryRegistryRemovalIfNeeded()
+      return
+    }
     defer {
       synchronizeWriteReadinessSource()
       onStatusChanged()
@@ -247,28 +285,41 @@ extension RustDisplayBridge {
     for _ in 0..<8 {
       // Presentation/history reads select the focused terminal below. Keep
       // readiness polling pinned to this bridge's original Controller.
-      guard selectClient() else { return }
+      let polledHandle = clientHandle
+      guard selectClient() else {
+        _ = handlePrimaryRegistryRemovalIfNeeded()
+        return
+      }
       let result = seyal_bridge_poll()
+      if result < 0, !Self.pollResultClosesConnection(result) {
+        onError(result)
+        return
+      }
       // Shell exit (-6): Lifecycle Finalized arrives after the final display /
       // history frames in the same poll. Publish those history ranges and the
       // Block timeline while the client is still registered (unregister waits
       // for stop — #1379 clear→exit). Other losses unregister inside poll;
       // APPLY_RUNTIME_BLOCKS with no client retains the composer timeline.
       if result < 0 {
+        // This readiness source polled clientHandle even when another pane was
+        // focused. Drain its completed history before a shell-exit disconnect;
+        // focused-display lookup would strand or misroute the response (#1426).
+        publishHistoryRanges(forDisplayHandle: polledHandle)
         _ = selectPresentedClient()
-        publishHistoryRanges()
         onTimeline()
         // Rebuild may have issued fresh history requests for settled Blocks;
-        // one more publish picks up anything already buffered on the client.
-        _ = selectPresentedClient()
-        publishHistoryRanges()
+        // one more addressed publish picks up buffered responses on the polled
+        // Controller without reading a sibling's same-numbered Block.
+        publishHistoryRanges(forDisplayHandle: polledHandle)
         onError(result)
         stop(reconnect: result == -18)
         return
       }
       runtimeBlockMetadata = currentBlockMetadata()
+      // Publish this poll source before selecting the focused presentation
+      // client. Pane-local Block ids are only meaningful on their Controller.
+      publishHistoryRanges(forDisplayHandle: polledHandle)
       _ = selectPresentedClient()
-      publishHistoryRanges()
       publishComposerResult()
       publishComposerStatus()
       if let text = copiedText() {
@@ -298,21 +349,16 @@ extension RustDisplayBridge {
   }
 
   func synchronizeWriteReadinessSource() {
-    guard isConnected else {
+    if !isConnected || clientHandle == 0 {
       writeSource?.cancel()
       writeSource = nil
-      for source in auxiliaryWriteSources.values {
-        source.cancel()
-      }
-      auxiliaryWriteSources.removeAll()
-      return
+    } else {
+      synchronizeWriteSource(
+        handle: clientHandle,
+        fileDescriptor: socketFileDescriptor,
+        existing: &writeSource
+      )
     }
-
-    synchronizeWriteSource(
-      handle: clientHandle,
-      fileDescriptor: socketFileDescriptor,
-      existing: &writeSource
-    )
 
     var live = Set<UInt64>()
     var cursor: UInt64 = 0
@@ -325,9 +371,8 @@ extension RustDisplayBridge {
       let fd = seyal_bridge_socket_fd_for(handle)
       let wants = seyal_bridge_wants_write_for(handle)
       if wants < 0 {
-        onError(wants)
-        stop()
-        return
+        finishAddressedMutation(wants, forDisplayHandle: handle)
+        continue
       }
       if wants != 1 || fd < 0 {
         if let source = auxiliaryWriteSources.removeValue(forKey: handle) {
@@ -339,11 +384,10 @@ extension RustDisplayBridge {
       let source = DispatchSource.makeWriteSource(fileDescriptor: fd, queue: .main)
       source.setEventHandler { [weak self] in
         seyalRunAsMainActorFromMainQueue {
-          guard let self, self.isConnected else { return }
+          guard let self, self.auxiliaryWriteSources[handle] != nil else { return }
           let result = seyal_bridge_flush_writable_for(handle)
           guard result == 0 else {
-            self.onError(result)
-            self.stop(reconnect: result == -18)
+            self.finishAddressedMutation(result, forDisplayHandle: handle)
             return
           }
           self.synchronizeWriteReadinessSource()
@@ -390,8 +434,7 @@ extension RustDisplayBridge {
         guard let self, self.isConnected else { return }
         let result = seyal_bridge_flush_writable_for(handle)
         guard result == 0 else {
-          self.onError(result)
-          self.stop(reconnect: result == -18)
+          self.finishMutation(result)
           return
         }
         self.synchronizeWriteReadinessSource()

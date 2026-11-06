@@ -96,6 +96,7 @@ A stale or ambiguous completion never falls back to the last terminal or nearest
 ## 6. Input, resize, copy/paste, composer and presentation
 
 - Terminal keyboard input, paste, mouse, direct-terminal keys, composer submission, and terminal-specific actions target only the selected terminal in the focused Pane.
+- Each Pane host derives its displayed/accessibility execution identity from that Pane's binding; it must not label a pane-specific frame through the process-wide focused-display selector.
 - Copy reads the selected terminal's authoritative display/selection projection; it never reads a sibling terminal or a stale view cache as authority.
 - Pane-local composer draft/history and Flow/Raw/TUI state are associated with the terminal tab/execution they serve. A draft cannot be submitted to a newly selected execution unless the user explicitly submits it there under the current revision/fence.
 - A user resize command targets the selected terminal of the focused Pane only. When split geometry changes, the accepted geometry transaction is correlated independently to each affected Pane's selected terminal; sizes cannot cross between Panes.

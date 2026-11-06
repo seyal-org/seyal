@@ -117,15 +117,12 @@ extension ProductChromeHostView {
 
     /// #1379 Defect B: show New shell only when Rust admits it for the focused
     /// Pane (`seyal_app_new_shell_available`). Do not re-derive from the
-    /// app-wide recovery stage (ADR-015).
+    /// app-wide recovery stage (ADR-015). Composer visibility stays with
+    /// `ComposerBridgeView.reconcile()` (Rust composer mode); this button
+    /// must not latch `isHidden` across Split (#1433).
     func updateNewShellRecoveryAction() {
         let show = seyal_app_new_shell_available(pane.appHandle) != 0
         newShellButton.isHidden = !show
-        // Hide the composer only when Rust already hid it for this Pane.
-        // A focused sibling stays eligible and must not lose its composer.
-        if show {
-            composer.isHidden = true
-        }
     }
 
     /// Explicit New shell after `exit`. Rust prepares the ended Pane, creates
