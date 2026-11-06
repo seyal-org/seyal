@@ -1898,6 +1898,63 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testIdenticalTranscriptGeometryDoesNotReprepareHistory() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-stable-transcript-frame"
+        )
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        func frame(revision: UInt64, clip: NSRect) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: revision,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: clip.origin,
+                        clip: clip
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+        let clip = NSRect(x: 0, y: 0, width: 320, height: 120)
+        surface.renderer.setPresentationPlan(.flow())
+        surface.retainHistoryRange(range)
+        surface.activateTranscriptDisplayHandle(11)
+        surface.setTranscriptFrame(frame(revision: 1, clip: clip))
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, 1)
+
+        surface.renderer.needsPresent = false
+        surface.setTranscriptFrame(frame(revision: 2, clip: clip))
+        XCTAssertFalse(
+            surface.renderer.needsPresent,
+            "a new frame revision with unchanged Block geometry must not reprepare history"
+        )
+
+        surface.setTranscriptFrame(
+            frame(revision: 3, clip: NSRect(x: 0, y: 10, width: 320, height: 120))
+        )
+        XCTAssertTrue(
+            surface.renderer.needsPresent,
+            "changed Block geometry must still prepare and present the repositioned history"
+        )
+    }
+
+    @MainActor
     func testSecondaryPaneReconcilesWhenItsControllerChanges() throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal unavailable")
