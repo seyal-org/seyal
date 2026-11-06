@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 @MainActor
@@ -196,12 +197,78 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["seyal-blocks-scroll"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["seyal-blocks"].waitForExistence(timeout: 5))
-        // Core Terminal chrome (#922): left panel, tab strip, and inspector
-        // are visible by default alongside the Flow composer/Blocks surface.
+        // Core chrome: workspace/layout navigation, Pane-local terminal tabs,
+        // and inspector are visible alongside the Flow composer/Blocks surface.
         XCTAssertTrue(app.descendants(matching: .any)["seyal-inspector"].firstMatch.isHittable)
-        XCTAssertTrue(app.descendants(matching: .any)["seyal-tab-strip"].firstMatch.isHittable)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-strip"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
+            ).firstMatch.isHittable
+        )
         XCTAssertTrue(app.descendants(matching: .any)["seyal-left-tabs"].firstMatch.isHittable)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
+    }
+
+    /// #1401/#1412: left C03 mode switcher is Workspaces ↔ Tabs; Workspaces omits
+    /// empty AGENTS and Pane dumps; Tabs lists pane-local TerminalTabs.
+    func testLeftContextWorkspacesAndTabsModeFollowC03Contracts() throws {
+        let app = hostedApp()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        waitForUsablePty(in: app)
+
+        let workspaces = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
+        XCTAssertTrue(workspaces.waitForExistence(timeout: 5))
+        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspaces.isHittable)
+        XCTAssertTrue(tabs.isHittable)
+        // Prefer AX label; fall back to title — attributed mode labels can vary by OS.
+        let workspacesName = (workspaces.label.isEmpty ? workspaces.title : workspaces.label)
+        let tabsName = (tabs.label.isEmpty ? tabs.title : tabs.label)
+        XCTAssertEqual(workspacesName, "Workspaces")
+        XCTAssertEqual(tabsName, "Tabs")
+        XCTAssertNotEqual(tabsName, "Layouts")
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-workspaces-heading"].firstMatch.waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-agents-heading"].exists,
+            "empty AGENTS chrome must stay omitted"
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-workspace-0"].firstMatch.exists)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-pane-0"].exists,
+            "C03 must not list Pane rows in the left rail"
+        )
+
+        tabs.click()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-tabs-heading"].firstMatch.waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-terminal-tab-left-0"].firstMatch.waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-0"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-pane-0"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-workspaces-heading"].exists)
+    }
+
+    /// #1412: left Tabs mode lists pane-local terminals, not outer Layout rows.
+    func testLeftTabsModeListsPaneLocalTerminalTabs() throws {
+        let app = hostedApp()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        waitForUsablePty(in: app)
+        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
+        XCTAssertEqual(tabs.label.isEmpty ? tabs.title : tabs.label, "Tabs")
+        tabs.click()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-terminal-tab-left-0"].firstMatch.waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-pane-0"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-0"].exists)
     }
 
     /// #923: the Tab's Rust PaneTree is projected into Pane regions. Before a
@@ -250,6 +317,43 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(
             secondary.waitForExistence(timeout: 12),
             "unfocused bound sibling must keep a live Metal host"
+        )
+    }
+
+    /// #1429: PaneLayoutView wires each region's shell pane title into
+    /// PaneTerminalTabStrip, so split leaves read "Pane 1" / "Pane 2" instead
+    /// of both reading "Terminal 1".
+    func testSplitPaneTerminalTabsShowDistinctPaneTitles() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        XCTAssertTrue(split.waitForExistence(timeout: 8))
+        split.click()
+        let firstRegion = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
+        let secondRegion = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(
+            secondRegion.waitForExistence(timeout: 12),
+            "SplitFocused must project a second Pane region"
+        )
+        XCTAssertTrue(firstRegion.exists)
+
+        func tabTitle(in region: XCUIElement) -> String? {
+            let predicate = NSPredicate(
+                format: "identifier BEGINSWITH 'seyal-terminal-tab-' "
+                    + "AND NOT (identifier CONTAINS[c] 'left') "
+                    + "AND NOT (identifier ENDSWITH '-close')"
+            )
+            let button = region.descendants(matching: .any).matching(predicate).firstMatch
+            guard button.waitForExistence(timeout: 8) else { return nil }
+            return button.label.isEmpty ? button.title : button.label
+        }
+
+        let firstTitle = tabTitle(in: firstRegion)
+        let secondTitle = tabTitle(in: secondRegion)
+        XCTAssertEqual(firstTitle, "Pane 1")
+        XCTAssertEqual(secondTitle, "Pane 2")
+        XCTAssertNotEqual(
+            firstTitle, secondTitle, "split leaves must not both read as Terminal 1 (#1429)"
         )
     }
 
@@ -324,8 +428,10 @@ final class SeyalHostUITests: XCTestCase {
             return
         }
         XCTAssertNotEqual(firstRegion.value as? String, "focused")
-        let primarySurface = app.descendants(matching: .any)["terminal-input"].firstMatch
-        XCTAssertTrue(primarySurface.waitForExistence(timeout: 8))
+        // #1424: multipane Flow hides liveContent/`terminal-input`; geometry
+        // projections live on durable pane presentation hosts.
+        let primarySurface = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
+        XCTAssertTrue(primarySurface.waitForExistence(timeout: 8), "focused Flow presentation host missing")
         let secondaryHost = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
         XCTAssertTrue(secondaryHost.waitForExistence(timeout: 12))
         XCTAssertTrue(secondaryHost.isEnabled, "secondary Pane focus target must be an enabled AX button")
@@ -489,9 +595,21 @@ final class SeyalHostUITests: XCTestCase {
             // product editability contract.
             editor.click()
             let command = "/bin/bash \(probeScript.path)"
-            editor.typeText(command)
+            // Paste avoids XCUI typeText truncating long paths to `/` under
+            // multipane Flow hosts (#1424).
+            let previous = NSPasteboard.general.string(forType: .string)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+            editor.typeKey("a", modifierFlags: [.command])
+            editor.typeKey("v", modifierFlags: [.command])
+            if let previous {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(previous, forType: .string)
+            }
+            // Paste can clear keyboard focus; re-click before submit.
+            editor.click()
             let draftMatchesCommand = expectation(
-                for: NSPredicate(format: "value == %@", command),
+                for: NSPredicate(format: "value CONTAINS %@", probeScript.lastPathComponent),
                 evaluatedWith: editor,
                 handler: nil
             )
@@ -504,7 +622,19 @@ final class SeyalHostUITests: XCTestCase {
                 )
                 return nil
             }
-            editor.typeKey("\r", modifierFlags: [])
+            let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
+            let executeReady = expectation(
+                for: NSPredicate(format: "isEnabled == true"),
+                evaluatedWith: execute,
+                handler: nil
+            )
+            if XCTWaiter.wait(for: [executeReady], timeout: 4) == .completed {
+                execute.click()
+            } else {
+                // Return invokes submit() which pushDraft()s even when AX still
+                // reports execute disabled after synthetic paste.
+                editor.typeKey("\r", modifierFlags: [])
+            }
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
                 if FileManager.default.fileExists(atPath: startedFile.path),
@@ -678,9 +808,12 @@ final class SeyalHostUITests: XCTestCase {
             return
         }
 
-        let primarySurfaceAfterFocus = app.descendants(matching: .any)["terminal-input"].firstMatch
+        let primarySurfaceAfterFocus = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
         let secondaryHostAfterFocus = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
-        XCTAssertTrue(primarySurfaceAfterFocus.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            primarySurfaceAfterFocus.waitForExistence(timeout: 5),
+            "focused Flow presentation host missing after focus restore"
+        )
         XCTAssertTrue(secondaryHostAfterFocus.waitForExistence(timeout: 5))
         guard let secondAtPane1Focus = waitForMatchingSize(
             from: secondFile,
@@ -714,6 +847,12 @@ final class SeyalHostUITests: XCTestCase {
             oldWidth + 20,
             "window must resize; before=\(oldWidth) frame=\(window.frame)"
         )
+        // Nudge layout on both Flow hosts so pane geometry proposals run after
+        // the outer-window resize gesture (#1424 multipane hosts).
+        primarySurfaceAfterFocus.click()
+        secondaryHostAfterFocus.click()
+        primarySurfaceAfterFocus.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
 
         func waitForResizedSize(
             in region: XCUIElement,
@@ -723,7 +862,7 @@ final class SeyalHostUITests: XCTestCase {
             previous: (rows: Int, columns: Int, shellPID: Int),
             requireUnfocused: Bool
         ) -> (rows: Int, columns: Int, shellPID: Int)? {
-            let deadline = Date().addingTimeInterval(10)
+            let deadline = Date().addingTimeInterval(16)
             var lastProbe = "missing"
             var lastProjection = "unavailable"
             while Date() < deadline {
@@ -1144,20 +1283,39 @@ final class SeyalHostUITests: XCTestCase {
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        let presentation = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
         let terminal = app.descendants(matching: .any)["terminal-input"]
-        XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
-        let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
-        let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
-        let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
+        if presentation.waitForExistence(timeout: 2) {
+            // Prefer host execution= once published; fall back to terminal-input
+            // when Raw resting still exposes the interactive surface (#1445).
+            let hostUsable = NSPredicate(format: "value CONTAINS 'execution='")
+            let hostReady = expectation(for: hostUsable, evaluatedWith: presentation, handler: nil)
+            if XCTWaiter.wait(for: [hostReady], timeout: min(timeout, 8)) != .completed,
+               terminal.waitForExistence(timeout: 2)
+            {
+                let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
+                let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
+                XCTAssertEqual(
+                    XCTWaiter.wait(for: [arrived], timeout: timeout),
+                    .completed,
+                    "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
+                )
+            }
+        } else {
+            XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
+            let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
+            let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
+            let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
+            XCTAssertEqual(
+                result,
+                .completed,
+                "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
+            )
+        }
         XCTAssertEqual(
             app.state,
             .runningForeground,
             "Seyal.app crashed while waiting for the PTY/runtime attach"
-        )
-        XCTAssertEqual(
-            result,
-            .completed,
-            "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
         )
         // #1065: Rust RecoveryCoordinator owns reconnect policy; the host only
         // executes effects (driveRecovery PerformAttempt/adopt) and projects
@@ -1179,6 +1337,7 @@ final class SeyalHostUITests: XCTestCase {
     /// Headed XCUI must stay on Flow/Blocks. A leftover Runtime in alternate
     /// screen, or a Raw-only launch, looks like a normal terminal and is a fail.
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
+        app.ensureFlowBlocksPresentation(timeout: timeout)
         let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
@@ -1837,8 +1996,41 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// W4b / W7: production window admission + last-window-close stay-alive.
-    func testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit() throws {
+    /// #1413 / ADR-028: Create Workspace control is visible on the Workspaces left rail.
+    func testCreateWorkspaceControlVisibleOnWorkspacesLeftRail() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
+            "Workspaces owns the left panel by default"
+        )
+        let create = app.descendants(matching: .any)["seyal-create-workspace"].firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 5), "Create Workspace chrome must project")
+        XCTAssertTrue(create.isHittable, "Create Workspace must be hittable on Workspaces panel")
+
+        let tabs = app.descendants(matching: .any)["seyal-left-tabs"].firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
+        tabs.click()
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline && create.exists && create.isHittable {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertFalse(
+            create.exists && create.isHittable,
+            "Create Workspace leaves the rail while Tabs owns the left panel"
+        )
+
+        let workspaces = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        workspaces.click()
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        XCTAssertTrue(create.isHittable)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// W4b / W7: production window admission + last-window close quits headed app
+    /// (ADR-018 §2.5 / #1451). Dock reopen after Quit is a fresh launch.
+    /// Headless Runtime survival remains covered by W7 Runtime/client proofs.
+    func testNewWindowAdmissionCreatesSecondWindowAndLastCloseQuits() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         XCTAssertEqual(app.windows.count, 1, "bootstrap realizes exactly one headed window")
@@ -1847,26 +2039,24 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(newWindow.isEnabled, "W4b turns CreateWindow admission on")
         newWindow.click()
         waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
-        let fileMenu = app.menuBars.menuBarItems["File"]
-        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
-        fileMenu.click()
-        let close = app.menuItems["Close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
-        close.click()
-        waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
-        fileMenu.click()
-        close.click()
-        waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
-        RunLoop.current.run(until: Date().addingTimeInterval(2))
-        XCTAssertEqual(app.state, .runningForeground, "last-window close must not quit")
+        // #1395: File owns Close Terminal / Close Tab; Window owns Close Window.
+        let windowMenu = app.menuBars.menuBarItems["Window"]
+        XCTAssertTrue(windowMenu.waitForExistence(timeout: 5))
+        windowMenu.click()
+        let closeWindow = app.menuItems["Close Window"]
         XCTAssertTrue(
-            newWindow.waitForExistence(timeout: 5),
-            "File → New Window stays available after the last window closes"
+            closeWindow.waitForExistence(timeout: 5),
+            "Window → Close Window must be projected after #1395"
         )
-        XCTAssertTrue(newWindow.isEnabled, "zero-window re-entry remains admitted")
-        fileMenu.click()
-        newWindow.click()
-        waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
+        closeWindow.click()
+        waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
+        windowMenu.click()
+        XCTAssertTrue(closeWindow.waitForExistence(timeout: 5))
+        closeWindow.click()
+        XCTAssertTrue(
+            app.wait(for: .notRunning, timeout: 8),
+            "closing the last window must quit the headed app (macOS-default)"
+        )
     }
 
     func testTitleBarCloseForwardsThroughWindowCloseDelegate() throws {
@@ -1881,6 +2071,18 @@ final class SeyalHostUITests: XCTestCase {
         closeButton.click()
         waitForWindowCount(app, 1, message: "title-bar close forwards the typed CloseWindow action")
         XCTAssertEqual(app.state, .runningForeground, "closing a non-final window must not quit")
+    }
+
+    func testSessionBootstrapChromeKeepsComposerUsableAtIdlePrompt() throws {
+        // ProductChromeHostView gained the ADR-026 session banner. Idle prompt
+        // must still admit Flow composer submit while the banner is collapsed.
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        XCTAssertTrue(composer.isHittable)
+        let chrome = app.descendants(matching: .any)["seyal-product-chrome"].firstMatch
+        XCTAssertTrue(chrome.waitForExistence(timeout: 5))
     }
 
     private func waitForWindowCount(

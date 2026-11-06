@@ -37,6 +37,60 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_shell(handle).window_count, 3)
     }
 
+    func testQuitConfirmCancelLeavesHostRunning() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_windows_only(host.appHandle, 2), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 1)
+        host.quitConfirmationHandlerForTests = { false }
+        XCTAssertEqual(host.applicationShouldTerminate(), .terminateCancel)
+        XCTAssertEqual(host.orderedKeys.count, 2)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 0)
+    }
+
+    func testQuitConfirmContinueRunsBoundedDetach() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, 2), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 1)
+        host.quitConfirmationHandlerForTests = { true }
+        let replies = QuitReplyCounter()
+        host.quitTerminateReplyHandlerForTests = { replies.increment() }
+        let reply = host.applicationShouldTerminate()
+        XCTAssertEqual(reply, .terminateLater)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(replies.count, 1)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+    }
+
+    func testWarnBeforeQuitFalseSkipsConfirm() {
+        let config = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-warn-before-quit-\(UUID().uuidString).toml")
+        try? "[app]\nwarn_before_quit = false\n".write(to: config, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: config) }
+        XCTAssertEqual(reloadUiConfigForMultiWindowTests(path: config.path), 0)
+
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, 3), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 0)
+        var confirmCalled = false
+        host.quitConfirmationHandlerForTests = {
+            confirmCalled = true
+            return true
+        }
+        let replies = QuitReplyCounter()
+        host.quitTerminateReplyHandlerForTests = { replies.increment() }
+        let reply = host.applicationShouldTerminate()
+        XCTAssertEqual(reply, .terminateLater)
+        XCTAssertFalse(confirmCalled)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(replies.count, 1)
+    }
+
     func testQuitWithThreeWindowsAndAttachmentsRepliesOnce() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
@@ -255,6 +309,7 @@ final class MultiWindowHostTests: XCTestCase {
             }
 
         XCTAssertEqual(projectedItems.count, 15)
+        XCTAssertEqual(projectedItems.filter { $0.title == "New Terminal" }.count, 1)
         XCTAssertEqual(
             Set(projectedItems.compactMap { $0.representedObject as? UInt16 }),
             Set((0..<seyal_app_shortcut_count()).compactMap { index in
@@ -271,7 +326,7 @@ final class MultiWindowHostTests: XCTestCase {
         )
         XCTAssertTrue(projectedItems.contains { $0.title == "Split Right" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Split Down" })
-        XCTAssertTrue(projectedItems.contains { $0.title == "Toggle Raw" })
+        XCTAssertFalse(projectedItems.contains { $0.title == "Toggle Raw" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Toggle TUI" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Go to…" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Previous Tab" })
@@ -282,7 +337,10 @@ final class MultiWindowHostTests: XCTestCase {
             $0.action == #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:))
         })
 
-        let close = projectedItems.first { $0.representedObject as? UInt16 == 37 }
+        // #1395: ⌘W closes the focused Pane terminal, not AppCloseFocused (37).
+        let close = projectedItems.first {
+            $0.representedObject as? UInt16 == KeybindingShortcutRealization.terminalCloseFocused
+        }
         XCTAssertEqual(close?.keyEquivalent, "w")
         XCTAssertTrue(close?.keyEquivalentModifierMask.contains(.command) == true)
     }
@@ -307,9 +365,9 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertTrue(host.orderedKeys.isEmpty)
     }
 
-    func testApplicationShouldTerminateAfterLastWindowClosedIsFalse() {
+    func testApplicationShouldTerminateAfterLastWindowClosedIsTrue() {
         let delegate = AppDelegate()
-        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+        XCTAssertTrue(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
     }
 
     func testWindowActivationRaisesOnlyTheNamedWindow() {
@@ -519,7 +577,7 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertNotEqual(secondWindow.windowNumber, -1)
     }
 
-    func testLastWindowCloseLeavesZeroWindowsWithoutQuit() {
+    func testLastWindowCloseLeavesZeroWindowsAndAppKitMayQuit() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
@@ -529,8 +587,9 @@ final class MultiWindowHostTests: XCTestCase {
         host.forwardCloseWindow(key)
         XCTAssertTrue(host.orderedKeys.isEmpty)
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        // Host unit test does not drive NSApp terminate; AppKit asks the delegate.
         let delegate = AppDelegate()
-        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+        XCTAssertTrue(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
     }
 
     func testZeroWindowReentryViaNewWindowAndDockReopen() {

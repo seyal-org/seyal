@@ -125,6 +125,10 @@ impl Runtime {
             .local_ipc
             .as_ref()
             .and_then(|state| state.attachments.execution_of(attachment_id).ok());
+        let was_controller = self.local_ipc.as_ref().is_some_and(|state| {
+            state.attachments.role_of(attachment_id).ok()
+                == Some(seyal_protocol::framing::Role::Controller)
+        });
         if let Some(state) = self.local_ipc.as_mut() {
             let _ = state.attachments.detach(attachment_id);
         }
@@ -140,6 +144,15 @@ impl Runtime {
                 .is_none_or(|state| state.attachments.attachments_for_execution(execution_id) == 0);
             if no_viewers && let Some(state) = self.local_ipc.as_mut() {
                 state.published.remove(&execution_id);
+            }
+            if was_controller {
+                let still = self
+                    .local_ipc
+                    .as_ref()
+                    .is_some_and(|state| state.attachments.has_controller(execution_id));
+                if !still {
+                    let _ = self.abort_bootstrap_on_detach(execution_id);
+                }
             }
         }
     }

@@ -92,8 +92,11 @@ impl ShellState {
             return Err(ShellError::CrossWorkspaceAdopt);
         }
         let pane = self.pane(pane_id)?;
-        if pane.execution.is_some() {
+        if pane.execution().is_some() {
             return Err(ShellError::ExecutionAlreadyBound);
+        }
+        if pane.selected_terminal_tab.is_none() {
+            return Err(ShellError::NoSelectedTerminalTab);
         }
         Ok(())
     }
@@ -104,10 +107,11 @@ impl ShellState {
         execution: ExecutionId,
     ) -> Result<(), ShellError> {
         self.validate_adopt_execution(pane_id, execution)?;
-        let pane = self.pane_mut(pane_id)?;
-        pane.execution = Some(execution);
-        self.unpresented.remove(&execution);
-        Ok(())
+        let terminal_tab = self
+            .pane(pane_id)?
+            .selected_terminal_tab
+            .ok_or(ShellError::NoSelectedTerminalTab)?;
+        self.bind_terminal_execution(pane_id, terminal_tab, execution)
     }
 
     pub(super) fn pane_workspace(&self, pane: PaneId) -> Result<WorkspaceId, ShellError> {

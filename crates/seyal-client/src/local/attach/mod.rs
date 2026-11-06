@@ -56,6 +56,7 @@ use super::{
     discovery::{
         canonical_control_socket_path, connect_stream_until, extended_terminal_key_supported,
         hello_until_with_legacy_key_fallback, read_exact_until, send_control_until,
+        session_bootstrap_negotiated,
     },
     display_apply::PendingDisplayBatch,
     execution_is_running,
@@ -273,42 +274,64 @@ impl LocalDisplayClient {
     /// role to its single running execution. Controller remains the permanent
     /// native-pane default; read-only native qualification may use Observer
     /// without borrowing controller authority from the app it will launch.
+    /// SPEC-004 §18: always `CreateExecution` then attach that id.
+    /// Does not adopt an already-running execution (would steal a sibling).
+    pub fn connect_created_execution_until(deadline: Instant) -> Result<Self, ClientError> {
+        Self::connect_role_until(Role::Controller, deadline, true)
+    }
+
     pub fn connect_first_running_as_until(
         role: Role,
         deadline: Instant,
     ) -> Result<Self, ClientError> {
+        Self::connect_role_until(role, deadline, false)
+    }
+
+    fn connect_role_until(
+        role: Role,
+        deadline: Instant,
+        always_create: bool,
+    ) -> Result<Self, ClientError> {
         let socket_path = canonical_control_socket_path()?;
 
         let mut stream = connect_stream_until(&socket_path, deadline)?;
-        let mut server_hello = hello_until_with_legacy_key_fallback(
+        let mut exchange = hello_until_with_legacy_key_fallback(
             &mut stream,
             || connect_stream_until(&socket_path, deadline),
             role == Role::Controller,
             true,
             deadline,
         )?;
-        send_control_until(&mut stream, MessageType::ListExecutions, &[], deadline)?;
-        let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)?;
-        if kind != MessageType::ExecutionList {
-            return Err(ClientError::Protocol);
-        }
-        let list = ExecutionList::decode(&payload).map_err(|_| ClientError::Protocol)?;
-        // P1 leaves the production Runtime resident with zero executions.
-        // A Controller opening the implicit bootstrap (headed recovery) creates
-        // profile 0 on this Ready connection, then attaches. Observer stays
-        // fail-closed so a read-only probe cannot spawn a shell.
-        // SPEC-009 §8.2.1: >1 survivors also provision new (leave survivors).
-        let mut created_bootstrap = false;
-        let execution_id = match resolve_single_running_execution(&list) {
-            Ok(execution_id) => execution_id,
-            Err(ClientError::NoRunningExecution | ClientError::AmbiguousExecutions)
-                if role == Role::Controller
-                    && provisioning_negotiated(server_hello.server_capabilities) =>
+        // New shell always CreateExecution then attaches that id. Listing and
+        // attaching "first" would steal a live sibling (SPEC-009 §8.2.1).
+        let (created_bootstrap, execution_id) = if always_create {
+            if role != Role::Controller
+                || !provisioning_negotiated(exchange.server.server_capabilities)
             {
-                created_bootstrap = true;
-                create_profile_zero_execution(&mut stream, deadline)?
+                return Err(ClientError::UnsupportedInteractiveCapability);
             }
-            Err(error) => return Err(error),
+            (true, create_profile_zero_execution(&mut stream, deadline)?)
+        } else {
+            send_control_until(&mut stream, MessageType::ListExecutions, &[], deadline)?;
+            let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)?;
+            if kind != MessageType::ExecutionList {
+                return Err(ClientError::Protocol);
+            }
+            let list = ExecutionList::decode(&payload).map_err(|_| ClientError::Protocol)?;
+            // P1 leaves the production Runtime resident with zero executions.
+            // A Controller opening the implicit bootstrap creates profile 0 on
+            // this Ready connection, then attaches. Observer stays fail-closed.
+            // SPEC-009 §8.2.1: >1 survivors also provision new (leave survivors).
+            match resolve_single_running_execution(&list) {
+                Ok(execution_id) => (false, execution_id),
+                Err(ClientError::NoRunningExecution | ClientError::AmbiguousExecutions)
+                    if role == Role::Controller
+                        && provisioning_negotiated(exchange.server.server_capabilities) =>
+                {
+                    (true, create_profile_zero_execution(&mut stream, deadline)?)
+                }
+                Err(error) => return Err(error),
+            }
         };
 
         #[cfg(target_os = "macos")]
@@ -318,10 +341,10 @@ impl LocalDisplayClient {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
 
-        if is_epoch_quarantined(server_hello.runtime_id, execution_id) {
+        if is_epoch_quarantined(exchange.server.runtime_id, execution_id) {
             drop(stream);
             stream = connect_stream_until(&socket_path, deadline)?;
-            server_hello = hello_until_with_legacy_key_fallback(
+            exchange = hello_until_with_legacy_key_fallback(
                 &mut stream,
                 || connect_stream_until(&socket_path, deadline),
                 role == Role::Controller,
@@ -330,19 +353,19 @@ impl LocalDisplayClient {
             )?;
         }
         let block_metadata_negotiated =
-            server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
-                && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
+            exchange.server.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
+                && !is_epoch_quarantined(exchange.server.runtime_id, execution_id);
         let dispose_request_id = if created_bootstrap { 2 } else { 1 };
         let mut client = match Self::finish_attach_with_capability_deadline(
             stream,
             execution_id,
             role,
-            server_hello.server_capabilities & CAP_COMMAND_BLOCKS != 0,
-            extended_terminal_key_supported(server_hello.server_capabilities),
-            server_hello.runtime_id,
+            exchange.server.server_capabilities & CAP_COMMAND_BLOCKS != 0,
+            extended_terminal_key_supported(exchange.server.server_capabilities),
+            exchange.server.runtime_id,
             block_metadata_negotiated,
-            provisioning_negotiated(server_hello.server_capabilities),
-            delivery_control_negotiated(server_hello.server_capabilities),
+            provisioning_negotiated(exchange.server.server_capabilities),
+            delivery_control_negotiated(exchange.server.server_capabilities),
             // §6.3 dispose only for Created never-bound bootstrap orphans — not
             // adopt/reconnect of a live survivor (connect_first with existing id).
             created_bootstrap,
@@ -365,6 +388,10 @@ impl LocalDisplayClient {
         if created_bootstrap {
             client.next_provisioning_request_id = 2;
         }
+        client.session_bootstrap_negotiated = session_bootstrap_negotiated(
+            exchange.client_capabilities,
+            exchange.server.server_capabilities,
+        );
         Ok(client)
     }
 
@@ -388,7 +415,7 @@ impl LocalDisplayClient {
         deadline: Instant,
     ) -> Result<Self, ClientError> {
         let mut stream = connect_stream_until(socket_path, deadline)?;
-        let mut server_hello = hello_until_with_legacy_key_fallback(
+        let mut exchange = hello_until_with_legacy_key_fallback(
             &mut stream,
             || connect_stream_until(socket_path, deadline),
             role == Role::Controller,
@@ -404,10 +431,10 @@ impl LocalDisplayClient {
         if !execution_is_running(&executions, execution_id) {
             return Err(ClientError::NoRunningExecution);
         }
-        if is_epoch_quarantined(server_hello.runtime_id, execution_id) {
+        if is_epoch_quarantined(exchange.server.runtime_id, execution_id) {
             drop(stream);
             stream = connect_stream_until(socket_path, deadline)?;
-            server_hello = hello_until_with_legacy_key_fallback(
+            exchange = hello_until_with_legacy_key_fallback(
                 &mut stream,
                 || connect_stream_until(socket_path, deadline),
                 role == Role::Controller,
@@ -416,23 +443,27 @@ impl LocalDisplayClient {
             )?;
         }
         let block_metadata_negotiated =
-            server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
-                && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
-        let client = Self::finish_attach_with_capability_deadline(
+            exchange.server.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
+                && !is_epoch_quarantined(exchange.server.runtime_id, execution_id);
+        let mut client = Self::finish_attach_with_capability_deadline(
             stream,
             execution_id,
             role,
-            server_hello.server_capabilities & CAP_COMMAND_BLOCKS != 0,
-            extended_terminal_key_supported(server_hello.server_capabilities),
-            server_hello.runtime_id,
+            exchange.server.server_capabilities & CAP_COMMAND_BLOCKS != 0,
+            extended_terminal_key_supported(exchange.server.server_capabilities),
+            exchange.server.runtime_id,
             block_metadata_negotiated,
-            provisioning_negotiated(server_hello.server_capabilities),
-            delivery_control_negotiated(server_hello.server_capabilities),
+            provisioning_negotiated(exchange.server.server_capabilities),
+            delivery_control_negotiated(exchange.server.server_capabilities),
             false,
             1,
             deadline,
         )
         .map_err(|failure| failure.error)?;
+        client.session_bootstrap_negotiated = session_bootstrap_negotiated(
+            exchange.client_capabilities,
+            exchange.server.server_capabilities,
+        );
         Ok(client)
     }
 
@@ -448,28 +479,32 @@ impl LocalDisplayClient {
     ) -> Result<Self, ClientError> {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         let mut stream = connect_stream_until(socket_path, deadline)?;
-        let server_hello = hello_until_with_legacy_key_fallback(
+        let exchange = hello_until_with_legacy_key_fallback(
             &mut stream,
             || connect_stream_until(socket_path, deadline),
             role == Role::Controller,
             false,
             deadline,
         )?;
-        let client = Self::finish_attach_with_capability_deadline(
+        let mut client = Self::finish_attach_with_capability_deadline(
             stream,
             execution_id,
             role,
-            server_hello.server_capabilities & CAP_COMMAND_BLOCKS != 0,
-            extended_terminal_key_supported(server_hello.server_capabilities),
-            server_hello.runtime_id,
+            exchange.server.server_capabilities & CAP_COMMAND_BLOCKS != 0,
+            extended_terminal_key_supported(exchange.server.server_capabilities),
+            exchange.server.runtime_id,
             false,
-            provisioning_negotiated(server_hello.server_capabilities),
-            delivery_control_negotiated(server_hello.server_capabilities),
+            provisioning_negotiated(exchange.server.server_capabilities),
+            delivery_control_negotiated(exchange.server.server_capabilities),
             false,
             1,
             deadline,
         )
         .map_err(|failure| failure.error)?;
+        client.session_bootstrap_negotiated = session_bootstrap_negotiated(
+            exchange.client_capabilities,
+            exchange.server.server_capabilities,
+        );
         Ok(client)
     }
 
@@ -808,10 +843,21 @@ impl LocalDisplayClient {
             harness_probe: false,
             pending_create_requests: std::collections::HashSet::new(),
             pending_terminate_requests: std::collections::HashSet::new(),
+            pending_mint_requests: std::collections::HashSet::new(),
             last_create_result: VecDeque::new(),
             last_terminate_result: None,
+            last_mint_result: None,
             viewport_line_ids: Vec::new(),
             viewport_line_ids_generation: 0,
+            session_bootstrap_negotiated: false,
+            composer_target: None,
+            target_generation: 0,
+            session_offer: None,
+            session_status: None,
+            pending_relay_requests: std::collections::HashSet::new(),
+            projected_eligibility: 0,
+            projected_wire_revision: 0,
+            composer_projection_revision: 0,
         })
     }
 }

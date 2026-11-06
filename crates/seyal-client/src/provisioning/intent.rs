@@ -1,6 +1,6 @@
 //! Provisioning intent records and bootstrap geometry (ADR-017 §5.2).
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, TerminalTabId};
 use seyal_protocol::framing::ErrorCode;
 
 use super::{ConnectionOwner, ProvisioningFailure};
@@ -69,6 +69,8 @@ pub struct PendingIntent {
     /// The Pane associated with this intent, if it provisions/adopts one.
     /// Dispose-only operations use a synthetic connection and have no Pane.
     pub pane: Option<PaneId>,
+    /// Pane-local terminal identity when this intent creates/adopts/closes one.
+    pub terminal_tab: Option<TerminalTabId>,
     pub owner: ConnectionOwner,
     pub request_id: u64,
     pub geometry: PaneGeometry,

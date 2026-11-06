@@ -17,6 +17,11 @@ fn make_primary_usable(root: &mut ApplicationRoot) {
         },
     })
     .unwrap();
+    root.apply(AppAction::SelectRestingPresentation {
+        fence: root.fence(),
+        raw: false,
+    })
+    .unwrap();
     root.apply(AppAction::BeginRecovery {
         now: Duration::ZERO,
     })
@@ -66,6 +71,62 @@ fn queue_secondary_loss(root: &mut ApplicationRoot, secondary: PaneId) -> PaneRe
     );
     assert!(root.pane_recovery.record_loss(target));
     target
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn split_terminal_tab_controller_loss_is_queued_for_that_pane() {
+    use crate::app::AppAction;
+    use crate::local::reconstruction_probe_client;
+    use crate::shell::SplitAxis;
+    use seyal_protocol::local_ipc::framing::Role;
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .expect("split creates the terminal Pane through production provisioning");
+    let pane = root.snapshot().shell.focused_pane;
+    let terminal_tab = root.shell.selected_terminal_tab(pane).unwrap().unwrap();
+    let execution = ExecutionId::from_bytes([0x61; 16]);
+    let attachment = AttachmentId::from_bytes([0x62; 16]);
+    root.shell
+        .overwrite_pane_execution_for_test(pane, execution)
+        .unwrap();
+    root.bind_pane_recovery(pane, execution);
+
+    let client = reconstruction_probe_client(Role::Controller, 24, 80, 1, execution, attachment);
+    let runtime_id = client.runtime_id();
+    let registered = crate::ffi::register_app_client(client).expect("register split Controller");
+    let handle = registered.raw();
+    root.extra_terminal_clients.insert(terminal_tab, registered);
+    root.terminal_client_raws.insert(terminal_tab, handle);
+    root.pane_client_raws.insert(pane, handle);
+    let authority = super::super::PaneAuthority {
+        pane,
+        execution,
+        attachment,
+        controller: true,
+        pty_generation: 1,
+    };
+    root.terminal_authorities.insert(terminal_tab, authority);
+    root.pane_authorities.insert(pane, authority);
+    root.pane_recovery.runtime_ids.insert(pane, runtime_id);
+
+    root.note_registry_client_loss(handle);
+
+    assert_eq!(root.pane_recovery.pending_len(), 1);
+    let target = root.pane_recovery.current_target(pane).unwrap();
+    assert_eq!(root.pane_client_raws.get(&pane), None);
+    assert_eq!(root.terminal_client_raws.get(&terminal_tab), None);
+    assert!(!root.extra_terminal_clients.contains_key(&terminal_tab));
+    assert_eq!(
+        root.terminal_authorities.get(&terminal_tab),
+        Some(&authority)
+    );
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+    let _ = crate::ffi::unregister_client(handle);
 }
 
 fn target(pane: u8, execution: u8, generation: u64) -> PaneRecoveryTarget {

@@ -6,7 +6,7 @@
 
 use std::collections::VecDeque;
 
-use seyal_protocol::framing::MAX_FRAME_PAYLOAD;
+use seyal_protocol::framing::{BlockScope, BlockTrust, MAX_FRAME_PAYLOAD};
 
 /// Per-command text admission limit (matches wire `MAX_COMPOSER_COMMAND_BYTES`).
 pub(crate) const MAX_COMMAND_BYTES: usize = 16 * 1024;
@@ -17,6 +17,9 @@ pub(crate) const MAX_BLOCKS_PER_EXECUTION: usize = 128;
 
 const TIMELINE_HEADER_BYTES: usize = 16;
 const RECORD_HEADER_BYTES: usize = 36;
+/// Session-schema scope/trust suffix. Counted for every record so a
+/// negotiated timeline cannot exceed the frame the legacy size allowed.
+const SCOPE_TRUST_BYTES: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct CommandBlockId(u64);
@@ -49,6 +52,10 @@ pub(crate) struct CommandBlockRecord {
     pub(crate) start_line: u64,
     pub(crate) end_line: Option<u64>,
     pub(crate) lifecycle: CommandBlockLifecycle,
+    pub(crate) scope: BlockScope,
+    pub(crate) trust: BlockTrust,
+    /// Host Block this session Block is nested under. `None` for local Blocks.
+    pub(crate) host_block: Option<u64>,
 }
 
 /// Bounded, append-only logical timeline for one `ExecutionId`.
@@ -59,6 +66,10 @@ pub(crate) struct CommandBlockRecord {
 pub(crate) struct CommandBlockTimeline {
     next_id: u64,
     records: VecDeque<CommandBlockRecord>,
+    /// First Block that remains on the Flow canvas after CSI ED2 (`clear`).
+    /// Earlier completed Blocks stay in `records` for session/history truth
+    /// but leave the active transcript presentation.
+    canvas_floor: Option<CommandBlockId>,
 }
 
 impl CommandBlockTimeline {
@@ -92,8 +103,31 @@ impl CommandBlockTimeline {
             start_line,
             end_line: None,
             lifecycle: CommandBlockLifecycle::Running,
+            scope: BlockScope::Local,
+            trust: BlockTrust::LocalTrusted,
+            host_block: None,
         });
         debug_assert!(self.encoded_len() <= MAX_FRAME_PAYLOAD as usize);
+        Ok(())
+    }
+
+    /// Session Block nested under `host_block`. Trust is presentation-only.
+    pub(crate) fn start_session(
+        &mut self,
+        id: CommandBlockId,
+        command: String,
+        start_line: u64,
+        host_block: u64,
+    ) -> Result<(), CommandBlockTimelineError> {
+        self.start(id, command, start_line)?;
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == id)
+            .expect("start just inserted this id");
+        record.scope = BlockScope::Session;
+        record.trust = BlockTrust::SessionTrusted;
+        record.host_block = Some(host_block);
         Ok(())
     }
 
@@ -103,9 +137,24 @@ impl CommandBlockTimeline {
     /// then backs up past it. The Block must still complete rather than stay
     /// `Running` with no owner (#1015). The wire range cannot express an empty
     /// output yet; that marker is proposed in the ADR-009 amendment (#1041).
+    /// Production completion prefers `complete_span` (ED2 frontier); this
+    /// wrapper remains the unit-test / no-frontier façade.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn complete(
         &mut self,
         id: CommandBlockId,
+        end_line: u64,
+        exit_status: Option<i32>,
+    ) -> Result<(), CommandBlockTimelineError> {
+        self.complete_span(id, None, end_line, exit_status)
+    }
+
+    /// Complete a running record, optionally advancing `start_line` (ED2 remint
+    /// frontier). Start never rewinds.
+    pub(crate) fn complete_span(
+        &mut self,
+        id: CommandBlockId,
+        start_line: Option<u64>,
         end_line: u64,
         exit_status: Option<i32>,
     ) -> Result<(), CommandBlockTimelineError> {
@@ -117,9 +166,29 @@ impl CommandBlockTimeline {
         if record.lifecycle != CommandBlockLifecycle::Running {
             return Err(CommandBlockTimelineError::InvalidCompletion);
         }
+        if let Some(start) = start_line
+            && start > record.start_line
+        {
+            record.start_line = start;
+            // ED2 reminted this Block's start: collapse earlier cards from the
+            // active Flow canvas while retaining them in the timeline.
+            // Local `clear` floors the live canvas (#1379). Session `clear`
+            // must not: headed SSH expects prior session Blocks to remain
+            // scrollable under the still-Running host (#1398).
+            if record.scope == BlockScope::Local {
+                match self.canvas_floor {
+                    Some(floor) if floor.raw() > id.raw() => {}
+                    _ => self.canvas_floor = Some(id),
+                }
+            }
+        }
         record.end_line = Some(end_line.max(record.start_line));
         record.lifecycle = CommandBlockLifecycle::Completed { exit_status };
         Ok(())
+    }
+
+    pub(crate) fn canvas_floor(&self) -> Option<CommandBlockId> {
+        self.canvas_floor
     }
 
     pub(crate) fn records(&self) -> impl ExactSizeIterator<Item = &CommandBlockRecord> {
@@ -131,12 +200,12 @@ impl CommandBlockTimeline {
             + self
                 .records
                 .iter()
-                .map(|record| RECORD_HEADER_BYTES + record.command.len())
+                .map(|record| RECORD_HEADER_BYTES + SCOPE_TRUST_BYTES + record.command.len())
                 .sum::<usize>()
     }
 
     fn make_room_for(&mut self, command_len: usize) -> Result<(), CommandBlockTimelineError> {
-        let needed = RECORD_HEADER_BYTES + command_len;
+        let needed = RECORD_HEADER_BYTES + SCOPE_TRUST_BYTES + command_len;
         if TIMELINE_HEADER_BYTES + needed > MAX_FRAME_PAYLOAD as usize {
             return Err(CommandBlockTimelineError::Capacity);
         }
@@ -148,7 +217,14 @@ impl CommandBlockTimeline {
             }) else {
                 return Err(CommandBlockTimelineError::Capacity);
             };
-            self.records.remove(index);
+            if let Some(removed) = self.records.remove(index)
+                && self.canvas_floor == Some(removed.id)
+            {
+                // Floor Block itself was capacity-evicted; remaining records are
+                // still post-clear. Pin the floor to the oldest survivor so the
+                // canvas does not resurrect pre-clear clutter.
+                self.canvas_floor = self.records.front().map(|record| record.id);
+            }
         }
         Ok(())
     }
@@ -166,6 +242,59 @@ pub(crate) enum CommandBlockTimelineError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ed2_remint_sets_canvas_floor_without_dropping_earlier_records() {
+        let mut timeline = CommandBlockTimeline::default();
+        let first = timeline.allocate_id().unwrap();
+        timeline.start(first, "printf before".into(), 10).unwrap();
+        timeline.complete(first, 12, Some(0)).unwrap();
+        let clear = timeline.allocate_id().unwrap();
+        timeline.start(clear, "clear".into(), 13).unwrap();
+        // ED2 advances start past sealed pre-remint rows.
+        timeline
+            .complete_span(clear, Some(40), 41, Some(0))
+            .unwrap();
+        assert_eq!(timeline.canvas_floor(), Some(clear));
+        assert_eq!(
+            timeline.records().count(),
+            2,
+            "clear must not delete timeline history"
+        );
+        assert_eq!(
+            timeline.records().next().map(|r| r.id),
+            Some(first),
+            "pre-clear Block stays ordered in the timeline"
+        );
+    }
+
+    #[test]
+    fn session_clear_ed2_keeps_prior_blocks_on_the_live_canvas() {
+        let mut timeline = CommandBlockTimeline::default();
+        let host = timeline.allocate_id().unwrap();
+        timeline.start(host, "ssh host".into(), 1).unwrap();
+        let before = timeline.allocate_id().unwrap();
+        timeline
+            .start_session(before, "echo before".into(), 10, host.raw())
+            .unwrap();
+        timeline.complete(before, 11, Some(0)).unwrap();
+        let clear = timeline.allocate_id().unwrap();
+        timeline
+            .start_session(clear, "clear".into(), 12, host.raw())
+            .unwrap();
+        timeline
+            .complete_span(clear, Some(40), 41, Some(0))
+            .unwrap();
+        assert_eq!(
+            timeline.canvas_floor(),
+            None,
+            "remote clear must leave prior session Blocks scrollable"
+        );
+        assert!(timeline
+            .records()
+            .any(|r| r.id == host && r.lifecycle == CommandBlockLifecycle::Running));
+        assert!(timeline.records().any(|r| r.id == before));
+    }
 
     #[test]
     fn creates_one_ordered_record_per_accepted_command() {

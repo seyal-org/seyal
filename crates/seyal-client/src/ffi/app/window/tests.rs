@@ -474,6 +474,7 @@ fn per_leaf_presentation_mode_round_trips_for_inactive_leaves_and_windows() {
     let expected = shell.snapshot();
     install_shell(handle, shell);
 
+    // Wire: Flow=0, Raw=1, Tui=2. New panes default to Flow (#1426).
     for (window, pane, mode) in [(0, 0, 0), (0, 1, 1), (1, 0, 2)] {
         let record = seyal_app_pane_leaf(handle, window, 0, pane);
         assert_eq!(record.version, APP_ABI_VERSION);

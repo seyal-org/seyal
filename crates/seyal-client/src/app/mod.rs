@@ -16,8 +16,12 @@ mod errors;
 mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
+mod leave_offer;
+mod leave_offer_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
+#[cfg(target_os = "macos")]
+mod live_history_apply;
 mod native_effect;
 mod palette_apply;
 mod pane_projection;
@@ -27,6 +31,7 @@ mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
+mod terminal_termination;
 mod unpresented_apply;
 
 #[cfg(target_os = "macos")]
@@ -39,12 +44,15 @@ use errors::{
 };
 
 pub use action_types::{AppAction, WindowNativeEvent};
+pub use leave_offer::{LeaveOffer, LeaveOfferKind};
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
 #[cfg(test)]
 mod focus_history_tests;
 #[cfg(test)]
 mod keybinding_apply_tests;
+#[cfg(test)]
+mod leave_offer_apply_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod pane_provisioning_tests;
 #[cfg(test)]
@@ -56,18 +64,24 @@ mod recovery_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod tab_provisioning_tests;
 #[cfg(test)]
+mod terminal_tabs_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
 #[cfg(test)]
 mod w7_adversarial_tests;
+#[cfg(test)]
+mod workspace_create_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{
+    AttachmentId, BlockId, ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId,
+};
 
 use crate::app::pane_recovery::PaneRecoveryQueue;
 use crate::chrome::{
@@ -269,6 +283,8 @@ pub struct ApplicationRoot {
     authority: Option<PaneAuthority>,
     /// Per-pane Controller authority after live create→attach→bind (#1175).
     pane_authorities: HashMap<PaneId, PaneAuthority>,
+    /// Controller evidence for every live terminal tab, including unselected tabs.
+    terminal_authorities: HashMap<TerminalTabId, PaneAuthority>,
     /// Portable provisioning/disposition authority (ADR-017 C1).
     provisioning: ProvisioningSession,
     /// Cold-path wire client for create/terminate (tests/harness). Production
@@ -299,8 +315,10 @@ pub struct ApplicationRoot {
     alternate_screen: bool,
     /// Flow or Raw used while alternate screen is off.
     resting: PresentationMode,
-    /// User asked for Raw until they ask to re-evaluate.
-    explicit_raw: bool,
+    /// Flow is the default for trusted supported shell sessions. The latch is
+    /// retained for Pane snapshots and recovery; unsupported integration still
+    /// forces the safe Raw fallback.
+    explicit_flow: bool,
     /// Runtime reported unsupported shell integration. SPEC-008 requires
     /// full-Pane Raw until a later status says otherwise.
     integration_unsupported: bool,
@@ -311,6 +329,9 @@ pub struct ApplicationRoot {
     /// Never duplicates [`Self::client_handle`].
     #[cfg(target_os = "macos")]
     extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Additional attached terminal sessions in the same or different Panes.
+    #[cfg(target_os = "macos")]
+    extra_terminal_clients: HashMap<TerminalTabId, crate::ffi::ClientRegistryHandle>,
     /// Dispose-only Controller clients, keyed by synthetic owner and never
     /// associated with a shell Pane or display handle.
     #[cfg(target_os = "macos")]
@@ -318,6 +339,9 @@ pub struct ApplicationRoot {
     /// Pane → registry raw for display/terminate (includes first pane).
     #[cfg(target_os = "macos")]
     pane_client_raws: HashMap<PaneId, u64>,
+    /// Exact display client for each terminal tab; Pane selects one for rendering.
+    #[cfg(target_os = "macos")]
+    terminal_client_raws: HashMap<TerminalTabId, u64>,
     /// Remaining injected live-attach failures before a real connect (C2b tests).
     #[cfg(target_os = "macos")]
     inject_live_attach_failures: u32,
@@ -338,9 +362,16 @@ pub struct ApplicationRoot {
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
     /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
     quit_deadline: Option<std::time::Instant>,
+    /// Ended Pane waiting for SPEC-004 §18 Create+Bind (New shell). Not focused-sibling.
+    replacement_bootstrap: Option<seyal_core::PaneId>,
+    /// Terminal display loss must keep Flow history paint. Set before the host
+    /// observes the poll error. Cleared only by process teardown.
+    flow_history_hold: bool,
     /// Extra live display attachments and probe peers owned through quit cleanup.
     #[cfg(target_os = "macos")]
     live_attachments: Vec<session::QuitProbeAttachment>,
+    /// ADR-028 leave-parent create/jump offer (trusted observe path only).
+    leave_offer: Option<LeaveOffer>,
 }
 
 impl Default for ApplicationRoot {
@@ -386,6 +417,7 @@ impl ApplicationRoot {
             shell,
             authority: None,
             pane_authorities: HashMap::new(),
+            terminal_authorities: HashMap::new(),
             provisioning: ProvisioningSession::new(),
             #[cfg(target_os = "macos")]
             wire_client: None,
@@ -407,16 +439,20 @@ impl ApplicationRoot {
             focus_history: FocusHistory::new(),
             alternate_screen: false,
             resting: PresentationMode::Flow,
-            explicit_raw: false,
+            explicit_flow: true,
             integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,
             #[cfg(target_os = "macos")]
             extra_pane_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
+            extra_terminal_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
             dispose_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
             pane_client_raws: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            terminal_client_raws: HashMap::new(),
             #[cfg(target_os = "macos")]
             inject_live_attach_failures: 0,
             #[cfg(target_os = "macos")]
@@ -428,9 +464,12 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             live_attach_gate: None,
             last_window_event: None,
+            replacement_bootstrap: None,
+            flow_history_hold: false,
             quit_deadline: None,
             #[cfg(target_os = "macos")]
             live_attachments: Vec::new(),
+            leave_offer: None,
         }
     }
 
@@ -448,11 +487,11 @@ impl ApplicationRoot {
         self.live_attach_gate = Some(rx);
     }
 
-    /// Extra per-pane Controller registry entries (second+ tabs).
+    /// Additional Controller registry entries for panes or terminal tabs.
     #[doc(hidden)]
     #[cfg(target_os = "macos")]
-    pub fn extra_pane_client_count(&self) -> usize {
-        self.extra_pane_clients.len()
+    pub fn extra_controller_client_count(&self) -> usize {
+        self.extra_pane_clients.len() + self.extra_terminal_clients.len()
     }
 
     /// Queued `AttachController` work waiting for the in-flight worker.
@@ -529,6 +568,26 @@ impl ApplicationRoot {
                 presentation_epoch: self.presentation.snapshot().epoch,
             },
         }
+    }
+
+    /// Pane-addressed composer snapshot for visible non-focused Flow hosts
+    /// (#1424). Does not rebind fence authority.
+    pub fn composer_for_pane(&self, pane: PaneId) -> Option<ComposerSnapshot> {
+        self.composer.snapshot(pane).ok()
+    }
+
+    /// Whether `pane` is present in the shell tree (execution may still be None).
+    pub fn pane_known(&self, pane: PaneId) -> bool {
+        self.shell.pane_execution(pane).is_ok()
+    }
+
+    /// Bound execution for a known Pane, if any.
+    pub fn pane_execution_id(&self, pane: PaneId) -> Option<ExecutionId> {
+        self.shell.pane_execution(pane).ok().flatten()
+    }
+
+    pub fn focused_pane_id(&self) -> PaneId {
+        self.shell.snapshot().focused_pane
     }
 
     pub fn snapshot(&self) -> AppSnapshot {

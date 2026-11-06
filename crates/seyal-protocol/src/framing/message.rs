@@ -2,8 +2,8 @@
 
 use super::envelope::{FrameHeader, FramingError, HEADER_LEN, MAX_FRAME_PAYLOAD};
 use super::execution::{
-    CreateExecutionRequest, CreateExecutionResult, TerminateExecutionRequest,
-    TerminateExecutionResult,
+    CreateExecutionRequest, CreateExecutionResult, MintWorkspaceRequest, MintWorkspaceResult,
+    TerminateExecutionRequest, TerminateExecutionResult,
 };
 use super::payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList, HostSearch,
@@ -11,8 +11,9 @@ use super::payload::{
 };
 use super::presentation::{ResumeDelivery, SuspendDelivery};
 use super::{
-    BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus, HistoryRangeRequest,
-    HistoryRangeSnapshot, ResizeRequest, ResizeResult, TerminalKey, TerminalKeyV2, ViewportLineIds,
+    BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus, ComposerTarget,
+    HistoryRangeRequest, HistoryRangeSnapshot, ResizeRequest, ResizeResult, SessionConsent,
+    SessionOffer, SessionStatus, TerminalKey, TerminalKeyV2, ViewportLineIds,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,6 +74,18 @@ pub enum MessageType {
     SuspendDelivery = 40,
     /// SPEC-004 §19: resume delivery via the bounded snapshot resync path.
     ResumeDelivery = 41,
+    /// ADR-026 type 42: Runtime→client session bootstrap offer.
+    SessionOffer = 42,
+    /// ADR-026 type 43: Client→Runtime consent for one offer.
+    SessionConsent = 43,
+    /// ADR-026 type 44: Runtime→client session overlay status.
+    SessionStatus = 44,
+    /// ADR-026 type 45: input target and target generation. Not a longer type 23.
+    ComposerTarget = 45,
+    /// ADR-028 interim: mint an opaque WorkspaceId (cold control path).
+    MintWorkspaceRequest = 46,
+    /// ADR-028 interim: mint-workspace result.
+    MintWorkspaceResult = 47,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -117,6 +130,12 @@ impl MessageType {
             39 => Self::TerminateExecutionResult,
             40 => Self::SuspendDelivery,
             41 => Self::ResumeDelivery,
+            42 => Self::SessionOffer,
+            43 => Self::SessionConsent,
+            44 => Self::SessionStatus,
+            45 => Self::ComposerTarget,
+            46 => Self::MintWorkspaceRequest,
+            47 => Self::MintWorkspaceResult,
             _ => return None,
         })
     }
@@ -164,6 +183,12 @@ pub enum Message<'a> {
     TerminateExecutionResult(TerminateExecutionResult),
     SuspendDelivery(SuspendDelivery),
     ResumeDelivery(ResumeDelivery),
+    SessionOffer(SessionOffer),
+    SessionConsent(SessionConsent),
+    SessionStatus(SessionStatus),
+    ComposerTarget(ComposerTarget),
+    MintWorkspaceRequest(MintWorkspaceRequest),
+    MintWorkspaceResult(MintWorkspaceResult),
 }
 
 pub fn decode_message<'a>(
@@ -240,6 +265,16 @@ pub fn decode_message<'a>(
         }
         MessageType::SuspendDelivery => Message::SuspendDelivery(SuspendDelivery::decode(payload)?),
         MessageType::ResumeDelivery => Message::ResumeDelivery(ResumeDelivery::decode(payload)?),
+        MessageType::SessionOffer => Message::SessionOffer(SessionOffer::decode(payload)?),
+        MessageType::SessionConsent => Message::SessionConsent(SessionConsent::decode(payload)?),
+        MessageType::SessionStatus => Message::SessionStatus(SessionStatus::decode(payload)?),
+        MessageType::ComposerTarget => Message::ComposerTarget(ComposerTarget::decode(payload)?),
+        MessageType::MintWorkspaceRequest => {
+            Message::MintWorkspaceRequest(MintWorkspaceRequest::decode(payload)?)
+        }
+        MessageType::MintWorkspaceResult => {
+            Message::MintWorkspaceResult(MintWorkspaceResult::decode(payload)?)
+        }
     })
 }
 

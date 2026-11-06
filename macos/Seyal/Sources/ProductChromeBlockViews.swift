@@ -8,28 +8,83 @@ final class IdentityButton: NSButton {
     var kind: UInt16 = 0
     var idLo: UInt64 = 0
     var idHi: UInt64 = 0
+    /// Owning PaneId for left C03 TerminalTab rows (#1412); unused otherwise.
+    var paneLo: UInt64 = 0
+    var paneHi: UInt64 = 0
     var containmentGeneration: UInt64 = 0
+
+    /// Transparent hit target for C04 rows that paint their own labels.
+    override func draw(_ dirtyRect: NSRect) {
+        if title.isEmpty, image == nil, !isBordered {
+            return
+        }
+        super.draw(dirtyRect)
+    }
+}
+
+/// Accessibility stand-in for Metal-painted Block output. It is not in Auto
+/// Layout: an `NSTextField` intrinsic width shrinks Flow cards to the string
+/// and pins them to the trailing edge. `draw` stays empty so Metal remains
+/// the only glyphs.
+final class BlockBodyTranscript: NSTextField {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isEditable = false
+        isSelectable = false
+        isBezeled = false
+        isBordered = false
+        drawsBackground = false
+        font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        lineBreakMode = .byClipping
+        maximumNumberOfLines = 1
+        cell?.isScrollable = false
+        translatesAutoresizingMaskIntoConstraints = true
+        autoresizingMask = [.width, .height]
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        _ = dirtyRect
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("BlockBodyTranscript is programmatic")
+    }
 }
 
 final class CommandBlockView: NSView {
     let body = NSView()
+    private let bodyTranscript = BlockBodyTranscript(frame: .zero)
     /// Host click on the header; `true` when the card is already selected.
     var onSelect: ((Bool) -> Void)?
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
     var isSelected = false {
         didSet {
-            setAccessibilityValue(isSelected ? "selected" : "")
+            updateAccessibilityValue()
             if let theme { apply(theme: theme) }
         }
     }
+    /// Projected from the Rust block row's SEYAL_APP_BLOCK_SESSION flag.
+    private var isSessionBlock: Bool
     private let header = NSView()
     private let prompt = NSTextField(labelWithString: "")
     private let command = NSTextField(labelWithString: "")
     private let status = NSTextField(labelWithString: "")
     private let seam = NSView()
-    private let state: UInt16
+    private var state: UInt16
     private var bodyHeight: NSLayoutConstraint!
+    private var seamTopConstraint: NSLayoutConstraint!
     private var theme: NativeTheme?
+
+    static func visibleOutputLineCount(_ text: String) -> Int {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        while let last = lines.last, last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.removeLast()
+        }
+        return max(lines.count, 1)
+    }
 
     init(
         prompt: String,
@@ -37,14 +92,17 @@ final class CommandBlockView: NSView {
         detail: String,
         state: UInt16,
         cellHeight: CGFloat,
-        lines: Int
+        lines: Int,
+        session: Bool
     ) {
         self.state = state
+        self.isSessionBlock = session
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = false
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
+        updateAccessibilityValue()
         self.prompt.stringValue = prompt
         self.prompt.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
         self.prompt.setContentHuggingPriority(.required, for: .horizontal)
@@ -67,8 +125,8 @@ final class CommandBlockView: NSView {
         body.wantsLayer = true
         body.layer?.isOpaque = false
         body.layer?.backgroundColor = NSColor.clear.cgColor
-        body.setAccessibilityElement(true)
-        body.setAccessibilityRole(.group)
+        bodyTranscript.setAccessibilityElement(true)
+        body.addSubview(bodyTranscript)
         header.addSubview(self.prompt)
         header.addSubview(command)
         header.addSubview(status)
@@ -80,6 +138,8 @@ final class CommandBlockView: NSView {
         bodyHeight = body.heightAnchor.constraint(
             equalToConstant: max(cellHeight, 1) * CGFloat(max(lines, 1))
         )
+        // Rust owns session classification; SSH Blocks retain the normal Block geometry.
+        seamTopConstraint = seam.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 12)
         NSLayoutConstraint.activate([
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -93,12 +153,12 @@ final class CommandBlockView: NSView {
             status.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             command.trailingAnchor.constraint(lessThanOrEqualTo: status.leadingAnchor, constant: -12),
             body.leadingAnchor.constraint(equalTo: command.leadingAnchor),
-            body.trailingAnchor.constraint(equalTo: trailingAnchor),
+            body.trailingAnchor.constraint(equalTo: header.trailingAnchor),
             body.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
             bodyHeight,
-            seam.leadingAnchor.constraint(equalTo: leadingAnchor),
-            seam.trailingAnchor.constraint(equalTo: trailingAnchor),
-            seam.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 12),
+            seam.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            seam.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            seamTopConstraint,
             seam.bottomAnchor.constraint(equalTo: bottomAnchor),
             seam.heightAnchor.constraint(equalToConstant: 1),
         ])
@@ -109,22 +169,81 @@ final class CommandBlockView: NSView {
         fatalError("CommandBlockView is programmatic")
     }
 
+    func setBodyAccessibilityIdentifier(_ identifier: String) {
+        bodyTranscript.setAccessibilityIdentifier(identifier)
+    }
+
+    func setBodyTranscript(_ text: String) {
+        bodyTranscript.stringValue = text
+        // Bound AX payloads so tall Block bodies do not stall XCUI tree walks.
+        let ax = Self.accessibilitySummary(for: text)
+        bodyTranscript.setAccessibilityLabel(ax)
+        bodyTranscript.setAccessibilityValue(ax)
+    }
+
+    private func updateAccessibilityValue() {
+        var traits: [String] = []
+        if isSessionBlock { traits.append("session") }
+        if isSelected { traits.append("selected") }
+        setAccessibilityValue(traits.joined(separator: ", "))
+    }
+
+    private static func accessibilitySummary(for text: String, limit: Int = 240) -> String {
+        guard text.count > limit else { return text }
+        // Keep both command onset and the live/completed tail available to
+        // assistive technology. A tail-only summary made it impossible to
+        // verify the first output line after a long Block completed.
+        let prefixCount = limit / 10
+        let separator = "…\n"
+        let suffixCount = max(limit - prefixCount - separator.count, 0)
+        return String(text.prefix(prefixCount)) + separator + String(text.suffix(suffixCount))
+    }
+
+    override func layout() {
+        super.layout()
+        bodyTranscript.frame = body.bounds
+    }
+
     func setOutputLines(_ lines: Int, cellHeight: CGFloat) {
         bodyHeight.constant = max(cellHeight, 1) * CGFloat(max(lines, 1))
+    }
+
+    func updatePresentation(prompt: String, title: String, detail: String, state: UInt16, session: Bool) {
+        self.prompt.stringValue = prompt
+        command.stringValue = title.isEmpty ? "command" : title
+        setAccessibilityLabel(command.stringValue)
+        status.stringValue = detail
+        status.isHidden = detail.isEmpty
+        self.state = state
+        isSessionBlock = session
+        updateAccessibilityValue()
+        if let theme { apply(theme: theme) }
     }
 
     override func accessibilityChildren() -> [Any]? {
         // The card is itself an accessibility element, so XCUI cannot see the
         // body (the live-tail target) without an explicit child list. Header
         // labels stay in the tree so VoiceOver still hears prompt, command, and status.
-        [prompt, command, status, body]
+        return [prompt, command, status, bodyTranscript]
     }
 
     /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must
     /// own the click. XCUI (and a user) hit the card center, which is the body
     /// once output exists — a header-only gesture never sees that click.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) == nil ? nil : self
+        let hit = super.hitTest(point)
+        return hit == nil ? nil : self
+    }
+
+    /// `hitTest` returns `self` for selection, which would otherwise swallow
+    /// trackpad/mouse wheel over Block bodies. Flow scrolling is Pane-owned by
+    /// the transcript `NSScrollView` (#1379 Gate 1).
+    override func scrollWheel(with event: NSEvent) {
+        if let scroll = enclosingScrollView {
+            scroll.scrollWheel(with: event)
+            return
+        }
+        super.scrollWheel(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {

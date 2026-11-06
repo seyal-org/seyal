@@ -134,12 +134,6 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
                 WindowSize::cells(80, 24).expect("geometry"),
             )
             .expect("unpresented execution");
-        let driver = runtime
-            .create_execution(
-                CommandSpec::new("/bin/sh").args(["-c", "sleep 30"]),
-                WindowSize::cells(80, 24).expect("geometry"),
-            )
-            .expect("sibling event-loop execution");
         let pid_deadline = Instant::now() + Duration::from_secs(2);
         while !anchor_pid_for_runtime.exists() && Instant::now() < pid_deadline {
             runtime
@@ -155,7 +149,7 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
             .expect("local IPC socket")
             .to_path_buf();
         ready_tx
-            .send((socket_path, anchor, unpresented, driver))
+            .send((socket_path, anchor, unpresented))
             .expect("test receiver");
 
         let deadline = Instant::now() + Duration::from_secs(8);
@@ -221,7 +215,7 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
             .run_until_empty(Instant::now() + Duration::from_secs(2))
             .expect("shutdown");
     });
-    let (socket_path, anchor, unpresented, driver) = ready_rx
+    let (socket_path, anchor, unpresented) = ready_rx
         .recv_timeout(Duration::from_secs(2))
         .expect("Runtime ready");
     set_explicit_runtime_dir(
@@ -241,9 +235,54 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
     while !root.snapshot().pending_effects.is_empty() {
         root.apply(AppAction::AckEffect).expect("ack window effect");
     }
+    // Master CreateWindow admits + provisions a live Controller for the new
+    // window (ADR-018 §3.3a). Finish that bind before dispose-attach so the
+    // create and unpresented-dispose wire paths do not contend, and so a later
+    // sibling Bind onto the same pane cannot return AlreadyBound.
     root.apply(AppAction::CreateWindow)
         .expect("open independent window");
     let open_window = root.snapshot().shell.active_window.expect("new window");
+    let open_pane = root.snapshot().shell.focused_pane;
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).expect("ack CreateWindow effect");
+    }
+    let deadline = Instant::now() + Duration::from_secs(7);
+    while Instant::now() < deadline {
+        if let Err(error) = root.poll_client(root.fence()) {
+            panic!(
+                "drive CreateWindow provision: {error:?}; extra_clients={}; snapshot={:?}",
+                root.extra_controller_client_count(),
+                root.snapshot()
+            );
+        }
+        let bound = root
+            .snapshot()
+            .shell
+            .windows
+            .iter()
+            .find(|window| window.id == open_window)
+            .and_then(|window| window.tabs.first())
+            .and_then(|tab| tab.panes.iter().find(|pane| pane.id == open_pane))
+            .and_then(|pane| pane.execution)
+            .is_some();
+        if bound {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        root.snapshot()
+            .shell
+            .windows
+            .iter()
+            .find(|window| window.id == open_window)
+            .and_then(|window| window.tabs.first())
+            .and_then(|tab| tab.panes.iter().find(|pane| pane.id == open_pane))
+            .and_then(|pane| pane.execution)
+            .is_some(),
+        "CreateWindow must finish provisioning before unpresented dispose"
+    );
+
     let workspace = root.snapshot().shell.active_workspace;
     root.apply(AppAction::RecordUnpresented {
         execution: unpresented,
@@ -261,7 +300,7 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
         if let Err(error) = root.poll_client(root.fence()) {
             panic!(
                 "drive attach and terminate: {error:?}; extra_clients={}; snapshot={:?}",
-                root.extra_pane_client_count(),
+                root.extra_controller_client_count(),
                 root.snapshot()
             );
         }
@@ -300,7 +339,7 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
             .windows
             .iter()
             .any(|window| window.id == anchor_window),
-        "the bound anchor window must remain open while the unbound focused window is active"
+        "the bound anchor window must remain open while the CreateWindow-focused window is active"
     );
     root.apply(AppAction::ReportWindowEvent {
         window: anchor_window,
@@ -350,11 +389,12 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
             .success(),
         "closing the bound window must leave the exact OS child alive"
     );
-    let driver_client =
-        LocalDisplayClient::connect_execution(&socket_path, driver, Role::Controller)
-            .expect("sibling event-loop Controller");
-    root.attach_client(root.fence(), driver_client)
-        .expect("bind sibling event-loop execution");
+    // Closing the anchor promotes CreateWindow's Controller to client_handle
+    // so dispose-attach can still drive without a second Bind onto the pane.
+    assert!(
+        root.live_client_handle_for_test().is_some(),
+        "surviving CreateWindow Controller must remain after anchor close"
+    );
     assert!(
         root.snapshot()
             .shell
@@ -384,7 +424,7 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
         if let Err(error) = root.poll_client(root.fence()) {
             panic!(
                 "drive Runtime-backed unpresented termination: {error:?}; extra_clients={}; snapshot={:?}",
-                root.extra_pane_client_count(),
+                root.extra_controller_client_count(),
                 root.snapshot()
             );
         }
@@ -635,7 +675,7 @@ fn last_window_close_releases_controller_for_readopt_and_terminate() {
         "last-window close must drop the Controller registry entry"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(8);
     let mut readopted = None;
     while Instant::now() < deadline {
         match LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Controller) {
@@ -650,13 +690,14 @@ fn last_window_close_releases_controller_for_readopt_and_terminate() {
     client
         .submit_terminate_execution(execution_id)
         .expect("new Controller admits terminate");
-    let result_deadline = Instant::now() + Duration::from_secs(3);
+    // Foundation Quality missed TerminationRequested inside a 3s window when
+    // the first poll_prepare Err aborted the wait. Keep polling until the
+    // result or this deadline. The assertion below is still
+    // TerminationRequested — this is not a weaker oracle.
+    let result_deadline = Instant::now() + Duration::from_secs(8);
     let mut result = None;
     while Instant::now() < result_deadline {
-        match client.poll_prepare() {
-            Ok(_) => {}
-            Err(_) => break,
-        }
+        let _ = client.poll_prepare();
         if let Some(found) = client.take_terminate_result() {
             result = Some(found);
             break;

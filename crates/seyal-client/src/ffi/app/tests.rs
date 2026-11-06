@@ -5,7 +5,7 @@ use std::{
 };
 
 use seyal_core::BlockId;
-use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+use seyal_protocol::framing::{BlockScope, BlockTrust, CommandBlock, CommandBlockState};
 
 use crate::app::AppAction;
 use crate::composer::RuntimeBlockRecord;
@@ -118,6 +118,20 @@ fn window_event_rejects_unknown_reserved_bits_and_misplaced_occlusion_flag() {
     assert_eq!(super::decode::decode_action(&action), Err(-6));
 }
 
+fn opt_in_flow_handle(handle: u64) {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        state
+            .root
+            .apply(AppAction::SelectRestingPresentation {
+                fence: state.root.fence(),
+                raw: false,
+            })
+            .expect("opt in Flow");
+    });
+}
+
 fn bound_handle() -> (u64, SeyalAppSnapshot) {
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);
@@ -143,6 +157,7 @@ fn bound_handle() -> (u64, SeyalAppSnapshot) {
         reserved: 0,
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+    opt_in_flow_handle(handle);
     relay_composer_status(handle, 1, 1);
     let bound = seyal_app_snapshot(handle);
     (handle, bound)
@@ -184,6 +199,7 @@ fn composer_status_relay_gates_availability_and_rejects_bad_codes() {
         reserved: 0,
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+    opt_in_flow_handle(handle);
     // Bound but Runtime has published nothing: busy, not submittable,
     // and the placeholder says so.
     let composer = seyal_app_composer(handle);
@@ -386,6 +402,24 @@ fn explicit_handle_round_trip_and_unknown_handle_fail_closed() {
     let missing = seyal_app_snapshot(handle);
     assert_eq!(missing.generation, 0);
     assert_eq!(seyal_app_option_as_alt(u64::MAX), 0);
+    assert_eq!(seyal_app_should_confirm_quit(u64::MAX), 0);
+}
+
+#[test]
+fn should_confirm_quit_follows_window_count_under_default_policy() {
+    let handle = seyal_app_create();
+    assert_eq!(
+        seyal_app_should_confirm_quit(handle),
+        0,
+        "single window/tab"
+    );
+    assert_eq!(seyal_app_test_seed_windows_only(handle, 2), 0);
+    assert_eq!(
+        seyal_app_should_confirm_quit(handle),
+        1,
+        "two windows under default warn_before_quit"
+    );
+    assert_eq!(seyal_app_destroy(handle), 0);
 }
 
 #[test]
@@ -427,7 +461,7 @@ fn bind_through_explicit_handle_does_not_use_implicit_select() {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &action) }, 0);
     let bound = seyal_app_snapshot(handle);
-    assert_eq!(bound.eligibility, 1);
+    assert_eq!(bound.eligibility, 1); // Blocks-first supported-session default (#1426)
     assert_eq!(bound.flags & SNAP_COMPOSER, SNAP_COMPOSER);
     assert_eq!(bound.flags & SNAP_HAS_EXECUTION, SNAP_HAS_EXECUTION);
     action.kind = 0;
@@ -505,7 +539,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
             .root
             .apply(AppAction::ApplyRuntimeBlocks {
                 fence,
-                records: vec![
+                records: Some(vec![
                     RuntimeBlockRecord {
                         id: BlockId::from_bytes([0x51; 16]),
                         command: "git status".into(),
@@ -513,6 +547,8 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         end_line: Some(3),
                         running: false,
                         exit_status: Some(0),
+                        canvas_floor: false,
+                        scope: seyal_protocol::framing::BlockScope::Local,
                     },
                     RuntimeBlockRecord {
                         id: BlockId::from_bytes([0x61; 16]),
@@ -521,8 +557,10 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         end_line: None,
                         running: true,
                         exit_status: None,
+                        canvas_floor: false,
+                        scope: seyal_protocol::framing::BlockScope::Local,
                     },
-                ],
+                ]),
             })
             .unwrap();
     });
@@ -669,6 +707,9 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
         start_line: 3,
         end_line: None,
         state: CommandBlockState::Running,
+        flags: 0,
+        scope: BlockScope::Local,
+        trust: BlockTrust::LocalTrusted,
     };
     let projected = runtime_block_from_command(&running);
     assert_eq!(projected.command, "echo hi");
@@ -678,6 +719,7 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
     let mut expected = [0u8; 16];
     expected[..8].copy_from_slice(&7u64.to_le_bytes());
     assert_eq!(projected.id, BlockId::from_bytes(expected));
+    assert_eq!(projected.scope, BlockScope::Local);
 
     let failed = CommandBlock {
         id: 8,
@@ -687,11 +729,29 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
         state: CommandBlockState::Completed {
             exit_status: Some(1),
         },
+        flags: 0,
+        scope: BlockScope::Local,
+        trust: BlockTrust::LocalTrusted,
     };
     let projected = runtime_block_from_command(&failed);
     assert!(!projected.running);
     assert_eq!(projected.exit_status, Some(1));
     assert_eq!(projected.end_line, Some(4));
+
+    let session = CommandBlock {
+        id: 9,
+        command: "echo session-ok".into(),
+        start_line: 30,
+        end_line: None,
+        state: CommandBlockState::Running,
+        flags: 0,
+        scope: BlockScope::Session,
+        trust: BlockTrust::SessionTrusted,
+    };
+    assert_eq!(
+        runtime_block_from_command(&session).scope,
+        BlockScope::Session
+    );
 }
 
 #[test]
@@ -733,7 +793,7 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
     };
     assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
     let bound = seyal_app_snapshot(handle);
-    assert_eq!(bound.eligibility, 1);
+    assert_eq!(bound.eligibility, 1); // Blocks-first supported-session default (#1426)
     let mut refresh = identity_fence(2, &bound);
     refresh.flags |= FLAG_ALTERNATE_SCREEN;
     assert_eq!(unsafe { seyal_app_apply(handle, &refresh) }, 0);

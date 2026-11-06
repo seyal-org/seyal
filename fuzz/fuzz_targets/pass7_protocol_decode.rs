@@ -59,6 +59,18 @@ fn decode_pass7_payload(kind: MessageType, payload: &[u8]) {
         MessageType::ViewportLineIds => {
             let _ = seyal_protocol::framing::ViewportLineIds::decode(payload);
         }
+        MessageType::SessionOffer => {
+            let _ = seyal_protocol::framing::SessionOffer::decode(payload);
+        }
+        MessageType::SessionConsent => {
+            let _ = seyal_protocol::framing::SessionConsent::decode(payload);
+        }
+        MessageType::SessionStatus => {
+            let _ = seyal_protocol::framing::SessionStatus::decode(payload);
+        }
+        MessageType::ComposerTarget => {
+            let _ = seyal_protocol::framing::ComposerTarget::decode(payload);
+        }
         _ => {}
     }
 }

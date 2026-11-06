@@ -1078,12 +1078,41 @@ fn negotiated_connection_routes_multiple_attachments_independently() {
         }
         .encode(),
     );
+
+    // SPEC-004 §19.2 provides no SuspendDelivery ACK. A display frame
+    // already on the wire may complete after the suspend request is sent.
+    // Resync on a suspended attachment MUST return InvalidState (§19.3).
+    // That ordered response proves the suspend has been processed; park
+    // prior presentation frames until the control response is observed.
+    harness.send(
+        &mut client,
+        MessageType::Resync,
+        &Resync {
+            attachment_id: first.attachment_id,
+        }
+        .encode(),
+    );
+    client.park_presentation = true;
+    let (kind, payload) =
+        harness.expect_frame(&mut client, Instant::now() + Duration::from_secs(2));
+    client.park_presentation = false;
+    assert_eq!(kind, MessageType::Error as u16);
+    let error = ErrorMessage::decode(&payload).expect("suspended Resync error");
+    assert_eq!(error.error_code, ErrorCode::InvalidState as u16);
+    assert_eq!(error.offending_message_type, MessageType::Resync as u16);
+    // The client discards obsolete queued presentation on entering Hidden;
+    // it must not be replayed as the subsequent resumed snapshot/LineIds.
+    client
+        .deferred_presentation_frames
+        .remove(&first.attachment_id);
+
     harness.assert_no_display_for_attachment(
         &mut client,
         first.attachment_id,
         Duration::from_millis(100),
     );
 
+    // The unrelated attachment still has an independent live delivery path.
     harness.send(
         &mut client,
         MessageType::Input,

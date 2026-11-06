@@ -1,4 +1,4 @@
-use seyal_runtime::local_ipc::framing::{ComposerEligibility, ComposerResultCode};
+use seyal_runtime::local_ipc::framing::ComposerResultCode;
 
 use crate::local::ClientError;
 use crate::LocalDisplayClient;
@@ -6,8 +6,8 @@ use crate::LocalDisplayClient;
 use super::{
     error_code, with_active_client, with_active_client_mut, with_display_client,
     with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
-    SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange, SeyalHistoryRow,
-    SeyalHistorySidecar, SeyalPreparedFrame,
+    SeyalComposerTarget, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange,
+    SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame, SeyalSessionSurface,
 };
 
 #[unsafe(no_mangle)]
@@ -73,6 +73,15 @@ pub extern "C" fn seyal_bridge_next_history_request_id() -> u64 {
     with_display_client(LocalDisplayClient::next_history_request_id).unwrap_or(0)
 }
 
+/// Peek the next history request id on one registry Controller (#1426).
+///
+/// Does not change the focused display/input client. Multipane Flow must pair
+/// this with [`seyal_bridge_request_history_range_for`] on the same handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_next_history_request_id_for(handle: u64) -> u64 {
+    super::with_client(handle, LocalDisplayClient::next_history_request_id).unwrap_or(0)
+}
+
 /// Atomically peeks one bounded response by its typed Block/request identity.
 /// Anchor coordinates are metadata only and never select a response.
 #[unsafe(no_mangle)]
@@ -80,33 +89,54 @@ pub extern "C" fn seyal_bridge_history_range_peek_for(
     block_id: u64,
     request_id: u64,
 ) -> SeyalHistoryRange {
-    with_display_client(|client| {
-        let Some(range) = client.history_range_for(block_id, request_id) else {
-            return SeyalHistoryRange::empty();
-        };
-        let Some(first) = range.rows.first() else {
-            return SeyalHistoryRange {
-                start_line: 0,
-                end_line: 0,
-                block_id: range.block_id,
-                request_id: range.request_id,
-                revision: range.revision,
-                row_count: 0,
-                reserved: range.status as u32,
-            };
-        };
-        let last = range.rows.last().map_or(first.line_id, |row| row.line_id);
-        SeyalHistoryRange {
-            start_line: first.line_id,
-            end_line: last,
+    with_display_client(|client| history_range_peek_from_client(client, block_id, request_id))
+        .unwrap_or_else(SeyalHistoryRange::empty)
+}
+
+/// Peek a history response on one registry Controller (#1426).
+///
+/// Does not change the focused display/input client.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_peek_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistoryRange {
+    super::with_client(handle, |client| {
+        history_range_peek_from_client(client, block_id, request_id)
+    })
+    .unwrap_or_else(SeyalHistoryRange::empty)
+}
+
+fn history_range_peek_from_client(
+    client: &LocalDisplayClient,
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistoryRange {
+    let Some(range) = client.history_range_for(block_id, request_id) else {
+        return SeyalHistoryRange::empty();
+    };
+    let Some(first) = range.rows.first() else {
+        return SeyalHistoryRange {
+            start_line: 0,
+            end_line: 0,
             block_id: range.block_id,
             request_id: range.request_id,
             revision: range.revision,
-            row_count: range.rows.len() as u32,
+            row_count: 0,
             reserved: range.status as u32,
-        }
-    })
-    .unwrap_or_else(SeyalHistoryRange::empty)
+        };
+    };
+    let last = range.rows.last().map_or(first.line_id, |row| row.line_id);
+    SeyalHistoryRange {
+        start_line: first.line_id,
+        end_line: last,
+        block_id: range.block_id,
+        request_id: range.request_id,
+        revision: range.revision,
+        row_count: range.rows.len() as u32,
+        reserved: range.status as u32,
+    }
 }
 
 /// Returns one borrowed row using the typed block/request identity returned by
@@ -118,20 +148,41 @@ pub extern "C" fn seyal_bridge_history_range_row_for(
     request_id: u64,
     index: u32,
 ) -> SeyalHistoryRow {
-    with_display_client(|client| {
-        let Some(range) = client.history_range_for(block_id, request_id) else {
-            return SeyalHistoryRow::empty();
-        };
-        let Some(row) = range.rows.get(index as usize) else {
-            return SeyalHistoryRow::empty();
-        };
-        SeyalHistoryRow {
-            line_id: row.line_id,
-            cells: row.cells.as_ptr().cast::<SeyalHistoryCell>(),
-            cell_count: row.cells.len() as u32,
-        }
+    with_display_client(|client| history_range_row_from_client(client, block_id, request_id, index))
+        .unwrap_or_else(SeyalHistoryRow::empty)
+}
+
+/// Borrow one history row on a named registry Controller (#1426).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_row_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+    index: u32,
+) -> SeyalHistoryRow {
+    super::with_client(handle, |client| {
+        history_range_row_from_client(client, block_id, request_id, index)
     })
     .unwrap_or_else(SeyalHistoryRow::empty)
+}
+
+fn history_range_row_from_client(
+    client: &LocalDisplayClient,
+    block_id: u64,
+    request_id: u64,
+    index: u32,
+) -> SeyalHistoryRow {
+    let Some(range) = client.history_range_for(block_id, request_id) else {
+        return SeyalHistoryRow::empty();
+    };
+    let Some(row) = range.rows.get(index as usize) else {
+        return SeyalHistoryRow::empty();
+    };
+    SeyalHistoryRow {
+        line_id: row.line_id,
+        cells: row.cells.as_ptr().cast::<SeyalHistoryCell>(),
+        cell_count: row.cells.len() as u32,
+    }
 }
 
 /// Returns the snapshot sidecar for a previously peeked history range. The
@@ -142,17 +193,36 @@ pub extern "C" fn seyal_bridge_history_range_sidecar_for(
     block_id: u64,
     request_id: u64,
 ) -> SeyalHistorySidecar {
-    with_display_client(|client| {
-        let Some(range) = client.history_range_for(block_id, request_id) else {
-            return SeyalHistorySidecar::empty();
-        };
-        SeyalHistorySidecar {
-            bytes: range.sidecar.as_ptr(),
-            len: range.sidecar.len() as u32,
-            reserved: 0,
-        }
+    with_display_client(|client| history_range_sidecar_from_client(client, block_id, request_id))
+        .unwrap_or_else(SeyalHistorySidecar::empty)
+}
+
+/// Borrow the history sidecar on a named registry Controller (#1426).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_sidecar_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistorySidecar {
+    super::with_client(handle, |client| {
+        history_range_sidecar_from_client(client, block_id, request_id)
     })
     .unwrap_or_else(SeyalHistorySidecar::empty)
+}
+
+fn history_range_sidecar_from_client(
+    client: &LocalDisplayClient,
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistorySidecar {
+    let Some(range) = client.history_range_for(block_id, request_id) else {
+        return SeyalHistorySidecar::empty();
+    };
+    SeyalHistorySidecar {
+        bytes: range.sidecar.as_ptr(),
+        len: range.sidecar.len() as u32,
+        reserved: 0,
+    }
 }
 
 /// Consumes a previously peeked response after its rows have been copied by
@@ -161,6 +231,19 @@ pub extern "C" fn seyal_bridge_history_range_sidecar_for(
 pub extern "C" fn seyal_bridge_history_range_consume(block_id: u64, request_id: u64) -> u8 {
     with_display_client_mut(|client| u8::from(client.consume_history_range(block_id, request_id)))
         .unwrap_or(0)
+}
+
+/// Consume a peeked history response on a named registry Controller (#1426).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_consume_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> u8 {
+    super::with_client_mut(handle, |client| {
+        u8::from(client.consume_history_range(block_id, request_id))
+    })
+    .unwrap_or(0)
 }
 
 /// Copies the latest Runtime ComposerResult into a typed C value. No command
@@ -189,23 +272,95 @@ pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
 /// 0 means nothing published yet. Rust remains the only reader of its meaning.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
-    with_display_client(|client| client.composer_status())
+    with_display_client(|client| client.projected_composer_status())
         .flatten()
-        .map(|status| {
-            let attachment = status.attachment_id.to_bytes();
-            SeyalComposerStatus {
-                revision: status.revision,
-                attachment_id_low: u64::from_le_bytes(attachment[..8].try_into().unwrap()),
-                attachment_id_high: u64::from_le_bytes(attachment[8..].try_into().unwrap()),
-                eligibility: match status.eligibility {
-                    ComposerEligibility::Available => 1,
-                    ComposerEligibility::Busy => 2,
-                    ComposerEligibility::Unsupported => 3,
-                },
-                reserved: [0; 7],
-            }
+        .map(|(eligibility, revision, attachment)| SeyalComposerStatus {
+            revision,
+            attachment_id_low: u64::from_le_bytes(attachment[..8].try_into().unwrap()),
+            attachment_id_high: u64::from_le_bytes(attachment[8..].try_into().unwrap()),
+            eligibility,
+            reserved: [0; 7],
         })
         .unwrap_or_else(SeyalComposerStatus::empty)
+}
+
+/// Read-only Runtime target used to anchor the single line Relay editor to its
+/// live Block. Rust retains admission authority; this value only positions UI.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_composer_target() -> SeyalComposerTarget {
+    with_display_client(|client| client.projected_composer_target())
+        .flatten()
+        .map(
+            |(block_id, target_generation, revision, mode)| SeyalComposerTarget {
+                block_id,
+                target_generation,
+                revision,
+                mode,
+                reserved: [0; 7],
+            },
+        )
+        .unwrap_or_else(SeyalComposerTarget::empty)
+}
+
+/// ADR-026 session affordance for the thin host. Kind 0 means hide the banner.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_surface() -> SeyalSessionSurface {
+    with_display_client(|client| {
+        let (kind, host_block_id, revision) = client.projected_session_surface();
+        SeyalSessionSurface {
+            kind,
+            reserved: [0; 7],
+            host_block_id,
+            revision,
+        }
+    })
+    .unwrap_or_else(SeyalSessionSurface::empty)
+}
+
+/// Rust-owned session copy. `kind`: 0 title, 1 body, 2 primary action, 3 dismiss.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_copy(kind: u8) -> *const std::ffi::c_char {
+    let text: &'static [u8] = match kind {
+        0 => b"Set up this SSH session\0",
+        1 => b"To group commands into session Blocks, Seyal will type one setup line into this session. That line may enter the remote shell's history. Seyal writes no remote file and installs only in-memory hooks until that shell exits. Direct input including Raw is held while setup runs. Afterward Raw and labeled relay remain available. Relay is plaintext to the foreground program.\0",
+        2 => b"Set up this session\0",
+        3 => b"Not now\0",
+        4 => b"Set up SSH session\0",
+        _ => b"\0",
+    };
+    text.as_ptr().cast()
+}
+
+/// Explicit Enable Blocks → type 43 Request. Host block comes from the surface.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_request() -> i32 {
+    match with_display_client_mut(|client| {
+        let (kind, host_block_id, _) = client.projected_session_surface();
+        if kind != 1 || host_block_id == 0 {
+            return Err(crate::ClientError::Protocol);
+        }
+        client.request_session_offer(host_block_id)
+    }) {
+        Some(Ok(())) => 0,
+        Some(Err(_)) => -1,
+        None => -2,
+    }
+}
+
+/// Accept (1) or Decline (0) the current SessionOffer.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_consent(accept: u8) -> i32 {
+    use seyal_runtime::local_ipc::framing::SessionConsentDecision;
+    let decision = if accept != 0 {
+        SessionConsentDecision::Accept
+    } else {
+        SessionConsentDecision::Decline
+    };
+    match with_display_client_mut(|client| client.submit_session_consent(decision)) {
+        Some(Ok(())) => 0,
+        Some(Err(_)) => -1,
+        None => -2,
+    }
 }
 
 /// Read-only Pass 8 execution metadata for the active Pane client. No command
@@ -249,8 +404,15 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
         Err(error) => {
             let code = error_code(error);
             if is_terminal_client_loss(&error) && handle != 0 {
-                super::app::note_application_roots_client_loss(handle);
-                let _ = super::unregister_client(handle);
+                if matches!(error, ClientError::NoRunningExecution) {
+                    // Retain the client until the host stop() path so Flow can
+                    // request final Block history after clear→exit (#1379).
+                    // Unregistering here left historyRanges stale vs AppKit cards.
+                    super::app::note_application_roots_execution_ended(handle);
+                } else {
+                    super::app::note_application_roots_client_loss(handle);
+                    let _ = super::unregister_client(handle);
+                }
             }
             code
         }
@@ -261,8 +423,10 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
 
 /// Poll one registry handle without changing the selected readiness client.
 ///
-/// Terminal disconnect/IO unregisters that client so level-triggered sources
-/// stop refiring. Transient prepare errors stay on the live registry.
+/// Connection-fatal errors unregister that client so level-triggered sources
+/// stop refiring. Protocol and BlockMetadataConflict leave the offending frame
+/// unconsumed, so the same client can never make progress (SPEC-007 §12.1/§12.2);
+/// unregistering is the only level-trigger progress path (#1433).
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
     super::drain_attach_wakeup();
@@ -280,8 +444,12 @@ pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
         Err(error) => {
             let code = error_code(error);
             if is_terminal_client_loss(&error) {
-                super::app::note_application_roots_client_loss(handle);
-                let _ = super::unregister_client(handle);
+                if matches!(error, ClientError::NoRunningExecution) {
+                    super::app::note_application_roots_execution_ended(handle);
+                } else {
+                    super::app::note_application_roots_client_loss(handle);
+                    let _ = super::unregister_client(handle);
+                }
             }
             code
         }
@@ -291,10 +459,7 @@ pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
 }
 
 fn is_terminal_client_loss(error: &ClientError) -> bool {
-    matches!(
-        error,
-        ClientError::Disconnected | ClientError::Io | ClientError::NoRunningExecution
-    )
+    error.is_terminal_registry_loss()
 }
 
 /// Ensure the initial PreparedSurface after attach snapshot commit. Idempotent.
@@ -380,6 +545,28 @@ pub extern "C" fn seyal_bridge_request_history_range(
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
+/// Request completed-Block history on one registry Controller (#1426).
+///
+/// Does not change the focused display/input client. Multipane secondary Flow
+/// hosts must use this instead of `seyal_bridge_select` + focused history APIs.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_request_history_range_for(
+    handle: u64,
+    block_id: u64,
+    start_line: u64,
+    end_line: u64,
+    max_lines: u16,
+    max_cells: u32,
+    start_unit: u32,
+) -> i32 {
+    super::with_client_mut(handle, |client| {
+        client.request_history_range(
+            block_id, start_line, end_line, max_lines, max_cells, start_unit,
+        )
+    })
+    .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
+}
+
 /// Borrow the current contiguous prepared surface.
 ///
 /// The returned cell pointer borrows Rust-owned prepared storage and is valid
@@ -404,6 +591,25 @@ pub extern "C" fn seyal_bridge_frame() -> SeyalPreparedFrame {
 pub extern "C" fn seyal_bridge_frame_for(handle: u64) -> SeyalPreparedFrame {
     super::with_client_mut(handle, prepared_frame_from_client)
         .unwrap_or_else(SeyalPreparedFrame::empty)
+}
+
+/// First LineId of the paired primary viewport (`ViewportLineIds[0]`), or 0
+/// when unpaired. Presentation-local Raw scrollback uses this as the live
+/// window origin without inventing client-side history (#1442).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_viewport_start_line_id() -> u64 {
+    with_display_client(|client| client.viewport_line_ids().first().copied().unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Same as [`seyal_bridge_viewport_start_line_id`] for one registry handle
+/// without changing the focused display client.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_viewport_start_line_id_for(handle: u64) -> u64 {
+    super::with_client(handle, |client| {
+        client.viewport_line_ids().first().copied().unwrap_or(0)
+    })
+    .unwrap_or(0)
 }
 
 fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {

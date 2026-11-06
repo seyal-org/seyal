@@ -62,6 +62,8 @@ An Issue or PR cannot override architecture/specification. Existing code is neve
 
 Any request to **implement, fix, finish, code, or complete a specific GitHub Issue** must enter through `.agents/skills/implement-issue/SKILL.md` before production edits. Do not implement a Ready Issue directly from chat instructions or bypass the skill because the requested change appears small.
 
+Seyal requires **two distinct ownership checks**: a human GitHub Issue owner for accountability, and a token-fenced atomic agent worker claim for the same-host execution. The human assignment/comment and branch do **not** provide atomic exclusion between two Cursor/Codex/Claude agents acting for that owner. After the approved plan and before writing, use `python3 scripts/seyal-ai-sdlc-claim.py begin --repo seyal-org/seyal --phase implement --number <N>`, then `verify` before every mutation and `release` only at the completed handoff. For PR review/remediation use the corresponding `review`/`process-review` phases on the same PR number. The host must provide `AI_SDLC_WORKER_ID` unique to each concurrently running worker; without it or `make bootstrap-agents` the write gate fails closed. A separate human review and explicit merge authorization are still required.
+
 Seyal uses an exclusive active-work claim:
 
 ```text

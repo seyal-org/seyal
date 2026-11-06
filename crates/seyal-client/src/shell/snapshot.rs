@@ -1,11 +1,12 @@
 //! ADR-018 §2.1 multi-window product snapshot projection (W3).
 
-use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use super::tree::{LayoutDescription, PaneTree};
 use super::workspace::{Pane, Tab, Window, Workspace};
 use super::{
-    PresentationTier, ShellError, ShellSnapshot, ShellState, TabSnapshot, WorkspaceSnapshot,
+    PresentationTier, ShellError, ShellSnapshot, ShellState, TabSnapshot, TerminalTabSnapshot,
+    WorkspaceSnapshot,
 };
 
 /// One Window in the ordered §2.1 snapshot list.
@@ -36,10 +37,13 @@ pub struct WindowTabSnapshot {
 pub struct PaneLeafSnapshot {
     pub id: PaneId,
     pub title: String,
+    pub terminal_tabs: Vec<TerminalTabSnapshot>,
+    pub selected_terminal_tab: Option<TerminalTabId>,
     pub execution: Option<ExecutionId>,
     pub allows_implicit_bootstrap: bool,
     pub presentation_tier: PresentationTier,
     pub presentation_mode: crate::presentation::PresentationMode,
+    pub resting_presentation_mode: crate::presentation::PresentationMode,
 }
 
 impl ShellState {
@@ -85,8 +89,19 @@ impl ShellState {
                         tab.panes.get(&id).map(|pane| super::PaneSnapshot {
                             id: pane.id,
                             title: pane.title.clone(),
-                            execution: pane.execution,
+                            terminal_tabs: pane
+                                .terminal_tabs
+                                .iter()
+                                .map(|terminal| TerminalTabSnapshot {
+                                    id: terminal.id,
+                                    execution: terminal.execution,
+                                })
+                                .collect(),
+                            selected_terminal_tab: pane.selected_terminal_tab,
+                            execution: pane.execution(),
                             allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
+                            presentation_mode: pane.presentation_mode,
+                            resting_presentation_mode: pane.resting_presentation_mode,
                         })
                     })
                     .collect(),
@@ -206,10 +221,20 @@ fn leaf_snapshot(
     PaneLeafSnapshot {
         id: pane.id,
         title: pane.title.clone(),
-        execution: pane.execution,
+        terminal_tabs: pane
+            .terminal_tabs
+            .iter()
+            .map(|terminal| TerminalTabSnapshot {
+                id: terminal.id,
+                execution: terminal.execution,
+            })
+            .collect(),
+        selected_terminal_tab: pane.selected_terminal_tab,
+        execution: pane.execution(),
         allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
         presentation_tier: tier_for_leaf(pane.id, tab, window, product_window),
         presentation_mode: pane.presentation_mode,
+        resting_presentation_mode: pane.resting_presentation_mode,
     }
 }
 
@@ -258,6 +283,10 @@ impl ShellError {
             Self::CrossWorkspaceAdopt => 21,
             Self::ExecutionNotUnpresented => 22,
             Self::WindowCreationUnavailable => 23,
+            Self::UnknownTerminalTab => 24,
+            Self::NoSelectedTerminalTab => 25,
+            Self::InvalidWorkspaceRoot => 26,
+            Self::DuplicateWorkspace => 27,
         }
     }
 }

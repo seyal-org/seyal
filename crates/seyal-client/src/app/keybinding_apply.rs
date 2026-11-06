@@ -94,6 +94,17 @@ impl ApplicationRoot {
             WorkspaceCommandId::CommandPaletteOpen => self.open_palette(fence),
             WorkspaceCommandId::CommandPaletteClose => self.close_palette(fence),
             WorkspaceCommandId::TabCreate => self.create_tab(),
+            WorkspaceCommandId::TerminalCreate => self.new_terminal(),
+            WorkspaceCommandId::TerminalCloseFocused => {
+                let shell = self.shell.snapshot();
+                let pane = shell.focused_pane;
+                let terminal_tab = self
+                    .shell
+                    .selected_terminal_tab(pane)
+                    .map_err(|_| AppError::UnknownPane)?
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.close_terminal_tab(pane, terminal_tab, shell.containment_generation)
+            }
             WorkspaceCommandId::TabCloseFocused => {
                 let id = self.shell.snapshot().active_tab;
                 self.close_tab(id, self.shell.containment_generation())
@@ -161,12 +172,12 @@ impl ApplicationRoot {
             }
             WorkspaceCommandId::PresentationToggleTui => {
                 let mode = self.presentation.snapshot().mode;
-                let next = if mode == PresentationMode::Tui {
-                    PresentationMode::Flow
+                if mode == PresentationMode::Tui {
+                    // Leave TUI via resting restore — never force Flow (#1438).
+                    self.derive_presentation(false)
                 } else {
-                    PresentationMode::Tui
-                };
-                self.transition_presentation(next)
+                    self.transition_presentation(PresentationMode::Tui)
+                }
             }
             WorkspaceCommandId::ComposerHistorySearchOpen => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
@@ -314,22 +325,33 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// Single resting-selection path for menu/keybinding (#1440). Flow/Raw
+    /// always latch through [`Self::select_resting_presentation`]. TUI is a
+    /// temporary takeover and must not rewrite the resting latch.
     fn transition_presentation(&mut self, mode: PresentationMode) -> Result<(), AppError> {
-        let snap = self.presentation.snapshot();
-        let Some(identity) = snap.identity else {
-            return Err(AppError::ActionUnavailable);
-        };
-        self.presentation
-            .apply(PresentationAction::Transition {
-                mode,
-                identity,
-                explicit: true,
-                epoch: snap.epoch,
-            })
-            .map_err(|_| AppError::StalePresentationEpoch)?;
-        self.sync_focused_presentation_mode();
-        self.clear_chord_prefix();
-        Ok(())
+        match mode {
+            PresentationMode::Raw | PresentationMode::Flow => {
+                self.select_resting_presentation(self.fence(), mode == PresentationMode::Raw)
+            }
+            PresentationMode::Tui => {
+                let snap = self.presentation.snapshot();
+                let Some(identity) = snap.identity else {
+                    return Err(AppError::ActionUnavailable);
+                };
+                self.presentation
+                    .apply(PresentationAction::Transition {
+                        mode: PresentationMode::Tui,
+                        identity,
+                        explicit: false,
+                        epoch: snap.epoch,
+                    })
+                    .map_err(|_| AppError::StalePresentationEpoch)?;
+                self.sync_focused_presentation_mode();
+                self.clear_chord_prefix();
+                self.sync_composer_presentation();
+                Ok(())
+            }
+        }
     }
 
     /// Gate menu-originated CreateTab when the palette owns focus (R6.4.1).

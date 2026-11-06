@@ -55,7 +55,8 @@ extension MetalSurfaceView {
   /// Recovery remains pinned to the accepted execution after its transport
   /// disconnects. An implicit first attach is only a bootstrap; its accepted
   /// identity must not be forgotten and replaced with whichever execution is
-  /// running later.
+  /// running later. Shell exit does not clear this pin: New shell is
+  /// SPEC-004 §18 Create+Bind, not `open_first`.
   var recoveryExecutionIdentity: String? {
     if let requestedExecutionIdentity { return requestedExecutionIdentity }
     guard let bridge else { return nil }
@@ -108,15 +109,25 @@ extension MetalSurfaceView {
 
   /// Explicit user retry starts a new bounded foreground recovery episode.
   /// Automatic exhaustion never invokes this method recursively.
+  ///
+  /// Shell exit stays on New shell (Create+Bind). Exhausted or blocked
+  /// startup may begin another episode. Automatic reconnect stays suppressed
+  /// while the stage is ExecutionEnded.
   @discardableResult
   func retryRuntimeConnection() -> Bool {
     guard shouldAttachRuntime,
       bridge?.isConnected != true,
-      bridge?.clientHandle == 0,
-      recoveryAppHandle != 0,
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue),
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
+      recoveryAppHandle != 0
     else { return bridge?.isConnected == true }
+    // New shell after exit / blocked bootstrap: finish teardown, then open.
+    if bridge?.clientHandle != 0 || isDetachingRuntimeConnection {
+      bridge?.completeEagerClientDisconnect()
+      isDetachingRuntimeConnection = false
+    }
+    if runtimeRecoveryStage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue) {
+      // New shell owns Create+Bind. Reopening the dead id is not a retry.
+      return false
+    }
     beginRustRecoveryEpisode()
     return bridge?.isConnected == true
   }

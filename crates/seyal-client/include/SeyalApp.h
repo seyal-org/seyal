@@ -125,7 +125,12 @@ enum SeyalAppActionKind {
      * layout is unchanged.
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
-    /** Mark reconstruction disconnected after the host drops the live client. */
+    /**
+     * Mark reconstruction disconnected after the host drops the live client.
+     * `reserved == 0`: keep continuity pins (same-execution reconnect fence).
+     * `reserved != 0`: clear Runtime/execution/attachment pins so New shell
+     * after exit can commit a fresh ExecutionId (SPEC-009 §8.2).
+     */
     SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
     /*
      * Drag one Split divider (#928). target_execution_lo/hi = the divider's
@@ -190,8 +195,48 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_EQUALIZE_FOCUSED = 74,
     SEYAL_APP_ACTION_EQUALIZE_TAB = 75,
     /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
-    SEYAL_APP_ACTION_CLOSE_WINDOW = 76
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 76,
+    SEYAL_APP_ACTION_NEW_TERMINAL = 77,
+    SEYAL_APP_ACTION_SELECT_TERMINAL_TAB = 78,
+    SEYAL_APP_ACTION_CLOSE_TERMINAL_TAB = 79,
+    /*
+     * New shell after an ended Pane (SPEC-004 §18). reserved must be 0.
+     * Without FLAG_HAS_EXECUTION: prepare the ended Pane.
+     * With FLAG_HAS_EXECUTION and FLAG_HAS_ATTACHMENT: bind target_* onto
+     * that Pane. Never selects a sibling by list order.
+     */
+    SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION = 80,
+    /*
+     * ADR-028 CreateWorkspace / SetWorkspaceRoot.
+     * CREATE_WORKSPACE: payload = UTF-8 absolute root path; Runtime mints id.
+     * SET_WORKSPACE_ROOT: target_execution_lo/hi = WorkspaceId; payload = root.
+     */
+    SEYAL_APP_ACTION_CREATE_WORKSPACE = 81,
+    SEYAL_APP_ACTION_SET_WORKSPACE_ROOT = 82,
+    /*
+     * ADR-028 leave offer. OBSERVE payload = trusted UTF-8 cwd (never OSC 7).
+     * CONFIRM = Yes (create or jump). DISMISS = No (navigation-only).
+     */
+    SEYAL_APP_ACTION_OBSERVE_TRUSTED_FOREGROUND_CWD = 83,
+    SEYAL_APP_ACTION_CONFIRM_LEAVE_OFFER = 84,
+    SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER = 85
 };
+
+enum SeyalAppLeaveOfferKind {
+    SEYAL_APP_LEAVE_OFFER_NONE = 0,
+    SEYAL_APP_LEAVE_OFFER_CREATE = 1,
+    SEYAL_APP_LEAVE_OFFER_JUMP = 2
+};
+
+typedef struct SeyalAppLeaveOffer {
+    uint16_t version;
+    uint16_t size;
+    uint16_t kind;
+    uint16_t path_len;
+    const uint8_t *path;
+    uint64_t jump_workspace_lo;
+    uint64_t jump_workspace_hi;
+} SeyalAppLeaveOffer;
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
 #define SEYAL_APP_WINDOW_EVENT_RESIGNED_KEY 1u
@@ -222,7 +267,8 @@ enum SeyalAppComposerEligibility {
     SEYAL_APP_COMPOSER_ELIGIBILITY_NONE = 0,
     SEYAL_APP_COMPOSER_ELIGIBILITY_AVAILABLE = 1,
     SEYAL_APP_COMPOSER_ELIGIBILITY_BUSY = 2,
-    SEYAL_APP_COMPOSER_ELIGIBILITY_UNSUPPORTED = 3
+    SEYAL_APP_COMPOSER_ELIGIBILITY_UNSUPPORTED = 3,
+    SEYAL_APP_COMPOSER_ELIGIBILITY_RELAY = 4
 };
 
 /* SEYAL_APP_ACTION_SET_INSPECTOR reserved values and SeyalAppChrome.inspector_mode. */
@@ -379,7 +425,8 @@ typedef struct SeyalAppAxNode {
 enum SeyalAppComposerMode {
     SEYAL_APP_COMPOSER_HIDDEN = 0,
     SEYAL_APP_COMPOSER_AVAILABLE = 1,
-    SEYAL_APP_COMPOSER_BUSY = 2
+    SEYAL_APP_COMPOSER_BUSY = 2,
+    SEYAL_APP_COMPOSER_RELAY = 3
 };
 
 #define SEYAL_APP_COMPOSER_CAN_SUBMIT 1u
@@ -394,7 +441,8 @@ enum SeyalAppComposerMode {
 
 /*
  * seyal_app_block_row flags: state in the low three bits, plus
- * SEYAL_APP_BLOCK_SELECTED when that Block is bound to the inspector (#935).
+ * SEYAL_APP_BLOCK_SELECTED when that Block is bound to the inspector (#935),
+ * plus SEYAL_APP_BLOCK_SESSION when the Block scope is session.
  * Hosts must mask with SEYAL_APP_BLOCK_STATE_MASK before comparing states.
  */
 #define SEYAL_APP_BLOCK_STATE_RUNNING 1u
@@ -404,6 +452,8 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_BLOCK_STATE_UNKNOWN 4u
 #define SEYAL_APP_BLOCK_STATE_MASK 7u
 #define SEYAL_APP_BLOCK_SELECTED 8u
+/* Session-scoped Block. Hosts may indent; product copy stays in Rust. */
+#define SEYAL_APP_BLOCK_SESSION 16u
 
 typedef struct SeyalAppComposer {
     uint16_t version;
@@ -415,6 +465,15 @@ typedef struct SeyalAppComposer {
     const uint8_t *draft_utf8;
     uint32_t draft_utf8_len;
     uint32_t block_count;
+    /*
+     * Flow canvas floor after clear (CSI ED2). Zero means show every Block.
+     * While the shell is live, hosts omit cards with id <= this floor so clear
+     * leaves a fully empty canvas (including the clear Block itself);
+     * BlockTimeline still retains them. Shell exit clears the floor so the
+     * full retained transcript is reviewable.
+     */
+    uint64_t canvas_floor_block_id_lo;
+    uint64_t canvas_floor_block_id_hi;
 } SeyalAppComposer;
 
 /*
@@ -685,6 +744,17 @@ typedef struct SeyalAppPaneBinding {
     uint64_t display_handle;
 } SeyalAppPaneBinding;
 
+typedef struct SeyalAppTerminalTab {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags; /* bit 0: selected in this Pane */
+    uint16_t reserved;
+    uint64_t terminal_lo;
+    uint64_t terminal_hi;
+    uint64_t execution_lo;
+    uint64_t execution_hi;
+} SeyalAppTerminalTab;
+
 /* Exact Pane-scoped recovery target. size == 0 means none is available. */
 #define SEYAL_APP_PANE_RECOVERY_TARGET_ACTIVE 1u
 #define SEYAL_APP_PANE_RECOVERY_RETRYABLE 2u
@@ -743,6 +813,13 @@ typedef struct SeyalAppPaneDivider {
 #define SEYAL_APP_ROW_WORKSPACE 0u
 #define SEYAL_APP_ROW_TAB 1u
 #define SEYAL_APP_ROW_PANE 2u
+/*
+ * Left C03 Tabs navigation map (#1412 / ADR-025 §2.8): one row per pane-local
+ * TerminalTab in the active Workspace Tab. id_lo/hi = TerminalTabId.
+ * address_bytes[0..16] = owning PaneId (address_len = 16); title/detail are
+ * Rust-authored. flags bit 0 = selected terminal of the focused Pane.
+ */
+#define SEYAL_APP_ROW_TERMINAL_TAB 3u
 #define SEYAL_APP_ROW_INSPECTOR 0u
 #define SEYAL_APP_ROW_AGENT 1u
 #define SEYAL_APP_ROW_ATTENTION 2u
@@ -804,6 +881,8 @@ int32_t seyal_app_test_seed_windows_only(uint64_t handle, uint32_t windows);
 uint32_t seyal_app_test_live_attachment_count(uint64_t handle);
 
 uint8_t seyal_app_option_as_alt(uint64_t handle);
+/** ADR-018 §4.0: non-zero when Quit must show the native multi-window/tab confirm. */
+uint8_t seyal_app_should_confirm_quit(uint64_t handle);
 
 /*
  * SPEC-024 §11 shortcut projection (K5). Cold key equivalents / hints come from
@@ -872,7 +951,14 @@ SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
 /* SPEC-022 R6.8 cursor for HISTORY_BACK/FORWARD; 0 = empty or invalid handle. */
 uint64_t seyal_app_focus_history_seq(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);
+/* Pane-addressed composer read; empty when Pane unknown. Draft ptr is
+ * invalidated by the next composer encode on this handle (#1424). */
+SeyalAppComposer seyal_app_composer_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
+SeyalAppLeaveOffer seyal_app_leave_offer(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppWindow seyal_app_window(uint64_t handle, uint32_t index);
@@ -895,6 +981,8 @@ SeyalAppNativeEffect seyal_app_native_effect(uint64_t handle, uint32_t index);
 int32_t seyal_app_record_compatible(uint16_t version, uint16_t size, uint16_t kind);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
 SeyalAppPaneBinding seyal_app_pane_binding(uint64_t handle, uint32_t index);
+uint32_t seyal_app_pane_terminal_tab_count(uint64_t handle, uint64_t pane_lo, uint64_t pane_hi);
+SeyalAppTerminalTab seyal_app_pane_terminal_tab(uint64_t handle, uint64_t pane_lo, uint64_t pane_hi, uint32_t index);
 SeyalAppPaneRecoveryTarget seyal_app_active_pane_recovery_target(uint64_t handle);
 SeyalAppPaneRecoveryTarget seyal_app_pane_recovery_target_for_pane(
     uint64_t handle,
@@ -936,6 +1024,11 @@ int32_t seyal_app_propose_pane_geometry(
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
+SeyalAppRow seyal_app_block_row_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    uint32_t index);
 SeyalAppRow seyal_app_copy(uint64_t handle, uint16_t kind);
 SeyalAppComposerHistory seyal_app_composer_history(uint64_t handle);
 SeyalAppRow seyal_app_history_row(uint64_t handle, uint32_t index);
@@ -965,7 +1058,29 @@ typedef struct SeyalAppBlockProjection {
 } SeyalAppBlockProjection;
 
 SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
+SeyalAppBlockProjection seyal_app_block_projection_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    uint32_t index);
+/* Sync Candidate-D Block timeline into a Pane's composer without focused fence. */
+int32_t seyal_app_sync_pane_runtime_blocks(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
+/* 0 unbound, 1 Flow, 2 Raw, 3 Tui — pane-scoped presentation proxy (#1424). */
+uint16_t seyal_app_eligibility_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
 uint64_t seyal_app_recovery_param(uint64_t handle);
+
+/** 1 when New shell has prepared an ended Pane and is waiting for Create+Bind. */
+uint8_t seyal_app_replacement_bootstrap_pending(uint64_t handle);
+/** 1 when an ended execution must keep Flow history paint. Not a poll-code check. */
+uint8_t seyal_app_retains_flow_history(uint64_t handle);
+/** 1 when focused-Pane New shell would be admitted (shell-exit latch). ADR-015. */
+uint8_t seyal_app_new_shell_available(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);
 

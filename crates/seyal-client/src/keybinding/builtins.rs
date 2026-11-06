@@ -34,26 +34,28 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             context: APP,
         },
         BuiltinRow {
-            keys_notation: "cmd+n",
-            id: WorkspaceCommandId::TabCreate,
+            keys_notation: "cmd+t",
+            id: WorkspaceCommandId::TerminalCreate,
+            ordinal: None,
+            context: APP,
+        },
+        // Keep the modified shortcut as an alias, but declare cmd+n last so
+        // Rust's menu projection exposes the user's primary New Window key.
+        BuiltinRow {
+            keys_notation: "cmd+shift+n",
+            id: WorkspaceCommandId::WindowNew,
             ordinal: None,
             context: APP,
         },
         BuiltinRow {
-            keys_notation: "cmd+t",
-            id: WorkspaceCommandId::TabCreate,
+            keys_notation: "cmd+n",
+            id: WorkspaceCommandId::WindowNew,
             ordinal: None,
             context: APP,
         },
         BuiltinRow {
             keys_notation: "cmd+w",
-            id: WorkspaceCommandId::AppCloseFocused,
-            ordinal: None,
-            context: APP,
-        },
-        BuiltinRow {
-            keys_notation: "cmd+shift+n",
-            id: WorkspaceCommandId::WindowNew,
+            id: WorkspaceCommandId::TerminalCloseFocused,
             ordinal: None,
             context: APP,
         },
@@ -199,12 +201,6 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             keys_notation: "cmd+opt+9",
             id: WorkspaceCommandId::WindowSelectOrdinal,
             ordinal: Some(9),
-            context: APP,
-        },
-        BuiltinRow {
-            keys_notation: "cmd+enter",
-            id: WorkspaceCommandId::PresentationToggleRaw,
-            ordinal: None,
             context: APP,
         },
         BuiltinRow {

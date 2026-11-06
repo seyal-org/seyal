@@ -269,6 +269,7 @@ extension MetalTerminalRenderer {
                     }
                     // Cursor only inside the running Block clip.
                     if frame.cursorVisible,
+                       !region.suppressesCursor,
                        row == frame.cursorRow,
                        column == frame.cursorColumn,
                        !presentationPlan.drawsCursorOutsideBlockRegions
@@ -293,6 +294,20 @@ extension MetalTerminalRenderer {
     /// last presented pixels on screen.
     private func failClosedLiveTail() {
         liveTail.regions.removeAll(keepingCapacity: false)
+        needsPresent = true
+    }
+
+    /// Drop running primary-frame clips and the cached prepared frame.
+    /// Shell-exit retain must keep completed history regions only — leaving
+    /// `lastPreparedFrame` lets clear→exit keep painting a loose viewport
+    /// (cursor + later Block output) over retained cards (#1379).
+    func clearLiveTailPresentation() {
+        liveTail.clips.removeAll(keepingCapacity: false)
+        liveTail.order.removeAll(keepingCapacity: false)
+        liveTail.regions.removeAll(keepingCapacity: false)
+        liveTail.transcriptRegions.removeAll(keepingCapacity: false)
+        liveTail.lastPreparedFrame = nil
+        liveTail.deferredForceRefresh = false
         needsPresent = true
     }
 }

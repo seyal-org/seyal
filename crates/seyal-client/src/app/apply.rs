@@ -57,6 +57,12 @@ impl ApplicationRoot {
                 authoritative_snapshot_committed,
             ),
             AppAction::DisconnectReconstruction => self.disconnect_reconstruction(),
+            AppAction::ClearReconstructionContinuity => self.clear_reconstruction_continuity(),
+            AppAction::CreateReplacementExecution {
+                execution,
+                attachment,
+                pty_generation,
+            } => self.create_replacement_execution(execution, attachment, pty_generation),
             AppAction::SetComposerDraft {
                 fence,
                 text,
@@ -71,9 +77,14 @@ impl ApplicationRoot {
                 request_id,
                 accepted,
             } => self.apply_composer_result(fence, request_id, accepted),
-            AppAction::ApplyRuntimeBlocks { fence, records } => {
-                self.apply_runtime_blocks(fence, records)
-            }
+            AppAction::ApplyRuntimeBlocks { fence, records } => match records {
+                // Disconnect / teardown: keep completed Flow history visible.
+                None => {
+                    self.require_fence(fence)?;
+                    Ok(())
+                }
+                Some(records) => self.apply_runtime_blocks(fence, records),
+            },
             AppAction::ApplyRuntimeComposerStatus {
                 fence,
                 eligibility,
@@ -131,6 +142,13 @@ impl ApplicationRoot {
                     .map_err(chrome_error)
             }
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
+            AppAction::CreateWorkspace { root_path } => self.create_workspace(root_path),
+            AppAction::SetWorkspaceRoot { id, root_path } => self.set_workspace_root(id, root_path),
+            AppAction::ObserveTrustedForegroundCwd { path } => {
+                self.observe_trusted_foreground_cwd(path)
+            }
+            AppAction::ConfirmLeaveOffer => self.confirm_leave_offer(),
+            AppAction::DismissLeaveOffer => self.dismiss_leave_offer(),
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => {
                 // R6.4.1: menu/key-equivalent New Tab cannot bypass the palette modal.
@@ -141,9 +159,14 @@ impl ApplicationRoot {
                 }
                 self.create_tab()
             }
+            AppAction::NewTerminal => self.new_terminal(),
+            AppAction::SelectTerminalTab { pane, terminal_tab } => {
+                self.select_terminal_tab(pane, terminal_tab)
+            }
             AppAction::CloseTab { .. }
             | AppAction::CloseWindow { .. }
-            | AppAction::ClosePane { .. } => self.apply_close(action),
+            | AppAction::ClosePane { .. }
+            | AppAction::CloseTerminalTab { .. } => self.apply_close(action),
             AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
             #[cfg(test)]

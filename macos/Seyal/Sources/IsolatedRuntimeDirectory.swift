@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Explicit isolated Runtime namespace for this process.
@@ -7,6 +8,10 @@ import Foundation
 /// `make ui-test` / `native-macos-smoke` can run while a user Runtime is
 /// already active. `make check` does not launch Seyal.app. Environment
 /// variables never select that endpoint.
+///
+/// Explicit `--runtime-dir` leaves are host-prepared as `0700` before the
+/// helper binds: Runtime discovery still fail-closes on insecure leaves and
+/// does not chmod-repair (#1428).
 enum IsolatedRuntimeDirectory {
   static let flag = "--runtime-dir"
 
@@ -20,6 +25,9 @@ enum IsolatedRuntimeDirectory {
     else {
       return
     }
+    // Host prep is best-effort here: a failed prepare still installs the
+    // absolute path so Runtime can report the typed discovery error.
+    _ = prepareExplicitRuntimeDirectory(directory)
     directory.withCString { pointer in
       let status = seyal_bridge_set_runtime_dir(pointer)
       precondition(status == 0, "\(flag) requires an absolute Runtime directory")
@@ -35,6 +43,9 @@ enum IsolatedRuntimeDirectory {
     else {
       return []
     }
+    // Best-effort host prep so disposable `/tmp/...` recipes and XCTest dirs
+    // are 0700 before the helper's create_verified_runtime_dir runs.
+    _ = prepareExplicitRuntimeDirectory(directory)
     var forwarded = [flag, directory]
     // Production / Release Seyal.app must not accept a Runtime command from
     // app argv. The unit-test host loads XCTest. Debug XCUI sets
@@ -85,16 +96,60 @@ enum IsolatedRuntimeDirectory {
     return nil
   }
 
+  /// Create missing parents and ensure the leaf is an euid-owned `0700` directory.
+  /// Existing parents such as `/tmp` are accepted without chmod; the leaf is
+  /// never a symlink and never left group/world-accessible.
+  @discardableResult
+  static func prepareExplicitRuntimeDirectory(_ path: String) -> Bool {
+    guard path.hasPrefix("/"), path != "/" else { return false }
+    let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+    let parent = url.deletingLastPathComponent().path
+    guard ensureExistingOrCreateParents(parent) else { return false }
+    return ensureOwnedPrivateLeaf(url.path)
+  }
+
   private static func makeUniqueDirectory(prefix: String) -> String {
     let url = URL(fileURLWithPath: "/tmp").appendingPathComponent(
       "\(prefix)-\(ProcessInfo.processInfo.processIdentifier)",
       isDirectory: true
     )
-    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    try? FileManager.default.setAttributes(
-      [.posixPermissions: 0o700],
-      ofItemAtPath: url.path
-    )
+    // Static type init must not trap: XCTest host load would crash the runner.
+    _ = prepareExplicitRuntimeDirectory(url.path)
     return url.path
+  }
+
+  private static func ensureExistingOrCreateParents(_ path: String) -> Bool {
+    if path.isEmpty || path == "/" { return true }
+    var st = stat()
+    // Follow symlinks for parents: Darwin `/tmp` is a symlink to
+    // `/private/tmp`. Leaf verification still uses lstat so a symlink
+    // runtime-dir remains fail-closed.
+    if stat(path, &st) == 0 {
+      return (st.st_mode & S_IFMT) == S_IFDIR
+    }
+    guard errno == ENOENT else { return false }
+    let parent = URL(fileURLWithPath: path).deletingLastPathComponent().path
+    let parentPath = parent == path ? "/" : parent
+    guard ensureExistingOrCreateParents(parentPath) else { return false }
+    if mkdir(path, 0o700) == 0 { return true }
+    if errno == EEXIST {
+      return stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR
+    }
+    return false
+  }
+
+  private static func ensureOwnedPrivateLeaf(_ path: String) -> Bool {
+    var st = stat()
+    if lstat(path, &st) == 0 {
+      guard (st.st_mode & S_IFMT) == S_IFDIR else { return false }
+      guard st.st_uid == geteuid() else { return false }
+      return chmod(path, 0o700) == 0
+    }
+    guard errno == ENOENT else { return false }
+    if mkdir(path, 0o700) == 0 { return true }
+    if errno == EEXIST {
+      return ensureOwnedPrivateLeaf(path)
+    }
+    return false
   }
 }

@@ -154,6 +154,105 @@ pub struct SeyalAppPaneBinding {
     pub display_handle: u64,
 }
 
+/// Pane-local terminal tab identity and selected state. Pane and terminal IDs
+/// stay separate so the host cannot confuse selection with pane focus.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SeyalAppTerminalTab {
+    pub version: u16,
+    pub size: u16,
+    pub flags: u16,
+    pub reserved: u16,
+    pub terminal_lo: u64,
+    pub terminal_hi: u64,
+    pub execution_lo: u64,
+    pub execution_hi: u64,
+}
+
+impl SeyalAppTerminalTab {
+    const fn empty() -> Self {
+        Self {
+            version: APP_ABI_VERSION,
+            size: 0,
+            flags: 0,
+            reserved: 0,
+            terminal_lo: 0,
+            terminal_hi: 0,
+            execution_lo: 0,
+            execution_hi: 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_pane_terminal_tab_count(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+) -> u32 {
+    let pane = pane_from_words(pane_lo, pane_hi);
+    APPS.with(|apps| {
+        apps.borrow()
+            .get(&handle)
+            .and_then(|state| {
+                state
+                    .root
+                    .snapshot()
+                    .shell
+                    .panes
+                    .iter()
+                    .find(|row| row.id == pane)
+                    .map(|row| row.terminal_tabs.len() as u32)
+            })
+            .unwrap_or(0)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_pane_terminal_tab(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+    index: u32,
+) -> SeyalAppTerminalTab {
+    let pane_id = pane_from_words(pane_lo, pane_hi);
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return SeyalAppTerminalTab::empty();
+        };
+        let snapshot = state.root.snapshot();
+        let Some(pane) = snapshot.shell.panes.iter().find(|row| row.id == pane_id) else {
+            return SeyalAppTerminalTab::empty();
+        };
+        let Some(terminal) = pane.terminal_tabs.get(index as usize) else {
+            return SeyalAppTerminalTab::empty();
+        };
+        let (terminal_lo, terminal_hi) = split_id(terminal.id.to_bytes());
+        let execution = terminal
+            .execution
+            .unwrap_or(ExecutionId::from_bytes([0; 16]));
+        let (execution_lo, execution_hi) = split_id(execution.to_bytes());
+        SeyalAppTerminalTab {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppTerminalTab>() as u16,
+            flags: u16::from(pane.selected_terminal_tab == Some(terminal.id)),
+            reserved: 0,
+            terminal_lo,
+            terminal_hi,
+            execution_lo,
+            execution_hi,
+        }
+    })
+}
+
+fn pane_from_words(lo: u64, hi: u64) -> PaneId {
+    let mut bytes = [0; 16];
+    bytes[..8].copy_from_slice(&lo.to_le_bytes());
+    bytes[8..].copy_from_slice(&hi.to_le_bytes());
+    PaneId::from_bytes(bytes)
+}
+
 impl SeyalAppPaneBinding {
     const fn empty() -> Self {
         Self {

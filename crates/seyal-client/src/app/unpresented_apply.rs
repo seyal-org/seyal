@@ -127,19 +127,26 @@ impl ApplicationRoot {
             execution: evidence.execution,
         })
         .map_err(unpresented_shell_error)?;
-        self.provisioning
-            .record_adopted_binding(fence.pane, evidence.execution);
-        self.seed_provisioning_request_floor_from_wire();
-        self.pane_authorities.insert(
+        let terminal_tab = self
+            .shell
+            .selected_terminal_tab(fence.pane)
+            .map_err(|_| AppError::UnknownPane)?
+            .ok_or(AppError::UnboundUnauthorized)?;
+        self.provisioning.record_adopted_terminal_binding(
             fence.pane,
-            PaneAuthority {
-                pane: fence.pane,
-                execution: evidence.execution,
-                attachment: evidence.attachment,
-                controller: evidence.controller,
-                pty_generation: evidence.pty_generation,
-            },
+            terminal_tab,
+            evidence.execution,
         );
+        self.seed_provisioning_request_floor_from_wire();
+        let authority = PaneAuthority {
+            pane: fence.pane,
+            execution: evidence.execution,
+            attachment: evidence.attachment,
+            controller: evidence.controller,
+            pty_generation: evidence.pty_generation,
+        };
+        self.pane_authorities.insert(fence.pane, authority);
+        self.terminal_authorities.insert(terminal_tab, authority);
         Ok(())
     }
 

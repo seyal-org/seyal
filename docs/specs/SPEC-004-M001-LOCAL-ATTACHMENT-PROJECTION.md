@@ -9,6 +9,7 @@
 - **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative** (ADR-017 Accepted). Create/terminate production path ships with Issue #1105 / PR #1112.
 - **Proposed M003 extension:** §19 per-attachment delivery suspend/resume, multi-attachment demux (§10.4), revised §5 maxima, and the additional resume-sequence/envelope/snapshot-commit rules (types 40–41, capability bit 11) under Issue #1162. This PR restores the #1163 baseline (`e2e3462f`); the historical @anulalbs approval is provenance for that baseline only, not approval of the additional corrections proposed here. Runtime/client implementation is W5 and is **not** part of this amendment. The current §19 text remains Proposed and requires fresh independent review; #1208 is not its acceptance vehicle.
 - **Accepted M003 extension:** L0 amendment (Issue #1113) — §15/`Created` launch-policy result code 17 and `CAP_LAUNCH_POLICY_DETAIL` (capability bit 12) for nonzero `Created.detail_code` warning bits.
+- **Accepted allocation under ADR-026 (#1384):** `CAP_SESSION_BOOTSTRAP` (bit 13) and message types 42–45, recorded in §8. Normative on merge of the ADR-026 acceptance PR by a non-author maintainer. An author or agent comment is not that acceptance. Exact widths are frozen and shipped under #1388. A client advertises bit 13, and on `MalformedPayload` drops only that bit before the existing ClientHello fallback chain.
 
 ## 1. Purpose
 
@@ -244,6 +245,12 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 37 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
 | 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
 | 39 | R→C | `TerminateExecutionResult` — M003 disposition (§18) |
+| 42 | R→C | `SessionOffer` — Accepted ADR-026 (#1384); shipped under #1388; exact 64 bytes |
+| 43 | C→R | `SessionConsent` — Accepted ADR-026 (#1384); shipped under #1388; exact 64 bytes |
+| 44 | R→C | `SessionStatus` — Accepted ADR-026 (#1384); shipped under #1388; exact 56 bytes |
+| 45 | R→C | `ComposerTarget` — Accepted ADR-026 (#1384); input target and target generation; not a longer type-23 body; shipped under #1388; exact 48 bytes |
+| 46 | C→R | `MintWorkspaceRequest` — ADR-028 §2.5 interim WorkspaceId mint (cold control; shares bit 10 / type-36/38 request-id space) |
+| 47 | R→C | `MintWorkspaceResult` — ADR-028 §2.5 interim WorkspaceId mint result |
 
 M001 / live capability bits (master + open claims), for allocation hygiene:
 
@@ -259,9 +266,22 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, accepted under #1083 / PR #1060;
 - bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18 (ADR-017 Accepted; implemented under #1105);
 - bit 11: per-attachment delivery suspend/resume (`CAP_ATTACHMENT_DELIVERY_CONTROL`) — §19 / Issue #1162;
-- bit 12: launch-policy Created detail bits (`CAP_LAUNCH_POLICY_DETAIL`) — L0 / Issue #1113; gates nonzero `Created.detail_code` warning bits only.
+- bit 12: launch-policy Created detail bits (`CAP_LAUNCH_POLICY_DETAIL`) — L0 / Issue #1113; gates nonzero `Created.detail_code` warning bits only;
+- bit 13: consented session bootstrap (`CAP_SESSION_BOOTSTRAP`, `1 << 13`) — Accepted ADR-026 (#1384), gated on `CAP_COMMAND_BLOCKS`, shipped under #1388.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are allocated to `ViewportLineIds` (§8.1, accepted under #1083 / PR #1060). §18 assigns types **36–39** and capability **bit 10** (ADR-017 Accepted; implemented under #1105 / PR #1112). §19 assigns types **40–41** and capability **bit 11** (`CAP_ATTACHMENT_DELIVERY_CONTROL`). L0 / #1113 allocates `CAP_LAUNCH_POLICY_DETAIL` as **bit 12** (ADR-020 §3.10), matching the shipped L0/L2/L3 wire.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are allocated to `ViewportLineIds` (§8.1, accepted under #1083 / PR #1060). §18 assigns types **36–39** and capability **bit 10** (ADR-017 Accepted; implemented under #1105 / PR #1112). §19 assigns types **40–41** and capability **bit 11** (`CAP_ATTACHMENT_DELIVERY_CONTROL`). L0 / #1113 allocates `CAP_LAUNCH_POLICY_DETAIL` as **bit 12** (ADR-020 §3.10), matching the shipped L0/L2/L3 wire. Accepted ADR-026 (#1384) allocates types **42–45** and capability **bit 13** (`CAP_SESSION_BOOTSTRAP`). The allocation is normative. #1388 ships those names at the frozen widths in §8.
+
+### Session bootstrap wire allocation (Accepted ADR-026 / #1384)
+
+**Status:** Allocated by Accepted ADR-026 under #1384. Exact field widths below are frozen and shipped under #1388. Schema selection is the negotiated capability, never payload length. A Runtime that does not know bit 13 answers `MalformedPayload`; the client then drops only that bit and continues the existing fallback chain.
+
+This allocation is normative. Peers must not infer the session `BlockTimeline` schema from payload length.
+
+- **Bit 13** `CAP_SESSION_BOOTSTRAP` (`1 << 13`) is gated on `CAP_COMMAND_BLOCKS`. Runtime never advertises bit 13 without bit 4. A ClientHello that requests bit 13 without `CAP_COMMAND_BLOCKS` is invalid.
+- **Type 42** `SessionOffer` (R→C), **type 43** `SessionConsent` (C→R), **type 44** `SessionStatus` (R→C), and **type 45** `ComposerTarget` (R→C) use exact-length framing under the §7 header rules (`payload_len <= 262144`; the header is validated before payload allocation). Malformed or oversized payloads fail closed. Type 23 `ComposerStatus` keeps its accepted exact length (`crates/seyal-protocol/src/pass7/composer.rs`). The input target and target generation travel only on type 45 when bit 13 was mutually negotiated. They are not an extended type-23 body inferred from a longer payload.
+- **`BlockTimeline` (type 21).** When bit 13 is not negotiated, records stay on the accepted legacy or duration-capable shape (SPEC-008 §5.4). When it is negotiated, each record adds `scope` (`Local` / `Session`) and `trust` (`LocalTrusted` / `SessionTrusted` / `Unverified`) with an explicit presence encoding inside the capability-bound schema. Clients never infer that schema from payload length. The first ClientHello retry drops only bit 13. The ADR-009 #1355 chain then runs unchanged (delivery control, then viewport LineIds, then extended key). That drop does not reorder those steps. Duration (bit 8) stays unadvertised until its schema ships.
+- **Composer-status fence.** A type 44 `SessionStatus` or type 45 `ComposerTarget` frame is accepted only for the current `attachment_id` and only when its revision or target generation moves forward, matching type 23 `ComposerStatus`: a delayed or replayed frame must not re-enable the composer against a newer fact. A client that has not received a current target treats the composer as busy.
+- No `SCM_RIGHTS` or other descriptor is sent for a session. The session secret never crosses the client boundary (ADR-026 §6.1, §10 T15/T19). Client→Runtime frames remain descriptor-free under §7.
 
 ### 8.1 Viewport LineIds (accepted, #1083)
 
@@ -859,11 +879,15 @@ Rules, validated in this order before any process or terminal mutation:
    correlated-resize space, because correlation is per message-type pair and the
    existing resize bookkeeping is unchanged;
 5. outstanding-request budget available (§18.6), otherwise `Backpressure`;
-6. `workspace_id` selects the owning Workspace association. **M003:** only
-   `workspace_id == 0` is accepted and means the Runtime's single
-   implicit/default Workspace (ADR-007 §2). Every nonzero value fails closed
-   with `InvalidWorkspace`. Runtime never creates a Workspace as a side effect
-   and clients need no wire-visible durable `WorkspaceId` in M003;
+6. `workspace_id` selects the owning Workspace association. **M003 / ADR-028
+   §2.5 interim:** `workspace_id == 0` means the Runtime's implicit/default
+   Workspace (ADR-007 §2). A nonzero `u128` is accepted only when it equals an
+   **admitted** Runtime-minted `WorkspaceId` (including the default's bytes when
+   sent explicitly); otherwise fail closed with `InvalidWorkspace`. Runtime
+   never invents a Workspace as a side effect of create. Clients obtain
+   admitted ids via the cold `MintWorkspaceRequest`/`MintWorkspaceResult` path
+   (types 46/47; 42–45 remain ADR-026) before `CreateWorkspace` product
+   recording; durable cross-restart minting remains ADR-023;
 7. `launch_profile` is implemented by this Runtime, otherwise
    `UnsupportedLaunchProfile`. `0` is the default interactive shell profile;
    all other values are reserved and must fail closed rather than fall back;

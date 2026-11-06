@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use crate::app_policy::{load_app_policy, AppPolicy};
 use crate::input_policy::{load_input_policy, InputPolicy};
 
 use super::config::{
@@ -48,6 +49,7 @@ pub fn collect_process_ui_env() -> Vec<(String, String)> {
 pub struct ProcessUiConfiguration {
     pub loaded: LoadedUiConfiguration,
     pub input: InputPolicy,
+    pub app: AppPolicy,
     pub path: Option<PathBuf>,
 }
 
@@ -70,9 +72,11 @@ fn load_process_ui_configuration_at(path: Option<&Path>) -> ProcessUiConfigurati
     let env = collect_process_ui_env();
     let loaded = load_ui_configuration(text.as_deref(), &env, None);
     let (input, _) = load_input_policy(text.as_deref());
+    let (app, _) = load_app_policy(text.as_deref());
     ProcessUiConfiguration {
         loaded,
         input,
+        app,
         path: path.map(Path::to_path_buf),
     }
 }
@@ -160,6 +164,7 @@ mod tests {
         assert!(!loaded.loaded.diagnostics.used_full_default_fallback);
         assert_eq!(loaded.loaded.source, "defaults");
         assert!(!loaded.input.option_as_alt);
+        assert!(loaded.app.warn_before_quit);
     }
 
     #[test]
@@ -188,6 +193,8 @@ padding = 14
 size = 18
 [input]
 option_as_alt = true
+[app]
+warn_before_quit = false
 "#,
         );
         let loaded = load_process_ui_configuration_at(Some(&path));
@@ -200,6 +207,7 @@ option_as_alt = true
         assert_eq!(loaded.loaded.settings.terminal_padding, 14.0);
         assert_eq!(loaded.loaded.settings.terminal_font_size, 18.0);
         assert!(loaded.input.option_as_alt);
+        assert!(!loaded.app.warn_before_quit);
         assert_eq!(loaded.loaded.source, "toml");
         let _ = std::fs::remove_file(path);
     }

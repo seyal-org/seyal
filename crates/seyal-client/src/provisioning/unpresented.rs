@@ -34,6 +34,7 @@ impl ProvisioningSession {
         let request_id = self.allocate_request_id()?;
         let intent = PendingIntent {
             pane: Some(pane),
+            terminal_tab: None,
             owner,
             request_id,
             geometry: PaneGeometry {
@@ -68,6 +69,7 @@ impl ProvisioningSession {
         let request_id = self.allocate_request_id()?;
         let intent = PendingIntent {
             pane: None,
+            terminal_tab: None,
             owner,
             request_id,
             geometry: PaneGeometry {

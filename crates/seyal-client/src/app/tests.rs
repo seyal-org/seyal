@@ -23,6 +23,15 @@ fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
     .unwrap();
 }
 
+/// Supported sessions start in Flow; Runtime Available status admits composer input.
+fn opt_in_flow(root: &mut ApplicationRoot) {
+    root.apply(AppAction::SelectRestingPresentation {
+        fence: root.fence(),
+        raw: false,
+    })
+    .unwrap();
+}
+
 #[test]
 fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
     use crate::composer::ComposerMode;
@@ -33,6 +42,7 @@ fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     let bound = root.snapshot().composer.unwrap();
     assert!(matches!(bound.mode, ComposerMode::Busy { .. }));
     assert!(!bound.can_submit);
@@ -207,9 +217,9 @@ fn refresh_alternate_screen_takeover_is_not_latched_at_bind() {
         alternate_screen: false,
     })
     .unwrap();
-    let flow = root.snapshot();
-    assert_eq!(flow.eligibility, PresentationEligibility::Flow);
-    assert!(flow.composer_eligible);
+    let raw = root.snapshot();
+    assert_eq!(raw.eligibility, PresentationEligibility::Flow);
+    assert!(raw.composer_eligible);
 }
 
 #[test]
@@ -295,6 +305,7 @@ fn observer_and_flow_cannot_submit_direct_input() {
             evidence: evidence(5, true, false),
         })
         .unwrap();
+    opt_in_flow(&mut controller);
     assert_eq!(
         controller.apply(AppAction::SubmitInput {
             fence: controller.fence(),
@@ -428,6 +439,7 @@ fn composer_history_is_fenced_and_never_submits() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     runtime_available(&mut root, 1);
     let epoch = root.snapshot().composer.unwrap().epoch;
     root.apply(AppAction::SetComposerDraft {
@@ -857,14 +869,16 @@ fn block_selection_is_fenced_and_sourced_from_runtime_blocks() {
     .unwrap();
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![RuntimeBlockRecord {
+        records: Some(vec![RuntimeBlockRecord {
             id: known,
             command: "git status".into(),
             start_line: 1,
             end_line: Some(3),
             running: false,
             exit_status: Some(0),
-        }],
+            canvas_floor: false,
+            scope: seyal_protocol::framing::BlockScope::Local,
+        }]),
     })
     .unwrap();
     assert_eq!(
@@ -903,7 +917,7 @@ fn block_selection_is_fenced_and_sourced_from_runtime_blocks() {
     // Runtime republishes without that Block: selection clears itself.
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![],
+        records: Some(vec![]),
     })
     .unwrap();
     let after = root.snapshot();
@@ -927,6 +941,7 @@ fn composer_submit_busy_and_stale_request_are_rust_owned() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     runtime_available(&mut root, 1);
     let epoch = root.snapshot().composer.as_ref().unwrap().epoch;
     root.apply(AppAction::SetComposerDraft {
@@ -968,14 +983,16 @@ fn composer_submit_busy_and_stale_request_are_rust_owned() {
     let block = BlockId::from_bytes([0x44; 16]);
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![RuntimeBlockRecord {
+        records: Some(vec![RuntimeBlockRecord {
             id: block,
             command: "echo hi".into(),
             start_line: 1,
             end_line: Some(1),
             running: false,
             exit_status: Some(0),
-        }],
+            canvas_floor: false,
+            scope: seyal_protocol::framing::BlockScope::Local,
+        }]),
     })
     .unwrap();
     let projected = &root.snapshot().composer.unwrap().blocks;

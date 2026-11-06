@@ -8,9 +8,13 @@ use crate::composer::{ComposerAction, RuntimeBlockRecord, RuntimeComposerEligibi
 
 impl ApplicationRoot {
     pub(super) fn composer_eligible_for(&self, eligibility: PresentationEligibility) -> bool {
+        let pane = self.shell.snapshot().focused_pane;
+        // #1379 Defect B: shell-exit is sticky per Pane. A global
+        // RecoveryStage::ExecutionEnded must not disable a newly focused
+        // leaf that never ended (CreateTab / Split / New shell recovery).
         eligibility == PresentationEligibility::Flow
             && !self.frozen
-            && self.recovery.state().stage != crate::recovery::RecoveryStage::ExecutionEnded
+            && !self.composer.execution_ended(pane)
     }
 
     pub(super) fn sync_composer_presentation(&mut self) {
@@ -27,10 +31,76 @@ impl ApplicationRoot {
             mode,
             input_route,
         });
-        let _ = self.composer.apply(ComposerAction::SetExecutionEnded {
-            pane,
-            ended: self.recovery.state().stage == crate::recovery::RecoveryStage::ExecutionEnded,
-        });
+        // Do not rebroadcast global ExecutionEnded onto the focused Pane.
+        // SetExecutionEnded is latched in complete_recovery for the pane that
+        // ended, and cleared when that pane binds a live execution again.
+    }
+
+    /// An ended execution is not still running a Block. Keep an observed exit
+    /// status; a block the timeline left `Running` becomes Unknown (ADR-009
+    /// mechanism 5) instead of `/ running`.
+    ///
+    /// Clamp a missing end to `start_line` so projection hands off to History
+    /// instead of FailClosed (which collapses the body and leaves stale
+    /// live-tail paint after clear → exit).
+    pub(super) fn settle_running_blocks_after_exit(&mut self, pane: seyal_core::PaneId) {
+        let Ok(snapshot) = self.composer.snapshot(pane) else {
+            return;
+        };
+        if !snapshot
+            .blocks
+            .iter()
+            .any(|block| block.state == crate::composer::BlockPresentationState::Running)
+        {
+            return;
+        }
+        let records = snapshot
+            .blocks
+            .into_iter()
+            .map(|block| {
+                let ended_without_status =
+                    block.state == crate::composer::BlockPresentationState::Running;
+                let end_line = block
+                    .end_line
+                    .or_else(|| (block.start_line > 0).then_some(block.start_line));
+                RuntimeBlockRecord {
+                    id: block.id,
+                    command: block.command,
+                    start_line: block.start_line,
+                    end_line,
+                    running: false,
+                    exit_status: if ended_without_status {
+                        None
+                    } else {
+                        block.exit_status
+                    },
+                    // Preserve floor across settle; snapshot still reveals all
+                    // Blocks once execution_ended is latched.
+                    canvas_floor: false,
+                    scope: block.scope,
+                }
+            })
+            .collect();
+        let _ = self
+            .composer
+            .apply(ComposerAction::ApplyRuntimeBlocks { pane, records });
+    }
+
+    /// Latch shell-exit on one Pane. Callers pass the ended Pane, never the
+    /// focused sibling (SPEC-009 §8.2.2).
+    pub(super) fn latch_execution_ended_on_pane(&mut self, pane: seyal_core::PaneId) {
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        let _ = self
+            .composer
+            .apply(ComposerAction::SetExecutionEnded { pane, ended: true });
+    }
+
+    /// Clear the shell-exit latch after a Pane binds a live execution again.
+    pub(super) fn clear_execution_ended_for_pane(&mut self, pane: seyal_core::PaneId) {
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        let _ = self
+            .composer
+            .apply(ComposerAction::SetExecutionEnded { pane, ended: false });
     }
 
     pub(super) fn set_composer_draft(
@@ -129,6 +199,31 @@ impl ApplicationRoot {
             .map_err(composer_error)?;
         // A selected Block that Runtime no longer lists is not inspectable.
         if self.chrome.selected_block_is_stale(&self.focused_blocks()) {
+            let shell = self.shell.snapshot();
+            let _ = self.chrome.apply(ChromeAction::ClearBlockSelection, &shell);
+        }
+        Ok(())
+    }
+
+    /// Apply Candidate-D Block records to a specific Pane without requiring
+    /// that Pane to hold focused fence authority (#1424). Callers must supply
+    /// records from that Pane's own Controller client.
+    pub fn apply_runtime_blocks_for_pane(
+        &mut self,
+        pane: seyal_core::PaneId,
+        records: Vec<RuntimeBlockRecord>,
+    ) -> Result<(), AppError> {
+        if !self.pane_known(pane) {
+            return Err(AppError::UnknownPane);
+        }
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        self.composer
+            .apply(ComposerAction::ApplyRuntimeBlocks { pane, records })
+            .map(|_| ())
+            .map_err(composer_error)?;
+        if pane == self.focused_pane_id()
+            && self.chrome.selected_block_is_stale(&self.focused_blocks())
+        {
             let shell = self.shell.snapshot();
             let _ = self.chrome.apply(ChromeAction::ClearBlockSelection, &shell);
         }

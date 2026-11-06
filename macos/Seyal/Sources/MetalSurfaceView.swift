@@ -41,6 +41,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var isNativeInteractionProbe: Bool { installation == .nativeInteractionProbe }
   var forceNextFrame = false
   var hasPreparedState = false
+  /// Encoded Flow history is on-screen without a Candidate-D live frame
+  /// (shell-exit retain). Must not satisfy SPEC-009 renderer-ready / Usable.
+  var hasRetainedHistoryPresentation = false
   var presentationState = PresentationRecoveryState()
   var presentationRetryScheduled = false
   var presentationRetryTimer: Timer?
@@ -61,8 +64,15 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var lastBridgeError: Int32?
   var lastRenderError: Error?
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
+  private(set) var transcriptDisplayHandle: UInt64 = 0
   var lastProposedGeometry = CGRect.null
   var proposingGeometry = false
+  /// Presentation-local Raw scrollback rows above live origin (#1442).
+  var rawScrollOffset: UInt64 = 0
+  /// `ViewportLineIds[0]` last used to paint Raw scrollback; 0 when follow-tail.
+  var rawScrollPaintedStartLineID: UInt64 = 0
+  /// One-shot refill after trimming sealed blank LineIds at absolute top.
+  var rawScrollDidRefillLeadingBlanks = false
 
   override convenience init(frame frameRect: NSRect) {
     self.init(frame: frameRect, paneID: "unbound")
@@ -200,7 +210,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   override func hitTest(_ point: NSPoint) -> NSView? {
     // Flow paints terminal pixels over Block bodies. Chrome owns scrolling
     // and composer hit-testing, so the compositor must not swallow events.
-    if inspectRendererPresentation().drawsLiveGrid {
+    // Raw scrollback temporarily suppresses drawsLiveGrid but must keep hits (#1442).
+    if inspectRendererPresentation().drawsLiveGrid || rawScrollOffset > 0 {
       return super.hitTest(point)
     }
     return nil
@@ -224,27 +235,52 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   func removeTranscriptRegions(except ids: Set<UInt64>) {
-    historyRanges = historyRanges.filter { ids.contains($0.key.blockID) }
-    renderer.removeHistoryRegions(except: ids)
-    clearLiveTailWhenTranscriptEmpty(ids)
+    let kept = historyExceptPreservingRawScrollback(ids)
+    historyRanges = historyRanges.filter { kept.contains($0.key.blockID) }
+    if historyRanges.isEmpty {
+      hasRetainedHistoryPresentation = false
+    }
+    renderer.removeHistoryRegions(except: kept)
+    clearLiveTailWhenTranscriptEmpty(kept)
+  }
+
+  /// Clear renderer buffers when a pane switches terminal-tab Controllers.
+  /// Block ids are local to an execution, so the same id in another tab must
+  /// not inherit the previous tab's Metal paint while its history is loading.
+  /// Canonical retained ranges remain keyed by Pane + display handle for reuse.
+  func activateTranscriptDisplayHandle(_ handle: UInt64) {
+    guard handle != transcriptDisplayHandle else { return }
+    transcriptDisplayHandle = handle
+    renderer.removeHistoryRegions(except: [])
+    renderer.clearLiveTailPresentation()
+    hasRetainedHistoryPresentation = historyRanges.keys.contains {
+      $0.displayHandle == handle
+    }
+    renderer.requestPresent()
   }
 
   var terminalExecutionIdentity: String? {
-    guard terminalBridgeIsConnected, let bridge else { return nil }
+    guard terminalBridgeIsConnected, let bridge, bridge.selectPresentedClient() else { return nil }
     return Self.identityString((
-      low: bridge.lastRecoveryResult.executionIDLow,
-      high: bridge.lastRecoveryResult.executionIDHigh
+      low: seyal_bridge_execution_id_low(),
+      high: seyal_bridge_execution_id_high()
     ))
   }
 
   var terminalRuntimeIdentity: String? {
-    guard terminalBridgeIsConnected, let bridge else { return nil }
-    return Self.identityString(bridge.runtimeIdentityWords)
+    guard terminalBridgeIsConnected, let bridge, bridge.selectPresentedClient() else { return nil }
+    return Self.identityString((
+      low: seyal_bridge_runtime_id_low(),
+      high: seyal_bridge_runtime_id_high()
+    ))
   }
 
   var terminalAttachmentIdentity: String? {
-    guard terminalBridgeIsConnected, let bridge else { return nil }
-    return Self.identityString(bridge.attachmentIdentityWords)
+    guard terminalBridgeIsConnected, let bridge, bridge.selectPresentedClient() else { return nil }
+    return Self.identityString((
+      low: seyal_bridge_attachment_id_low(),
+      high: seyal_bridge_attachment_id_high()
+    ))
   }
 
   /// Makes the authoritative recovery state observable to VoiceOver and to
@@ -260,7 +296,14 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let execution = terminalExecutionIdentity ?? "none"
     let attachment = terminalAttachmentIdentity ?? "none"
     let alternate = lastAlternateScreen == true ? "true" : "false"
-    let flowPaint = renderer.inspectFlowPaint().accessibilityToken
+    let paint = renderer.inspectFlowPaint()
+    let flowPaint = paint.accessibilityToken
+    // history-instances / history-regions-painted expose Metal Block-body
+    // glyphs so XCUI fails when AX titles/bodies exist but paint is blank or
+    // collapsed onto one card (#1379 false-green).
+    let historyInstances = paint.historyInstanceCount
+    let historyRegionsPainted = paint.paintedHistoryRegionCount
+    let historyClips = paint.historyClipsDistinct ? "ok" : "collapse"
     let geometry: String
     if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
       geometry =
@@ -274,7 +317,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       "process=\(ProcessInfo.processInfo.processIdentifier) connection=\(connection) "
         + "runtime=\(runtime) execution=\(execution) "
         + "attachment=\(attachment) alternate-screen=\(alternate) "
-        + "\(geometry) flow-paint=\(flowPaint)"
+        + "\(geometry) flow-paint=\(flowPaint) history-instances=\(historyInstances) "
+        + "history-regions-painted=\(historyRegionsPainted) history-clips=\(historyClips)"
     )
   }
 
@@ -315,7 +359,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     updateDrawableSize()
     proposeCurrentGeometry()
     guard shouldRender,
-      hasPreparedState,
+      canPresentSurface,
       renderer.persistentDisplayFailure == nil,
       !presentationState.exhausted
     else { return }
@@ -479,7 +523,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         lastRenderError = nil
       }
       bridge?.publishCurrentFrame()
-      if hasPreparedState, !presentationState.exhausted {
+      if canPresentSurface, !presentationState.exhausted {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
@@ -505,6 +549,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     if lastAlternateScreen != frame.alternateScreen {
       lastAlternateScreen = frame.alternateScreen
       onAlternateScreenChanged?(frame.alternateScreen)
+      if frame.alternateScreen {
+        restoreRawFollowTailLiveGrid()
+      }
     }
     refreshRecoveryAccessibilityValue()
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
@@ -517,6 +564,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       if result == .updated {
         forceNextFrame = false
         hasPreparedState = true
+        if rawScrollOffset > 0, !frame.alternateScreen {
+          refreshRawScrollbackPaint(force: false)
+        }
         // Chrome learns the frame only after Candidate-D prepare succeeds.
         onFrameChanged?(frame)
         // Candidate-D can continue advancing while an exhausted GPU
@@ -616,11 +666,38 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     }
     lastProposedGeometry = .null
     recoveryPresentationPending = false
-    // History/composer/display correlations are disposable connection state;
-    // logical pane and Block identity remain owned by Runtime and are not
-    // cleared here.
-    historyRanges.removeAll(keepingCapacity: false)
-    invalidatePreparedPresentation()
+    // Rust owns which Blocks remain (composer timeline). Do not wipe
+    // historyRanges here from a retain-flag race — rebuildBlocks prunes via
+    // removeTranscriptRegions(except: retained) against that timeline
+    // (ADR-015; #1379). Ordinary disconnect with an empty timeline clears
+    // the cache there; shell-exit keeps completed Block ids.
+    let retainHistory = recoveryAppHandle != 0 && seyal_app_retains_flow_history(recoveryAppHandle) != 0
+    // Always drop running primary clips on disconnect. Retained history must
+    // not share the surface with the last prepared viewport after clear→exit
+    // (#1379): that leftover frame paints loose text/cursor over Block cards.
+    // Drop Metal history *buffers* (and any deferred prepares) too — keep
+    // historyRanges rows so chrome can re-encode against settled AppKit clips.
+    clearLiveTailPresentation()
+    renderer.removeHistoryRegions(except: [])
+    cancelPresentationRetries()
+    resetPreparationRecovery()
+    // Live Candidate-D readiness must not linger into reconnect/New shell
+    // (SPEC-009 §8.2.2 / §10). History present uses the retained flag only
+    // when Rust still retains Flow history.
+    hasPreparedState = false
+    hasRetainedHistoryPresentation = retainHistory && !historyRanges.isEmpty
+    onTimelineChanged?()
+    if retainHistory, shouldRender, hasRetainedHistoryPresentation {
+      renderer.requestPresent()
+      beginPresentationAttemptSeries()
+      armMetalDisplayLink()
+    } else if !retainHistory {
+      // Presentation retries / retained flag already cleared above. Do not
+      // call invalidatePreparedPresentation — it would also drop
+      // hasRetainedHistoryPresentation after a late retain latch and wipe
+      // historyRanges indirectly via Raw/empty rebuild only.
+      presentationState.cancel()
+    }
     startAutomaticBridgeRecoveryIfNeeded()
   }
 
@@ -651,7 +728,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// another test can leave on a different client.
   @discardableResult
   func selectTerminalBridge() -> Bool {
-    bridge?.selectClient() ?? false
+    bridge?.selectPresentedClient() ?? false
   }
 
   @discardableResult
@@ -689,18 +766,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func terminalNextComposerRequestID() -> UInt64 {
     bridge?.nextComposerRequestID() ?? 0
-  }
-
-  func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    bridge?.requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID) ?? -10
-  }
-
-  func retainHistoryRange(_ range: NativeHistoryRange) {
-    historyRanges[PaneBlockKey(paneID: paneID, blockID: range.blockID)] = range
-  }
-
-  func discardHistoryRequests(except blockIDs: Set<UInt64>) {
-    bridge?.discardHistoryRequests(except: blockIDs)
   }
 
   @discardableResult
@@ -799,57 +864,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// before the surrounding Block body is attached.
   func publishCurrentTerminalFrame() {
     bridge?.publishCurrentFrame()
-  }
-
-  /// Installs the bounded Runtime history projection into this Pane's one
-  /// Metal renderer. The callback is intentionally asynchronous at the
-  /// bridge boundary but preparation itself remains main-thread confined with
-  /// the rest of AppKit/Metal ownership.
-  func renderHistoryRange(_ range: NativeHistoryRange, region: NativeTranscriptRegion? = nil) {
-    retainHistoryRange(range)
-    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
-    do {
-      let rendererRegion: NativeTranscriptRegion
-      if let region {
-        // AppKit uses a bottom-left origin while the terminal shader
-        // consumes top-left pixel coordinates.
-        let pixelClip = NSRect(
-          x: region.clip.minX * scale,
-          y: (bounds.height - region.clip.maxY) * scale,
-          width: region.clip.width * scale,
-          height: region.clip.height * scale
-        )
-        rendererRegion = NativeTranscriptRegion(
-          id: region.id,
-          origin: pixelClip.origin,
-          clip: pixelClip
-        )
-      } else {
-        rendererRegion = NativeTranscriptRegion(
-          id: range.blockID,
-          origin: .zero,
-          clip: NSRect(
-            x: 0,
-            y: 0,
-            width: bounds.width * scale,
-            height: bounds.height * scale
-          )
-        )
-      }
-      try renderer.update(
-        historyRange: range,
-        region: rendererRegion,
-        backingScale: scale
-      )
-      if shouldRender {
-        renderer.requestPresent()
-        beginPresentationAttemptSeries()
-        armMetalDisplayLink()
-      }
-      refreshRecoveryAccessibilityValue()
-    } catch {
-      lastRenderError = error
-    }
   }
 
   func applyRendererPresentation(_ plan: RendererPresentationPlan) {

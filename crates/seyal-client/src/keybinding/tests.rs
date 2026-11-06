@@ -428,10 +428,8 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     );
 
     assert!(contexts_for(&table, "cmd+,").is_empty());
-    assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::AppCloseFocused).is_some());
+    assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TerminalCloseFocused).is_some());
     assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TabCloseFocused).is_none());
-    assert!(binding_for(&table, "cmd+n", WorkspaceCommandId::TabCreate).is_some());
-    assert!(binding_for(&table, "cmd+shift+n", WorkspaceCommandId::WindowNew).is_some());
 }
 
 #[test]
@@ -643,7 +641,7 @@ context = ["raw"]
 
 #[test]
 fn conflict_worked_example_disjoint_contexts_both_remain() {
-    // builtin cmd+t → tab.create [app]
+    // builtin cmd+t → terminal.create [app]
     // user cmd+t → pane.split_down [raw]
     // → both remain
     let toml = r#"
@@ -657,7 +655,7 @@ context = ["raw"]
     assert_eq!(rows.len(), 2);
     assert!(rows
         .iter()
-        .any(|(id, ctx)| *id == WorkspaceCommandId::TabCreate && *ctx == BindingContext::APP));
+        .any(|(id, ctx)| *id == WorkspaceCommandId::TerminalCreate && *ctx == BindingContext::APP));
     assert!(rows.iter().any(|(id, ctx)| {
         *id == WorkspaceCommandId::PaneSplitDown && *ctx == BindingContext::RAW
     }));

@@ -1,6 +1,7 @@
 //! Public application actions accepted by the portable product-state root.
 
 use super::*;
+use seyal_core::TerminalTabId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AppAction {
@@ -53,6 +54,17 @@ pub enum AppAction {
     },
     /// Mark reconstruction disconnected after the host drops the live client.
     DisconnectReconstruction,
+    /// Drop continuity pins so a fresh ExecutionId (New shell after exit) can
+    /// commit. Same-execution reconnect must keep using DisconnectReconstruction.
+    ClearReconstructionContinuity,
+    /// Explicit New shell after an ended Pane (SPEC-004 §18 Create+Bind).
+    /// `None` prepares that Pane. `Some` binds the created ExecutionId onto it,
+    /// never onto a focused sibling.
+    CreateReplacementExecution {
+        execution: Option<ExecutionId>,
+        attachment: Option<AttachmentId>,
+        pty_generation: u64,
+    },
     SetComposerDraft {
         fence: AppFence,
         text: String,
@@ -69,7 +81,9 @@ pub enum AppAction {
     },
     ApplyRuntimeBlocks {
         fence: AppFence,
-        records: Vec<RuntimeBlockRecord>,
+        /// `None` means the active display client is unavailable. Retain the
+        /// last projected Flow Block history instead of wiping it (#1379/#1171).
+        records: Option<Vec<RuntimeBlockRecord>>,
     },
     /// Relay the attached client's Runtime-published composer eligibility
     /// (ADR-009 invariant 7). `None` clears it when the transport is lost.
@@ -78,9 +92,10 @@ pub enum AppAction {
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
     },
-    /// User choice of the non-TUI presentation (#867).
-    /// `raw` keeps Raw across TUI entry and exit. Clearing it follows
-    /// structured eligibility again.
+    /// User choice of the non-TUI resting presentation (#867, #1438).
+    /// `raw == true` selects grid-first Raw (clears Flow opt-in). `raw == false`
+    /// opts into Flow when integration allows. Shell-integration status alone
+    /// must not flip resting Raw → Flow while Flow is quarantined.
     SelectRestingPresentation {
         fence: AppFence,
         raw: bool,
@@ -107,10 +122,37 @@ pub enum AppAction {
     SelectWorkspace {
         id: WorkspaceId,
     },
+    /// ADR-028: create a Workspace with an explicit root; Runtime mints the id.
+    CreateWorkspace {
+        root_path: String,
+    },
+    /// ADR-028: bind or update root on an existing Workspace.
+    SetWorkspaceRoot {
+        id: WorkspaceId,
+        root_path: String,
+    },
+    /// ADR-028: trusted foreground cwd observation (never OSC 7).
+    ObserveTrustedForegroundCwd {
+        path: String,
+    },
+    /// ADR-028: Yes on leave offer → create or jump.
+    ConfirmLeaveOffer,
+    /// ADR-028: No on leave offer → dismiss; navigation-only.
+    DismissLeaveOffer,
     SelectTab {
         id: TabId,
     },
     CreateTab,
+    NewTerminal,
+    SelectTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+    },
+    CloseTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        containment_generation: u64,
+    },
     SelectWindow {
         id: WindowId,
     },

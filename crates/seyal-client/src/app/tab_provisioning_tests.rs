@@ -505,7 +505,11 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
     assert!(root.snapshot().shell.tabs.iter().any(|item| item.id == tab));
     // Authority stays until TerminateExecutionResult; shell binding still present.
     assert_eq!(root.shell.pane_execution(pane).unwrap(), Some(execution));
-    assert_eq!(root.provisioning().recorded_execution(pane), None);
+    assert_eq!(
+        root.provisioning().recorded_execution(pane),
+        Some(execution),
+        "binding remains authoritative until Runtime confirms termination"
+    );
     assert_ne!(
         root.snapshot().eligibility,
         PresentationEligibility::Unbound
@@ -541,6 +545,11 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
         .expect("absorb terminate")
         .expect("terminate result present");
     assert_eq!(root.shell.pane_execution(pane).unwrap(), None);
+    assert_eq!(
+        root.shell.selected_terminal_tab(pane).unwrap(),
+        None,
+        "confirmed terminal termination removes its terminal-tab chrome"
+    );
     assert_eq!(
         root.snapshot().eligibility,
         PresentationEligibility::Unbound
@@ -963,5 +972,64 @@ fn miniaturize_hides_focused_leaf() {
     assert_eq!(
         root.snapshot().shell.windows[0].tabs[0].panes[0].presentation_tier,
         PresentationTier::Focused
+    );
+}
+
+#[test]
+fn create_window_begins_provisioning_for_empty_terminal() {
+    let mut root = ApplicationRoot::new();
+    root.shell.set_allows_window_creation_for_test(true);
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    let before = root.snapshot().shell.windows.len();
+    root.apply(AppAction::CreateWindow)
+        .expect("CreateWindow must admit and provision");
+    assert_eq!(root.snapshot().shell.windows.len(), before + 1);
+    let pane = root.snapshot().shell.focused_pane;
+    assert!(
+        root.provisioning().pending_intent(pane).is_some(),
+        "ADR-018 §3.3a: new Window must begin #994 provisioning"
+    );
+}
+
+#[test]
+fn dock_activate_workspace_create_begins_provisioning() {
+    let mut root = ApplicationRoot::new();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    let workspace = root.snapshot().shell.active_workspace;
+    let window = root.snapshot().shell.active_window.expect("seed window");
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::CloseWindow {
+        id: window,
+        containment_generation: generation,
+    })
+    .expect("close to zero windows");
+    assert!(root.snapshot().shell.windows.is_empty());
+    root.apply(AppAction::SelectWorkspace { id: workspace })
+        .expect("Dock ActivateWorkspace create");
+    assert_eq!(root.snapshot().shell.windows.len(), 1);
+    let pane = root.snapshot().shell.focused_pane;
+    assert!(
+        root.provisioning().pending_intent(pane).is_some(),
+        "zero-window Dock reopen must provision a new terminal"
+    );
+}
+
+#[test]
+fn dock_activate_workspace_raise_does_not_reprovision_bound_leaf() {
+    let execution = exec(77);
+    let (mut root, pane) = bound_root_with_wire_client(execution);
+    let workspace = root.snapshot().shell.active_workspace;
+    assert!(root.provisioning().pending_intent(pane).is_none());
+    root.apply(AppAction::SelectWorkspace { id: workspace })
+        .expect("raise existing workspace");
+    assert!(
+        root.provisioning().pending_intent(pane).is_none(),
+        "raise must not begin a second create for an already-bound leaf"
+    );
+    assert_eq!(
+        root.provisioning().recorded_execution(pane),
+        Some(execution)
     );
 }

@@ -10,6 +10,8 @@ enum KeybindingShortcutRealization {
     static let tabSelectNext: UInt16 = 5
     static let paneSplitRight: UInt16 = 7
     static let paneSplitDown: UInt16 = 8
+    /// SPEC-024 / #1438: `presentation.set_flow` (explicit Flow latch; Raw is default resting).
+    static let presentationSetFlow: UInt16 = 12
     static let presentationToggleRaw: UInt16 = 15
     static let presentationToggleTui: UInt16 = 16
     static let gotoOpen: UInt16 = 21
@@ -19,6 +21,8 @@ enum KeybindingShortcutRealization {
     static let windowCycleNext: UInt16 = 40
     static let windowCyclePrevious: UInt16 = 41
     static let windowSelectOrdinal: UInt16 = 42
+    static let terminalCreate: UInt16 = 43
+    static let terminalCloseFocused: UInt16 = 44
 
     static func item(commandId: UInt16) -> SeyalAppShortcutItem? {
         let count = seyal_app_shortcut_count()
@@ -63,11 +67,14 @@ enum KeybindingShortcutRealization {
         switch commandId {
         case commandPaletteOpen: return "Command Palette"
         case tabCreate: return "New Tab"
+        case terminalCreate: return "New Terminal"
+        case terminalCloseFocused: return "Close Terminal"
         case tabCloseFocused: return "Close Tab"
         case tabSelectPrevious: return "Previous Tab"
         case tabSelectNext: return "Next Tab"
         case paneSplitRight: return "Split Right"
         case paneSplitDown: return "Split Down"
+        case presentationSetFlow: return "Flow"
         case presentationToggleRaw: return "Toggle Raw"
         case presentationToggleTui: return "Toggle TUI"
         case gotoOpen: return "Go to…"

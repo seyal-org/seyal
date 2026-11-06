@@ -26,7 +26,7 @@
 | Tab close leaves Window open | `shell::w7_matrix_tests::tab_close_leaves_window_open_without_terminate` |
 | Window close without execution death | `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` (real Runtime child remains in unpresented inventory after its Window closes) |
 | Unpresented execution finalizes without closing another Window | `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` (real Runtime child + ApplicationRoot attach/dispose; asserts child finalization, retained other Window, and surviving closed-window child) |
-| Last Window closes while the App remains running | `SeyalHostUITests::testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit` (W4b/W7; closes the final live-PTY Window and asserts zero windows plus foreground process) |
+| Last Window close quits the headed app; Runtime/execution survival stays orthogonal | `SeyalHostUITests::testNewWindowAdmissionCreatesSecondWindowAndLastCloseQuits` (W4b/W7; ADR-018 §2.5 / #1451) + `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` |
 | Quit × create in flight | `app::w7_adversarial_tests::quit_while_create_tab_provisioning_in_flight` |
 | Close requesting Tab × create in flight | `app::w7_adversarial_tests::close_requesting_tab_while_provisioning_in_flight` |
 | Terminate after Hidden → Unpresented | `app::w7_adversarial_tests::terminate_unpresented_requests_attach_for_dispose_after_hidden` (client contract: requests a Controller attach for disposal) + `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` (Runtime integration: asserts Hidden before close, exact child remains alive while Unpresented, then Runtime finalizes it without closing the sibling Window) |
@@ -42,7 +42,7 @@
 | Closed window hosts Focused/Visible/Hidden leaf | Leaves removed with window; Unpresented is inventory only |
 | Unpresented as a live PaneLeafSnapshot tier | Asserted in `unpresented_is_inventory_not_leaf_tier` |
 | Shell binding encodes Controller/Observer | `PaneLeafSnapshot` has `ExecutionId` only |
-| Shell close equals application quit | Zero-window re-entry still admits `CreateWindow` |
+| Headed last-window close without AppKit quit path | ADR-018 §2.5 / #1451: last headed window close quits; zero-window re-entry is a shell-only fixture path, not headed stay-alive |
 | Multi-live Metal leaf × N GPU surfaces on this tip | Blocked on unmerged #936 — labelled PLATFORM_LIMITED in measurements |
 | Pane equalize / swap / move-beside matrix rows | Blocked on unmerged PT4/PT5 — labelled PLATFORM_LIMITED |
 
