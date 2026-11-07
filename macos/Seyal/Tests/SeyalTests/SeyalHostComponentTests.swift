@@ -1997,6 +1997,55 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testHundredThousandRowHistoryPreparesOnlyTheVisibleMetalPage() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-bounded-history-page"
+        )
+        surface.renderer.setPresentationPlan(.flow())
+        surface.activateTranscriptDisplayHandle(11)
+        let cell = NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 100_000,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: Array(repeating: [cell], count: 100_000),
+            sourceDisplayHandle: 11
+        )
+        let visibleRows = 99_800..<100_000
+        surface.retainHistoryRange(range)
+        surface.setTranscriptFrame(
+            NativeTranscriptFrame(
+                revision: 1,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: .zero,
+                        clip: NSRect(x: 0, y: 0, width: 320, height: 200),
+                        historyRows: visibleRows,
+                        historyRequestID: 1,
+                        historyRevision: 1
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        )
+
+        XCTAssertEqual(
+            surface.renderer.historyRegions[1]?.instanceCount,
+            visibleRows.count,
+            "Metal must prepare only the selected viewport page from a 100K-row Block"
+        )
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, visibleRows.count)
+    }
+
+    @MainActor
     func testIdenticalTranscriptGeometryPreparesHistoryThatArrivesLater() throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal unavailable")
