@@ -187,6 +187,10 @@ extension ProductChromeHostView {
     }
 
     func rebuildBlocks() {
+        // Preserve scroll across projection rebuilds so status/timeline
+        // churn does not yank intentional history scroll (#1379 / #1424 parity).
+        let savedOffsetY = transcript.contentView.bounds.origin.y
+        let savedFollowing = followingLiveEnd
         let previousCards = blockCards
         blocks.arrangedSubviews
             .filter { $0 !== transcriptLeadingSpacer }
@@ -286,8 +290,20 @@ extension ProductChromeHostView {
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         publishLiveTailBlocks()
-        if visibleIndex > lastBlockCount, followingLiveEnd {
+        if savedFollowing {
             scrollTranscriptToLiveEnd()
+        } else {
+            // Keep the reader's intentional history offset across rebuilds.
+            // Expand-only document sizing (syncTranscriptDocumentSize) keeps
+            // the prior document height as a floor for this restore.
+            isProgrammaticTranscriptScroll = true
+            defer { isProgrammaticTranscriptScroll = false }
+            let maxY = max(transcriptDocumentScrollHeight() - transcript.contentView.bounds.height, 0)
+            let y = min(max(savedOffsetY, 0), maxY)
+            transcript.contentView.scroll(to: NSPoint(x: 0, y: y))
+            transcript.reflectScrolledClipView(transcript.contentView)
+            followingLiveEnd = false
+            publishBlockOutputFrame()
         }
         lastBlockCount = visibleIndex
         applyComposerPlacement()
@@ -298,6 +314,9 @@ extension ProductChromeHostView {
             guard let self else { return }
             self.layoutSubtreeIfNeeded()
             self.syncTranscriptDocumentSize()
+            if self.followingLiveEnd {
+                self.scrollTranscriptToLiveEnd()
+            }
             self.publishBlockOutputFrame()
         }
     }

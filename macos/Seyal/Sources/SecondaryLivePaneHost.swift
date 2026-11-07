@@ -351,9 +351,14 @@ final class SecondaryLivePaneHost: NSView {
     }
 
     @objc private func transcriptBoundsDidChange(_ note: Notification) {
-        guard !isProgrammaticTranscriptScroll else { return }
-        followingLiveEnd = isNearLiveEnd()
-        rememberTranscriptScrollState()
+        // History instance origins are baked in surface pixels; scroll must
+        // re-publish clips/origins even for programmatic follow-to-live-end /
+        // offset restore, or Metal history sticks at the pre-scroll geometry
+        // (#1379 / stuck glyphs). Only the follow-tail latch is gated.
+        if !isProgrammaticTranscriptScroll {
+            followingLiveEnd = isNearLiveEnd()
+            rememberTranscriptScrollState()
+        }
         publishBlockOutputFrame()
     }
 
