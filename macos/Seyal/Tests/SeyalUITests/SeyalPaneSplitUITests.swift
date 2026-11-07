@@ -45,6 +45,125 @@ final class SeyalPaneSplitUITests: XCTestCase {
         assertSingleLiveSurface(in: app, focusedRegion: focused)
     }
 
+    func testSecondPaneComposerShowsTypedDraftBeforeSubmitAfterPriorCommands() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand("ls", in: app)
+        submitComposerCommand("ls -lrt", in: app)
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
+
+        let composer = element(app, "seyal-composer")
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        let editor = composer.descendants(matching: .any)
+            .matching(identifier: "seyal-composer-editor")
+            .firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        editor.click()
+        let command = "echo second-pane-live-draft-marker"
+        editor.typeText(command)
+
+        let visibleDraft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", "second-pane-live-draft-marker"),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [visibleDraft], timeout: 5),
+            .completed,
+            "typed text must appear in the second-pane composer before Return; value=\(editor.value ?? "nil")"
+        )
+
+        editor.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: "second-pane-live-draft-marker")
+                .waitForExistence(timeout: 10),
+            "the visible draft must submit to the focused pane's Block timeline"
+        )
+    }
+
+    func testSecondPanePythonReceivesInputAfterInteractAction() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        submitComposerCommand("python3 -q", in: app, expectBlock: false)
+        XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
+
+        let secondPane = element(app, "seyal-pane-region-1")
+        let interact = element(app, "seyal-running-program-interact")
+        XCTAssertTrue(interact.waitForExistence(timeout: 10), "Python Block must offer direct input")
+        XCTAssertTrue(
+            secondPane.frame.insetBy(dx: -1, dy: -1).contains(interact.frame),
+            "Python Block interaction must belong to Pane 2; button=\(interact.frame), pane=\(secondPane.frame)"
+        )
+        interact.click()
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        let rawRoute = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [rawRoute], timeout: 5),
+            .completed,
+            "Interact must route the focused second pane to its terminal input surface"
+        )
+
+        terminal.click()
+        let marker = "seyal-second-pane-python-input"
+        terminal.typeText("print('\(marker)')")
+        terminal.typeKey("\r", modifierFlags: [])
+        let screenshot = app.windows.firstMatch.screenshot()
+        let renderedText = try recognizedText(in: screenshot)
+        XCTAssertTrue(
+            renderedText.contains(marker),
+            "Python input must reach the Pane 2 PTY and render in its Raw terminal; OCR=\(renderedText)"
+        )
+    }
+
+    func testSecondPaneNodeReceivesInputWithoutSessionSetupPopup() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        submitComposerCommand("node", in: app, expectBlock: false)
+        XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
+
+        let interact = element(app, "seyal-running-program-interact")
+        XCTAssertTrue(interact.waitForExistence(timeout: 10), "Node Block must offer direct input")
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-session-bootstrap-title"].exists,
+            "a local Node REPL must not be interrupted by a session setup popup"
+        )
+        interact.click()
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        XCTAssertEqual(terminal.elementType, .textView)
+
+        terminal.click()
+        let marker = "seyal-second-pane-node-input"
+        terminal.typeText("console.log('\(marker)')")
+        terminal.typeKey("\r", modifierFlags: [])
+        let renderedText = try recognizedText(in: app.windows.firstMatch.screenshot())
+        XCTAssertTrue(
+            renderedText.contains(marker),
+            "Node input must reach the Pane 2 PTY and render in its Raw terminal; OCR=\(renderedText)"
+        )
+    }
+
     func testPaneTabOverflowNeverOverlapsNeighborOrTrailingActions() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)

@@ -255,8 +255,15 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     /// return a fresh focused snapshot for mutating actions.
     @discardableResult
     private func prepareFocusedMutation() -> SeyalAppSnapshot {
-        if boundPaneLo != nil {
-            onEnsureFocused?()
+        if let paneLo = boundPaneLo, let paneHi = boundPaneHi {
+            let shell = seyal_app_shell(appHandle)
+            if shell.focused_pane_lo != paneLo || shell.focused_pane_hi != paneHi {
+                // Focus reconciliation may route the legacy single-pane editor.
+                // Restore this pane's editor after focusing it so the first
+                // edit does not send the remaining keystrokes elsewhere.
+                onEnsureFocused?()
+                _ = window?.makeFirstResponder(textView)
+            }
         }
         return seyal_app_snapshot(appHandle)
     }

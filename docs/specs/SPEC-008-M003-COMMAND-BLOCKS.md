@@ -322,6 +322,9 @@ snapshot.
   such semantics are required;
 - IME/first-responder/accessibility/mouse ownership follows the active
   presentation mode and section 3.4 transition fence.
+- editing a Pane composer retains that Pane's first responder for the whole
+  draft; focus reconciliation runs only when the focused Pane actually changes,
+  and must not steal subsequent characters from the composer.
 
 When the current Flow input target is `ForegroundProgram(b)` with an admitted
 line-level Relay, the Pane's single Rust-owned composer/editor is visually
