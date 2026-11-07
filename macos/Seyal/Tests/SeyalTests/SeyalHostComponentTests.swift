@@ -3208,6 +3208,62 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(continued.begin(key), "the completed continuation settles the original projection")
     }
 
+    /// #1379: Raw/TUI wipe of Metal history must clear settled request keys so
+    /// return-to-Flow can re-fetch Block bodies instead of painting blank cards.
+    func testRawOrTuiHistoryWipeClearsSettledProjectionRequests() {
+        var requests = HistoryProjectionRequestBook()
+        let key = HistoryProjectionRequestKey(
+            displayHandle: 33,
+            blockID: 9,
+            startLine: 1,
+            endLine: 40
+        )
+        XCTAssertTrue(requests.begin(key))
+        requests.complete(key)
+        XCTAssertFalse(requests.begin(key), "settled keys stay suppressed until wiped")
+        requests.discard(forDisplayHandle: 33)
+        XCTAssertTrue(
+            requests.begin(key),
+            "discard after Raw/TUI presentation wipe must allow a fresh HistoryRangeRequest"
+        )
+    }
+
+    /// #1379: intentional history scroll survives a secondary rebuildBlocks pass.
+    @MainActor
+    func testSecondaryRebuildBlocksPreservesScrolledOffsetAwayFromLiveEnd() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        layout.appHandle = seyal_app_create()
+        defer { seyal_app_destroy(layout.appHandle) }
+        let region = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 0,
+            rect: CGRect(x: 0, y: 0, width: 1, height: 1),
+            focused: true, live: true, title: "A"
+        )
+        layout.apply([region], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        let host = try XCTUnwrap(layout.presentationHost(paneLo: 1, paneHi: 0))
+        host.transcript.setFrameSize(NSSize(width: 320, height: 280))
+        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
+        host.setTranscriptDocumentOffsetY(320)
+        let before = host.transcriptDocumentOffsetY
+        XCTAssertGreaterThan(before, 200)
+        XCTAssertFalse(host.followingLiveEnd)
+
+        host.rebuildBlocks()
+        layout.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            host.transcriptDocumentOffsetY,
+            before,
+            accuracy: 1,
+            "rebuildBlocks must restore intentional scroll away from live end"
+        )
+        XCTAssertFalse(host.followingLiveEnd)
+    }
+
     /// The primary readiness source polls `clientHandle`; focus selection must
     /// not redirect its history response lookup to another Controller.
     @MainActor

@@ -590,6 +590,11 @@ final class SecondaryLivePaneHost: NSView {
             surface.applyRendererPresentation(.fullPane(mode))
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])
+            // Wiping Metal/history caches must also clear the settled request
+            // book. Otherwise return-to-Flow rebuilds skip HistoryRangeRequest
+            // for already-settled Block keys and leave permanently blank bodies
+            // (#1379 adversarial review B2).
+            historyProjectionRequests.discard(forDisplayHandle: displayHandle)
             composer.isHidden = true
             clearPreservedDocumentHeight()
             surface.preserveRawScrollbackAfterPresentationChange(eligibility: eligibility)

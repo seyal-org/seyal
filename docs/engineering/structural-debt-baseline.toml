@@ -36,9 +36,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 726
-issue = 1426
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1426 preserves viewport position across focus/reconcile churn and restores each tab's own scroll position while its controller history is rebound."
+acknowledged_loc = 736
+issue = 1379
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1379 adds programmatic-scroll Metal republish (stuck-glyph fix) and Raw/TUI→Flow history-request discard so return-to-Flow can re-fetch Block bodies. Further split would separate scroll/history ownership from the surface that applies it."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
