@@ -5833,6 +5833,63 @@ extension SeyalHostComponentTests {
         )
         XCTAssertLessThanOrEqual(maximum.rows.count, HistoryRenderWindow.maximumRows)
         XCTAssertEqual(maximum.rows.upperBound, Int.max)
+
+        let pageIdentity = NativeHistoryRenderPageKey(
+            displayHandle: 1,
+            startLine: 10,
+            endLine: 20,
+            totalRows: 100_000,
+            requestID: 2,
+            revision: 3,
+            rows: 500..<900,
+            cellSize: CGSize(width: 8, height: 16),
+            backingScale: 2
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 20,
+                totalRows: 100_000,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 18),
+                backingScale: 2
+            ),
+            "font metric changes must invalidate the cached page"
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 20,
+                totalRows: 100_000,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 16),
+                backingScale: 1
+            ),
+            "backing scale changes must invalidate the cached page"
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 21,
+                totalRows: 100_001,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 16),
+                backingScale: 2
+            ),
+            "new history extents must invalidate the cached page"
+        )
     }
 
     @MainActor

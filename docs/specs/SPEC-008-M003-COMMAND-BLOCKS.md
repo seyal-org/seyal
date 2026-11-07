@@ -367,6 +367,9 @@ Pane/execution, Block, history revision and visible range; a content or range
 change invalidates glyph data even when clip geometry is unchanged. PTY/VT
 progress must not wait for page retrieval or GPU preparation. The renderer's
 per-page row/cell bounds remain enforced for every request and buffer.
+Changes to source line bounds, total history extent, cell metrics, or backing
+scale also invalidate the prepared page so resize/font changes cannot reuse
+stale glyph positions.
 
 ### 5.2 Running Block
 

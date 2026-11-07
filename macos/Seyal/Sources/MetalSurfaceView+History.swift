@@ -1,9 +1,14 @@
 import AppKit
 
 struct NativeHistoryRenderPageKey: Equatable {
+  let displayHandle: UInt64
+  let startLine: UInt64
+  let endLine: UInt64
+  let totalRows: Int
   let requestID: UInt64
   let revision: UInt64
   let rows: Range<Int>
+  let cellSize: CGSize
   let backingScale: CGFloat
 }
 
@@ -39,6 +44,7 @@ extension MetalSurfaceView {
       firstVisibleRow: max(range.rows.count - HistoryRenderWindow.maximumRows, 0),
       visibleRowCount: HistoryRenderWindow.maximumRows
     ).rows
+    let cellSize = terminalPresentationCellSize()
     let lowerBound = max(0, min(rows.lowerBound, range.rows.count))
     let upperBound = max(lowerBound, min(rows.upperBound, range.rows.count))
     let boundedRows = lowerBound..<upperBound
@@ -53,9 +59,14 @@ extension MetalSurfaceView {
       sourceDisplayHandle: range.sourceDisplayHandle
     )
     let key = NativeHistoryRenderPageKey(
+      displayHandle: range.sourceDisplayHandle,
+      startLine: range.startLine,
+      endLine: range.endLine,
+      totalRows: range.rows.count,
       requestID: range.requestID,
       revision: range.revision,
       rows: boundedRows,
+      cellSize: cellSize,
       backingScale: scale
     )
     do {
@@ -73,7 +84,7 @@ extension MetalSurfaceView {
           height: currentRegion.clip.height * scale
         )
         let pageOffset = CGFloat(boundedRows.lowerBound)
-          * terminalPresentationCellSize().height * scale
+          * cellSize.height * scale
         let pixelOrigin = NSPoint(x: pixelClip.minX, y: pixelClip.minY + pageOffset)
         rendererRegion = NativeTranscriptRegion(
           id: currentRegion.id,
