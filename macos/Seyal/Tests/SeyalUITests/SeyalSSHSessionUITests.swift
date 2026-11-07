@@ -413,7 +413,7 @@ final class SeyalSSHSessionUITests: XCTestCase {
         let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
         XCTAssertEqual(
             setupTitle.value as? String,
-            "Set up this SSH session",
+            "Enable Blocks for this session?",
             "session consent must not present Blocks as disabled by default"
         )
         let consentCopy = expectation(

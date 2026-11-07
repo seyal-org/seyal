@@ -453,12 +453,12 @@ extension SecondaryLivePaneHost {
     /// `NSStackView.fittingSize`, which can retain the prior document frame
     /// while Blocks are rebuilt after focus/projection changes (#1426).
     func transcriptCardsContentHeight() -> CGFloat {
-        let cards = blocks.arrangedSubviews.filter { $0 !== transcriptLeadingSpacer }
-        guard !cards.isEmpty else { return 0 }
-        let cardHeight = cards.reduce(CGFloat.zero) { total, view in
-            total + max(view.fittingSize.height, view.bounds.height)
-        }
-        return cardHeight + CGFloat(max(cards.count - 1, 0)) * blocks.spacing
+        TranscriptDocumentSizing.contentHeight(
+            arrangedSubviews: blocks.arrangedSubviews,
+            leadingSpacer: transcriptLeadingSpacer,
+            spacing: blocks.spacing,
+            edgeInsets: blocks.edgeInsets
+        )
     }
 
     func transcriptDocumentScrollHeight() -> CGFloat {

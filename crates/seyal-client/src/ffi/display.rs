@@ -317,15 +317,16 @@ pub extern "C" fn seyal_bridge_session_surface() -> SeyalSessionSurface {
     .unwrap_or_else(SeyalSessionSurface::empty)
 }
 
-/// Rust-owned session copy. `kind`: 0 title, 1 body, 2 primary action, 3 dismiss.
+/// Rust-owned session copy. `kind`: 0 title, 1 body, 2 consent action, 3 dismiss,
+/// 4 explicit setup action.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_session_copy(kind: u8) -> *const std::ffi::c_char {
     let text: &'static [u8] = match kind {
-        0 => b"Set up this SSH session\0",
-        1 => b"To group commands into session Blocks, Seyal will type one setup line into this session. That line may enter the remote shell's history. Seyal writes no remote file and installs only in-memory hooks until that shell exits. Direct input including Raw is held while setup runs. Afterward Raw and labeled relay remain available. Relay is plaintext to the foreground program.\0",
-        2 => b"Set up this session\0",
+        0 => b"Enable Blocks for this session?\0",
+        1 => b"Only accept this in a compatible shell. This does not open an SSH connection; it types one setup line into the foreground program. Python or Node receive it as input, so choose Not now and use Relay or Raw. The line may enter shell history, including remote shell history. No setup files are written; hooks stay in memory until the shell exits. Raw input is held during setup; Relay is plaintext.\0",
+        2 => b"Enable for this session\0",
         3 => b"Not now\0",
-        4 => b"Set up SSH session\0",
+        4 => b"Enable Blocks\0",
         _ => b"\0",
     };
     text.as_ptr().cast()

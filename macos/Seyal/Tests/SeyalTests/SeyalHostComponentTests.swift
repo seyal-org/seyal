@@ -5737,6 +5737,26 @@ private func accessibilityChildren(
 
 extension SeyalHostComponentTests {
     @MainActor
+    func testTranscriptSizingUsesIntrinsicHeightsAndAccountsForDockSpacing() {
+        let leadingSpacer = NSView()
+        let staleExpandedCard = NSView(
+            frame: NSRect(x: 0, y: 0, width: 240, height: 500)
+        )
+        staleExpandedCard.translatesAutoresizingMaskIntoConstraints = false
+        staleExpandedCard.heightAnchor.constraint(equalToConstant: 48).isActive = true
+
+        XCTAssertEqual(staleExpandedCard.bounds.height, 500)
+        XCTAssertEqual(staleExpandedCard.fittingSize.height, 48)
+        let height = TranscriptDocumentSizing.contentHeight(
+            arrangedSubviews: [leadingSpacer, staleExpandedCard],
+            leadingSpacer: leadingSpacer,
+            spacing: 10,
+            edgeInsets: NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        )
+        XCTAssertEqual(height, 74, "use the current Block height, the leading stack gap, and both insets")
+    }
+
+    @MainActor
     func testSessionBootstrapBannerRendersRustCopyAndStaysHiddenWithoutSurface() {
         let banner = SessionBootstrapBanner()
         XCTAssertTrue(banner.isHidden)
@@ -5745,9 +5765,14 @@ extension SeyalHostComponentTests {
         let enable = String(cString: seyal_bridge_session_copy(4))
         let accept = String(cString: seyal_bridge_session_copy(2))
         let decline = String(cString: seyal_bridge_session_copy(3))
-        XCTAssertEqual(title, "Set up this SSH session")
-        XCTAssertEqual(enable, "Set up SSH session")
-        XCTAssertEqual(accept, "Set up this session")
+        XCTAssertEqual(title, "Enable Blocks for this session?")
+        XCTAssertEqual(enable, "Enable Blocks")
+        XCTAssertEqual(accept, "Enable for this session")
+        let disclosure = String(cString: seyal_bridge_session_copy(1))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("does not open an SSH connection"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("Python or Node"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("remote shell history"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("choose Not now"))
         XCTAssertEqual(decline, "Not now")
         let surface = seyal_bridge_session_surface()
         XCTAssertEqual(surface.kind, 0)

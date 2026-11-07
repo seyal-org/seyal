@@ -1,5 +1,24 @@
 import AppKit
 
+enum TranscriptDocumentSizing {
+    static func contentHeight(
+        arrangedSubviews: [NSView],
+        leadingSpacer: NSView,
+        spacing: CGFloat,
+        edgeInsets: NSEdgeInsets
+    ) -> CGFloat {
+        let contentSubviews = arrangedSubviews.filter { $0 !== leadingSpacer }
+        guard !contentSubviews.isEmpty else { return 0 }
+        let intrinsicHeight = contentSubviews.reduce(CGFloat.zero) { total, view in
+            total + max(view.fittingSize.height, 0)
+        }
+        return intrinsicHeight
+            + CGFloat(contentSubviews.count) * spacing
+            + edgeInsets.top
+            + edgeInsets.bottom
+    }
+}
+
 enum HistoryRangeRouting {
     enum Destination: Equatable {
         case primary
@@ -583,8 +602,19 @@ extension ProductChromeHostView {
     func syncTranscriptDocumentSize() {
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
-        let contentHeight = max(fitted.height - transcriptLeadingSpacerHeight.constant, 0)
+        // Measure the arranged cards themselves. NSStackView.fittingSize can
+        // retain the stretched document height after a previous tall stream;
+        // subtracting the spacer from that stale value leaves short Blocks
+        // stranded above the composer instead of bottom-docking them (#1426).
         let hasCards = !blockCards.isEmpty
+        let contentHeight = hasCards
+            ? TranscriptDocumentSizing.contentHeight(
+                arrangedSubviews: blocks.arrangedSubviews,
+                leadingSpacer: transcriptLeadingSpacer,
+                spacing: blocks.spacing,
+                edgeInsets: blocks.edgeInsets
+            )
+            : 0
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let height = max(contentHeight, viewportHeight, 1)

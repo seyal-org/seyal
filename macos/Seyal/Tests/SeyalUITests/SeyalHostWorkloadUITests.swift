@@ -27,6 +27,45 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "824-high-volume")
     }
 
+    func testLocalPythonSessionCopyIsGenericAndBlockStaysBottomDocked() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "python3 -q")
+
+        let pythonBlock = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "python3 -q")
+        ).firstMatch
+        XCTAssertTrue(pythonBlock.waitForExistence(timeout: 12), "Python must stay in its running Block")
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+
+        let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
+        XCTAssertTrue(setupTitle.waitForExistence(timeout: 5), "interactive session setup must remain explicit")
+        XCTAssertEqual(
+            setupTitle.value as? String,
+            "Enable Blocks for this session?",
+            "a local Python REPL must not be described as an SSH connection"
+        )
+
+        let blocksScroll = app.scrollViews["seyal-blocks-scroll"].firstMatch
+        XCTAssertTrue(blocksScroll.exists)
+        XCTAssertLessThanOrEqual(
+            blocksScroll.frame.maxY - pythonBlock.frame.maxY,
+            96,
+            "the active Python Block must stay docked above the Pane composer"
+        )
+        XCTAssertGreaterThan(
+            composer.frame.minY - pythonBlock.frame.maxY,
+            0,
+            "the composer must remain below the active Python Block"
+        )
+        XCTAssertLessThanOrEqual(
+            composer.frame.minY - pythonBlock.frame.maxY,
+            96,
+            "the Python Block must dock directly above the composer"
+        )
+        attachScreenshot(app, name: "m003-local-python-bottom-dock")
+    }
+
     /// #1379: completed Flow Blocks must paint output bodies, not titles-only
     /// chrome with an empty white Metal clip.
     func testCompletedFlowBlockKeepsPaintedOutputBody() throws {
