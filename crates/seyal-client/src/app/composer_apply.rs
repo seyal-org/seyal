@@ -235,6 +235,7 @@ impl ApplicationRoot {
         fence: AppFence,
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
+        target: Option<RuntimeComposerTarget>,
     ) -> Result<(), AppError> {
         self.require_fence(fence)?;
         self.composer
@@ -245,11 +246,65 @@ impl ApplicationRoot {
             })
             .map(|_| ())
             .map_err(composer_error)?;
+        let target = target.filter(|target| target.revision > 0 && target.target_generation > 0);
+        self.runtime_composer_target = target;
+        if eligibility == Some(RuntimeComposerEligibility::Available)
+            || eligibility == Some(RuntimeComposerEligibility::Unsupported)
+            || self
+                .interactive_raw_target
+                .is_some_and(|(_, _, block, generation)| {
+                    !target.is_some_and(|current| {
+                        current.block_id == block
+                            && current.target_generation == generation
+                            && current.target_class == 2 // ForegroundProgram (ADR-026)
+                    })
+                })
+        {
+            self.interactive_raw_target = None;
+        }
         if let Some(eligibility) = eligibility {
             self.integration_unsupported = eligibility == RuntimeComposerEligibility::Unsupported;
             self.recompute_resting();
             self.derive_presentation(self.alternate_screen)?;
         }
         Ok(())
+    }
+
+    pub(super) fn interact_with_running_block(
+        &mut self,
+        fence: AppFence,
+        block_id: u64,
+        target_generation: u64,
+        target_revision: u64,
+    ) -> Result<(), AppError> {
+        self.require_fence(fence)?;
+        if !fence.controller || self.frozen || self.alternate_screen {
+            return Err(AppError::ActionUnavailable);
+        }
+        let Some(target) = self.runtime_composer_target else {
+            return Err(AppError::ActionUnavailable);
+        };
+        if target.block_id != block_id
+            || target.target_generation != target_generation
+            || target.revision != target_revision
+            || target.target_class != 2 // ForegroundProgram (ADR-026)
+            || target.mode == 1
+        // Submit is the trusted shell prompt, not a child.
+        {
+            return Err(AppError::ActionUnavailable);
+        }
+        let block_is_running = self.focused_blocks().iter().any(|block| {
+            u64::from_le_bytes(block.id.to_bytes()[..8].try_into().unwrap_or([0; 8])) == block_id
+                && block.state == crate::composer::BlockPresentationState::Running
+        });
+        if !block_is_running {
+            return Err(AppError::ActionUnavailable);
+        }
+        let Some(bound) = self.authority else {
+            return Err(AppError::UnboundUnauthorized);
+        };
+        self.interactive_raw_target =
+            Some((fence.pane, bound.execution, block_id, target_generation));
+        self.derive_presentation(false)
     }
 }

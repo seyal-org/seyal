@@ -173,7 +173,6 @@ final class SecondaryLivePaneHost: NSView {
         )
         transcriptLeadingSpacerHeight.isActive = true
         blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
-
         let clip = TranscriptClipView()
         clip.drawsBackground = false
         clip.copiesOnScroll = false

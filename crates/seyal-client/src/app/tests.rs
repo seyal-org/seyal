@@ -1,3 +1,4 @@
+use super::presentation_tests::runtime_available;
 use super::*;
 use crate::presentation::InputRoute;
 mod close_disposition_tests;
@@ -10,17 +11,6 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
         pty_generation: 1,
         alternate_screen: alternate,
     }
-}
-
-/// Runtime published `Available` for the bound attachment: the only way
-/// the composer becomes submittable.
-fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
-    root.apply(AppAction::ApplyRuntimeComposerStatus {
-        fence: root.fence(),
-        eligibility: Some(RuntimeComposerEligibility::Available),
-        revision,
-    })
-    .unwrap();
 }
 
 /// Supported sessions start in Flow; Runtime Available status admits composer input.
@@ -68,6 +58,7 @@ fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
             fence: stale,
             eligibility: Some(RuntimeComposerEligibility::Available),
             revision: 1,
+            target: None,
         }),
         Err(AppError::StaleExecution)
     );
@@ -82,6 +73,7 @@ fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Busy),
         revision: 2,
+        target: None,
     })
     .unwrap();
     let busy = root.snapshot().composer.unwrap();

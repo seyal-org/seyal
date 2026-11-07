@@ -88,20 +88,17 @@ final class SessionBootstrapBanner: NSView {
             setCollapsed(true)
             return
         }
+        guard surface.kind == 2 else {
+            setCollapsed(true)
+            return
+        }
         setCollapsed(false)
         titleLabel.stringValue = copyString(0)
-        if surface.kind == 2 {
-            bodyLabel.stringValue = copyString(1)
-            bodyLabel.isHidden = false
-            primary.title = copyString(2)
-            dismiss.title = copyString(3)
-            dismiss.isHidden = false
-        } else {
-            bodyLabel.stringValue = ""
-            bodyLabel.isHidden = true
-            primary.title = copyString(4)
-            dismiss.isHidden = true
-        }
+        bodyLabel.stringValue = copyString(1)
+        bodyLabel.isHidden = false
+        primary.title = copyString(2)
+        dismiss.title = copyString(3)
+        dismiss.isHidden = false
         setAccessibilityLabel(titleLabel.stringValue)
     }
 
@@ -125,9 +122,7 @@ final class SessionBootstrapBanner: NSView {
     }
 
     @objc private func primaryClicked() {
-        if lastKind == 1 {
-            _ = seyal_bridge_session_request()
-        } else if lastKind == 2 {
+        if lastKind == 2 {
             _ = seyal_bridge_session_consent(1)
         }
         reconcile()

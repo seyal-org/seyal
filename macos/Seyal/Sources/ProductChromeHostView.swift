@@ -24,6 +24,8 @@ final class ProductChromeHostView: NSView {
     /// `syncTranscriptDocumentSize`, never by NSStackView distribution.
     let transcriptLeadingSpacer = NSView()
     var transcriptLeadingSpacerHeight: NSLayoutConstraint!
+    var lastTranscriptViewportSize = CGSize.zero
+    var hasPendingTranscriptViewportSync = false
     let composer: ComposerBridgeView
     let sessionBootstrap = SessionBootstrapBanner()
     /// Rust-owned history overlay (#933); internal for component tests.
@@ -76,7 +78,13 @@ final class ProductChromeHostView: NSView {
     var transcriptRelayBottomConstraint: NSLayoutConstraint?
     let transcriptTopSpacer = NSView(frame: .zero)
     var transcriptTopSpacerHeight: NSLayoutConstraint!
-    var relayTarget: (blockID: UInt64, generation: UInt64, mode: UInt8) = (0, 0, 0)
+    var relayTarget: (
+        blockID: UInt64,
+        generation: UInt64,
+        revision: UInt64,
+        targetClass: UInt8,
+        mode: UInt8
+    ) = (0, 0, 0, 0, 0)
     var composerInlineBlockID: UInt64 = 0
     var transcriptFrameRevision: UInt64 = 0
     /// Bounds zero-clip async republish so layout stalls cannot spin forever (#1379).

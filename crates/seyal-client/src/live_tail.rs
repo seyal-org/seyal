@@ -13,6 +13,7 @@
 //! - Raw/TUI and conflicting evidence fail closed.
 
 use crate::presentation::PresentationMode;
+use seyal_protocol::display::{DisplayCache, DisplayCell};
 
 /// Inclusive canonical history span for a completed Flow Block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +30,43 @@ pub struct PrimaryFrameClip {
     pub first_row: u16,
     /// Number of prepared-frame rows to draw (`0` is invalid / fail closed).
     pub row_count: u16,
+}
+
+/// Remove only a conservatively proven blank suffix from an already paired
+/// primary-frame clip. The committed display is disposable projection data;
+/// this never changes the authoritative VT state or crosses the caller's
+/// existing Block/exclusive-end bounds.
+pub fn trim_blank_suffix(clip: PrimaryFrameClip, display: &DisplayCache) -> PrimaryFrameClip {
+    let rows = usize::from(display.rows);
+    let columns = usize::from(display.columns);
+    let first = usize::from(clip.first_row);
+    let count = usize::from(clip.row_count);
+    if rows == 0
+        || columns == 0
+        || display.cells.len() != rows.saturating_mul(columns)
+        || count == 0
+        || first.saturating_add(count) > rows
+    {
+        return clip;
+    }
+
+    let cursor_row = usize::from(display.cursor_row);
+    let mut last = first + count - 1;
+    while last > first && last != cursor_row {
+        let row_start = last * columns;
+        let row_end = row_start + columns;
+        if !display.cells[row_start..row_end]
+            .iter()
+            .all(|cell| cell == &DisplayCell::blank())
+        {
+            break;
+        }
+        last -= 1;
+    }
+    PrimaryFrameClip {
+        row_count: u16::try_from(last - first + 1).unwrap_or(clip.row_count),
+        ..clip
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,6 +199,20 @@ pub fn project_block_output_until(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use seyal_protocol::display::{DisplayAttributes, DisplayColor};
+
+    fn display(rows: u16, columns: u16, cursor_row: u16) -> DisplayCache {
+        DisplayCache {
+            generation: 1,
+            rows,
+            columns,
+            cursor_row,
+            cursor_col: 0,
+            cursor_visible: true,
+            alternate_screen: false,
+            cells: vec![DisplayCell::blank(); usize::from(rows) * usize::from(columns)],
+        }
+    }
 
     #[test]
     fn running_clip_skips_preceding_viewport_rows() {
@@ -177,6 +229,79 @@ mod tests {
                 row_count: 3,
             })
         );
+    }
+
+    #[test]
+    fn trims_only_blank_suffix_after_cursor_without_shifting_block_rows() {
+        let mut display = display(6, 2, 1);
+        display.cells[2] = DisplayCell::lead_scalar(
+            '>',
+            1,
+            DisplayColor::Default,
+            DisplayColor::Default,
+            DisplayAttributes::default(),
+        );
+        let clip = PrimaryFrameClip {
+            start_line: 10,
+            first_row: 0,
+            row_count: 6,
+        };
+
+        assert_eq!(trim_blank_suffix(clip, &display).row_count, 2);
+    }
+
+    #[test]
+    fn preserves_spaces_and_styled_rows_inside_candidate_clip() {
+        let mut display = display(5, 2, 1);
+        display.cells[6] = DisplayCell::lead_scalar(
+            ' ',
+            1,
+            DisplayColor::Default,
+            DisplayColor::Default,
+            DisplayAttributes::default(),
+        );
+        display.cells[8].background = DisplayColor::Indexed(4);
+        let clip = PrimaryFrameClip {
+            start_line: 10,
+            first_row: 0,
+            row_count: 5,
+        };
+
+        assert_eq!(trim_blank_suffix(clip, &display).row_count, 5);
+    }
+
+    #[test]
+    fn retains_cursor_row_and_at_least_one_row_within_existing_clip() {
+        let mut display = display(5, 2, 3);
+        let clip = PrimaryFrameClip {
+            start_line: 10,
+            first_row: 1,
+            row_count: 4,
+        };
+        assert_eq!(trim_blank_suffix(clip, &display).row_count, 3);
+
+        display.cursor_row = 0;
+        assert_eq!(trim_blank_suffix(clip, &display).row_count, 1);
+    }
+
+    #[test]
+    fn malformed_or_out_of_bounds_display_never_trims_candidate_clip() {
+        let mut display = display(4, 2, 0);
+        display.cells.pop();
+        let clip = PrimaryFrameClip {
+            start_line: 10,
+            first_row: 2,
+            row_count: 2,
+        };
+        assert_eq!(trim_blank_suffix(clip, &display), clip);
+
+        display.cells = vec![DisplayCell::blank(); 8];
+        let out_of_bounds = PrimaryFrameClip {
+            first_row: 3,
+            row_count: 2,
+            ..clip
+        };
+        assert_eq!(trim_blank_suffix(out_of_bounds, &display), out_of_bounds);
     }
 
     #[test]

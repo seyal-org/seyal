@@ -75,8 +75,24 @@ impl ApplicationRoot {
             self.sync_composer_presentation();
             return Ok(());
         };
+        let focused_pane = self.shell.snapshot().focused_pane;
+        let direct_interaction = self.interactive_raw_target.is_some_and(
+            |(pane, execution, block_id, target_generation)| {
+                pane == focused_pane
+                    && self
+                        .authority
+                        .is_some_and(|bound| bound.execution == execution)
+                    && self.runtime_composer_target.is_some_and(|target| {
+                        target.block_id == block_id
+                            && target.target_generation == target_generation
+                            && target.target_class == 2 // ForegroundProgram (ADR-026)
+                    })
+            },
+        );
         let desired = if alternate_screen {
             PresentationMode::Tui
+        } else if direct_interaction {
+            PresentationMode::Raw
         } else {
             self.resting
         };
@@ -145,7 +161,11 @@ impl ApplicationRoot {
         let pane = self.shell.snapshot().focused_pane;
         let mode = self.presentation.snapshot().mode;
         let _ = self.shell.set_presentation_mode(pane, mode);
-        if mode != PresentationMode::Tui {
+        let temporary_raw = mode == PresentationMode::Raw
+            && self
+                .interactive_raw_target
+                .is_some_and(|(target_pane, _, _, _)| target_pane == pane);
+        if mode != PresentationMode::Tui && !temporary_raw {
             let _ = self.shell.set_resting_presentation_mode(pane, mode);
         }
     }

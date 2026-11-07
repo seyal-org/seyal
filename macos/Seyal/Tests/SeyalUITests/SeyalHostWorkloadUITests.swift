@@ -27,6 +27,131 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "824-high-volume")
     }
 
+    func testLocalPythonDoesNotShowSSHSetupPromptAndBlockStaysBottomDocked() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "python3 -q")
+
+        let pythonBlock = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "python3 -q")
+        ).firstMatch
+        XCTAssertTrue(pythonBlock.waitForExistence(timeout: 12), "Python must stay in its running Block")
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+
+        let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
+        XCTAssertFalse(
+            setupTitle.waitForExistence(timeout: 2),
+            "a non-SSH Candidate must not interrupt a Python REPL with a setup banner"
+        )
+
+        let blocksScroll = app.scrollViews["seyal-blocks-scroll"].firstMatch
+        XCTAssertTrue(blocksScroll.exists)
+        XCTAssertLessThanOrEqual(
+            composer.frame.minY - blocksScroll.frame.maxY,
+            32,
+            "the Flow viewport must end immediately above the composer"
+        )
+        XCTAssertLessThanOrEqual(
+            blocksScroll.frame.maxY - pythonBlock.frame.maxY,
+            96,
+            "the active Python Block must stay docked above the Pane composer"
+        )
+        XCTAssertGreaterThan(
+            composer.frame.minY - pythonBlock.frame.maxY,
+            0,
+            "the composer must remain below the active Python Block"
+        )
+        XCTAssertLessThanOrEqual(
+            composer.frame.minY - pythonBlock.frame.maxY,
+            96,
+            "the Python Block must dock directly above the composer"
+        )
+        let interact = app.buttons["seyal-running-program-interact"]
+        XCTAssertTrue(
+            interact.waitForExistence(timeout: 3),
+            "a Running Block must visibly offer an explicit direct-input fallback"
+        )
+        interact.click()
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertEqual(
+            terminal.elementType,
+            .textView,
+            "entering Raw from a Running Block must expose the terminal's direct-input AX route"
+        )
+        terminal.click()
+        let pythonMarker = "seyal-m003-python-repl-input"
+        app.typeText("print('\(pythonMarker)'); raise SystemExit")
+        app.typeKey("\r", modifierFlags: [])
+        let pythonBody = pythonBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        let pythonOutput = expectation(
+            for: NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                pythonMarker,
+                pythonMarker
+            ),
+            evaluatedWith: pythonBody,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [pythonOutput], timeout: 8),
+            .completed,
+            "keyboard input must reach the actual local Python REPL through its PTY"
+        )
+        attachScreenshot(app, name: "m003-local-python-bottom-dock")
+    }
+
+    func testNodeREPLDoesNotShowUnsolicitedSessionSetupBanner() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/node") else {
+            throw XCTSkip("Node.js is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "/opt/homebrew/bin/node")
+
+        let nodeBlock = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "/opt/homebrew/bin/node")
+        ).firstMatch
+        XCTAssertTrue(nodeBlock.waitForExistence(timeout: 12), "Node must run in its actual local PTY Block")
+        let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
+        XCTAssertFalse(
+            setupTitle.waitForExistence(timeout: 2),
+            "a non-SSH Node Candidate must not pop a session setup prompt"
+        )
+        let interact = app.buttons["seyal-running-program-interact"]
+        XCTAssertTrue(
+            interact.waitForExistence(timeout: 3),
+            "a Running Block must visibly offer an explicit direct-input fallback"
+        )
+        interact.click()
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertGreaterThan(terminal.frame.width, 8, "Raw must expose the direct-input surface")
+        terminal.click()
+        let nodeMarker = "seyal-m003-node-repl-input"
+        app.typeText("console.log('\(nodeMarker)'); process.exit(0)")
+        app.typeKey("\r", modifierFlags: [])
+        let nodeBody = nodeBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        let nodeOutput = expectation(
+            for: NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                nodeMarker,
+                nodeMarker
+            ),
+            evaluatedWith: nodeBody,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [nodeOutput], timeout: 8),
+            .completed,
+            "keyboard input must reach the actual local Node REPL through its PTY"
+        )
+        attachScreenshot(app, name: "m003-node-no-session-banner")
+        app.terminate()
+    }
+
     /// #1379: completed Flow Blocks must paint output bodies, not titles-only
     /// chrome with an empty white Metal clip.
     func testCompletedFlowBlockKeepsPaintedOutputBody() throws {

@@ -3,6 +3,18 @@
 use super::*;
 use seyal_core::TerminalTabId;
 
+/// Runtime-published target facts used to fence an explicit direct-input
+/// transition. These are read-only projections; Runtime remains the input
+/// admission authority.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeComposerTarget {
+    pub block_id: u64,
+    pub target_generation: u64,
+    pub revision: u64,
+    pub target_class: u8,
+    pub mode: u8,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AppAction {
     Focus {
@@ -91,6 +103,15 @@ pub enum AppAction {
         fence: AppFence,
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
+        target: Option<RuntimeComposerTarget>,
+    },
+    /// User intent to enter direct input for the exact foreground program
+    /// Runtime currently associates with a Running Block.
+    InteractWithRunningBlock {
+        fence: AppFence,
+        block_id: u64,
+        target_generation: u64,
+        target_revision: u64,
     },
     /// User choice of the non-TUI resting presentation (#867, #1438).
     /// `raw == true` selects grid-first Raw (clears Flow opt-in). `raw == false`

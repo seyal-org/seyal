@@ -217,10 +217,13 @@ struct NativeComposerStatus: Equatable {
   let revision: UInt64
   let targetBlockID: UInt64
   let targetGeneration: UInt64
+  let targetRevision: UInt64
+  let targetClass: UInt8
   let targetMode: UInt8
 
   static let cleared = NativeComposerStatus(
-    eligibility: 0, revision: 0, targetBlockID: 0, targetGeneration: 0, targetMode: 0
+    eligibility: 0, revision: 0, targetBlockID: 0, targetGeneration: 0,
+    targetRevision: 0, targetClass: 0, targetMode: 0
   )
 }
 

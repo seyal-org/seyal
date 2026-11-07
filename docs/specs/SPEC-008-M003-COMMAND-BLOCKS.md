@@ -85,7 +85,7 @@ eligible composer
   -> command accepted by trusted integration
   -> Block(Current, command identity, start LineId)
   -> canonical execution/output continues
-  -> running Block receives bounded live-tail projection
+  -> running Block receives bounded live-tail projection, with a proven blank suffix omitted from its card geometry
   -> trusted command completion + accepted final drain
   -> Block(Completed, end LineId, exit metadata)
 ```
@@ -93,6 +93,16 @@ eligible composer
 The Runtime owns lifecycle truth. Missing, malformed, conflicting or stale
 metadata causes the client to quarantine the structured projection and select a
 safe presentation; it never changes PTY/VT authority.
+
+The running Block's live-tail projection preserves every visible row from its
+trusted start anchor through the last row containing terminal content or the
+cursor. The paired Rust display may prove that rows after this boundary are
+blank; those trailing rows are omitted from the Block card so a short live
+Block stays docked above its Pane composer. No leading row, nonblank/styled
+row, or cursor row may be removed. If the same-generation cell proof is
+unavailable, the complete candidate clip is retained. This changes only the
+Block projection geometry; the authoritative VT grid, cursor, and PTY remain
+unchanged.
 
 ## 3. Presentation state contract
 
@@ -151,6 +161,37 @@ not another viewport added to Flow.
 **Accepted ADR-026 (#1384):** labeled Relay is not
 Raw and does not satisfy this section. Raw remains the full-Pane
 character-level presentation.
+
+**Running-program interaction fallback:** Runtime's current `Running(BlockId)`
+and composer `Busy` facts do not prove whether a foreground program accepts
+line input, requires character-level input, or is simply producing output.
+Seyal must not infer that distinction from command text, terminal output, or a
+hidden Raw view. A Running Block therefore exposes an explicit **Interact with
+running program** action. The action is available only for the current live
+Block and is bound to its Pane, ExecutionId, Controller attachment, target
+generation, and presentation epoch. Rust rejects stale or mismatched actions.
+
+On acceptance, Rust temporarily presents that Pane's same execution in full-Pane
+Raw before native keyboard, mouse, paste, or IME input can be admitted. Ordinary
+Running Blocks remain in Flow until the user requests interaction. Alternate
+screen still takes TUI priority. The temporary Raw presentation ends only when
+Runtime reports a fresh trusted local-shell prompt for that execution or the
+execution ends; Raw is retained across an intervening TUI session while the
+same foreground program remains active. A stale target, detached Controller,
+or changed presentation epoch admits no input and cannot change a sibling Pane.
+
+This action requests direct terminal interaction; it does not enable session
+bootstrap, alter SSH trust, or use Relay. Trusted session Relay remains a
+separate line-input route. Unsupported foreground programs and character-level
+workflows use Raw; line-oriented trusted session programs may continue using
+Relay when that is sufficient.
+
+Type 45 carries the known foreground `BlockId` and target generation even when
+composer mode is `Unavailable`. The `Unavailable` mode still prohibits Submit
+and Relay; the identity is solely the Rust-validated target for the explicit
+direct-input action above. This lets local Python/Node and other Running
+programs expose the same deliberate Raw fallback without presenting session
+bootstrap or guessing from command text.
 
 **User-confirmed #1398 SSH Flow UX requirement:** While a trusted, line-oriented
 foreground program is in Relay, the existing Pane composer is presented on the
