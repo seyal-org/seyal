@@ -322,9 +322,13 @@ snapshot.
   such semantics are required;
 - IME/first-responder/accessibility/mouse ownership follows the active
   presentation mode and section 3.4 transition fence.
-- editing a Pane composer retains that Pane's first responder for the whole
-  draft; focus reconciliation runs only when the focused Pane actually changes,
-  and must not steal subsequent characters from the composer.
+- in multipane Flow, keyboard focus routes to the Rust-focused Pane's visible,
+  Pane-owned composer; the hidden single-pane composer must not receive text or
+  submit on that Pane's behalf. Single-pane Flow keeps the root composer, while
+  Raw/TUI routes to the focused terminal surface.
+- a Pane draft mutation is fenced to its PaneId. If Rust focus differs, transfer
+  focus and restore the native editor before applying it; once Rust focus
+  matches, do not reapply focus during each edit or steal subsequent characters.
 
 When the current Flow input target is `ForegroundProgram(b)` with an admitted
 line-level Relay, the Pane's single Rust-owned composer/editor is visually

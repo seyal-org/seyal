@@ -330,7 +330,7 @@ extension ProductChromeHostView {
                 composer.setInlineRelayPresentation(false)
                 composer.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate(composerDockConstraints)
-                if shouldRestoreEditorFocus { composer.focusEditor() }
+                if shouldRestoreEditorFocus { routeFocus() }
             }
             return
         }
@@ -359,7 +359,7 @@ extension ProductChromeHostView {
             scrollTranscriptToLiveEnd()
         }
         positionInlineComposerAtCurrentCursor()
-        if shouldRestoreEditorFocus { composer.focusEditor() }
+        if shouldRestoreEditorFocus { routeFocus() }
     }
 
     func setRelayTranscriptViewportBottomAnchored(_ anchored: Bool) {

@@ -255,17 +255,21 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     /// return a fresh focused snapshot for mutating actions.
     @discardableResult
     private func prepareFocusedMutation() -> SeyalAppSnapshot {
+        prepareBoundPaneInputFocus()
+        return seyal_app_snapshot(appHandle)
+    }
+
+    /// If this editor reports a draft change before Rust focus reaches its Pane,
+    /// reconcile that focus and restore this responder before applying the
+    /// draft mutation to Rust.
+    private func prepareBoundPaneInputFocus() {
         if let paneLo = boundPaneLo, let paneHi = boundPaneHi {
             let shell = seyal_app_shell(appHandle)
             if shell.focused_pane_lo != paneLo || shell.focused_pane_hi != paneHi {
-                // Focus reconciliation may route the legacy single-pane editor.
-                // Restore this pane's editor after focusing it so the first
-                // edit does not send the remaining keystrokes elsewhere.
                 onEnsureFocused?()
                 _ = window?.makeFirstResponder(textView)
             }
         }
-        return seyal_app_snapshot(appHandle)
     }
 
     func reconcile() {

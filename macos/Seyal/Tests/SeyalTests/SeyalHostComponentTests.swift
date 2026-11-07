@@ -5891,6 +5891,13 @@ extension SeyalHostComponentTests {
             let buttonRect = block.convert(interact.bounds, from: interact)
             let hit = block.hitTest(NSPoint(x: buttonRect.midX, y: buttonRect.midY))
             XCTAssertTrue(hit === interact, "Block hit testing must preserve the button action")
+
+            block.canInteractWithRunningProgram = false
+            block.layoutSubtreeIfNeeded()
+            XCTAssertTrue(interact.isHidden, "completed Blocks hide the direct-input action")
+            block.canInteractWithRunningProgram = true
+            block.layoutSubtreeIfNeeded()
+            XCTAssertFalse(interact.isHidden, "a renewed Running Block restores the direct-input action")
         }
         let event = NSEvent.mouseEvent(
             with: .rightMouseDown,

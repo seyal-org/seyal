@@ -69,8 +69,13 @@ final class CommandBlockView: NSView {
         didSet {
             guard oldValue != canInteractWithRunningProgram else { return }
             interactButton.isHidden = !canInteractWithRunningProgram
-            statusTrailingToHeader.isActive = !canInteractWithRunningProgram
-            statusTrailingToInteractButton.isActive = canInteractWithRunningProgram
+            if canInteractWithRunningProgram {
+                statusTrailingToHeader.isActive = false
+                statusTrailingToInteractButton.isActive = true
+            } else {
+                statusTrailingToInteractButton.isActive = false
+                statusTrailingToHeader.isActive = true
+            }
         }
     }
     var onInteractWithRunningProgram: (() -> Void)?
