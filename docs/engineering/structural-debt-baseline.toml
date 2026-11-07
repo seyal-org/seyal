@@ -41,6 +41,12 @@ issue = 1379
 reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1379 adds programmatic-scroll Metal republish (stuck-glyph fix) and Raw/TUI→Flow history-request discard so return-to-Flow can re-fetch Block bodies. Further split would separate scroll/history ownership from the surface that applies it."
 
 [[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
+acknowledged_loc = 714
+issue = 1426
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1426 keeps the current transcript page bounded while preserving full Block scroll extent and invalidates prepared cells when source bounds or display metrics change. Further extraction should follow a cohesive host responsibility split, not this focused correctness fix."
+
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
 acknowledged_loc = 834
 issue = 1117
