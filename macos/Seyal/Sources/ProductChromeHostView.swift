@@ -120,20 +120,25 @@ final class ProductChromeHostView: NSView {
             button.bezelStyle = .inline
             button.isBordered = false
             button.font = .systemFont(ofSize: 11, weight: .regular)
+            button.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 22).isActive = true
         }
 
         left.translatesAutoresizingMaskIntoConstraints = false
         left.wantsLayer = true
         leftModeRow.orientation = .horizontal
         leftModeRow.alignment = .centerY
-        leftModeRow.spacing = 10
+        // Fit the full Workspace/Terminal mode switcher and backed actions in
+        // the 220 pt context rail without button compression or overlap.
+        leftModeRow.spacing = 4
         leftModeRow.translatesAutoresizingMaskIntoConstraints = false
         let modeSpacer = NSView()
         modeSpacer.translatesAutoresizingMaskIntoConstraints = false
         modeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         leftModeRow.addArrangedSubview(workspacesButton)
         leftModeRow.addArrangedSubview(createWorkspaceButton)
-        leftModeRow.addArrangedSubview(tabsButton)
+        // Pane tabs are visible in their own strips; advanced inventory
+        // remains available from the command palette, not a second toggle.
         leftModeRow.addArrangedSubview(modeSpacer)
         leftModeRow.addArrangedSubview(newTabButton)
         leftModeRow.addArrangedSubview(closeTabButton)
@@ -217,7 +222,8 @@ final class ProductChromeHostView: NSView {
             self?.focusPaneRegion(lo: lo, hi: hi)
         }
         centerColumn.onSelectTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
-            self?.selectTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
+            guard let self, self.focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+            self.selectTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
         }
         centerColumn.onCloseTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
             self?.closeTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
@@ -648,8 +654,8 @@ final class ProductChromeHostView: NSView {
         } else {
             newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
             newTabButton.action = #selector(createTab)
-            newTabButton.setAccessibilityLabel("New Tab")
-            newTabButton.toolTip = "New Tab"
+            newTabButton.setAccessibilityLabel("New Layout")
+            newTabButton.toolTip = "New Layout"
             closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
         }
         configureCloseButtons(shell: shell)
@@ -694,6 +700,7 @@ final class ProductChromeHostView: NSView {
                     )
                 }
             }
+            appendWorkspaceLayoutsIfNeeded(shell: shell)
             let chrome = seyal_app_chrome(pane.appHandle)
             if chrome.agent_count > 0 {
                 appendLeftSection(
@@ -752,30 +759,6 @@ final class ProductChromeHostView: NSView {
             }
         }
         // Pane focus stays pane-local. C03 must not dump a Pane tree into the left rail.
-    }
-
-    /// Bound for left Tabs rows without growing `SeyalAppShell` ABI size.
-    func leftTerminalTabRowCount(shell: SeyalAppShell) -> Int {
-        var count = 0
-        for index in 0..<Int(shell.pane_count) {
-            let paneRow = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
-            count += Int(seyal_app_pane_terminal_tab_count(pane.appHandle, paneRow.id_lo, paneRow.id_hi))
-        }
-        return count
-    }
-
-    func paneIdFromTerminalTabRow(_ row: SeyalAppRow) -> (UInt64, UInt64) {
-        guard row.address_len >= 16 else { return (0, 0) }
-        let bytes = withUnsafeBytes(of: row.address_bytes) { Array($0.prefix(16)) }
-        var lo: UInt64 = 0
-        var hi: UInt64 = 0
-        withUnsafeMutableBytes(of: &lo) { dest in
-            dest.copyBytes(from: bytes[0..<8])
-        }
-        withUnsafeMutableBytes(of: &hi) { dest in
-            dest.copyBytes(from: bytes[8..<16])
-        }
-        return (UInt64(littleEndian: lo), UInt64(littleEndian: hi))
     }
 
     /// C04 secondary path only when it adds information beyond the primary name.

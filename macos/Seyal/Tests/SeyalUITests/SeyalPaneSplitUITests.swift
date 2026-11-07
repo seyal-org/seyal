@@ -80,21 +80,31 @@ final class SeyalPaneSplitUITests: XCTestCase {
         add(screenshot)
         XCTAssertFalse(paneStrips[0].frame.intersects(paneStrips[1].frame), "neighboring Pane strips remain in their own regions")
 
+        let focusedStrips = paneStrips.filter { ($0.value as? String) == "focused" }
+        XCTAssertEqual(focusedStrips.count, 1, "exactly one focused pane exposes split chrome")
         for strip in paneStrips {
             let splitRight = strip.buttons.matching(identifier: "seyal-split-right").firstMatch
             let splitDown = strip.buttons.matching(identifier: "seyal-split-down").firstMatch
-            XCTAssertTrue(splitRight.exists)
-            XCTAssertTrue(splitDown.exists)
-            XCTAssertGreaterThan(splitRight.frame.minX, strip.frame.midX, "split controls sit on the Pane toolbar’s right side")
-            XCTAssertLessThanOrEqual(splitRight.frame.maxX, splitDown.frame.minX, "split controls keep a consistent icon order")
-            XCTAssertTrue(strip.frame.contains(splitRight.frame), "Split Right stays inside its Pane strip")
-            XCTAssertTrue(strip.frame.contains(splitDown.frame), "Split Down stays inside its Pane strip")
+            let isFocused = (strip.value as? String) == "focused"
+            if isFocused {
+                XCTAssertTrue(splitRight.exists, "focused strip exposes Split Right")
+                XCTAssertTrue(splitDown.exists, "focused strip exposes Split Down")
+                XCTAssertGreaterThan(splitRight.frame.minX, strip.frame.midX, "split controls sit on the Pane toolbar’s right side")
+                XCTAssertLessThanOrEqual(splitRight.frame.maxX, splitDown.frame.minX, "split controls keep a consistent icon order")
+                XCTAssertTrue(strip.frame.contains(splitRight.frame), "Split Right stays inside its Pane strip")
+                XCTAssertTrue(strip.frame.contains(splitDown.frame), "Split Down stays inside its Pane strip")
+            } else {
+                XCTAssertFalse(splitRight.isHittable, "unfocused strip keeps Split Right out of the always-visible toolbar")
+                XCTAssertFalse(splitDown.isHittable, "unfocused strip keeps Split Down out of the always-visible toolbar")
+            }
             let tabViewport = strip.descendants(matching: .any).matching(
                 identifier: "\(strip.identifier.replacingOccurrences(of: "-terminal-tabs", with: "-terminal-tab-viewport"))"
             ).firstMatch
             XCTAssertTrue(tabViewport.exists)
             XCTAssertTrue(strip.frame.contains(tabViewport.frame), "tab viewport stays inside its Pane strip")
-            XCTAssertLessThanOrEqual(tabViewport.frame.maxX, splitRight.frame.minX - 8, "tab viewport reserves clear space before the toolbar")
+            if isFocused {
+                XCTAssertLessThanOrEqual(tabViewport.frame.maxX, splitRight.frame.minX - 8, "tab viewport reserves clear space before the toolbar")
+            }
             let selectedTab = strip.buttons.matching(NSPredicate(format: "value == 'selected'")).firstMatch
             if selectedTab.exists {
                 XCTAssertTrue(
@@ -1211,9 +1221,11 @@ final class SeyalPaneSplitUITests: XCTestCase {
         waitForUsablePty(in: app)
         waitForAnyPaneBlock("SEYAL_TAB_TWO_MARKER", in: app, expected: true)
         waitForAnyPaneBlock("SEYAL_TAB_ONE_MARKER", in: app, expected: false)
+        // Multipane Flow keeps Pane 2 Blocks visible as secondary chrome (#1424).
+        // Assert isolation against the focused Pane's primary Block ids only.
         XCTAssertFalse(
-            anyPaneBlock(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists,
-            "Pane 2 command history stays out of Pane 1"
+            blockCommand(in: app, containing: "SEYAL_PANE_TWO_MARKER").exists,
+            "Pane 2 command history stays out of focused Pane 1 Blocks"
         )
 
         element(app, "seyal-pane-region-1").click()
@@ -1600,15 +1612,29 @@ final class SeyalPaneSplitUITests: XCTestCase {
     private func splitPane(_ app: XCUIApplication, _ paneIdentifier: String, direction: String) {
         let region = element(app, paneIdentifier)
         XCTAssertTrue(region.waitForExistence(timeout: 8), "\(paneIdentifier) is shown")
+        // Split chrome is focus-scoped (C05). Focus the target leaf first so the
+        // strip under this region actually exposes seyal-split-*.
+        if (region.value as? String) != "focused" {
+            region.click()
+            let suffix = paneIdentifier.replacingOccurrences(of: "seyal-pane-region-", with: "")
+            if let index = Int(suffix) {
+                waitForFocus(app, region: index)
+            }
+        }
         guard let strip = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs"))
-            .allElementsBoundByIndex.first(where: { region.frame.contains($0.frame) })
+            .allElementsBoundByIndex.first(where: {
+                let frame = $0.frame
+                return region.frame.contains(CGPoint(x: frame.midX, y: frame.midY))
+                    || region.frame.intersects(frame)
+            })
         else {
             XCTFail("terminal tab strip must belong to \(paneIdentifier)")
             return
         }
         let button = strip.buttons.matching(identifier: "seyal-split-\(direction)").firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 8), "Split \(direction) is shown in \(paneIdentifier)")
+        XCTAssertTrue(button.isHittable, "Split \(direction) must be hittable on the focused strip")
         button.click()
     }
 

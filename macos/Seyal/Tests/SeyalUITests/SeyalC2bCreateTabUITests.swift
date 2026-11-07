@@ -22,10 +22,46 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         clickNewTab(in: app)
         waitForRunLoop(5)
         XCTAssertEqual(app.state, .runningForeground, "CreateTab must not crash Seyal.app")
-        // Left Tabs mode is TerminalTab inventory (#1412); outer Tab count stays
-        // on the Workspaces row secondary / close-tab affordance.
+        // Outer layout count stays on the Workspace row; pane terminals
+        // are represented only in their own pane headers at rest.
         waitForWorkspaceTabCountHint(in: app, atLeast: 2)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-close-tab"].firstMatch.exists)
+    }
+
+    /// C03/C05: outer layout navigation remains pointer reachable without
+    /// adding a second terminal-looking tab row above Pane TerminalTabs.
+    func testWorkspaceLayoutsUseContextRowsNotDuplicateTerminalChrome() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        showWorkspaces(in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layouts-heading"].firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-0"].firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-layout-1"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-left-tabs"].exists)
+
+        clickNewTab(in: app)
+        waitForWorkspaceTabCountHint(in: app, atLeast: 2)
+        let layouts = app.descendants(matching: .any)["seyal-layouts-heading"].firstMatch
+        let first = app.descendants(matching: .any)["seyal-layout-0"].firstMatch
+        let second = app.descendants(matching: .any)["seyal-layout-1"].firstMatch
+        XCTAssertTrue(layouts.waitForExistence(timeout: 8))
+        XCTAssertTrue(first.waitForExistence(timeout: 8))
+        XCTAssertTrue(second.waitForExistence(timeout: 8))
+        XCTAssertTrue(first.isHittable)
+        first.click()
+        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-0"].firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-strip"].exists)
+        let layoutEvidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        layoutEvidence.name = "1457-workspace-layout-navigation"
+        layoutEvidence.lifetime = .keepAlways
+        add(layoutEvidence)
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier CONTAINS %@", "-terminal-tabs")
+            ).firstMatch.waitForExistence(timeout: 8),
+            "Pane-local terminal strip survives outer layout navigation"
+        )
     }
 
     func testCommandTCreatesPaneTerminalAndCommandNCreatesWindow() throws {
@@ -45,12 +81,12 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         waitForTerminalTabCount(app, 2, timeout: 12)
         XCTAssertEqual(app.windows.count, 1, "⌘T creates a Pane-local terminal, not a Layout or Window")
 
+        // File → New Window remains the primary admission (cmd+shift+n is an
+        // alias). Stacked multi-window close/quit is covered by HostUITests;
+        // this case only proves CreateWindow still admits after New Terminal.
         clickFileMenuItem(in: app, title: "New Window")
         waitForWindowCount(app, 2, timeout: 10)
-
-        // cmd+shift+n is an alias; File → New Window remains the primary admission.
-        clickFileMenuItem(in: app, title: "New Window")
-        waitForWindowCount(app, 3, timeout: 10)
+        XCTAssertEqual(app.windows.count, 2, "File → New Window creates a second headed window")
     }
 
     func testCommandWClosesOnlySelectedPaneTerminal() throws {
@@ -106,12 +142,12 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func clickNewTab(in app: XCUIApplication) {
-        // CreateTab lives on the left + while Workspaces mode is selected (#1412
-        // retargets + to NewTerminal only in Tabs mode).
+        // Create Layout uses the existing Rust CreateTab action; terminal
+        // session creation remains pane-local.
         showWorkspaces(in: app)
         let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
         XCTAssertTrue(newTab.waitForExistence(timeout: 8), "production composition shows New Tab")
-        XCTAssertEqual(newTab.label.isEmpty ? newTab.title : newTab.label, "New Tab")
+        XCTAssertEqual(newTab.label.isEmpty ? newTab.title : newTab.label, "New Layout")
         newTab.click()
     }
 
@@ -126,7 +162,10 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func clickFileMenuItem(in app: XCUIApplication, title: String) {
-        let item = app.menuBars.menuBarItems["File"].menuItems[title]
+        // Prefer the flat menuItems query used by HostUITests. Nested
+        // File → item clicks often stop at hover for shared
+        // `invokeProjectedWorkspaceCommand:` selectors (New Window).
+        let item = app.menuItems[title]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "File → \(title) must be projected")
         XCTAssertTrue(item.isEnabled, "File → \(title) must be enabled")
         item.click()
@@ -193,14 +232,11 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func terminalTabButtons(in app: XCUIApplication) -> XCUIElementQuery {
-        // Match title, not AX label: tab buttons set `title` ("Terminal 1") and
-        // leave accessibilityLabel unset; close buttons use title "×" / Close label.
+        // Pane-local chips use Rust pane titles ("Pane 1", "Pane 1 · 2") with
+        // stable `seyal-terminal-tab-<hi>-<lo>` ids. Close controls share the
+        // prefix plus `-close`; left-rail leftovers used a `left` token.
         app.descendants(matching: .any).matching(
-            NSPredicate(
-                format: "identifier BEGINSWITH %@ AND title BEGINSWITH %@",
-                "seyal-terminal-tab-",
-                "Terminal "
-            )
+            NSPredicate(format: "identifier MATCHES %@", "^seyal-terminal-tab-[0-9]+-[0-9]+$")
         )
     }
 
@@ -231,7 +267,11 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
             evaluatedWith: app.windows,
             handler: nil
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [arrived], timeout: timeout), .completed)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [arrived], timeout: timeout),
+            .completed,
+            "Expected \(count) headed windows; actual=\(app.windows.count)"
+        )
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {

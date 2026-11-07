@@ -9,6 +9,28 @@
 
 > Note on visual authority: the checked-in `01-core terminal.png` is a historical reference. This doc describes implementable contracts and code-aligned component inventory, not a pixel-golden completion claim.
 
+## 0. Default chrome refinement — PR #1456
+
+**Status:** Proposed product-approved default for M003, superseding the
+historical always-visible left Workspaces/Tabs switcher and outer Workspace
+Tab top strip described below.
+
+- Default C03 shows **Workspaces**, **Layouts**, and backed **Agents**;
+  the layout rows navigate the active Workspace's outer Rust `TabId` entries,
+  including the sole initial layout.
+- Do not render a permanent left **Tabs** mode control. The existing terminal
+  inventory remains accessible on demand via the command palette; Workspaces
+  can restore the default view.
+- Every Pane retains one 30-point non-wrapping `TerminalTabId` strip, with
+  quiet labels, selected 2-point seam, focused-pane actions, and stable close
+  slots. Overflow must reveal the selected tab.
+- No second terminal-looking outer strip is permitted. The Workspaces header
+  offers **New Layout** (Rust `CreateTab`); each Pane offers **New Terminal**
+  (Rust `NewTerminal`).
+- Native rendered screenshots and interaction tests, not concept art, establish
+  visual/behavioral acceptance. All unchanged sections below remain design
+  background unless they conflict with this refined navigation decision.
+
 ## 1. Source-reference inventory (states)
 This spec targets the “Reference 01 — Core Terminal / full terminal view” left-pane states:
 - Left panel visible
