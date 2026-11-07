@@ -2126,6 +2126,7 @@ final class SeyalHostComponentTests: XCTestCase {
             sourceDisplayHandle: 11
         )
         let clip = CGRect(x: 0, y: 0, width: CGFloat(metrics.cellWidth), height: CGFloat(metrics.cellHeight))
+        surface.renderer.setHistoryRegionOrder([77])
         try surface.renderer.update(
             historyRange: range,
             region: NativeTranscriptRegion(id: 77, origin: .zero, clip: clip),
@@ -5325,7 +5326,12 @@ final class SeyalHostComponentTests: XCTestCase {
         host.isProgrammaticTranscriptScroll = false
         host.transcriptDidScroll()
         host.transcriptDidScroll()
-        // Immediate re-read: do not wait for unrelated PTY frames.
+        // Scroll handling intentionally republishes on the main queue. Await
+        // that bounded presentation callback instead of racing it with this
+        // assertion (and without waiting for unrelated PTY frames).
+        for _ in 0..<40 where host.transcriptFrameRevision <= beforeRevision {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
         let after = try XCTUnwrap(view.terminalCurrentFrame())
 
         XCTAssertGreaterThan(

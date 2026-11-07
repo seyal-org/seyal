@@ -12,7 +12,11 @@ extension SecondaryLivePaneHost {
                 .filter { $0 !== transcriptLeadingSpacer }
                 .forEach { $0.removeFromSuperview() }
             blockCards.removeAll()
+            syncTranscriptDocumentSize()
+            setTranscriptDocumentOffsetY(0)
+            followingLiveEnd = true
             lastBlockCount = 0
+            rememberTranscriptScrollState()
             return
         }
         // Preserve scroll across projection rebuilds so focus/reconcile churn
