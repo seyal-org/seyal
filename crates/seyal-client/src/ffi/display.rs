@@ -288,24 +288,55 @@ pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
 /// live Block. Rust retains admission authority; this value only positions UI.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_composer_target() -> SeyalComposerTarget {
-    with_display_client(|client| client.projected_composer_target())
-        .flatten()
+    composer_target(
+        super::with_display_client(|client| client.projected_composer_target()).flatten(),
+    )
+}
+
+/// Per-client composer target for a pane-local Flow host. No global display
+/// selection is changed by this read.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_composer_target_for_handle(handle: u64) -> SeyalComposerTarget {
+    composer_target(
+        super::with_client(handle, |client| client.projected_composer_target()).flatten(),
+    )
+}
+
+fn composer_target(projected: Option<(u64, u64, u64, u8, u8)>) -> SeyalComposerTarget {
+    projected
         .map(
-            |(block_id, target_generation, revision, mode)| SeyalComposerTarget {
+            |(block_id, target_generation, revision, mode, target_class)| SeyalComposerTarget {
                 block_id,
                 target_generation,
                 revision,
                 mode,
-                reserved: [0; 7],
+                target_class,
+                reserved: [0; 6],
             },
         )
         .unwrap_or_else(SeyalComposerTarget::empty)
 }
 
-/// ADR-026 session affordance for the thin host. Kind 0 means hide the banner.
+/// ADR-026 surface for the thin host. Kind 0 hides the banner; a nonzero
+/// `host_block_id` then identifies a Candidate available through its context menu.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_session_surface() -> SeyalSessionSurface {
     with_display_client(|client| {
+        let (kind, host_block_id, revision) = client.projected_session_surface();
+        SeyalSessionSurface {
+            kind,
+            reserved: [0; 7],
+            host_block_id,
+            revision,
+        }
+    })
+    .unwrap_or_else(SeyalSessionSurface::empty)
+}
+
+/// Pane-scoped session surface for a retained Block context-menu target.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_session_surface_for_handle(handle: u64) -> SeyalSessionSurface {
+    super::with_client(handle, |client| {
         let (kind, host_block_id, revision) = client.projected_session_surface();
         SeyalSessionSurface {
             kind,
@@ -326,21 +357,27 @@ pub extern "C" fn seyal_bridge_session_copy(kind: u8) -> *const std::ffi::c_char
         1 => b"Only accept this in a compatible shell. This does not open an SSH connection; it types one setup line into the foreground program. Python or Node receive it as input, so choose Not now and use Relay or Raw. The line may enter shell history, including remote shell history. No setup files are written; hooks stay in memory until the shell exits. Raw input is held during setup; Relay is plaintext.\0",
         2 => b"Enable for this session\0",
         3 => b"Not now\0",
-        4 => b"Enable Blocks\0",
+        4 => b"Enable Blocks for this session\xE2\x80\xA6\0",
         _ => b"\0",
     };
     text.as_ptr().cast()
 }
 
-/// Explicit Enable Blocks → type 43 Request. Host block comes from the surface.
+/// Explicit session request fenced to the Block whose context menu was opened.
 #[unsafe(no_mangle)]
-pub extern "C" fn seyal_bridge_session_request() -> i32 {
-    match with_display_client_mut(|client| {
-        let (kind, host_block_id, _) = client.projected_session_surface();
-        if kind != 1 || host_block_id == 0 {
+pub extern "C" fn seyal_bridge_session_request_for_handle(
+    handle: u64,
+    expected_host_block_id: u64,
+    expected_revision: u64,
+) -> i32 {
+    match super::with_client_mut(handle, |client| {
+        let target = client
+            .explicit_session_request_target()
+            .ok_or(crate::ClientError::Protocol)?;
+        if target != (expected_host_block_id, expected_revision) {
             return Err(crate::ClientError::Protocol);
         }
-        client.request_session_offer(host_block_id)
+        client.request_session_offer(expected_host_block_id)
     }) {
         Some(Ok(())) => 0,
         Some(Err(_)) => -1,

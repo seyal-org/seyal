@@ -9,6 +9,8 @@ use std::os::unix::net::UnixStream;
 
 #[path = "tests/delivery.rs"]
 mod delivery;
+#[path = "tests/session_bootstrap.rs"]
+mod session_bootstrap;
 pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
     LocalDisplayClient {
         stream,

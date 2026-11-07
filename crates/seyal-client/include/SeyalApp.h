@@ -219,7 +219,9 @@ enum SeyalAppActionKind {
      */
     SEYAL_APP_ACTION_OBSERVE_TRUSTED_FOREGROUND_CWD = 83,
     SEYAL_APP_ACTION_CONFIRM_LEAVE_OFFER = 84,
-    SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER = 85
+    SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER = 85,
+    /** Explicit Running-Block transition to temporary Raw; target pair = BlockId. */
+    SEYAL_APP_ACTION_INTERACT_WITH_RUNNING_BLOCK = 86
 };
 
 enum SeyalAppLeaveOfferKind {
@@ -947,6 +949,17 @@ int32_t seyal_app_route_keystroke(
     uint8_t composition_active);
 
 int32_t seyal_app_apply(uint64_t handle, const SeyalAppAction *action);
+/* Relay current Runtime composer state and its exact foreground target into
+ * Rust-owned product state. target_class/mode follow ADR-026 wire values. */
+int32_t seyal_app_apply_runtime_composer_status(
+    uint64_t handle,
+    uint8_t eligibility,
+    uint64_t revision,
+    uint64_t target_block_id,
+    uint64_t target_generation,
+    uint64_t target_revision,
+    uint8_t target_class,
+    uint8_t target_mode);
 SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
 /* SPEC-022 R6.8 cursor for HISTORY_BACK/FORWARD; 0 = empty or invalid handle. */
 uint64_t seyal_app_focus_history_seq(uint64_t handle);

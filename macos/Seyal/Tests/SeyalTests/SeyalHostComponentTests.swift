@@ -3382,40 +3382,58 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
-    /// #1379: intentional history scroll survives a secondary rebuildBlocks pass.
     @MainActor
-    func testSecondaryRebuildBlocksPreservesScrolledOffsetAwayFromLiveEnd() throws {
+    func testSecondaryTallToShortBlockKeepsScrolledHistoryAtItsOriginalCoordinate() throws {
         let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
         layout.appHandle = seyal_app_create()
         defer { seyal_app_destroy(layout.appHandle) }
-        let region = PaneLayoutView.Region(
+        let left = PaneLayoutView.Region(
             paneLo: 1, paneHi: 0,
-            rect: CGRect(x: 0, y: 0, width: 1, height: 1),
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
             focused: true, live: true, title: "A"
         )
-        layout.apply([region], dividers: [])
+        let right = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 0,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "B"
+        )
+        layout.apply([left, right], dividers: [])
         layout.reconcileSecondaryLiveHosts(bindings: [
             (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
         ])
         layout.layoutSubtreeIfNeeded()
-        let host = try XCTUnwrap(layout.presentationHost(paneLo: 1, paneHi: 0))
+        let host = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
         host.transcript.setFrameSize(NSSize(width: 320, height: 280))
-        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
-        host.setTranscriptDocumentOffsetY(320)
-        let before = host.transcriptDocumentOffsetY
-        XCTAssertGreaterThan(before, 200)
-        XCTAssertFalse(host.followingLiveEnd)
-
-        host.rebuildBlocks()
+        let card = CommandBlockView(
+            prompt: "$",
+            title: "ssh host",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 32,
+            session: false
+        )
+        host.blocks.insertArrangedSubview(card, at: 1)
+        host.blockCards[42] = card
+        host.followingLiveEnd = false
+        host.syncTranscriptDocumentSize()
+        layout.layoutSubtreeIfNeeded()
+        let originalCardMinY = card.frame.minY
+        host.preserveDocumentHeight(1_200)
+        card.setOutputLines(2, cellHeight: 16)
+        host.followingLiveEnd = false
+        host.syncTranscriptDocumentSize()
         layout.layoutSubtreeIfNeeded()
 
+        XCTAssertGreaterThan(host.transcriptLeadingSpacerHeight.constant, 0)
         XCTAssertEqual(
-            host.transcriptDocumentOffsetY,
-            before,
+            card.frame.minY,
+            originalCardMinY,
             accuracy: 1,
-            "rebuildBlocks must restore intentional scroll away from live end"
+            "preserved document extent must not become filler before the visible Block"
         )
-        XCTAssertFalse(host.followingLiveEnd)
+        XCTAssertTrue(host.blocks.arrangedSubviews.first === host.transcriptLeadingSpacer)
     }
 
     /// The primary readiness source polls `clientHandle`; focus selection must
@@ -3484,6 +3502,45 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertTrue(tracker.clear())
         XCTAssertFalse(tracker.clear())
+
+        var targetTracker = ComposerStatusRelayTracker()
+        XCTAssertTrue(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 0,
+                targetGeneration: 0,
+                targetRevision: 0,
+                targetClass: 1,
+                targetMode: 1
+            )
+        )
+        XCTAssertTrue(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 7,
+                targetGeneration: 3,
+                targetRevision: 13,
+                targetClass: 2,
+                targetMode: 0
+            ),
+            "a foreground-target update on the same eligibility revision must reach Rust"
+        )
+        XCTAssertFalse(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 7,
+                targetGeneration: 3,
+                targetRevision: 13,
+                targetClass: 2,
+                targetMode: 0
+            )
+        )
     }
 
     @MainActor
@@ -5757,6 +5814,102 @@ extension SeyalHostComponentTests {
     }
 
     @MainActor
+    func testScrolledSecondaryRebuildPreservesBlockCoordinatesWithBottomDockingSlack() {
+        let following = TranscriptDocumentSizing.spacerHeights(
+            contentHeight: 300,
+            viewportHeight: 500,
+            preservedDocumentHeight: 0
+        )
+        XCTAssertEqual(following.leading, 200)
+        XCTAssertEqual(following.trailing, 0)
+        XCTAssertEqual(following.document, 500)
+
+        let scrolledAwayAfterShrink = TranscriptDocumentSizing.spacerHeights(
+            contentHeight: 300,
+            viewportHeight: 400,
+            preservedDocumentHeight: 1_000
+        )
+        XCTAssertEqual(
+            scrolledAwayAfterShrink.leading,
+            700,
+            "preserved document space keeps blocks bottom-docked"
+        )
+        XCTAssertEqual(scrolledAwayAfterShrink.trailing, 0)
+        XCTAssertEqual(scrolledAwayAfterShrink.document, 1_000)
+    }
+
+    @MainActor
+    func testCandidateSessionActionLivesInBlockContextMenu() {
+        let block = CommandBlockView(
+            prompt: "$",
+            title: "node",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 1,
+            session: false
+        )
+        block.canRequestSessionBootstrap = true
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )!
+        XCTAssertEqual(
+            block.menu(for: event)?.items.first?.title,
+            "Enable Blocks for this session…",
+            "a Candidate must be available as an explicit action, not an unsolicited popup"
+        )
+    }
+
+    @MainActor
+    func testRunningBlockContextMenuOffersDirectInputFallback() {
+        let block = CommandBlockView(
+            prompt: "$",
+            title: "python3 -q",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 1,
+            session: false
+        )
+        block.frame = NSRect(x: 0, y: 0, width: 600, height: 80)
+        block.canInteractWithRunningProgram = true
+        block.layoutSubtreeIfNeeded()
+        let interact = (block.accessibilityChildren() ?? [])
+            .compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "seyal-running-program-interact" }
+        XCTAssertNotNil(interact, "the Running Block must expose its direct-input button")
+        if let interact {
+            XCTAssertGreaterThan(interact.frame.width, 0)
+            let buttonRect = block.convert(interact.bounds, from: interact)
+            let hit = block.hitTest(NSPoint(x: buttonRect.midX, y: buttonRect.midY))
+            XCTAssertTrue(hit === interact, "Block hit testing must preserve the button action")
+        }
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )!
+        XCTAssertEqual(
+            block.menu(for: event)?.items.first?.title,
+            "Interact with running program"
+        )
+    }
+
+    @MainActor
     func testSessionBootstrapBannerRendersRustCopyAndStaysHiddenWithoutSurface() {
         let banner = SessionBootstrapBanner()
         XCTAssertTrue(banner.isHidden)
@@ -5766,7 +5919,7 @@ extension SeyalHostComponentTests {
         let accept = String(cString: seyal_bridge_session_copy(2))
         let decline = String(cString: seyal_bridge_session_copy(3))
         XCTAssertEqual(title, "Enable Blocks for this session?")
-        XCTAssertEqual(enable, "Enable Blocks")
+        XCTAssertEqual(enable, "Enable Blocks for this session…")
         XCTAssertEqual(accept, "Enable for this session")
         let disclosure = String(cString: seyal_bridge_session_copy(1))
         XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("does not open an SSH connection"))

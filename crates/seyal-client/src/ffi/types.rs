@@ -435,7 +435,8 @@ pub struct SeyalComposerTarget {
     pub target_generation: u64,
     pub revision: u64,
     pub mode: u8,
-    pub reserved: [u8; 7],
+    pub target_class: u8,
+    pub reserved: [u8; 6],
 }
 
 impl SeyalComposerTarget {
@@ -445,7 +446,8 @@ impl SeyalComposerTarget {
             target_generation: 0,
             revision: 0,
             mode: 0,
-            reserved: [0; 7],
+            target_class: 0,
+            reserved: [0; 6],
         }
     }
 }
@@ -496,7 +498,8 @@ mod composer_status_abi_tests {
         assert_eq!(offset_of!(SeyalComposerTarget, target_generation), 8);
         assert_eq!(offset_of!(SeyalComposerTarget, revision), 16);
         assert_eq!(offset_of!(SeyalComposerTarget, mode), 24);
-        assert_eq!(offset_of!(SeyalComposerTarget, reserved), 25);
+        assert_eq!(offset_of!(SeyalComposerTarget, target_class), 25);
+        assert_eq!(offset_of!(SeyalComposerTarget, reserved), 26);
     }
 }
 

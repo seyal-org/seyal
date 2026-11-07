@@ -19,9 +19,20 @@ use crate::{
     AttachmentId, ExecutionId,
 };
 
-use super::super::session_overlay::{derive_composer, input_target_class, input_target_scope};
+use super::super::session_overlay::{
+    derive_composer, input_target_class, input_target_scope, InputTargetFact,
+};
 use super::super::shell_integration::{composer_eligibility, composer_facts};
 use super::super::Runtime;
+
+/// Preserve foreground Block identity while Relay is unavailable so explicit
+/// Raw interaction can be fenced to the current process.
+fn input_target_block_id(target: InputTargetFact) -> u64 {
+    match target {
+        InputTargetFact::Foreground(block_id) => block_id,
+        InputTargetFact::None | InputTargetFact::TrustedShell => 0,
+    }
+}
 
 impl Runtime {
     /// Send the current eligibility to every attached block-capable
@@ -165,7 +176,7 @@ impl Runtime {
             scope: input_target_scope(entry.session),
             mode: derived.mode(),
             reason: derived.reason(),
-            block_id: derived.block_id(),
+            block_id: input_target_block_id(entry.input_target),
             target_generation: entry.target_generation,
             revision: entry.composer_target_revision,
         };
@@ -219,6 +230,19 @@ impl Runtime {
             let frame = framing::encode_frame(MessageType::SessionOffer, &offer.encode());
             let _ = self.send_mandatory_frame(token, frame);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::input_target_block_id;
+    use crate::runtime::session_overlay::InputTargetFact;
+
+    #[test]
+    fn foreground_identity_survives_unavailable_relay() {
+        assert_eq!(input_target_block_id(InputTargetFact::Foreground(2)), 2);
+        assert_eq!(input_target_block_id(InputTargetFact::TrustedShell), 0);
+        assert_eq!(input_target_block_id(InputTargetFact::None), 0);
     }
 }
 

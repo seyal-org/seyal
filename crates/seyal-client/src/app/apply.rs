@@ -89,7 +89,19 @@ impl ApplicationRoot {
                 fence,
                 eligibility,
                 revision,
-            } => self.apply_runtime_composer_status(fence, eligibility, revision),
+                target,
+            } => self.apply_runtime_composer_status(fence, eligibility, revision, target),
+            AppAction::InteractWithRunningBlock {
+                fence,
+                block_id,
+                target_generation,
+                target_revision,
+            } => self.interact_with_running_block(
+                fence,
+                block_id,
+                target_generation,
+                target_revision,
+            ),
             AppAction::SelectRestingPresentation { fence, raw } => {
                 self.select_resting_presentation(fence, raw)
             }

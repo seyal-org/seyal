@@ -130,10 +130,12 @@ typedef struct SeyalComposerTarget {
     uint64_t target_generation;
     uint64_t revision;
     uint8_t mode;
-    uint8_t reserved[7];
+    uint8_t target_class;
+    uint8_t reserved[6];
 } SeyalComposerTarget;
 
-/* ADR-026 session affordance. kind: 0 none, 1 enable Blocks, 2 offer. */
+/* ADR-026 session surface. kind: 0 hidden banner, 2 consent offer. A hidden
+ * surface may carry a Candidate host Block id for its explicit context menu. */
 typedef struct SeyalSessionSurface {
     uint8_t kind;
     uint8_t reserved[7];
@@ -294,9 +296,15 @@ uint8_t seyal_bridge_history_range_consume_for_handle(
 SeyalComposerResult seyal_bridge_composer_result(void);
 SeyalComposerStatus seyal_bridge_composer_status(void);
 SeyalComposerTarget seyal_bridge_composer_target(void);
+SeyalComposerTarget seyal_bridge_composer_target_for_handle(uint64_t handle);
 SeyalSessionSurface seyal_bridge_session_surface(void);
+SeyalSessionSurface seyal_bridge_session_surface_for_handle(uint64_t handle);
 const char *seyal_bridge_session_copy(uint8_t kind);
-int32_t seyal_bridge_session_request(void);
+int32_t seyal_bridge_session_request_for_handle(
+    uint64_t handle,
+    uint64_t expected_host_block_id,
+    uint64_t expected_revision
+);
 int32_t seyal_bridge_session_consent(uint8_t accept);
 SeyalRecoveryResult seyal_bridge_last_recovery_result(void);
 /** Classify a failed open into a SeyalAppRecoveryOutcome code (Rust-owned). */

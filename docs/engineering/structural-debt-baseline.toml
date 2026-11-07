@@ -72,13 +72,13 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1075
+ceiling_loc = 1067
 issue = 1440
 responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1136
+ceiling_loc = 1133
 issue = 1451
 responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424); #1451 adds seyal_app_should_confirm_quit on that façade so Rust owns warn_before_quit composition policy without a second ABI module."
 

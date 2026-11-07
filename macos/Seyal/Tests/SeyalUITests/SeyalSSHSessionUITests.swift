@@ -208,7 +208,10 @@ final class SeyalSSHSessionUITests: XCTestCase {
         XCTAssertLessThanOrEqual(
             blocksScroll.frame.maxY - inlineComposer.frame.maxY,
             128,
-            "the active Python prompt must remain docked near the bottom edge with its Blocks"
+            "the active Python prompt must remain docked near the bottom edge with its Blocks; "
+                + "scroll=\(blocksScroll.frame) block=\(pythonBlock.frame) "
+                + "body=\(runningPythonBody.frame) composer=\(inlineComposer.frame) "
+                + "window=\(app.windows.firstMatch.frame)"
         )
         let pythonMarker = "seyal-1398-python-line"
         submitComposerCommand(
@@ -399,6 +402,13 @@ final class SeyalSSHSessionUITests: XCTestCase {
         let host = blockCommand(app, containing: "ssh -p 2222 me@test-host")
         XCTAssertTrue(host.waitForExistence(timeout: 10), "SSH needs its host Block")
         XCTAssertTrue(waitForFile(invocation.path, timeout: 8), "fake SSH was not invoked")
+        let blocksScroll = app.scrollViews["seyal-blocks-scroll"].firstMatch
+        XCTAssertTrue(blocksScroll.exists)
+        XCTAssertLessThanOrEqual(
+            blocksScroll.frame.maxY - host.frame.maxY,
+            96,
+            "a short running SSH host Block must use the same bottom docking as later session Blocks"
+        )
 
         let banner = app.descendants(matching: .any)["seyal-session-bootstrap"].firstMatch
         XCTAssertTrue(
@@ -407,17 +417,17 @@ final class SeyalSSHSessionUITests: XCTestCase {
         )
         let primary = app.descendants(matching: .any)["seyal-session-bootstrap-primary"].firstMatch
         XCTAssertTrue(primary.waitForExistence(timeout: 5))
-        primary.click() // Explicitly request the consented typed path.
 
         let consentBody = app.descendants(matching: .any)["seyal-session-bootstrap-body"].firstMatch
         let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
+        XCTAssertTrue(setupTitle.waitForExistence(timeout: 5), "SSH hint should proactively offer session setup")
         XCTAssertEqual(
             setupTitle.value as? String,
             "Enable Blocks for this session?",
             "session consent must not present Blocks as disabled by default"
         )
         let consentCopy = expectation(
-            for: NSPredicate(format: "value CONTAINS[c] %@", "type one setup line into this session"),
+            for: NSPredicate(format: "label CONTAINS[c] %@", "setup line into the foreground program"),
             evaluatedWith: consentBody,
             handler: nil
         )
@@ -426,7 +436,17 @@ final class SeyalSSHSessionUITests: XCTestCase {
             .completed,
             "typed zsh bootstrap must ask for explicit consent"
         )
-        primary.click()
+        XCTAssertTrue(
+            (consentBody.label + " " + String(describing: consentBody.value ?? ""))
+                .localizedCaseInsensitiveContains("does not open an SSH connection"),
+            "session setup must be distinguished from opening an SSH connection"
+        )
+        XCTAssertTrue(
+            (consentBody.label + " " + String(describing: consentBody.value ?? ""))
+                .localizedCaseInsensitiveContains("Python or Node"),
+            "users must be warned against accepting shell setup while a REPL owns the foreground"
+        )
+        primary.click() // Accept the consented typed path.
 
         let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         waitForComposerValue(composer, "available", timeout: 25)
@@ -449,6 +469,11 @@ final class SeyalSSHSessionUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [output], timeout: 12), .completed)
         assertPaintedOutput(body, marker: marker)
+        XCTAssertLessThanOrEqual(
+            blocksScroll.frame.maxY - command.frame.maxY,
+            96,
+            "the newest SSH session Block must stay docked above the composer"
+        )
         XCTAssertEqual(
             try FileManager.default.contentsOfDirectory(atPath: remoteHome.path),
             [],
