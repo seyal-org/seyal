@@ -10,12 +10,27 @@ struct LiveTailClip: Equatable {
     var rowCount: UInt16
 }
 
+struct LiveTailRegionGeometry: Equatable {
+    var rowCount: Int
+    var columns: Int
+    var cellWidth: Int
+    var cellHeight: Int
+    var backingScale: CGFloat
+    var atlasResetGeneration: UInt64
+}
+
 /// Renderer-local live-tail draw state. Clip rows come only from Rust; this
 /// holds GPU instance buffers for the prepared-frame slice per running Block.
 struct LiveTailRenderState {
     var regions: [UInt64: HistoryRenderRegion] = [:]
+    var regionGeometry: [UInt64: LiveTailRegionGeometry] = [:]
     var order: [UInt64] = []
     var clips: [UInt64: LiveTailClip] = [:]
+    /// A row-map mismatch may retain a same-geometry buffer for one submitted
+    /// frame while Runtime and the prepared frame converge. Never retry the
+    /// fallback until that Block has a valid map or its clip changes.
+    var invalidMappingObserved: Set<UInt64> = []
+    var pendingTransientFallbacks: Set<UInt64> = []
     /// Clip membership changed while a command buffer still samples live-tail
     /// instance buffers. Refresh after GPU completion (same gate as history).
     var deferredForceRefresh = false
@@ -97,10 +112,17 @@ extension MetalTerminalRenderer {
         if clipsByBlock == liveTail.clips {
             return
         }
+        for (blockID, clip) in clipsByBlock where liveTail.clips[blockID] != clip {
+            liveTail.invalidMappingObserved.remove(blockID)
+            liveTail.pendingTransientFallbacks.remove(blockID)
+        }
         liveTail.clips = clipsByBlock
         liveTail.order = clipsByBlock.keys.sorted()
         let keep = Set(liveTail.order)
         liveTail.regions = liveTail.regions.filter { keep.contains($0.key) }
+        liveTail.regionGeometry = liveTail.regionGeometry.filter { keep.contains($0.key) }
+        liveTail.invalidMappingObserved.formIntersection(keep)
+        liveTail.pendingTransientFallbacks.formIntersection(keep)
         forceLiveTailRefreshWhenIdle()
     }
 
@@ -179,6 +201,7 @@ extension MetalTerminalRenderer {
         let scale = max(backingScale, 1)
         let metrics = glyphAtlas.metrics(backingScale: scale)
         var next: [UInt64: HistoryRenderRegion] = [:]
+        var nextGeometry: [UInt64: LiveTailRegionGeometry] = [:]
         for blockID in liveTail.order {
             guard let clip = liveTail.clips[blockID],
                   clip.startLine > 0,
@@ -189,17 +212,57 @@ extension MetalTerminalRenderer {
             }
             let firstRow = Int(clip.firstRow)
             let rowCount = Int(clip.rowCount)
+            let geometry = LiveTailRegionGeometry(
+                rowCount: rowCount,
+                columns: frame.columns,
+                cellWidth: metrics.cellWidth,
+                cellHeight: metrics.cellHeight,
+                backingScale: scale,
+                atlasResetGeneration: glyphAtlas.stats.resets
+            )
             guard firstRow < frame.rows, firstRow + rowCount <= frame.rows else {
-                // Stale mapping vs prepared frame: fail closed for this Block.
+                // Runtime and renderer updates may land on adjacent frames.
+                // Retain one submitted frame only when the previous buffer's
+                // Block-local instances still match its row/column, font-metric,
+                // scale, and atlas generation. The current origin and clip are
+                // draw-time metadata, so the retained cells follow a moved
+                // Block without rewriting a buffer the GPU may be sampling.
+                let firstInvalidMapping = liveTail.invalidMappingObserved.insert(blockID).inserted
+                if (firstInvalidMapping || liveTail.pendingTransientFallbacks.contains(blockID)),
+                   let existing = liveTail.regions[blockID],
+                   let previousGeometry = liveTail.regionGeometry[blockID],
+                   previousGeometry == geometry,
+                   existing.instanceCount == rowCount * frame.columns
+                {
+                    next[blockID] = HistoryRenderRegion(
+                        buffer: existing.buffer,
+                        instanceCount: existing.instanceCount,
+                        origin: SIMD2<Float>(Float(region.origin.x), Float(region.origin.y)),
+                        clip: region.clip
+                    )
+                    nextGeometry[blockID] = geometry
+                    liveTail.pendingTransientFallbacks.insert(blockID)
+                } else {
+                    liveTail.pendingTransientFallbacks.remove(blockID)
+                }
                 continue
             }
+            liveTail.invalidMappingObserved.remove(blockID)
+            liveTail.pendingTransientFallbacks.remove(blockID)
             // Damage-driven reuse: skip buffer rebuild when the clip row slice
             // is untouched and membership/geometry did not force a refresh.
             if !force,
                let existing = liveTail.regions[blockID],
+               liveTail.regionGeometry[blockID] == geometry,
                !(firstRow..<(firstRow + rowCount)).contains(where: { damage.contains(row: $0) })
             {
-                next[blockID] = existing
+                next[blockID] = HistoryRenderRegion(
+                    buffer: existing.buffer,
+                    instanceCount: existing.instanceCount,
+                    origin: SIMD2<Float>(Float(region.origin.x), Float(region.origin.y)),
+                    clip: region.clip
+                )
+                nextGeometry[blockID] = geometry
                 continue
             }
             let cells = rowCount * frame.columns
@@ -209,6 +272,7 @@ extension MetalTerminalRenderer {
             let buffer: MTLBuffer
             let hadReusableBuffer: Bool
             if let existing = liveTail.regions[blockID],
+               liveTail.regionGeometry[blockID] == geometry,
                existing.buffer.length >= byteCount,
                existing.instanceCount == cells
             {
@@ -244,12 +308,16 @@ extension MetalTerminalRenderer {
                     let index = row * frame.columns + column
                     let outputIndex = rowOffset * frame.columns + column
                     let origin = SIMD2<Float>(
-                        Float(region.origin.x) + Float(column * metrics.cellWidth),
-                        Float(region.origin.y) + Float(rowOffset * metrics.cellHeight)
+                        Float(column * metrics.cellWidth),
+                        Float(rowOffset * metrics.cellHeight)
+                    )
+                    let surfaceOrigin = origin + SIMD2<Float>(
+                        Float(region.origin.x),
+                        Float(region.origin.y)
                     )
                     let painted = CGRect(
-                        x: CGFloat(origin.x),
-                        y: CGFloat(origin.y),
+                        x: CGFloat(surfaceOrigin.x),
+                        y: CGFloat(surfaceOrigin.y),
                         width: CGFloat(size.x),
                         height: CGFloat(size.y)
                     )
@@ -298,12 +366,32 @@ extension MetalTerminalRenderer {
             next[blockID] = HistoryRenderRegion(
                 buffer: buffer,
                 instanceCount: cells,
-                origin: .zero,
+                origin: SIMD2<Float>(Float(region.origin.x), Float(region.origin.y)),
                 clip: region.clip
             )
+            nextGeometry[blockID] = geometry
         }
         liveTail.regions = next
+        liveTail.regionGeometry = nextGeometry
         needsPresent = true
+    }
+
+    /// A retained stale-map buffer is valid for one submitted frame only. The
+    /// next draw clears it unless a valid Runtime mapping arrived in between.
+    func retireSubmittedLiveTailFallbacks() {
+        let retired = liveTail.pendingTransientFallbacks
+        guard !retired.isEmpty else { return }
+        for blockID in retired {
+            liveTail.regions.removeValue(forKey: blockID)
+            liveTail.regionGeometry.removeValue(forKey: blockID)
+        }
+        liveTail.pendingTransientFallbacks.removeAll(keepingCapacity: true)
+        needsPresent = true
+        // The fallback was encoded into the submitted drawable. Once that
+        // drawable completes, schedule a fresh frame to clear it; the display
+        // link is paused while the command buffer is in flight, so waiting for
+        // another PTY frame would leave stale pixels visible indefinitely.
+        needsCurrentFrameWhenIdle = true
     }
 
     /// Fail closed: drop live-tail draws so the next Flow present clears stale
@@ -311,6 +399,9 @@ extension MetalTerminalRenderer {
     /// last presented pixels on screen.
     private func failClosedLiveTail() {
         liveTail.regions.removeAll(keepingCapacity: false)
+        liveTail.regionGeometry.removeAll(keepingCapacity: false)
+        liveTail.invalidMappingObserved.removeAll(keepingCapacity: false)
+        liveTail.pendingTransientFallbacks.removeAll(keepingCapacity: false)
         needsPresent = true
     }
 
@@ -322,6 +413,9 @@ extension MetalTerminalRenderer {
         liveTail.clips.removeAll(keepingCapacity: false)
         liveTail.order.removeAll(keepingCapacity: false)
         liveTail.regions.removeAll(keepingCapacity: false)
+        liveTail.regionGeometry.removeAll(keepingCapacity: false)
+        liveTail.invalidMappingObserved.removeAll(keepingCapacity: false)
+        liveTail.pendingTransientFallbacks.removeAll(keepingCapacity: false)
         liveTail.transcriptRegions.removeAll(keepingCapacity: false)
         liveTail.lastPreparedFrame = nil
         liveTail.deferredForceRefresh = false

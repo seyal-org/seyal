@@ -1997,6 +1997,160 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testIdenticalTranscriptGeometryPreparesHistoryThatArrivesLater() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-late-history-frame"
+        )
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        func frame(revision: UInt64) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: revision,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: NSPoint(x: 0, y: 10),
+                        clip: NSRect(x: 0, y: 10, width: 320, height: 24)
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+
+        surface.renderer.setPresentationPlan(.flow())
+        surface.activateTranscriptDisplayHandle(11)
+        surface.setTranscriptFrame(frame(revision: 1))
+        XCTAssertNil(surface.renderer.historyRegions[1])
+
+        // Runtime history can arrive after the first card-geometry publish.
+        // Its subsequent frame has identical geometry, but must prepare the
+        // newly retained cells for the existing Block clip.
+        surface.retainHistoryRange(range)
+        surface.setTranscriptFrame(frame(revision: 2))
+
+        XCTAssertEqual(
+            surface.inspectFlowPaint().historyInstanceCount,
+            1,
+            "same-geometry republishes must prepare history ranges that arrived since the prior frame"
+        )
+    }
+
+    @MainActor
+    func testNarrowedHistoryClipIsCleanWhenMetalScissorContainsOutput() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-narrowed-history-clip"
+        )
+        surface.renderer.setPresentationPlan(.flow())
+        let metrics = surface.renderer.glyphAtlas.metrics(backingScale: 1)
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 77,
+            requestID: 1,
+            revision: 1,
+            rows: [
+                [
+                    NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0),
+                    NativeHistoryRange.Cell(scalar: 66, foreground: 0, background: 0, flags: 0),
+                    NativeHistoryRange.Cell(scalar: 67, foreground: 0, background: 0, flags: 0),
+                    NativeHistoryRange.Cell(scalar: 68, foreground: 0, background: 0, flags: 0)
+                ]
+            ],
+            sourceDisplayHandle: 11
+        )
+        let clip = CGRect(x: 0, y: 0, width: CGFloat(metrics.cellWidth), height: CGFloat(metrics.cellHeight))
+        try surface.renderer.update(
+            historyRange: range,
+            region: NativeTranscriptRegion(id: 77, origin: .zero, clip: clip),
+            backingScale: 1
+        )
+
+        let sourceInspection = surface.inspectFlowPaint()
+        XCTAssertGreaterThan(
+            sourceInspection.instancesOutsideClips,
+            0,
+            "retained cells may extend beyond a narrower Block clip after a pane resize"
+        )
+        let texture = try XCTUnwrap(surface.renderer.renderOffscreenAndWait(
+            width: metrics.cellWidth * 4,
+            height: metrics.cellHeight
+        ))
+        let sampled = surface.renderer.inspectFlowPaint(from: texture)
+        XCTAssertTrue(
+            sampled.isClean,
+            "the Metal scissor must keep retained cells outside the Block clip from becoming visible"
+        )
+        XCTAssertGreaterThan(sampled.opaquePixelsInsideClips, 0)
+        XCTAssertEqual(sampled.opaquePixelsOutsideClips, 0)
+    }
+
+    @MainActor
+    func testDeferredHistoryPrepareRequestsPresentationAfterGPUCompletes() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-deferred-history-presentation"
+        )
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        let region = NativeTranscriptRegion(
+            id: 1,
+            displayHandle: 11,
+            origin: .zero,
+            clip: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        var frameRequested = false
+        surface.renderer.onNeedsCurrentFrame = { frameRequested = true }
+        surface.renderer.setPresentationPlan(.flow())
+        surface.renderer.requestPresent()
+        XCTAssertTrue(surface.renderer.beginValidationFrameInFlight())
+
+        XCTAssertEqual(
+            try surface.renderer.update(historyRange: range, region: region, backingScale: 1),
+            .deferred
+        )
+        XCTAssertTrue(surface.renderer.hasDeferredHistoryPrepare)
+
+        surface.renderer.endValidationFrameInFlight()
+
+        XCTAssertFalse(surface.renderer.hasDeferredHistoryPrepare)
+        XCTAssertEqual(surface.renderer.historyRegions[1]?.instanceCount, 1)
+        XCTAssertTrue(
+            frameRequested,
+            "a history prepare flushed at GPU completion must schedule a draw without waiting for more PTY output"
+        )
+    }
+
+    @MainActor
     func testSecondaryPaneReconcilesWhenItsControllerChanges() throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal unavailable")
@@ -4708,14 +4862,16 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         let renderer = try MetalTerminalRenderer(device: device)
         renderer.setPresentationPlan(.flow())
+        var requestedIdleFrameCount = 0
+        renderer.onNeedsCurrentFrame = { requestedIdleFrameCount += 1 }
 
         // Three prepared rows: preceding Block output on row 0, running
         // Block on rows 1..2. Clip must exclude row 0.
         func cell(_ ch: Character) -> SeyalPreparedCell {
             var c = SeyalPreparedCell()
             c.scalar = UInt32(ch.unicodeScalars.first!.value)
-            c.foreground = 0xffe9_e1d8
-            c.background = 0xff10_0d0b
+            c.foreground = 0x02e9_e1d8
+            c.background = 0x020c_100d
             return c
         }
         var cells = [
@@ -4743,12 +4899,13 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(try update(generation: 865, fullRebuild: true, damage: damage), .updated)
 
         let cellSize = renderer.cellPixelSize(backingScale: 1)
+        let regionOrigin = NSPoint(x: cellSize.width, y: cellSize.height)
         let region = NativeTranscriptRegion(
             id: 865,
-            origin: .zero,
+            origin: regionOrigin,
             clip: NSRect(
-                x: 0,
-                y: 0,
+                x: regionOrigin.x,
+                y: regionOrigin.y,
                 width: CGFloat(cellSize.width * 2),
                 height: CGFloat(cellSize.height * 2)
             )
@@ -4784,6 +4941,48 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(paint.liveTailInstanceCount, 4)
         XCTAssertEqual(paint.instancesOutsideClips, 0)
 
+        let liveTailTexture = try XCTUnwrap(renderer.renderOffscreenAndWait(
+            width: cellSize.width * 3,
+            height: cellSize.height * 4
+        ))
+        let sampledLiveTail = renderer.inspectFlowPaint(from: liveTailTexture)
+        XCTAssertGreaterThan(
+            sampledLiveTail.opaquePixelsInsideClips,
+            0,
+            "a live Block must paint visible pixels inside its current body clip"
+        )
+        XCTAssertEqual(
+            sampledLiveTail.opaquePixelsOutsideClips,
+            0,
+            "live-tail glyphs and cell backgrounds must stay clipped to their Block"
+        )
+        var textureBytes = [UInt8](repeating: 0, count: liveTailTexture.width * liveTailTexture.height * 4)
+        liveTailTexture.getBytes(
+            &textureBytes,
+            bytesPerRow: liveTailTexture.width * 4,
+            from: MTLRegionMake2D(0, 0, liveTailTexture.width, liveTailTexture.height),
+            mipmapLevel: 0
+        )
+        let clip = region.clip.integral
+        var foregroundPixels = 0
+        for y in Int(clip.minY)..<Int(clip.maxY) {
+            for x in Int(clip.minX)..<Int(clip.maxX) {
+                let offset = (y * liveTailTexture.width + x) * 4
+                if textureBytes[offset] == 0xd8,
+                   textureBytes[offset + 1] == 0xe1,
+                   textureBytes[offset + 2] == 0xe9,
+                   textureBytes[offset + 3] == 0xff
+                {
+                    foregroundPixels += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(
+            foregroundPixels,
+            0,
+            "the Block body must contain actual glyph pixels, not only AX transcript text"
+        )
+
         // Damage-free update must reuse the live-tail clip without allocating
         // another live-tail buffer or rewriting cells.
         XCTAssertEqual(try update(generation: 866, fullRebuild: false, damage: DamageMask()), .updated)
@@ -4814,6 +5013,82 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
         XCTAssertEqual(renderer.liveTailFirstPaintedOriginY(for: 865) ?? -1, 0, accuracy: 0.01)
 
+        // A Runtime row mapping can briefly outrun the latest prepared frame.
+        // Keep the Block-local buffer under the latest origin/clip for one
+        // submitted frame, then fail closed if the mapping has not converged.
+        let staleClip = LiveTailClip(startLine: 30, firstRow: 2, rowCount: 2)
+        renderer.setLiveTailBlocks([865: staleClip])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
+        XCTAssertEqual(renderer.orderedLiveTailRegions.first?.clip, region.clip)
+        XCTAssertTrue(renderer.beginValidationFrameInFlight())
+        XCTAssertEqual(
+            renderer.liveTailRegionCount,
+            0,
+            "the stale-map fallback must retire after one submitted frame"
+        )
+        renderer.endValidationFrameInFlight()
+        XCTAssertEqual(
+            requestedIdleFrameCount,
+            1,
+            "retiring a one-frame live-tail fallback must request its clearing frame without new PTY output"
+        )
+        XCTAssertEqual(try update(generation: 868, fullRebuild: false, damage: DamageMask()), .updated)
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "persistent mismatch must not reacquire stale paint")
+
+        // Local instances follow a moved Block by updating draw-time origin
+        // and clip. Persistent invalid mappings still retire after one draw.
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
+        let movedRegion = NativeTranscriptRegion(
+            id: 865,
+            origin: NSPoint(x: cellSize.width, y: cellSize.height),
+            clip: NSRect(
+                x: cellSize.width,
+                y: cellSize.height,
+                width: cellSize.width * 2,
+                height: cellSize.height * 2
+            )
+        )
+        renderer.setTranscriptRegions([movedRegion])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        renderer.setLiveTailBlocks([865: staleClip])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1, "a moved Block may retain compatible local cells")
+        let movedAgainRegion = NativeTranscriptRegion(
+            id: 865,
+            origin: NSPoint(x: cellSize.width * 2, y: cellSize.height),
+            clip: NSRect(
+                x: cellSize.width * 2,
+                y: cellSize.height,
+                width: cellSize.width * 2,
+                height: cellSize.height * 2
+            )
+        )
+        renderer.setTranscriptRegions([movedAgainRegion])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        XCTAssertEqual(
+            renderer.orderedLiveTailRegions.first?.origin,
+            SIMD2<Float>(Float(movedAgainRegion.origin.x), Float(movedAgainRegion.origin.y)),
+            "the stale buffer must use the new Block origin"
+        )
+        XCTAssertEqual(renderer.orderedLiveTailRegions.first?.clip, movedAgainRegion.clip)
+        XCTAssertTrue(renderer.beginValidationFrameInFlight())
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "a stale buffer retires after one submitted frame")
+        renderer.endValidationFrameInFlight()
+        XCTAssertEqual(try update(generation: 869, fullRebuild: false, damage: DamageMask()), .updated)
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "persistent stale mapping must not reacquire the buffer")
+
+        // Atlas reset invalidates UV coordinates even when row shape and font
+        // metrics match. An incompatible stale buffer must never be replayed.
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        renderer.glyphAtlas.resetWhenGPUIdle()
+        renderer.setLiveTailBlocks([865: staleClip])
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "old atlas UVs must fail closed")
+
         // Clearing live-tail must not re-enable Pane-wide live grid.
         renderer.setLiveTailBlocks([:])
         XCTAssertEqual(renderer.liveTailRegionCount, 0)
@@ -4822,7 +5097,7 @@ final class SeyalHostComponentTests: XCTestCase {
         // #1379 clear→exit: retain history must drop the prepared viewport.
         // setLiveTailBlocks([:]) alone left lastPreparedFrame so a later
         // refresh could repaint loose primary rows over Block cards.
-        XCTAssertEqual(try update(generation: 868, fullRebuild: false, damage: DamageMask()), .updated)
+        XCTAssertEqual(try update(generation: 870, fullRebuild: false, damage: DamageMask()), .updated)
         renderer.setLiveTailBlocks([
             865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
         ])

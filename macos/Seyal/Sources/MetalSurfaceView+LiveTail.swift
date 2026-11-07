@@ -20,10 +20,18 @@ extension MetalSurfaceView {
     if frame.regions.isEmpty, !historyRanges.isEmpty {
       return
     }
-    // Host polling and projection refreshes can publish a newer frame revision
-    // without changing any Block geometry. Do not dirty the drawable for those
-    // no-op publications.
-    guard lastTranscriptFrameRegions != frame.regions else { return }
+    // History replies can arrive after the first geometry publish. Allow an
+    // identical frame through until each retained range has a renderer region;
+    // otherwise the Block keeps AX text but its Metal body stays blank.
+    let hasUnpreparedHistory = frame.regions.contains { region in
+      let key = PaneBlockKey(
+        paneID: paneID,
+        displayHandle: region.displayHandle,
+        blockID: region.id
+      )
+      return historyRanges[key] != nil && renderer.historyRegions[region.id] == nil
+    }
+    guard lastTranscriptFrameRegions != frame.regions || hasUnpreparedHistory else { return }
     lastTranscriptFrameRegions = frame.regions
     let regionIDs = Set(frame.regionIDs)
     // Do not drop `historyRanges` here when a body clip is briefly omitted —
