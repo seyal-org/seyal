@@ -505,6 +505,84 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "824-altscreen-return")
     }
 
+    func testRealLessSessionTakesOverAndReturnsToFlow() throws {
+        let lessPath = "/usr/bin/less"
+        guard FileManager.default.isExecutableFile(atPath: lessPath) else {
+            throw XCTSkip("less is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer {
+            if app.state == .runningForeground, !composer.isHittable {
+                if terminal.isHittable { terminal.click() }
+                app.typeText("q")
+            }
+        }
+
+        submitComposerCommand(app, "\(lessPath) /etc/hosts")
+        let enteredTUI = expectation(
+            for: NSPredicate(format: "isHittable == false"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [enteredTUI], timeout: 12), .completed,
+            "real less must take over the pane instead of leaving the Flow composer active"
+        )
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.click()
+        app.typeText("q")
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 12), .completed,
+            "q in the actual less TUI must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-less-flow-return")
+    }
+
+    func testRealTopSessionTakesOverAndReturnsToFlow() throws {
+        let topPath = "/usr/bin/top"
+        guard FileManager.default.isExecutableFile(atPath: topPath) else {
+            throw XCTSkip("top is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer {
+            if app.state == .runningForeground, !composer.isHittable {
+                if terminal.isHittable { terminal.click() }
+                app.typeText("q")
+            }
+        }
+
+        submitComposerCommand(app, "\(topPath) -o cpu")
+        let enteredTUI = expectation(
+            for: NSPredicate(format: "isHittable == false"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [enteredTUI], timeout: 12), .completed,
+            "interactive top must take over the pane instead of leaving the Flow composer active"
+        )
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.click()
+        app.typeText("q")
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 12), .completed,
+            "q in the actual top TUI must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-top-flow-return")
+    }
+
     func testGuiRelaunchReconnectsWithoutKillingExecution() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
