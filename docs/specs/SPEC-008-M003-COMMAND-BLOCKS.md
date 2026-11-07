@@ -355,6 +355,19 @@ A completed Block references a bounded canonical history range from its trusted
 start/end anchors. The client may cache disposable prepared GPU data for visible
 ranges, but the range remains authoritative in Runtime terminal/history state.
 
+For output longer than one bounded history response, the Pane transcript keeps
+the Block's full intrinsic scroll extent while the renderer prepares only a
+bounded page for the rows visible in that Pane (with bounded overscan). A page
+is addressed through the Block's stable history anchors and Runtime history
+range protocol; the client must not concatenate an unbounded Block into one
+GPU buffer or substitute a second terminal/history model. Scrolling, resize,
+and backing-scale changes request or prepare the page for the new viewport and
+preserve the user's Pane scroll position. The rendered page cache is keyed by
+Pane/execution, Block, history revision and visible range; a content or range
+change invalidates glyph data even when clip geometry is unchanged. PTY/VT
+progress must not wait for page retrieval or GPU preparation. The renderer's
+per-page row/cell bounds remain enforced for every request and buffer.
+
 ### 5.2 Running Block
 
 A running Block requires a bounded derived live projection from its trusted

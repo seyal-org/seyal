@@ -64,6 +64,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var lastBridgeError: Int32?
   var lastRenderError: Error?
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
+  var historyRenderPageKeys: [UInt64: NativeHistoryRenderPageKey] = [:]
   /// Latest geometry installed for the active Flow transcript. Frame revisions
   /// can advance for unrelated runtime updates; identical regions need no new
   /// Metal history preparation.
@@ -241,6 +242,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   func removeTranscriptRegions(except ids: Set<UInt64>) {
     let kept = historyExceptPreservingRawScrollback(ids)
     historyRanges = historyRanges.filter { kept.contains($0.key.blockID) }
+    historyRenderPageKeys = historyRenderPageKeys.filter { kept.contains($0.key) }
     if historyRanges.isEmpty {
       hasRetainedHistoryPresentation = false
     }
@@ -256,6 +258,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     guard handle != transcriptDisplayHandle else { return }
     transcriptDisplayHandle = handle
     lastTranscriptFrameRegions = nil
+    historyRenderPageKeys.removeAll(keepingCapacity: true)
     renderer.removeHistoryRegions(except: [])
     renderer.clearLiveTailPresentation()
     hasRetainedHistoryPresentation = historyRanges.keys.contains {

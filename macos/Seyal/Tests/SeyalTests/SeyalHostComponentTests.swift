@@ -5794,6 +5794,48 @@ private func accessibilityChildren(
 
 extension SeyalHostComponentTests {
     @MainActor
+    func testHistoryRenderWindowBoundsTopMiddleAndTailPages() {
+        let total = 100_000
+        let visibleRows = 120
+
+        let top = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: 0,
+            visibleRowCount: visibleRows
+        )
+        let middle = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: 50_000,
+            visibleRowCount: visibleRows
+        )
+        let tail = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: total - visibleRows,
+            visibleRowCount: visibleRows
+        )
+
+        XCTAssertEqual(top.rows.lowerBound, 0)
+        XCTAssertTrue(top.rows.contains(0))
+        XCTAssertTrue(middle.rows.contains(50_000))
+        XCTAssertTrue(tail.rows.contains(total - 1))
+        for page in [top, middle, tail] {
+            XCTAssertLessThanOrEqual(page.rows.count, HistoryRenderWindow.maximumRows)
+            XCTAssertGreaterThan(page.rows.count, 0)
+        }
+        XCTAssertEqual(
+            HistoryRenderWindow(totalRows: 0, firstVisibleRow: 0, visibleRowCount: 120).rows,
+            0..<0
+        )
+        let maximum = HistoryRenderWindow(
+            totalRows: Int.max,
+            firstVisibleRow: Int.max,
+            visibleRowCount: Int.max
+        )
+        XCTAssertLessThanOrEqual(maximum.rows.count, HistoryRenderWindow.maximumRows)
+        XCTAssertEqual(maximum.rows.upperBound, Int.max)
+    }
+
+    @MainActor
     func testTranscriptSizingUsesIntrinsicHeightsAndAccountsForDockSpacing() {
         let leadingSpacer = NSView()
         let staleExpandedCard = NSView(

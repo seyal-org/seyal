@@ -237,6 +237,34 @@ struct NativeTranscriptRegion: Equatable {
   let origin: NSPoint
   let clip: NSRect
   var suppressesCursor: Bool = false
+  /// Bounded canonical history rows prepared for this Block's visible Pane
+  /// window. `nil` means this region is a running live-tail clip.
+  var historyRows: Range<Int>? = nil
+  var historyRequestID: UInt64 = 0
+  var historyRevision: UInt64 = 0
+}
+
+/// Selects a bounded row page for one Pane viewport. The complete history
+/// remains Runtime-owned; this range only chooses disposable prepared cells.
+struct HistoryRenderWindow: Equatable {
+  static let maximumRows = 512
+  static let overscanRows = 16
+
+  let rows: Range<Int>
+
+  init(totalRows: Int, firstVisibleRow: Int, visibleRowCount: Int) {
+    let total = max(totalRows, 0)
+    let visibleStart = min(max(firstVisibleRow, 0), total)
+    let visibleCount = min(max(visibleRowCount, 0), Self.maximumRows)
+    let visibleEnd = visibleStart + min(visibleCount, total - visibleStart)
+    var lower = max(visibleStart - Self.overscanRows, 0)
+    var upper = visibleEnd + min(Self.overscanRows, total - visibleEnd)
+    if upper - lower > Self.maximumRows {
+      lower = min(max(visibleStart - (Self.maximumRows - visibleCount) / 2, 0), total - Self.maximumRows)
+      upper = min(total, lower + Self.maximumRows)
+    }
+    rows = lower..<max(lower, upper)
+  }
 }
 
 struct NativeTranscriptFrame: Equatable {

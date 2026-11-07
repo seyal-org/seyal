@@ -439,12 +439,40 @@ extension SecondaryLivePaneHost {
         for (blockID, card) in blockCards {
             let clip = card.body.convert(card.body.bounds, to: surface)
             guard clip.width > 0, clip.height > 0 else { continue }
+            let historyRows: Range<Int>?
+            let historyRequestID: UInt64
+            let historyRevision: UInt64
+            if let range = surface.retainedHistoryRange(
+                blockID: blockID,
+                displayHandle: displayHandle
+            ) {
+                let visibleBody = card.body.convert(surface.bounds, from: surface)
+                    .intersection(card.body.bounds)
+                let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
+                let rowsFromTop = max(card.body.bounds.maxY - visibleBody.maxY, 0)
+                let firstVisibleRow = Int((rowsFromTop / cellHeight).rounded(.down))
+                let visibleRowCount = Int((visibleBody.height / cellHeight).rounded(.up))
+                historyRows = HistoryRenderWindow(
+                    totalRows: range.rows.count,
+                    firstVisibleRow: firstVisibleRow,
+                    visibleRowCount: visibleRowCount
+                ).rows
+                historyRequestID = range.requestID
+                historyRevision = range.revision
+            } else {
+                historyRows = nil
+                historyRequestID = 0
+                historyRevision = 0
+            }
             regions.append(
                 NativeTranscriptRegion(
                     id: blockID,
                     displayHandle: displayHandle,
                     origin: clip.origin,
-                    clip: clip
+                    clip: clip,
+                    historyRows: historyRows,
+                    historyRequestID: historyRequestID,
+                    historyRevision: historyRevision
                 )
             )
         }
