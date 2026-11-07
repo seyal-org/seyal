@@ -331,10 +331,8 @@ final class PaneLayoutView: NSView {
     /// dividers from Rust and apply them. A zero-size row means Rust no longer
     /// has that index (stale count); reading stops rather than guessing.
     func reconcile(paneCount: Int) {
-        apply(
-            Self.readRegions(appHandle: appHandle, paneCount: paneCount),
-            dividers: Self.readDividers(appHandle: appHandle, count: max(paneCount - 1, 0))
-        )
+        apply(Self.readRegions(appHandle: appHandle, paneCount: paneCount),
+              dividers: Self.readDividers(appHandle: appHandle, count: max(paneCount - 1, 0)))
     }
 
     /// Forward a drag to Rust as the raw pointer coordinate along the
@@ -497,6 +495,7 @@ final class PaneLayoutView: NSView {
         self.theme = theme
         regionViews.forEach { $0.apply(theme: theme) }
         dividerViews.forEach { $0.apply(theme: theme) }
+        terminalStrips.values.forEach { $0.apply(theme: theme) }
         secondaryLiveHosts.values.forEach { $0.apply(theme: theme) }
     }
 
@@ -589,7 +588,7 @@ final class PaneLayoutView: NSView {
                 paneTitle: region.title,
                 tabs: region.terminalTabs,
                 focused: region.focused,
-                canSplit: shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) != 0,
+                canSplit: region.focused && shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) != 0,
                 canClosePane: shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) != 0
             )
             strip.onSelect = { [weak self] tab in self?.onSelectTerminalTab?(key.lo, key.hi, tab.lo, tab.hi) }
@@ -598,6 +597,7 @@ final class PaneLayoutView: NSView {
             strip.onSplit = { [weak self] direction in self?.onSplitPane?(key.lo, key.hi, direction) }
             strip.onClosePane = { [weak self] in self?.onClosePane?(key.lo, key.hi) }
             terminalStrips[key] = strip
+            if let theme { strip.apply(theme: theme) }
             addSubview(strip, positioned: .above, relativeTo: liveContent)
         }
     }

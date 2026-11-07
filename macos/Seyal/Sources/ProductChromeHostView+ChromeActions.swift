@@ -283,21 +283,102 @@ extension ProductChromeHostView {
     func configureChromeButtons() {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
+        createWorkspaceButton.bezelStyle = .inline
+        createWorkspaceButton.isBordered = false
+        createWorkspaceButton.title = ""
+        createWorkspaceButton.image = NSImage(
+            systemSymbolName: "folder.badge.plus",
+            accessibilityDescription: "Create Workspace"
+        )
+        createWorkspaceButton.imagePosition = .imageOnly
+        createWorkspaceButton.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        createWorkspaceButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
         createWorkspaceButton.setAccessibilityIdentifier("seyal-create-workspace")
         createWorkspaceButton.setAccessibilityLabel("Create Workspace")
         createWorkspaceButton.toolTip = "Create Workspace"
         createWorkspaceButton.target = self
         createWorkspaceButton.action = #selector(createWorkspace)
+        newTabButton.title = ""
+        newTabButton.image = NSImage(
+            systemSymbolName: "plus.square",
+            accessibilityDescription: "New Tab"
+        )
+        newTabButton.imagePosition = .imageOnly
         newTabButton.setAccessibilityIdentifier("seyal-new-tab")
         newTabButton.setAccessibilityLabel("New Tab")
         newTabButton.toolTip = "New Tab"
         newTabButton.target = self
         newTabButton.action = #selector(createTab)
+        closeTabButton.title = ""
+        closeTabButton.image = NSImage(
+            systemSymbolName: "xmark.square",
+            accessibilityDescription: "Close Tab"
+        )
+        closeTabButton.imagePosition = .imageOnly
         closeTabButton.setAccessibilityIdentifier("seyal-close-tab")
         closeTabButton.setAccessibilityLabel("Close Tab")
         closeTabButton.toolTip = "Close Tab"
         closeTabButton.target = self
         closeTabButton.action = #selector(closeActiveTab(_:))
+    }
+
+    /// Project outer layout Tab identities without a competing terminal strip.
+    func appendWorkspaceLayoutsIfNeeded(shell: SeyalAppShell) {
+        // Workspace Tabs are layout containers, not terminal sessions.
+        // Keep them reachable by pointer as compact C04 navigation rows
+        // without adding a competing terminal-looking top strip.
+        if shell.tab_count > 0 {
+            appendLeftSection(
+                title: "LAYOUTS",
+                identifier: "seyal-layouts-heading",
+                topGap: true
+            ) {
+                for index in 0..<Int(shell.tab_count) {
+                    let row = seyal_app_shell_row(
+                        pane.appHandle,
+                        UInt16(SEYAL_APP_ROW_TAB),
+                        UInt32(index)
+                    )
+                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Layout \(index + 1)"
+                    leftItems.addArrangedSubview(
+                        contextRow(
+                            primary: title,
+                            secondary: nil,
+                            identifier: "seyal-layout-\(index)",
+                            selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                            action: #selector(selectTab(_:)),
+                            kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
+                            idLo: row.id_lo,
+                            idHi: row.id_hi
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /// Bound for left Tabs rows without growing `SeyalAppShell` ABI size.
+    func leftTerminalTabRowCount(shell: SeyalAppShell) -> Int {
+        var count = 0
+        for index in 0..<Int(shell.pane_count) {
+            let paneRow = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
+            count += Int(seyal_app_pane_terminal_tab_count(pane.appHandle, paneRow.id_lo, paneRow.id_hi))
+        }
+        return count
+    }
+
+    func paneIdFromTerminalTabRow(_ row: SeyalAppRow) -> (UInt64, UInt64) {
+        guard row.address_len >= 16 else { return (0, 0) }
+        let bytes = withUnsafeBytes(of: row.address_bytes) { Array($0.prefix(16)) }
+        var lo: UInt64 = 0
+        var hi: UInt64 = 0
+        withUnsafeMutableBytes(of: &lo) { dest in
+            dest.copyBytes(from: bytes[0..<8])
+        }
+        withUnsafeMutableBytes(of: &hi) { dest in
+            dest.copyBytes(from: bytes[8..<16])
+        }
+        return (UInt64(littleEndian: lo), UInt64(littleEndian: hi))
     }
 
     func configureCloseButtons(shell: SeyalAppShell) {
@@ -468,15 +549,24 @@ extension ProductChromeHostView {
             ])
         }
 
-        // C16 status glyph: filled disc + ring so status is not colour-only.
-        let dot = NSView()
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 4
-        dot.layer?.backgroundColor = NSColor.systemGreen.cgColor
-        dot.layer?.borderWidth = 1
-        dot.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.35).cgColor
-        dot.setAccessibilityElement(false)
+        // Navigation identities have no generic "healthy/running" state.
+        // A green dot on every Workspace/Tab fabricated connection status.
+        // Use a neutral type glyph; real attention belongs to Rust flags.
+        let symbol: String
+        switch kind {
+        case UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue):
+            symbol = "square.stack.3d.up"
+        case UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue):
+            symbol = "rectangle.on.rectangle"
+        default:
+            symbol = "terminal"
+        }
+        let glyph = NSImageView()
+        glyph.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        glyph.imageScaling = .scaleProportionallyDown
+        glyph.contentTintColor = selected ? .labelColor : .tertiaryLabelColor
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        glyph.setAccessibilityElement(false)
 
         let primaryLabel = NSTextField(labelWithString: primary)
         primaryLabel.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .medium)
@@ -516,7 +606,7 @@ extension ProductChromeHostView {
         hit.setContentHuggingPriority(.defaultLow, for: .horizontal)
         hit.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        row.addSubview(dot)
+        row.addSubview(glyph)
         row.addSubview(primaryLabel)
         row.addSubview(secondaryLabel)
         row.addSubview(hit)
@@ -524,13 +614,13 @@ extension ProductChromeHostView {
         let hasSecondary = !(secondary?.isEmpty ?? true)
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: hasSecondary ? 46 : 36),
-            dot.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
-            dot.centerYAnchor.constraint(
+            glyph.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            glyph.centerYAnchor.constraint(
                 equalTo: hasSecondary ? primaryLabel.centerYAnchor : row.centerYAnchor
             ),
-            dot.widthAnchor.constraint(equalToConstant: 8),
-            dot.heightAnchor.constraint(equalToConstant: 8),
-            primaryLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
+            glyph.widthAnchor.constraint(equalToConstant: 13),
+            glyph.heightAnchor.constraint(equalToConstant: 13),
+            primaryLabel.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: 8),
             primaryLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
             primaryLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: hasSecondary ? 8 : 10),
             secondaryLabel.leadingAnchor.constraint(equalTo: primaryLabel.leadingAnchor),

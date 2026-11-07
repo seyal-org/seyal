@@ -4,6 +4,31 @@
 **Scope:** Core terminal screen and shared interaction rules  
 **Reference image:** `docs/architecture/ui/assets/m001-core-terminal-reference.jpg`
 
+## 0. M003 default navigation refinement — PR #1456
+
+**Status:** Proposed product-approved UI simplification; effective only if the
+owning PR is accepted and merged. This section supersedes earlier descriptions
+of a permanently visible Workspaces/Tabs switcher and outer top tab chips,
+without changing accepted Runtime ownership or TerminalTab identity semantics.
+
+- C03 **Workspaces** is the default, stable navigation surface: Workspace rows,
+  a **LAYOUTS** section for the active Workspace's Rust-owned outer `TabId`
+  containers (including the first layout), and relevant agent rows.
+- The left **Tabs** switcher is not always visible. The existing pane-local
+  `TerminalTabId` inventory can still be opened deliberately with the global
+  palette's **Show Tabs in Left Panel** action; **Workspaces** returns to the
+  default view.
+- Pane-local terminal tab strips remain the **only terminal-looking tab bar**
+  in the work surface. No second top strip mirrors Workspace layout tabs.
+- The compact **New Layout** button uses the existing outer `CreateTab`
+  action; pane-local **New Terminal** uses the distinct `NewTerminal` action.
+- Pointer activation of an unfocused Pane's terminal tab focuses that exact
+  Pane through Rust before selecting the terminal. Neither action creates
+  another PTY or terminal authority.
+- All navigation/close/scroll/focus semantics must be verified in a headed
+  macOS app and must preserve the same Rust-owned identities and execution
+  continuity. Do not treat mockup fidelity as proof of a working implementation.
+
 ## 1. Purpose
 
 This document freezes the canonical Core Terminal information architecture and interaction rules so later implementation does not drift across mockups.

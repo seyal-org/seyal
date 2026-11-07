@@ -10,6 +10,10 @@ final class PaneTerminalTabStrip: NSView {
     var onClosePane: (() -> Void)?
     private let tabs: [PaneLayoutView.TerminalTab]
     private let canClosePane: Bool
+    private let focused: Bool
+    private var tabButtons: [NSButton] = []
+    private var tabUnderlines: [NSView] = []
+    private var closeButtons: [NSButton] = []
     private let tabStack = NSStackView()
     private let tabViewport = NSScrollView()
     private let actionStack = NSStackView()
@@ -30,7 +34,9 @@ final class PaneTerminalTabStrip: NSView {
     ) {
         self.tabs = tabs
         self.canClosePane = canClosePane
+        self.focused = focused
         super.init(frame: .zero)
+        wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -38,7 +44,7 @@ final class PaneTerminalTabStrip: NSView {
         setAccessibilityValue(focused ? "focused" : "")
         tabStack.orientation = .horizontal
         tabStack.alignment = .centerY
-        tabStack.spacing = 4
+        tabStack.spacing = 2
         tabStack.translatesAutoresizingMaskIntoConstraints = true
         tabViewport.drawsBackground = false
         tabViewport.borderType = .noBorder
@@ -49,7 +55,7 @@ final class PaneTerminalTabStrip: NSView {
         tabViewport.documentView = tabStack
         actionStack.orientation = .horizontal
         actionStack.alignment = .centerY
-        actionStack.spacing = 4
+        actionStack.spacing = 2
         actionStack.translatesAutoresizingMaskIntoConstraints = true
         let actionCount = 1 + (canSplit ? 2 : 0)
         actionWidth = CGFloat(actionCount) * 24 + CGFloat(actionCount - 1) * 4
@@ -58,41 +64,81 @@ final class PaneTerminalTabStrip: NSView {
         actionStack.frame = CGRect(x: 0, y: 0, width: actionWidth, height: 24)
         setAccessibilityChildren([tabViewport, actionStack])
         for (index, tab) in tabs.enumerated() {
+            // C05: one quiet tab row. Selection is typography plus a 2 pt
+            // semantic seam, not a recessed/pill AppKit button.
             let group = NSStackView()
-            group.orientation = .horizontal
+            group.orientation = .vertical
+            group.alignment = .width
             group.spacing = 0
-            // Pane-local index alone made every split leaf read "Terminal 1"
-            // (#1429). Prefer the shell pane title so leaves stay distinct.
+
+            let content = NSStackView()
+            content.orientation = .horizontal
+            content.alignment = .centerY
+            content.spacing = 2
             let title = Self.terminalTabTitle(
                 paneTitle: paneTitle,
                 index: index,
                 tabCount: tabs.count
             )
             let button = NSButton(title: title, target: self, action: #selector(selectTab(_:)))
-            button.bezelStyle = .recessed
+            button.bezelStyle = .inline
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 11, weight: tab.selected ? .semibold : .regular)
+            button.contentTintColor = tab.selected ? .labelColor : .secondaryLabelColor
+            button.cell?.lineBreakMode = .byTruncatingMiddle
             button.identifier = NSUserInterfaceItemIdentifier("seyal-terminal-tab-\(tab.hi)-\(tab.lo)")
             button.setAccessibilityIdentifier(button.identifier!.rawValue)
             button.setAccessibilityLabel(title)
             button.setAccessibilityValue(tab.selected ? "selected" : "")
             button.state = tab.selected ? .on : .off
             button.tag = index
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 64).isActive = true
+            button.widthAnchor.constraint(lessThanOrEqualToConstant: 150).isActive = true
             if tab.selected {
                 selectedTabButton = button
                 selectedTabIndex = index
             }
-            group.addArrangedSubview(button)
+            content.addArrangedSubview(button)
+            tabButtons.append(button)
+
+            // Reserve close-button geometry on every tab; only the selected
+            // tab exposes its action. Switching selection never shifts chips.
             let close = NSButton(title: "×", target: self, action: #selector(closeTab(_:)))
-            close.bezelStyle = .texturedRounded
+            close.bezelStyle = .inline
+            close.isBordered = false
+            close.font = .systemFont(ofSize: 12, weight: .regular)
             close.setAccessibilityIdentifier("seyal-terminal-tab-\(tab.hi)-\(tab.lo)-close")
             close.setAccessibilityLabel("Close \(title)")
+            close.toolTip = "Close Terminal"
             close.tag = index
-            group.addArrangedSubview(close)
+            // Only the focused Pane presents close chrome; unfocused panes
+            // keep the exact same tab geometry without inviting accidental termination.
+            close.alphaValue = tab.selected && focused ? 1 : 0
+            close.isEnabled = tab.selected && focused
+            close.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            close.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            content.addArrangedSubview(close)
+            closeButtons.append(close)
+
+            let underline = NSView()
+            underline.wantsLayer = true
+            underline.layer?.backgroundColor = tab.selected
+                ? NSColor.controlAccentColor.cgColor : NSColor.clear.cgColor
+            underline.heightAnchor.constraint(equalToConstant: 2).isActive = true
+            underline.setAccessibilityElement(false)
+            group.addArrangedSubview(content)
+            group.addArrangedSubview(underline)
+            tabUnderlines.append(underline)
             tabStack.addArrangedSubview(group)
             terminalGroups.append(group)
         }
         let add = NSButton(title: "+", target: self, action: #selector(newTerminal))
-        add.bezelStyle = .texturedRounded
+        add.bezelStyle = .inline
         add.isBordered = false
+        add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New Terminal")
+        add.imagePosition = .imageOnly
+        add.toolTip = "New Terminal"
         add.widthAnchor.constraint(equalToConstant: 24).isActive = true
         add.heightAnchor.constraint(equalToConstant: 24).isActive = true
         add.setAccessibilityIdentifier("seyal-pane-\(paneHi)-\(paneLo)-new-terminal")
@@ -118,6 +164,27 @@ final class PaneTerminalTabStrip: NSView {
         )
         splitDown.isHidden = !canSplit
         actionStack.addArrangedSubview(splitDown)
+    }
+
+    /// Only presentation values are realized here; terminal selection,
+    /// identity, focus and close mutations remain Rust-owned.
+    func apply(theme: NativeTheme) {
+        layer?.backgroundColor = theme.utility.withAlphaComponent(focused ? 0.72 : 0.42).cgColor
+        for (index, button) in tabButtons.enumerated() {
+            let selected = tabs[index].selected
+            button.attributedTitle = NSAttributedString(
+                string: button.title,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: max(11, theme.uiFontSize - 1),
+                                             weight: selected ? .semibold : .regular),
+                    .foregroundColor: selected ? theme.text : theme.secondary,
+                ]
+            )
+            tabUnderlines[index].layer?.backgroundColor = selected
+                ? (focused ? theme.accent : theme.seam).cgColor
+                : NSColor.clear.cgColor
+            closeButtons[index].contentTintColor = theme.secondary
+        }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -193,7 +260,7 @@ final class PaneTerminalTabStrip: NSView {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
             ?? NSImage(size: NSSize(width: 16, height: 16))
         let button = NSButton(image: image, target: target, action: action)
-        button.bezelStyle = .texturedRounded
+        button.bezelStyle = .inline
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.setAccessibilityIdentifier(identifier)

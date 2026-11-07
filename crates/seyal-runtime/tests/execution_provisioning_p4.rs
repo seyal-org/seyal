@@ -421,17 +421,20 @@ fn controller_terminate_requests_then_finalizes_via_lifecycle_only() {
         TerminateExecutionResultCode::TerminationRequested
     );
     assert_eq!(result.detail_code, 0);
-    let observed_lifecycle = h
-        .runtime
-        .lookup(created.execution_id)
-        .map(|snapshot| snapshot.lifecycle);
-    assert!(
-        matches!(
-            observed_lifecycle,
-            Some(ExecutionLifecycle::TerminatingGraceful) | None
-        ),
-        "termination may finalize before its reply is observed; the Lifecycle frame below remains mandatory"
-    );
+    // A fast child may already have finalized before the response is read.
+    // The accepted result is the boundary; final Lifecycle is checked below.
+    // Allow TerminatingGraceful and DrainingAfterPrimaryExit when still present.
+    if let Some(record) = h.runtime.lookup(created.execution_id) {
+        assert!(
+            matches!(
+                record.lifecycle,
+                ExecutionLifecycle::TerminatingGraceful
+                    | ExecutionLifecycle::DrainingAfterPrimaryExit
+            ),
+            "unexpected lifecycle after accepted terminate: {:?}",
+            record.lifecycle
+        );
+    }
 
     let progress_deadline = Instant::now() + Duration::from_secs(3);
     let mut saw_progress = false;

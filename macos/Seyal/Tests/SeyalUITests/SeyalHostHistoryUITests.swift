@@ -187,43 +187,16 @@ final class SeyalHostHistoryUITests: XCTestCase {
         attachScreenshot(app, name: "842-history-after-altscreen")
     }
 
-    /// #1442: Cmd+Enter Raw toggle must leave Flow chrome, then restore Blocks
-    /// so Raw scroll state cannot keep wiping Block bodies after return.
+    /// #1442 historically used Cmd+Enter → Toggle Raw. Accepted keybinding
+    /// policy now keeps `presentation.toggle_raw` out of builtins and the
+    /// View menu (`supported_shell_menu_and_builtins_do_not_expose_raw_presentation`).
+    /// Raw/Flow restore coverage lives in presentation unit tests; a headed
+    /// Raw-admission E2E needs its own Issue against the current resting model.
     func testCmdEnterRawToggleRestoresFlowBlocks() throws {
-        let app = hostedApp()
-        waitForUsablePty(in: app)
-        submitComposerCommand(app, "printf '%s\\n' $(seq 1 40)")
-        waitBriefly(0.8)
-        assertFlowBlocksOrFail(in: app)
-
-        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
-        let blocks = app.descendants(matching: .any)["seyal-blocks"].firstMatch
-        // Unfocus the composer editor so cmd+enter routes as Toggle Raw, not submit.
-        let chrome = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
-        if chrome.waitForExistence(timeout: 2), chrome.isHittable {
-            chrome.click()
-        }
-        app.typeKey("\r", modifierFlags: .command)
-        let leftFlow = expectation(
-            for: NSPredicate(format: "isHittable == false OR exists == false"),
-            evaluatedWith: composer,
-            handler: nil
+        throw XCTSkip(
+            "Toggle Raw has no builtin Cmd+Enter / View menu admission; "
+                + "see keybinding projection policy. Out of scope for #1457 chrome."
         )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [leftFlow], timeout: 8),
-            .completed,
-            "Cmd+Enter must leave Flow composer for Raw"
-        )
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed entering Raw")
-        attachScreenshot(app, name: "1442-raw-after-cmd-enter")
-
-        app.typeKey("\r", modifierFlags: .command)
-        XCTAssertTrue(
-            blocks.waitForExistence(timeout: 8),
-            "Cmd+Enter back must restore seyal-blocks"
-        )
-        assertFlowBlocksOrFail(in: app)
-        attachScreenshot(app, name: "1442-flow-after-raw-toggle")
     }
 
     private func submitComposerCommand(_ app: XCUIApplication, _ command: String) {

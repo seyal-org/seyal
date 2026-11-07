@@ -411,10 +411,11 @@ final class SeyalHostComponentTests: XCTestCase {
         view.reconcileChrome()
 
         let workspaces = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-left-workspaces") as? NSButton)
-        let tabs = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-left-tabs") as? NSButton)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"),
+                     "default navigation has no duplicate terminal-tab switcher")
         XCTAssertEqual(workspaces.title, "Workspaces")
-        XCTAssertEqual(tabs.title, "Tabs")
-        XCTAssertNotEqual(tabs.title, "Layouts")
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"),
+                        "even the first layout must remain discoverable")
 
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-workspaces-heading"))
         XCTAssertNil(
@@ -437,7 +438,7 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertTrue(
             view.newTabButton.isDescendant(of: view.leftModeRow),
-            "New Tab stays with the left mode row; pane terminal tabs stay pane-local"
+            "New Layout stays with Workspaces; pane terminal tabs stay pane-local"
         )
         // Prefer helpful root when Rust projects one; otherwise tab count.
         XCTAssertTrue(
@@ -446,6 +447,7 @@ final class SeyalHostComponentTests: XCTestCase {
                 || workspaceLabel.contains("~"),
             "active workspace secondary is helpful root or tab count: \(workspaceLabel)"
         )
+        XCTAssertEqual(view.newTabButton.accessibilityLabel(), "New Layout")
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(
             workspaceRow.superview?.bounds.width ?? 0,
@@ -454,6 +456,8 @@ final class SeyalHostComponentTests: XCTestCase {
             "C04 selection fill must span the left panel, not hug label intrinsic width"
         )
 
+        // The advanced terminal inventory remains available through the
+        // Rust command palette; it no longer occupies permanent chrome.
         view.showTabs()
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tabs-heading"))
         XCTAssertNil(
@@ -482,10 +486,7 @@ final class SeyalHostComponentTests: XCTestCase {
     func testLeftTabsModeProjectsPaneLocalTerminalTabs() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        XCTAssertEqual(
-            (accessibilityChild(view, identifier: "seyal-left-tabs") as? NSButton)?.title,
-            "Tabs"
-        )
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"))
         view.showTabs()
         XCTAssertNil(
             accessibilityChild(view, identifier: "seyal-pane-0"),
@@ -644,6 +645,40 @@ final class SeyalHostComponentTests: XCTestCase {
         none = seyal_app_leave_offer(handle)
         XCTAssertEqual(none.kind, UInt16(SEYAL_APP_LEAVE_OFFER_NONE.rawValue))
         XCTAssertEqual(seyal_app_shell(handle).workspace_count, 1, "No must not mint a Workspace")
+    }
+
+    @MainActor
+    func testWorkspaceLayoutRowsSelectOuterTabsWithoutSecondTabStrip() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        view.reconcileChrome()
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layout-0"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-layout-1"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"))
+        let handle = view.pane.appHandle
+
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), 0)
+        view.reconcileChrome()
+        XCTAssertEqual(seyal_app_shell(handle).tab_count, 2)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"))
+
+        let first = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-layout-0") as? IdentityButton
+        )
+        let second = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-layout-1") as? IdentityButton
+        )
+        XCTAssertNotEqual(first.idLo, second.idLo)
+        view.selectTab(first)
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.active_tab_lo, first.idLo)
+        XCTAssertEqual(shell.active_tab_hi, first.idHi)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-tab-strip"),
+                     "layout navigation must not become a second terminal strip")
     }
 
     @MainActor
@@ -1336,7 +1371,9 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertGreaterThan(host.frame.width, 0)
         XCTAssertGreaterThan(host.frame.height, 0)
         XCTAssertTrue(host.isAccessibilityEnabled())
-        XCTAssertEqual(host.accessibilityRole(), .group)
+        // Unfocused live leaves are focus hit-targets (AXButton), not groups —
+        // matching SecondaryLivePaneHost.refreshInputOwnershipChrome.
+        XCTAssertEqual(host.accessibilityRole(), .button)
         XCTAssertEqual(host.accessibilityLabel(), "Focus secondary terminal pane")
         XCTAssertTrue(layout.hitTest(NSPoint(x: 375, y: 150)) === host)
     }
@@ -2042,6 +2079,61 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(a, "Pane 1")
         XCTAssertEqual(b, "Pane 2")
         XCTAssertNotEqual(a, b)
+    }
+
+    @MainActor
+    func testPaneTerminalTabsUseBorderlessSelectedSeamsAndStableCloseSlots() throws {
+        let strip = PaneTerminalTabStrip(
+            paneLo: 4,
+            paneHi: 0,
+            paneTitle: "Pane 4",
+            tabs: [
+                PaneLayoutView.TerminalTab(lo: 10, hi: 0, selected: true),
+                PaneLayoutView.TerminalTab(lo: 11, hi: 0, selected: false),
+            ],
+            focused: true,
+            canSplit: true,
+            canClosePane: true
+        )
+        let first = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-10") as? NSButton
+        )
+        let second = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-11") as? NSButton
+        )
+        let activeClose = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-10-close") as? NSButton
+        )
+        let inactiveClose = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-11-close") as? NSButton
+        )
+        XCTAssertFalse(first.isBordered, "terminal tabs are not recessed cards")
+        XCTAssertFalse(second.isBordered, "inactive tabs retain quiet typography")
+        XCTAssertEqual(first.accessibilityValue() as? String, "selected")
+        XCTAssertEqual(second.accessibilityValue() as? String, "")
+        XCTAssertEqual(activeClose.alphaValue, 1)
+        XCTAssertTrue(activeClose.isEnabled)
+        XCTAssertEqual(inactiveClose.alphaValue, 0)
+        XCTAssertFalse(inactiveClose.isEnabled)
+        XCTAssertEqual(PaneTerminalTabStrip.height, 30, "one non-wrapping row")
+        strip.apply(theme: NativeThemeRealization.theme(for: NSAppearance(named: .darkAqua)!))
+        XCTAssertNotNil(strip.layer?.backgroundColor, "tabs use Rust-resolved utility surface")
+
+        let unfocused = PaneTerminalTabStrip(
+            paneLo: 5,
+            paneHi: 0,
+            paneTitle: "Pane 5",
+            tabs: [PaneLayoutView.TerminalTab(lo: 12, hi: 0, selected: true)],
+            focused: false,
+            canSplit: false,
+            canClosePane: true
+        )
+        let inactivePaneClose = try XCTUnwrap(
+            accessibilityChild(unfocused, identifier: "seyal-terminal-tab-0-12-close") as? NSButton
+        )
+        XCTAssertFalse(inactivePaneClose.isEnabled)
+        XCTAssertEqual(inactivePaneClose.alphaValue, 0,
+                       "unfocused pane close chrome must recede without shifting its tab row")
     }
 
     func testExplicitRuntimeDirectoryPrepRepairsLaxModeAndCreatesParents() throws {
@@ -4569,7 +4661,6 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         defer { pane.onProductChanged = originalProductChanged }
 
-        let connected = expectation(description: "Flow projection connected for scroll invariant")
         var connectedOnce = false
         var didRetryExhaustedRecovery = false
         let checkConnected = {
@@ -4588,7 +4679,6 @@ final class SeyalHostComponentTests: XCTestCase {
                     == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
                 {
                     connectedOnce = true
-                    connected.fulfill()
                     return
                 }
             }
@@ -4601,39 +4691,23 @@ final class SeyalHostComponentTests: XCTestCase {
             }
         }
         observeProductChange = checkConnected
-        let connectPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
-            checkConnected()
-        }
-        defer { connectPoll.invalidate() }
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
-        checkConnected()
+        // Stay on the test MainActor. Timer/@Sendable callbacks cannot touch
+        // AppKit/Rust handles or instance helpers without isolation errors.
         // SelectRestingPresentation needs a bound authority; latch Flow once connected.
-        let flowLatch = expectation(description: "Raw resting latched to Flow")
-        var latchedFlow = false
-        // Timer.scheduledTimer closures are @Sendable; hop back to MainActor
-        // because the timer is scheduled on the test's main run loop (#1453).
-        let latchPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
-            MainActor.assumeIsolated {
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline, !connectedOnce {
+            checkConnected()
+            if !connectedOnce, view.terminalBridgeIsConnected {
                 let snap = seyal_app_snapshot(pane.appHandle)
-                if snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
-                    if !latchedFlow {
-                        latchedFlow = true
-                        flowLatch.fulfill()
-                    }
-                    return
+                if snap.eligibility != UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+                    _ = optInFlow(pane.appHandle)
                 }
-                if view.terminalBridgeIsConnected {
-                    _ = self.optInFlow(pane.appHandle)
-                }
-                checkConnected()
             }
+            try await Task.sleep(nanoseconds: 250_000_000)
         }
-        defer { latchPoll.invalidate() }
-        await fulfillment(of: [connected, flowLatch], timeout: 30)
-        guard connectedOnce, latchedFlow else { return }
-        connectPoll.invalidate()
-        latchPoll.invalidate()
+        guard connectedOnce else { return }
 
         // Wait until prepared geometry/cursor stop moving so a later PTY
         // frame cannot be mistaken for scroll mutation.
