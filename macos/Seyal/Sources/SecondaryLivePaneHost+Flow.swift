@@ -67,8 +67,13 @@ extension SecondaryLivePaneHost {
             let promptRow = seyal_app_copy(appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
             let lines = outputLineCount(projection: projection)
+            let cardKey = PaneBlockKey(
+                paneID: surface.paneID,
+                displayHandle: displayHandle,
+                blockID: blockID
+            )
             let card = CommandBlockStackReconciler.reuseOrCreate(
-                blockID: blockID,
+                key: cardKey,
                 previousCards: previousCards,
                 stack: blocks
             ) {
@@ -112,13 +117,13 @@ extension SecondaryLivePaneHost {
                 )
             }
             if blockID != 0 {
-                blockCards[blockID] = card
+                blockCards[cardKey] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
             }
         }
         CommandBlockStackReconciler.removeStale(
             previousCards: previousCards,
-            retainedBlockIDs: Set(blockCards.keys),
+            retainedKeys: Set(blockCards.keys),
             from: blocks
         )
         // Bridgeless surfaces: discard through the borrowed window bridge,
@@ -211,7 +216,7 @@ extension SecondaryLivePaneHost {
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
         for index in 0..<Int(composerSnap.block_count) {
             let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
-            guard row.id_lo != 0, let card = blockCards[row.id_lo] else { continue }
+            guard row.id_lo != 0, let card = blockCards[blockCardKey(row.id_lo)] else { continue }
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
         }
     }
@@ -224,7 +229,7 @@ extension SecondaryLivePaneHost {
         let cellHeight = surface.terminalPresentationCellSize().height
         for index in 0..<Int(composerSnap.block_count) {
             let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
-            guard row.id_lo != 0, let card = blockCards[row.id_lo] else { continue }
+            guard row.id_lo != 0, let card = blockCards[blockCardKey(row.id_lo)] else { continue }
             let projection = seyal_app_block_projection_for_pane(
                 appHandle,
                 paneLo,
@@ -305,7 +310,7 @@ extension SecondaryLivePaneHost {
         historyProjectionRequests.receive(key, status: range.status)
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
-        if let card = blockCards[range.blockID] {
+        if let card = blockCards[blockCardKey(range.blockID)] {
             card.setBodyTranscript(range.transcriptText)
             card.setOutputLines(
                 CommandBlockView.visibleOutputLineCount(range.transcriptText),
@@ -394,12 +399,12 @@ extension SecondaryLivePaneHost {
 
     private func collectBlockOutputRegions() -> [NativeTranscriptRegion] {
         var regions: [NativeTranscriptRegion] = []
-        for (blockID, card) in blockCards {
+        for (key, card) in blockCards {
             let clip = card.body.convert(card.body.bounds, to: surface)
             guard clip.width > 0, clip.height > 0 else { continue }
             regions.append(
                 NativeTranscriptRegion(
-                    id: blockID,
+                    id: key.blockID,
                     displayHandle: displayHandle,
                     origin: clip.origin,
                     clip: clip
@@ -407,6 +412,10 @@ extension SecondaryLivePaneHost {
             )
         }
         return regions
+    }
+
+    private func blockCardKey(_ blockID: UInt64) -> PaneBlockKey {
+        PaneBlockKey(paneID: surface.paneID, displayHandle: displayHandle, blockID: blockID)
     }
 
     /// Mirrors `ProductChromeHostView+Blocks.syncTranscriptDocumentSize`: when

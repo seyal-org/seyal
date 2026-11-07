@@ -1159,6 +1159,39 @@ final class SeyalHostComponentTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testSecondaryBlockReconciliationDoesNotReuseSameIDAcrossTerminalTabs() {
+        let stack = NSStackView()
+        let paneID = "pane-tab-reconciliation"
+        let tabOneKey = PaneBlockKey(paneID: paneID, displayHandle: 11, blockID: 1)
+        let tabTwoKey = PaneBlockKey(paneID: paneID, displayHandle: 22, blockID: 1)
+        let tabOneCard = CommandBlockView(
+            prompt: "$", title: "tab-one", detail: "", state: 0,
+            cellHeight: 14, lines: 1, session: false
+        )
+        stack.addArrangedSubview(tabOneCard)
+
+        let tabTwoCard = CommandBlockStackReconciler.reuseOrCreate(
+            key: tabTwoKey,
+            previousCards: [tabOneKey: tabOneCard],
+            stack: stack
+        ) {
+            CommandBlockView(
+                prompt: "$", title: "tab-two", detail: "", state: 0,
+                cellHeight: 14, lines: 1, session: false
+            )
+        }
+        CommandBlockStackReconciler.removeStale(
+            previousCards: [tabOneKey: tabOneCard],
+            retainedKeys: [tabTwoKey],
+            from: stack
+        )
+
+        XCTAssertFalse(tabOneCard === tabTwoCard)
+        XCTAssertFalse(stack.arrangedSubviews.contains(where: { $0 === tabOneCard }))
+        XCTAssertTrue(stack.arrangedSubviews.contains(where: { $0 === tabTwoCard }))
+    }
+
     /// #1424: late 0→bound display-handle must keep the host and re-sync
     /// projections (split often installs hosts before Controller bind).
     @MainActor
@@ -1956,6 +1989,59 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(
             surface.renderer.historyRegions[1]?.buffer === preparedHistoryBuffer,
             "moving an unchanged Block must preserve its prepared Metal buffer"
+        )
+    }
+
+    @MainActor
+    func testIdenticalTranscriptGeometryPreparesHistoryThatArrivesLater() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-late-history-frame"
+        )
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        func frame(revision: UInt64) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: revision,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: NSPoint(x: 0, y: 10),
+                        clip: NSRect(x: 0, y: 10, width: 320, height: 24)
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+
+        surface.renderer.setPresentationPlan(.flow())
+        surface.activateTranscriptDisplayHandle(11)
+        surface.setTranscriptFrame(frame(revision: 1))
+        XCTAssertNil(surface.renderer.historyRegions[1])
+
+        // Runtime history can arrive after the first card-geometry publish.
+        // Its subsequent frame has identical geometry, but must still prepare
+        // the newly retained cells for the existing Block clip.
+        surface.retainHistoryRange(range)
+        surface.setTranscriptFrame(frame(revision: 2))
+
+        XCTAssertEqual(
+            surface.inspectFlowPaint().historyInstanceCount,
+            1,
+            "same-geometry republishes must prepare history ranges that arrived since the prior frame"
         )
     }
 

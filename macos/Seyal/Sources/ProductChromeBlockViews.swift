@@ -292,6 +292,34 @@ final class CommandBlockView: NSView {
 @MainActor
 enum CommandBlockStackReconciler {
     static func reuseOrCreate(
+        key: PaneBlockKey,
+        previousCards: [PaneBlockKey: CommandBlockView],
+        stack: NSStackView,
+        make: @MainActor () -> CommandBlockView
+    ) -> CommandBlockView {
+        if let existing = previousCards[key] {
+            if !stack.arrangedSubviews.contains(where: { $0 === existing }) {
+                stack.addArrangedSubview(existing)
+            }
+            return existing
+        }
+        let card = make()
+        stack.addArrangedSubview(card)
+        return card
+    }
+
+    static func removeStale(
+        previousCards: [PaneBlockKey: CommandBlockView],
+        retainedKeys: Set<PaneBlockKey>,
+        from stack: NSStackView
+    ) {
+        for (key, card) in previousCards where !retainedKeys.contains(key) {
+            stack.removeArrangedSubview(card)
+            card.removeFromSuperview()
+        }
+    }
+
+    static func reuseOrCreate(
         blockID: UInt64,
         previousCards: [UInt64: CommandBlockView],
         stack: NSStackView,

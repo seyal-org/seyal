@@ -71,7 +71,7 @@ final class ProductChromeHostView: NSView {
     var isReconcilingChrome = false
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
     var chromeNeedsReconcile = false
-    var blockCards: [UInt64: CommandBlockView] = [:]
+    var blockCards: [PaneBlockKey: CommandBlockView] = [:]
     var composerDockConstraints: [NSLayoutConstraint] = []
     var transcriptRelayBottomConstraint: NSLayoutConstraint?
     let transcriptTopSpacer = NSView(frame: .zero)

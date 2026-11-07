@@ -229,8 +229,9 @@ extension ProductChromeHostView {
             let promptRow = seyal_app_copy(pane.appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
             let lines = outputLineCount(projection: projection)
+            let cardKey = blockCardKey(blockID)
             let card = CommandBlockStackReconciler.reuseOrCreate(
-                blockID: blockID,
+                key: cardKey,
                 previousCards: previousCards,
                 stack: blocks
             ) {
@@ -273,13 +274,13 @@ extension ProductChromeHostView {
                 self?.selectBlock(idLo: idLo, idHi: idHi, deselect: selected)
             }
             if blockID != 0 {
-                blockCards[blockID] = card
+                blockCards[cardKey] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
             }
         }
         CommandBlockStackReconciler.removeStale(
             previousCards: previousCards,
-            retainedBlockIDs: Set(blockCards.keys),
+            retainedKeys: Set(blockCards.keys),
             from: blocks
         )
         pane.inputSurface.discardHistoryRequests(except: retained)
@@ -313,7 +314,7 @@ extension ProductChromeHostView {
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         let target = relayTarget.mode == 2 && relayTarget.generation != 0
-            ? blockCards[relayTarget.blockID] : nil
+            ? blockCards[blockCardKey(relayTarget.blockID)] : nil
         guard !direct, relayTarget.blockID != 0, let target else {
             setRelayTranscriptViewportBottomAnchored(false)
             if composerInlineBlockID != 0 {
@@ -374,7 +375,7 @@ extension ProductChromeHostView {
     func positionInlineComposerAtCurrentCursor() {
         guard relayTarget.mode == 2,
               relayTarget.blockID != 0,
-              let card = blockCards[relayTarget.blockID],
+              let card = blockCards[blockCardKey(relayTarget.blockID)],
               let frame = pane.inputSurface.terminalCurrentFrame()
         else { return }
         let composer = seyal_app_composer(pane.appHandle)
@@ -443,7 +444,7 @@ extension ProductChromeHostView {
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
             guard row.id_lo != 0,
                   projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
-                  let card = blockCards[row.id_lo]
+                  let card = blockCards[blockCardKey(row.id_lo)]
             else { continue }
             card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
         }
@@ -523,7 +524,7 @@ extension ProductChromeHostView {
         guard range.sourceDisplayHandle == 0
             || range.sourceDisplayHandle == activeBlockDisplayHandle
         else { return }
-        if let card = blockCards[range.blockID], !range.rows.isEmpty {
+        if let card = blockCards[blockCardKey(range.blockID)], !range.rows.isEmpty {
             card.setBodyTranscript(range.transcriptText)
             card.setOutputLines(
                 CommandBlockView.visibleOutputLineCount(range.transcriptText),
@@ -623,18 +624,26 @@ extension ProductChromeHostView {
 
     private func collectBlockOutputRegions(surface: InteractiveMetalSurfaceView) -> [NativeTranscriptRegion] {
         var regions: [NativeTranscriptRegion] = []
-        for (blockID, card) in blockCards {
+        for (key, card) in blockCards {
             let clip = card.body.convert(card.body.bounds, to: surface)
             guard clip.width > 0, clip.height > 0 else { continue }
             regions.append(NativeTranscriptRegion(
-                id: blockID,
+                id: key.blockID,
                 displayHandle: activeBlockDisplayHandle,
                 origin: clip.origin,
                 clip: clip,
-                suppressesCursor: blockID == relayTarget.blockID && relayTarget.mode == 2
+                suppressesCursor: key.blockID == relayTarget.blockID && relayTarget.mode == 2
             ))
         }
         return regions
+    }
+
+    private func blockCardKey(_ blockID: UInt64) -> PaneBlockKey {
+        PaneBlockKey(
+            paneID: pane.inputSurface.paneID,
+            displayHandle: activeBlockDisplayHandle,
+            blockID: blockID
+        )
     }
 
     /// NSScrollView scrolls against `documentView.frame`. `syncTranscriptDocumentSize`

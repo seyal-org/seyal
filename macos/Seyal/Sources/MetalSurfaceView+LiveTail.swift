@@ -22,8 +22,18 @@ extension MetalSurfaceView {
     }
     // Host polling and projection refreshes can publish a newer frame revision
     // without changing any Block geometry. Do not dirty the drawable for those
-    // no-op publications.
-    guard lastTranscriptFrameRegions != frame.regions else { return }
+    // no-op publications. History replies can arrive after the first geometry
+    // publish, though; allow the identical frame through until each retained
+    // range has a prepared renderer region.
+    let hasUnpreparedHistory = frame.regions.contains { region in
+      let key = PaneBlockKey(
+        paneID: paneID,
+        displayHandle: region.displayHandle,
+        blockID: region.id
+      )
+      return historyRanges[key] != nil && renderer.historyRegions[region.id] == nil
+    }
+    guard lastTranscriptFrameRegions != frame.regions || hasUnpreparedHistory else { return }
     lastTranscriptFrameRegions = frame.regions
     let regionIDs = Set(frame.regionIDs)
     // Do not drop `historyRanges` here when a body clip is briefly omitted —

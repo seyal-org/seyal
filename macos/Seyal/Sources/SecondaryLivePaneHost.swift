@@ -57,7 +57,7 @@ final class SecondaryLivePaneHost: NSView {
     /// `syncTranscriptDocumentSize`, never by NSStackView distribution.
     let transcriptLeadingSpacer = NSView()
     var transcriptLeadingSpacerHeight: NSLayoutConstraint!
-    var blockCards: [UInt64: CommandBlockView] = [:]
+    var blockCards: [PaneBlockKey: CommandBlockView] = [:]
     var lastBlockCount = 0
     var followingLiveEnd = true
     var isProgrammaticTranscriptScroll = false
