@@ -20,6 +20,11 @@ extension MetalSurfaceView {
     if frame.regions.isEmpty, !historyRanges.isEmpty {
       return
     }
+    // Host polling and projection refreshes can publish a newer frame revision
+    // without changing any Block geometry. Do not dirty the drawable for those
+    // no-op publications.
+    guard lastTranscriptFrameRegions != frame.regions else { return }
+    lastTranscriptFrameRegions = frame.regions
     let regionIDs = Set(frame.regionIDs)
     // Do not drop `historyRanges` here when a body clip is briefly omitted —
     // that erased AX transcript + Metal source data after clear→exit while
@@ -27,12 +32,14 @@ extension MetalSurfaceView {
     // disconnect retain policy.
     renderer.removeHistoryRegions(except: regionIDs)
     renderer.setHistoryRegionOrder(frame.regionIDs)
-    renderer.setTranscriptRegions(liveTailPixelRegions(in: frame))
-    // Body intrinsic growth moves every following Block. Re-encode all
-    // retained canonical ranges against this complete frame so no region
-    // retains its previous clip or origin. History keeps AppKit surface
-    // coordinates (convert already matches the shader); live-tail alone
-    // uses top-left pixel clips.
+    let pixelRegions = liveTailPixelRegions(in: frame)
+    renderer.setTranscriptRegions(pixelRegions)
+    let pixelRegionsByID = Dictionary(uniqueKeysWithValues: pixelRegions.map { ($0.id, $0) })
+    // New Blocks move earlier cards as the transcript grows. Their history
+    // cells are already prepared in local coordinates, so update only each
+    // draw origin and scissor instead of allocating/rebuilding every buffer.
+    // A missing buffer means this is the first geometry publish after a
+    // display-handle switch or renderer reset; restore it from retained rows.
     for region in frame.regions {
       guard
         let range = historyRanges[
@@ -43,6 +50,15 @@ extension MetalSurfaceView {
           )
         ]
       else {
+        continue
+      }
+      if let pixelRegion = pixelRegionsByID[region.id],
+         renderer.setHistoryRegionGeometry(
+           id: region.id,
+           origin: pixelRegion.origin,
+           clip: pixelRegion.clip
+         )
+      {
         continue
       }
       renderHistoryRange(range, region: region)

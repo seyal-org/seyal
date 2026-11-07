@@ -64,6 +64,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var lastBridgeError: Int32?
   var lastRenderError: Error?
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
+  /// Latest geometry installed for the active Flow transcript. Frame revisions
+  /// can advance for unrelated runtime updates; identical regions need no new
+  /// Metal history preparation.
+  var lastTranscriptFrameRegions: [NativeTranscriptRegion]?
   private(set) var transcriptDisplayHandle: UInt64 = 0
   var lastProposedGeometry = CGRect.null
   var proposingGeometry = false
@@ -251,6 +255,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   func activateTranscriptDisplayHandle(_ handle: UInt64) {
     guard handle != transcriptDisplayHandle else { return }
     transcriptDisplayHandle = handle
+    lastTranscriptFrameRegions = nil
     renderer.removeHistoryRegions(except: [])
     renderer.clearLiveTailPresentation()
     hasRetainedHistoryPresentation = historyRanges.keys.contains {
@@ -678,6 +683,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // Drop Metal history *buffers* (and any deferred prepares) too — keep
     // historyRanges rows so chrome can re-encode against settled AppKit clips.
     clearLiveTailPresentation()
+    lastTranscriptFrameRegions = nil
     renderer.removeHistoryRegions(except: [])
     cancelPresentationRetries()
     resetPreparationRecovery()

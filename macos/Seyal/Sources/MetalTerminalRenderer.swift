@@ -436,23 +436,10 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         for (rowIndex, row) in historyRange.rows.enumerated() {
             for (columnIndex, cell) in row.prefix(512).enumerated() {
                 let origin = SIMD2<Float>(
-                    Float(region.origin.x) + Float(columnIndex * metrics.cellWidth),
-                    Float(region.origin.y) + Float(rowIndex * metrics.cellHeight)
+                    Float(columnIndex * metrics.cellWidth),
+                    Float(rowIndex * metrics.cellHeight)
                 )
                 let size = SIMD2<Float>(Float(metrics.cellWidth), Float(metrics.cellHeight))
-                let painted = CGRect(
-                    x: CGFloat(origin.x),
-                    y: CGFloat(origin.y),
-                    width: CGFloat(size.x),
-                    height: CGFloat(size.y)
-                )
-                // Flow owns no full-grid canvas. Do not even prepare cells
-                // outside the Block body clip: Metal scissoring prevents
-                // pixels from escaping, but retaining those instances both
-                // wastes hot-path work and violates the observable contract.
-                guard region.clip.intersects(painted.insetBy(dx: 0.5, dy: 0.5)) else {
-                    continue
-                }
                 var flags: UInt32 = 0
                 var uvRect = SIMD4<Float>(repeating: 0)
                 var atlasSlice: UInt32 = 0
@@ -503,6 +490,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         historyRegions[historyRange.blockID] = HistoryRenderRegion(
             buffer: buffer,
             instanceCount: outputIndex,
+            origin: SIMD2<Float>(Float(region.origin.x), Float(region.origin.y)),
             clip: region.clip
         )
         needsPresent = instanceBuffer != nil || !presentationPlan.drawsLiveGrid
@@ -575,7 +563,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             for index in 0..<region.instanceCount where pointer[index].size.x > 0 && pointer[index].size.y > 0 {
                 historyInstanceCount += 1
                 regionPainted += 1
-                let origin = pointer[index].origin
+                let origin = pointer[index].origin + region.origin
                 let size = pointer[index].size
                 let painted = CGRect(
                     x: CGFloat(origin.x),

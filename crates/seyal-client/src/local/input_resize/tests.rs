@@ -453,6 +453,14 @@ fn runtime_input_backpressure_is_visible_without_fatal_disconnect() {
     assert_eq!(
         classify_server_error(ErrorMessage {
             error_code: ErrorCode::CapacityExceeded as u16,
+            offending_message_type: MessageType::Paste as u16,
+            detail_code: 0,
+        }),
+        Ok(Some(InputAdmissionFailure::CommitTooLarge))
+    );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::CapacityExceeded as u16,
             offending_message_type: MessageType::BlockTimeline as u16,
             detail_code: 0,
         }),

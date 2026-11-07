@@ -351,9 +351,14 @@ final class SecondaryLivePaneHost: NSView {
     }
 
     @objc private func transcriptBoundsDidChange(_ note: Notification) {
-        guard !isProgrammaticTranscriptScroll else { return }
-        followingLiveEnd = isNearLiveEnd()
-        rememberTranscriptScrollState()
+        // History instance origins are baked in surface pixels; scroll must
+        // re-publish clips/origins even for programmatic follow-to-live-end /
+        // offset restore, or Metal history sticks at the pre-scroll geometry
+        // (#1379 / stuck glyphs). Only the follow-tail latch is gated.
+        if !isProgrammaticTranscriptScroll {
+            followingLiveEnd = isNearLiveEnd()
+            rememberTranscriptScrollState()
+        }
         publishBlockOutputFrame()
     }
 
@@ -585,6 +590,11 @@ final class SecondaryLivePaneHost: NSView {
             surface.applyRendererPresentation(.fullPane(mode))
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])
+            // Wiping Metal/history caches must also clear the settled request
+            // book. Otherwise return-to-Flow rebuilds skip HistoryRangeRequest
+            // for already-settled Block keys and leave permanently blank bodies
+            // (#1379 adversarial review B2).
+            historyProjectionRequests.discard(forDisplayHandle: displayHandle)
             composer.isHidden = true
             clearPreservedDocumentHeight()
             surface.preserveRawScrollbackAfterPresentationChange(eligibility: eligibility)

@@ -1935,6 +1935,68 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testIdenticalTranscriptGeometryDoesNotReprepareHistory() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-stable-transcript-frame"
+        )
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        func frame(revision: UInt64, clip: NSRect) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: revision,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: clip.origin,
+                        clip: clip
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+        let clip = NSRect(x: 0, y: 0, width: 320, height: 120)
+        surface.renderer.setPresentationPlan(.flow())
+        surface.retainHistoryRange(range)
+        surface.activateTranscriptDisplayHandle(11)
+        surface.setTranscriptFrame(frame(revision: 1, clip: clip))
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, 1)
+        let preparedHistoryBuffer = try XCTUnwrap(surface.renderer.historyRegions[1]?.buffer)
+
+        surface.renderer.needsPresent = false
+        surface.setTranscriptFrame(frame(revision: 2, clip: clip))
+        XCTAssertFalse(
+            surface.renderer.needsPresent,
+            "a new frame revision with unchanged Block geometry must not reprepare history"
+        )
+
+        surface.setTranscriptFrame(
+            frame(revision: 3, clip: NSRect(x: 0, y: 10, width: 320, height: 120))
+        )
+        XCTAssertTrue(
+            surface.renderer.needsPresent,
+            "changed Block geometry must still prepare and present the repositioned history"
+        )
+        XCTAssertTrue(
+            surface.renderer.historyRegions[1]?.buffer === preparedHistoryBuffer,
+            "moving an unchanged Block must preserve its prepared Metal buffer"
+        )
+    }
+
+    @MainActor
     func testSecondaryPaneReconcilesWhenItsControllerChanges() throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal unavailable")
@@ -2739,6 +2801,84 @@ final class SeyalHostComponentTests: XCTestCase {
     /// #1379: Block cards must own clicks for selection but forward wheel
     /// events to the transcript NSScrollView so long Flow output can scroll.
     @MainActor
+    func testMultipaneBlockProjectionReusesExistingCardViews() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        for name in ["ProductChromeHostView+Blocks.swift", "SecondaryLivePaneHost+Flow.swift"] {
+            let source = sourceRoot.appendingPathComponent(name)
+            let text = try String(contentsOf: source, encoding: .utf8)
+            let rebuildStart = try XCTUnwrap(text.range(of: "func rebuildBlocks()"))
+            let rebuildBody = text[rebuildStart.lowerBound...]
+            XCTAssertTrue(
+                rebuildBody.contains("CommandBlockStackReconciler.reuseOrCreate"),
+                "\(name) must update a Block view in place when Runtime republishes its projection"
+            )
+            XCTAssertTrue(
+                rebuildBody.contains("CommandBlockStackReconciler.removeStale"),
+                "\(name) must remove only Block views whose IDs left the projection"
+            )
+        }
+    }
+
+    @MainActor
+    func testBlockStackReconcilerPreservesIdentityAndRemovesOnlyStaleCards() {
+        let stack = NSStackView()
+        let original = CommandBlockView(
+            prompt: "$", title: "echo one", detail: "", state: 0,
+            cellHeight: 16, lines: 1, session: false
+        )
+        stack.addArrangedSubview(original)
+        var created = 0
+
+        let reused = CommandBlockStackReconciler.reuseOrCreate(
+            blockID: 1,
+            previousCards: [1: original],
+            stack: stack
+        ) {
+            created += 1
+            return CommandBlockView(
+                prompt: "$", title: "replacement", detail: "", state: 0,
+                cellHeight: 16, lines: 1, session: false
+            )
+        }
+        XCTAssertTrue(reused === original)
+        XCTAssertEqual(created, 0, "projection updates must keep the existing card object")
+        XCTAssertEqual(stack.arrangedSubviews.count, 1, "reusing a card must not detach or duplicate it")
+
+        let next = CommandBlockStackReconciler.reuseOrCreate(
+            blockID: 2,
+            previousCards: [1: original],
+            stack: stack
+        ) {
+            created += 1
+            return CommandBlockView(
+                prompt: "$", title: "echo two", detail: "", state: 0,
+                cellHeight: 16, lines: 1, session: false
+            )
+        }
+        CommandBlockStackReconciler.removeStale(
+            previousCards: [1: original],
+            retainedBlockIDs: [1, 2],
+            from: stack
+        )
+        XCTAssertEqual(created, 1)
+        XCTAssertTrue(original.superview === stack)
+        XCTAssertTrue(next.superview === stack)
+
+        CommandBlockStackReconciler.removeStale(
+            previousCards: [1: original, 2: next],
+            retainedBlockIDs: [2],
+            from: stack
+        )
+        XCTAssertNil(original.superview)
+        XCTAssertTrue(next.superview === stack)
+        XCTAssertEqual(stack.arrangedSubviews.count, 1)
+    }
+
+    @MainActor
     func testCommandBlockForwardsScrollWheelToTranscript() {
         let sourceRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -3066,6 +3206,62 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(continued.begin(key), "a truncated reply must not race its continuation")
         continued.receive(partialReply, status: 0)
         XCTAssertFalse(continued.begin(key), "the completed continuation settles the original projection")
+    }
+
+    /// #1379: Raw/TUI wipe of Metal history must clear settled request keys so
+    /// return-to-Flow can re-fetch Block bodies instead of painting blank cards.
+    func testRawOrTuiHistoryWipeClearsSettledProjectionRequests() {
+        var requests = HistoryProjectionRequestBook()
+        let key = HistoryProjectionRequestKey(
+            displayHandle: 33,
+            blockID: 9,
+            startLine: 1,
+            endLine: 40
+        )
+        XCTAssertTrue(requests.begin(key))
+        requests.complete(key)
+        XCTAssertFalse(requests.begin(key), "settled keys stay suppressed until wiped")
+        requests.discard(forDisplayHandle: 33)
+        XCTAssertTrue(
+            requests.begin(key),
+            "discard after Raw/TUI presentation wipe must allow a fresh HistoryRangeRequest"
+        )
+    }
+
+    /// #1379: intentional history scroll survives a secondary rebuildBlocks pass.
+    @MainActor
+    func testSecondaryRebuildBlocksPreservesScrolledOffsetAwayFromLiveEnd() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        layout.appHandle = seyal_app_create()
+        defer { seyal_app_destroy(layout.appHandle) }
+        let region = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 0,
+            rect: CGRect(x: 0, y: 0, width: 1, height: 1),
+            focused: true, live: true, title: "A"
+        )
+        layout.apply([region], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        let host = try XCTUnwrap(layout.presentationHost(paneLo: 1, paneHi: 0))
+        host.transcript.setFrameSize(NSSize(width: 320, height: 280))
+        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
+        host.setTranscriptDocumentOffsetY(320)
+        let before = host.transcriptDocumentOffsetY
+        XCTAssertGreaterThan(before, 200)
+        XCTAssertFalse(host.followingLiveEnd)
+
+        host.rebuildBlocks()
+        layout.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            host.transcriptDocumentOffsetY,
+            before,
+            accuracy: 1,
+            "rebuildBlocks must restore intentional scroll away from live end"
+        )
+        XCTAssertFalse(host.followingLiveEnd)
     }
 
     /// The primary readiness source polls `clientHandle`; focus selection must

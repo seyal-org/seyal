@@ -220,6 +220,49 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// Repeated command completion must leave previously rendered Block bodies
+    /// present while the transcript publishes new geometry for the latest card.
+    func testSequentialCommandsKeepEarlierBlockBodiesDuringTranscriptRefresh() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+
+        var completedMarkers: [String] = []
+        for index in 1...4 {
+            let marker = "SEQUENTIAL_REFRESH_\(index)_\(String(UUID().uuidString.prefix(6)))"
+            submitComposerCommand(
+                "printf '\(marker)\\n'",
+                in: app,
+                blockMarker: marker
+            )
+
+            let block = anyPaneBlock(in: app, containing: marker)
+            XCTAssertTrue(block.waitForExistence(timeout: 8))
+            waitForBodyMarker(
+                blockBody(for: block, in: app, expectedMarker: marker),
+                marker: marker
+            )
+            completedMarkers.append(marker)
+
+            for earlierMarker in completedMarkers.dropLast() {
+                let earlier = anyPaneBlock(in: app, containing: earlierMarker)
+                XCTAssertTrue(earlier.waitForExistence(timeout: 5))
+                waitForBodyMarker(
+                    blockBody(for: earlier, in: app, expectedMarker: earlierMarker),
+                    marker: earlierMarker,
+                    timeout: 5,
+                    message: "adding a new Block must retain earlier transcript content"
+                )
+            }
+        }
+
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "sequential-block-transcript-refresh"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// A live Flow command must remain a Block when its pane becomes a
     /// secondary pane during a split. Repeated focus changes must keep the
     /// command and streamed output in that pane's transcript.

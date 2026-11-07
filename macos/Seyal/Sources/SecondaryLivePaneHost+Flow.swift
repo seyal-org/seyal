@@ -28,10 +28,8 @@ extension SecondaryLivePaneHost {
         let savedOffsetY = savedScrollState.offsetY
         let savedFollowing = savedScrollState.followsLiveEnd
         let savedDocumentHeight = savedScrollState.documentHeight
-        blocks.arrangedSubviews
-            .filter { $0 !== transcriptLeadingSpacer }
-            .forEach { $0.removeFromSuperview() }
-        blockCards.removeAll()
+        let previousCards = blockCards
+        blockCards.removeAll(keepingCapacity: true)
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
         let count = Int(composerSnap.block_count)
         let floorLo = composerSnap.canvas_floor_block_id_lo
@@ -69,15 +67,29 @@ extension SecondaryLivePaneHost {
             let promptRow = seyal_app_copy(appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
             let lines = outputLineCount(projection: projection)
-            let card = CommandBlockView(
+            let card = CommandBlockStackReconciler.reuseOrCreate(
+                blockID: blockID,
+                previousCards: previousCards,
+                stack: blocks
+            ) {
+                CommandBlockView(
+                    prompt: prompt,
+                    title: title,
+                    detail: detail,
+                    state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
+                    cellHeight: cellHeight,
+                    lines: lines,
+                    session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
+                )
+            }
+            card.updatePresentation(
                 prompt: prompt,
                 title: title,
                 detail: detail,
                 state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
-                cellHeight: cellHeight,
-                lines: lines,
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
+            card.setOutputLines(lines, cellHeight: cellHeight)
             // Focused hosts use the primary seyal-block-* ids so existing XCUI
             // and host assertions keep working; unfocused stay pane-secondary.
             let prefix = inputOwned ? "seyal-block-" : "seyal-secondary-block-"
@@ -99,12 +111,16 @@ extension SecondaryLivePaneHost {
                     cellHeight: surface.terminalPresentationCellSize().height
                 )
             }
-            blocks.addArrangedSubview(card)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
             }
         }
+        CommandBlockStackReconciler.removeStale(
+            previousCards: previousCards,
+            retainedBlockIDs: Set(blockCards.keys),
+            from: blocks
+        )
         // Bridgeless surfaces: discard through the borrowed window bridge,
         // scoped to this pane's own handle (#1426 residual).
         historyProjectionRequests.retain(blockIDs: retained, forDisplayHandle: displayHandle)

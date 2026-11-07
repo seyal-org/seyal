@@ -240,6 +240,9 @@ struct NativePreparedFrame {
 struct HistoryRenderRegion {
     let buffer: MTLBuffer
     let instanceCount: Int
+    /// Translation applied at draw time. History cells stay in local coordinates;
+    /// moving a Block does not require rewriting a buffer that the GPU may read.
+    let origin: SIMD2<Float>
     let clip: CGRect
 }
 
