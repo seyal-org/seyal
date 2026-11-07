@@ -400,6 +400,12 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 region: region,
                 backingScale: backingScale
             )
+            // History can be the only new presentation state after a command
+            // completes. If the current drawable is still in flight,
+            // renderHistoryRange cannot arm the display link yet. Make GPU
+            // completion request a fresh frame after flushing this prepare so
+            // the completed Block does not wait for the next PTY command.
+            needsCurrentFrameWhenIdle = true
             stats.coalescedFrames &+= 1
             return .deferred
         }
@@ -587,7 +593,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             )
             for index in 0..<region.instanceCount where pointer[index].size.x > 0 && pointer[index].size.y > 0 {
                 liveTailInstanceCount += 1
-                let origin = pointer[index].origin
+                let origin = pointer[index].origin + region.origin
                 let size = pointer[index].size
                 let painted = CGRect(
                     x: CGFloat(origin.x),
@@ -716,6 +722,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             self?.scheduleGPUCompletionDrainWakeup()
         }
         commandBuffer.commit()
+        retireSubmittedLiveTailFallbacks()
         return true
     }
 
@@ -758,6 +765,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         framesInFlight = 1
         needsPresent = false
         stats.submittedFrames &+= 1
+        retireSubmittedLiveTailFallbacks()
         return true
     }
 

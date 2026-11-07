@@ -63,9 +63,13 @@ struct FlowPaintInspection: Equatable, Sendable {
         if mode != .flow {
             return true
         }
+        // A retained history buffer can outlive a narrowed Block after a pane
+        // split. Those source instances are intentionally left untouched; the
+        // encoder applies a per-region Metal scissor, so only pixels escaping
+        // that clip constitute visible leakage. Keep instancesOutsideClips as
+        // a geometry diagnostic instead of treating it as painted output.
         return !liveGridSubmitted
             && !fullGridBackgroundSubmitted
-            && instancesOutsideClips == 0
             && opaquePixelsOutsideClips == 0
             && historyClipsDistinct
     }
