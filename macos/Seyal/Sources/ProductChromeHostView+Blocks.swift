@@ -657,8 +657,12 @@ extension ProductChromeHostView {
                 let visibleBody = card.body.convert(surface.bounds, from: surface)
                     .intersection(card.body.bounds)
                 let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
-                let rowsFromTop = max(card.body.bounds.maxY - visibleBody.maxY, 0)
-                let firstVisibleRow = Int((rowsFromTop / cellHeight).rounded(.down))
+                let firstVisibleRow = HistoryRenderWindow.firstVisibleRow(
+                    documentBounds: card.body.bounds,
+                    visibleBounds: visibleBody,
+                    isFlipped: card.body.isFlipped,
+                    cellHeight: cellHeight
+                )
                 let visibleRowCount = Int((visibleBody.height / cellHeight).rounded(.up))
                 historyRows = HistoryRenderWindow(
                     totalRows: range.rows.count,

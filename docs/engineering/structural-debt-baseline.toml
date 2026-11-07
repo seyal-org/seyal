@@ -42,9 +42,9 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 714
+acknowledged_loc = 718
 issue = 1426
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1426 keeps the current transcript page bounded while preserving full Block scroll extent and invalidates prepared cells when source bounds or display metrics change. Further extraction should follow a cohesive host responsibility split, not this focused correctness fix."
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1426 keeps the current transcript page bounded while preserving full Block scroll extent, invalidates prepared cells when source bounds or display metrics change, and maps flipped Block viewport coordinates to the correct history page. Further extraction should follow a cohesive host responsibility split, not this focused correctness fix."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"

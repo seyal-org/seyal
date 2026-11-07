@@ -5847,6 +5847,37 @@ extension SeyalHostComponentTests {
         let total = 100_000
         let visibleRows = 120
 
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 0, width: 400, height: 1_920),
+                isFlipped: true,
+                cellHeight: 16
+            ),
+            0,
+            "the top of a flipped Block body maps to the oldest history row"
+        )
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 98_080, width: 400, height: 1_920),
+                isFlipped: true,
+                cellHeight: 16
+            ),
+            6_130,
+            "scrolled document coordinates map from the flipped top edge"
+        )
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 0, width: 400, height: 1_920),
+                isFlipped: false,
+                cellHeight: 16
+            ),
+            6_130,
+            "the bottom of an unflipped AppKit body maps to the newest history row"
+        )
+
         let top = HistoryRenderWindow(
             totalRows: total,
             firstVisibleRow: 0,

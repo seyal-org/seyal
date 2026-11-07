@@ -544,7 +544,7 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "m003-real-less-flow-return")
     }
 
-    func testRealTopSessionTakesOverAndReturnsToFlow() throws {
+    func testRealTopSessionReturnsToFlow() throws {
         let topPath = "/usr/bin/top"
         guard FileManager.default.isExecutableFile(atPath: topPath) else {
             throw XCTSkip("top is not installed on this macOS test host")
@@ -554,20 +554,29 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         defer {
-            if app.state == .runningForeground, !composer.isHittable {
+            if app.state == .runningForeground,
+               !composer.isHittable || app.buttons["seyal-running-program-interact"].exists
+            {
+                let interact = app.buttons["seyal-running-program-interact"]
+                if interact.isHittable { interact.click() }
                 if terminal.isHittable { terminal.click() }
                 app.typeText("q")
             }
         }
 
         submitComposerCommand(app, "\(topPath) -o cpu")
-        let enteredTUI = expectation(
-            for: NSPredicate(format: "isHittable == false"), evaluatedWith: composer, handler: nil
+        let interact = app.buttons["seyal-running-program-interact"]
+        let started = expectation(
+            for: NSPredicate(format: "exists == true"), evaluatedWith: interact, handler: nil
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [enteredTUI], timeout: 12), .completed,
-            "interactive top must take over the pane instead of leaving the Flow composer active"
+            XCTWaiter.wait(for: [started], timeout: 12), .completed,
+            "the actual top process must remain available through its running Block"
         )
+        if composer.isHittable {
+            XCTAssertTrue(interact.isHittable, "Flow keeps its composer while top does not enter alternate screen")
+            interact.click()
+        }
         XCTAssertTrue(terminal.waitForExistence(timeout: 5))
         terminal.click()
         app.typeText("q")

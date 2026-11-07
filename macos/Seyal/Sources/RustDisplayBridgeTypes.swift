@@ -252,6 +252,21 @@ struct HistoryRenderWindow: Equatable {
 
   let rows: Range<Int>
 
+  /// Converts an AppKit document-space visible rectangle to the first terminal
+  /// history row. Flipped Block bodies use a top-left origin; ordinary AppKit
+  /// views use a bottom-left origin.
+  static func firstVisibleRow(
+    documentBounds: CGRect,
+    visibleBounds: CGRect,
+    isFlipped: Bool,
+    cellHeight: CGFloat
+  ) -> Int {
+    let distanceFromTop = isFlipped
+      ? visibleBounds.minY - documentBounds.minY
+      : documentBounds.maxY - visibleBounds.maxY
+    return Int((max(distanceFromTop, 0) / max(cellHeight, 1)).rounded(.down))
+  }
+
   init(totalRows: Int, firstVisibleRow: Int, visibleRowCount: Int) {
     let total = max(totalRows, 0)
     let visibleStart = min(max(firstVisibleRow, 0), total)
