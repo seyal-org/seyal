@@ -566,12 +566,13 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
         submitComposerCommand(app, "\(topPath) -o cpu")
         let interact = app.buttons["seyal-running-program-interact"]
-        let started = expectation(
-            for: NSPredicate(format: "exists == true"), evaluatedWith: interact, handler: nil
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [started], timeout: 12), .completed,
-            "the actual top process must remain available through its running Block"
+        let startDeadline = Date().addingTimeInterval(12)
+        while Date() < startDeadline, composer.isHittable, !interact.exists {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(
+            !composer.isHittable || interact.exists,
+            "top must either enter its requested TUI or remain available through its running Block"
         )
         if composer.isHittable {
             XCTAssertTrue(interact.isHittable, "Flow keeps its composer while top does not enter alternate screen")
