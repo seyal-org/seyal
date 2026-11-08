@@ -43,6 +43,9 @@ final class SecondaryLivePaneHost: NSView {
     let paneHi: UInt64
     var onFocus: (() -> Void)?
     var onRetryRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
+    /// Product shortcut consumed in this pane's composer (e.g. ⌘D); host must
+    /// reconcile chrome and re-route first responder (#1464).
+    var onCommandConsumed: (() -> Void)?
     /// Shared window bridge for completed-Block history (surfaces are bridgeless).
     weak var historyBridge: RustDisplayBridge?
     private(set) var displayHandle: UInt64
@@ -157,6 +160,7 @@ final class SecondaryLivePaneHost: NSView {
         }
         composer.onCommandConsumed = { [weak self] in
             self?.reconcileFlowPresentation()
+            self?.onCommandConsumed?()
         }
 
         blocks.orientation = .vertical

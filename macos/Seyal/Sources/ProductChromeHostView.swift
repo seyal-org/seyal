@@ -387,11 +387,21 @@ final class ProductChromeHostView: NSView {
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
         }
+        // Product shortcuts (⌘D split, pane focus, …) mutate Rust then
+        // reconcile. Always re-route first responder: Flow→Flow split does
+        // not change eligibility, so reconcile alone leaves the hidden
+        // liveContent composer focused (#1464).
         composer.onCommandConsumed = { [weak self] in
             self?.reconcileChrome()
+            self?.routeFocus()
         }
         pane.inputSurface.onCommandConsumed = { [weak self] in
             self?.reconcileChrome()
+            self?.routeFocus()
+        }
+        centerColumn.onPaneCommandConsumed = { [weak self] in
+            self?.reconcileChrome()
+            self?.routeFocus()
         }
         composer.onHistoryOpened = { [weak self] in
             self?.reconcileChrome()
@@ -630,20 +640,36 @@ final class ProductChromeHostView: NSView {
         commandPalette.requestOpenGoto()
     }
 
+    /// Flow first-responder target: the focused multipane leaf composer when
+    /// pane hosts exist, otherwise the original single-pane composer (#1464).
+    var activeComposer: ComposerBridgeView {
+        let shell = seyal_app_shell(pane.appHandle)
+        if !centerColumn.secondaryHosts.isEmpty,
+           let host = centerColumn.presentationHost(
+               paneLo: shell.focused_pane_lo,
+               paneHi: shell.focused_pane_hi
+           ),
+           !host.composer.isHidden
+        {
+            return host.composer
+        }
+        if let owned = centerColumn.secondaryHosts.first(where: \.inputOwned),
+           !owned.composer.isHidden
+        {
+            return owned.composer
+        }
+        return composer
+    }
+
     func routeFocus() {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
         guard !commandPalette.isOpen else { return }
         // Revoke Metal IME/AX before focusing the composer so Flow never keeps
         // a competing terminal first responder (#866).
-        inputSurface.syncInputRoutePresentation()
+        pane.inputSurface.syncInputRoutePresentation()
         let shell = seyal_app_shell(pane.appHandle)
-        if !centerColumn.secondaryHosts.isEmpty,
-           let host = centerColumn.presentationHost(
-               paneLo: shell.focused_pane_lo,
-               paneHi: shell.focused_pane_hi
-           )
-        {
+        if !centerColumn.secondaryHosts.isEmpty {
             let eligibility = seyal_app_eligibility_for_pane(
                 pane.appHandle,
                 shell.focused_pane_lo,
@@ -656,7 +682,7 @@ final class ProductChromeHostView: NSView {
                     shell.focused_pane_hi
                 )
                 if paneComposer.mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue) {
-                    host.composer.focusEditor()
+                    activeComposer.focusEditor()
                 }
                 return
             }
