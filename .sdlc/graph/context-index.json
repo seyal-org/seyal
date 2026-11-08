@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "d85c195e00bc5eaae890dec6e1364890d8b94afc"
+          "fingerprint": "7e22ffb535a37ac88002fb74d4eb701f059db148"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "d85c195e00bc5eaae890dec6e1364890d8b94afc"
+          "fingerprint": "7e22ffb535a37ac88002fb74d4eb701f059db148"
         }
       ],
       "relationships": [
@@ -126,7 +126,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "7ffb25716244884d332c478303c5be627f943e5a"
+          "fingerprint": "7e667b853d5df734937f786165b41a095651f975"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
@@ -134,7 +134,7 @@
         },
         {
           "path": "docs/specs/SPEC-008-M003-COMMAND-BLOCKS.md",
-          "fingerprint": "2c3cf7ce8581b8dcf02ad1ad998b2a593ed1914e"
+          "fingerprint": "f5f6632d1e9c7ddbec76f743a3384414a5e77621"
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "7ffb25716244884d332c478303c5be627f943e5a"
+          "fingerprint": "7e667b853d5df734937f786165b41a095651f975"
         }
       ],
       "relationships": [
@@ -355,7 +355,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-026-CONSENTED-SESSION-REMOTE-SHELL-BOOTSTRAP.md",
-          "fingerprint": "bb7186cb499f914bec145334e7d75097025a8684"
+          "fingerprint": "97132cb670a177d124f896fcef0af8e7b9161605"
         }
       ],
       "relationships": []

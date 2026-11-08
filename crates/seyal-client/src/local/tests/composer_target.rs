@@ -37,8 +37,8 @@ fn negotiated_target_projects_block_identity_even_when_relay_is_unavailable() {
         attachment_id: client.attachment_id,
         target: InputTargetClass::ForegroundProgram,
         scope: BlockScope::Local,
-        mode: ComposerTargetMode::Unavailable,
-        reason: ComposerTargetReason::NotAtPrompt,
+        mode: ComposerTargetMode::DirectInput,
+        reason: ComposerTargetReason::None,
         block_id: 11,
         target_generation: 44,
         revision: 6,
@@ -49,9 +49,31 @@ fn negotiated_target_projects_block_identity_even_when_relay_is_unavailable() {
             11,
             44,
             6,
+            ComposerTargetMode::DirectInput as u8,
+            InputTargetClass::ForegroundProgram as u8,
+        )),
+        "DirectInput preserves the exact foreground Block for Flow Block-scoped keys"
+    );
+
+    client.composer_target = Some(ComposerTarget {
+        attachment_id: client.attachment_id,
+        target: InputTargetClass::ForegroundProgram,
+        scope: BlockScope::Local,
+        mode: ComposerTargetMode::Unavailable,
+        reason: ComposerTargetReason::NotAtPrompt,
+        block_id: 13,
+        target_generation: 45,
+        revision: 7,
+    });
+    assert_eq!(
+        client.projected_composer_target(),
+        Some((
+            13,
+            45,
+            7,
             ComposerTargetMode::Unavailable as u8,
             InputTargetClass::ForegroundProgram as u8,
         )),
-        "Unavailable prevents Relay but must preserve the exact foreground Block for explicit Raw interaction"
+        "Unavailable still preserves Block identity for explicit Raw fallback"
     );
 }

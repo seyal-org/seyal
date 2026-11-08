@@ -45,6 +45,8 @@ pub enum RuntimeComposerEligibility {
     Unsupported,
     /// Type 45 `Relay`. Type 23 stays `Busy` for legacy clients.
     Relay,
+    /// Type 45 `DirectInput` (#1466). Submit closed; Flow Block-scoped keys.
+    DirectInput,
 }
 
 /// Why a [`ComposerAction`] was rejected. The previous state is unchanged
@@ -382,9 +384,10 @@ impl PaneComposer {
             Some(RuntimeComposerEligibility::Relay) => ComposerMode::Relay,
             Some(RuntimeComposerEligibility::Available)
             | Some(RuntimeComposerEligibility::Unsupported) => ComposerMode::Available,
-            // Runtime has not proved a trusted prompt for this attachment:
-            // fail closed rather than let Return silently receive `Busy`.
-            Some(RuntimeComposerEligibility::Busy) | None => ComposerMode::Busy {
+            // No trusted prompt (or DirectInput): fail closed for Submit.
+            Some(RuntimeComposerEligibility::Busy)
+            | Some(RuntimeComposerEligibility::DirectInput)
+            | None => ComposerMode::Busy {
                 process: self.running_command().unwrap_or_default(),
             },
         }

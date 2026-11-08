@@ -25,8 +25,9 @@ use super::super::session_overlay::{
 use super::super::shell_integration::{composer_eligibility, composer_facts};
 use super::super::Runtime;
 
-/// Preserve foreground Block identity while Relay is unavailable so explicit
-/// Raw interaction can be fenced to the current process.
+/// Preserve foreground Block identity for DirectInput and for Unavailable so
+/// Block-scoped Flow keys (#1466) and explicit Raw fallback can be fenced to
+/// the current process.
 fn input_target_block_id(target: InputTargetFact) -> u64 {
     match target {
         InputTargetFact::Foreground(block_id) => block_id,

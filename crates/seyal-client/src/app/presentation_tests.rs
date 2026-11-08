@@ -489,7 +489,7 @@ fn available_status_keeps_blocks_first_flow_and_enables_composer() {
 }
 
 #[test]
-fn running_block_direct_input_is_temporary_raw_and_tui_keeps_priority() {
+fn running_block_direct_input_stays_flow_and_tui_keeps_priority() {
     use crate::app::RuntimeComposerTarget;
     use crate::composer::RuntimeBlockRecord;
     use seyal_core::BlockId;
@@ -517,18 +517,30 @@ fn running_block_direct_input_is_temporary_raw_and_tui_keeps_priority() {
     .unwrap();
     root.apply(AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
-        eligibility: Some(RuntimeComposerEligibility::Busy),
+        eligibility: Some(RuntimeComposerEligibility::DirectInput),
         revision: 10,
         target: Some(RuntimeComposerTarget {
             block_id: 7,
             target_generation: 4,
             revision: 10,
             target_class: 2, // ForegroundProgram
-            mode: 3,         // Unavailable; local foreground child
+            mode: 3,         // DirectInput (ADR-009 #1466)
         }),
     })
     .unwrap();
 
+    let snap = root.snapshot();
+    assert_eq!(snap.eligibility, PresentationEligibility::Flow);
+    assert!(snap.block_scoped_direct_input);
+    // Flow chrome may stay visible as Busy; Submit stays closed.
+    let composer = snap.composer.expect("composer");
+    assert!(!composer.can_submit);
+    assert!(matches!(
+        composer.mode,
+        crate::composer::ComposerMode::Busy { .. }
+    ));
+
+    // Interact must not force temporary Raw when DirectInput is published.
     root.apply(AppAction::InteractWithRunningBlock {
         fence: root.fence(),
         block_id: 7,
@@ -536,13 +548,13 @@ fn running_block_direct_input_is_temporary_raw_and_tui_keeps_priority() {
         target_revision: 10,
     })
     .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
     assert_eq!(root.snapshot().execution, execution);
 
     refresh(&mut root, true);
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Tui);
     refresh(&mut root, false);
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
 
     root.apply(AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
@@ -558,7 +570,58 @@ fn running_block_direct_input_is_temporary_raw_and_tui_keeps_priority() {
     })
     .unwrap();
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+    assert!(!root.snapshot().block_scoped_direct_input);
     assert_eq!(root.snapshot().execution, execution);
+}
+
+#[test]
+fn unavailable_foreground_interact_still_allows_temporary_raw_fallback() {
+    use crate::app::RuntimeComposerTarget;
+    use crate::composer::RuntimeBlockRecord;
+    use seyal_core::BlockId;
+    use seyal_protocol::framing::BlockScope;
+
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    let mut block_bytes = [0; 16];
+    block_bytes[..8].copy_from_slice(&7_u64.to_le_bytes());
+    root.apply(AppAction::ApplyRuntimeBlocks {
+        fence: root.fence(),
+        records: Some(vec![RuntimeBlockRecord {
+            id: BlockId::from_bytes(block_bytes),
+            command: "python3 -q".into(),
+            start_line: 1,
+            end_line: None,
+            running: true,
+            exit_status: None,
+            canvas_floor: false,
+            scope: BlockScope::Local,
+        }]),
+    })
+    .unwrap();
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Busy),
+        revision: 10,
+        target: Some(RuntimeComposerTarget {
+            block_id: 7,
+            target_generation: 4,
+            revision: 10,
+            target_class: 2,
+            mode: 0, // Unavailable — out-of-contract fallback
+        }),
+    })
+    .unwrap();
+    assert!(!root.snapshot().block_scoped_direct_input);
+
+    root.apply(AppAction::InteractWithRunningBlock {
+        fence: root.fence(),
+        block_id: 7,
+        target_generation: 4,
+        target_revision: 10,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
 }
 
 #[test]
@@ -588,7 +651,7 @@ fn running_block_interaction_rejects_stale_or_nonforeground_targets() {
     .unwrap();
     root.apply(AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
-        eligibility: Some(RuntimeComposerEligibility::Busy),
+        eligibility: Some(RuntimeComposerEligibility::DirectInput),
         revision: 10,
         target: Some(RuntimeComposerTarget {
             block_id: 7,
@@ -611,6 +674,7 @@ fn running_block_interaction_rejects_stale_or_nonforeground_targets() {
         Err(AppError::ActionUnavailable)
     );
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+    assert!(root.snapshot().block_scoped_direct_input);
 }
 
 #[test]

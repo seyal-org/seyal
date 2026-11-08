@@ -36,9 +36,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 736
-issue = 1379
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1379 adds programmatic-scroll Metal republish (stuck-glyph fix) and Raw/TUI→Flow history-request discard so return-to-Flow can re-fetch Block bodies. Further split would separate scroll/history ownership from the surface that applies it."
+acknowledged_loc = 739
+issue = 1467
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; tip already ships 739 LOC on master with no Swift delta in #1467. Ratchet acknowledged_loc to the measured tip so silent headroom cannot hide further growth."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
@@ -246,22 +246,22 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 968
-issue = 1442
-reason = "Thin AppKit chrome host stays one cold-path façade; #1442 routes Raw correlation history ranges through renderRawScrollbackHistoryIfNeeded before Flow applyHistoryRange so Block bodies and Raw scroll cannot split-brain on the same surface. Tip already ships 968 LOC; ratchet acknowledged_loc to the measured tip so silent headroom cannot hide further growth."
+acknowledged_loc = 986
+issue = 1467
+reason = "Thin AppKit chrome host stays one cold-path façade; tip already ships 986 LOC on master with no Swift delta in #1467. Ratchet acknowledged_loc to the measured tip so silent headroom cannot hide further growth."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
-acknowledged_loc = 723
-issue = 1426
-reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1426 installs the shared history bridge before seeding a new secondary host so its initial Block-history request is accepted, alongside the existing multipane/Raw host wiring and pane-tab title projection."
-issue_url = "https://github.com/seyal-org/seyal/issues/1426"
+acknowledged_loc = 728
+issue = 1467
+reason = "Pane region/divider/host projection stays one AppKit layout adapter; tip already ships 728 LOC on master with no Swift delta in #1467. Ratchet acknowledged_loc to the measured tip so silent headroom cannot hide further growth."
+issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 745
-issue = 1442
-reason = "Local display-client protocol proofs stay one module; #1442 adds the Raw presentation-correlation purge retention proof beside existing history request fixtures rather than a second client test file."
+acknowledged_loc = 752
+issue = 1467
+reason = "Local display-client protocol proofs stay one module; #1467 adds DirectInput projection coverage beside existing type-45 Submit/Relay/Unavailable fixtures rather than a second client test file."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
@@ -271,15 +271,15 @@ reason = "Interactive Metal remains the AppKit input owner; #1442 adds Raw-local
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
-acknowledged_loc = 753
-issue = 1398
-reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1388 keeps consider_session_candidate on cold edges only (None, not every PTY read) without moving marker dispatch or the submission byte contract into a second hot-path module. #1398 only hooks the fenced submit to the spawn-time ssh rewrite; parsing and arming live in ssh_spawn.rs."
+acknowledged_loc = 756
+issue = 1467
+reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1467 fences DirectInput composer Submit as Busy beside the existing Relay/Submit match without moving marker dispatch into a second module."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_overlay.rs"
-acknowledged_loc = 723
-issue = 1398
-reason = "ADR-026 F4 overlay transitions, wire projection, and composer derivation stay one pure state machine with its exhaustive transition table; #1398 adds the Runtime-internal SpawnArmed state and its table cases rather than a second overlay type."
+acknowledged_loc = 751
+issue = 1467
+reason = "ADR-026 F4 overlay transitions, wire projection, and composer derivation stay one pure state machine with its exhaustive transition table; #1467 adds DerivedComposer::DirectInput and Flow+Running(b) proofs rather than a second overlay type."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_bootstrap.rs"

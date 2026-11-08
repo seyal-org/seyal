@@ -311,17 +311,24 @@ snapshot.
 - composer availability follows the Accepted ADR-026 (#1384) §3.2 input
   target. A `TrustedShell` target, including `TrustedShell(session)`, is
   composer mode `Submit`. A `ForegroundProgram` target may be labeled
-  `Relay`. Neither mode is implied by Block lifecycle `Running` alone. When
-  the input target is `None`, the composer is disabled or represented by real
-  busy state;
+  `Relay` (line-level) or `DirectInput` (ADR-009 #1466 Block-scoped
+  character-level while Flow remains). Neither Submit nor Relay is implied by
+  Block lifecycle `Running` alone. When the input target is `None`, the
+  composer is disabled or represented by real busy state;
 - supported Pane-level control actions such as an explicit interrupt may route
   through typed input semantics without turning empty Flow space into a raw
   terminal surface;
-- arbitrary character-level terminal input is not routed through Flow merely
-  because a hidden Metal view exists; the Pane transitions to Raw first when
-  such semantics are required;
+- under Accepted ADR-009 #1466, when presentation is Flow, the canonical
+  screen is primary, the attachment is Controller, and the input target is
+  `ForegroundProgram(b)` with mode `DirectInput`, character-level terminal
+  input (keys, IME commits that encode input, paste, and mouse reports that
+  encode input) may be routed into Running Block `b`'s live region without a
+  full-Pane Raw transition. Empty Flow canvas still must not expose a second
+  Raw viewport or empty-canvas terminal hit-test. Cases outside that contract
+  keep a usable full-Pane Raw/TUI direct-terminal path;
 - IME/first-responder/accessibility/mouse ownership follows the active
-  presentation mode and section 3.4 transition fence.
+  presentation mode, the DirectInput focus target when published, and
+  section 3.4 transition fence.
 - in multipane Flow, keyboard focus routes to the Rust-focused Pane's visible,
   Pane-owned composer; the hidden single-pane composer must not receive text or
   submit on that Pane's behalf. Single-pane Flow keeps the root composer, while
@@ -345,7 +352,9 @@ Direct-terminal event classification, committed-text atomicity, composition-only
 IME document semantics, key encoding, queue bounds and resize transactions remain
 governed by SPEC-006. Under accepted ADR-009/#858 those direct-terminal
 interaction rules apply to the **active Raw/TUI/direct-terminal presentation
-endpoint**, not to a hidden/focusable surface under Flow.
+endpoint**, and under Accepted ADR-009 #1466 also to the **Block-scoped
+DirectInput focus target** on a primary-screen Running Block while Flow chrome
+remains — not to a hidden/focusable empty-canvas surface under Flow.
 
 ## 5. Flow output projection
 

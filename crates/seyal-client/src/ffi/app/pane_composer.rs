@@ -39,6 +39,7 @@ pub(super) fn decode_runtime_composer_status(
         2 => Some(RuntimeComposerEligibility::Busy),
         3 => Some(RuntimeComposerEligibility::Unsupported),
         4 => Some(RuntimeComposerEligibility::Relay),
+        5 => Some(RuntimeComposerEligibility::DirectInput),
         _ => return Err(-6),
     };
     Ok(AppAction::ApplyRuntimeComposerStatus {
@@ -81,6 +82,7 @@ pub extern "C" fn seyal_app_apply_runtime_composer_status(
         2 => Some(RuntimeComposerEligibility::Busy),
         3 => Some(RuntimeComposerEligibility::Unsupported),
         4 => Some(RuntimeComposerEligibility::Relay),
+        5 => Some(RuntimeComposerEligibility::DirectInput),
         _ => return -6,
     };
     let target = (target_revision != 0).then_some(RuntimeComposerTarget {

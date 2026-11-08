@@ -300,11 +300,28 @@ impl ApplicationRoot {
         if !block_is_running {
             return Err(AppError::ActionUnavailable);
         }
+        // ADR-009 #1466 DirectInput already owns Block-scoped keys in Flow.
+        // Do not force temporary full-Pane Raw for the ordinary REPL path.
+        if target.mode == 3 {
+            self.interactive_raw_target = None;
+            return self.derive_presentation(false);
+        }
         let Some(bound) = self.authority else {
             return Err(AppError::UnboundUnauthorized);
         };
         self.interactive_raw_target =
             Some((fence.pane, bound.execution, block_id, target_generation));
         self.derive_presentation(false)
+    }
+
+    /// True when Runtime published Flow Block-scoped character input for the
+    /// current foreground Running Block (ComposerTargetMode::DirectInput).
+    pub(super) fn block_scoped_direct_input_eligible(&self) -> bool {
+        self.eligibility() == PresentationEligibility::Flow
+            && self.runtime_composer_target.is_some_and(|target| {
+                target.target_class == 2 // ForegroundProgram
+                    && target.mode == 3 // DirectInput
+                    && target.block_id != 0
+            })
     }
 }
