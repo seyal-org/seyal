@@ -614,6 +614,13 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false))
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
         XCTAssertEqual(host.orderedKeys.count, 1)
+
+        // Even if AppKit still reports a visible/ghost window, Rust zero-Window
+        // must create on Dock reopen (#1402).
+        host.forwardCloseWindow(host.orderedKeys[0])
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: true))
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
     }
 
     func testHierarchicalCloseMenuForwardsClosePane() {

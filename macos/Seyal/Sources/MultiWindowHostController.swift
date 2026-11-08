@@ -198,7 +198,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         if liveKey != key {
             installLiveHost(in: window, key: key)
         }
+        // Dock reopen with a miniaturized product window must deminiaturize
+        // before makeKeyAndOrderFront (ADR-018 §3.3a raise path).
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Remaining injected failures for the next `WindowActivation` (tests).
