@@ -8,11 +8,14 @@ extension ProductChromeHostView {
         flags: UInt16
     ) {
         let target = relayTarget
-        let canInteract = blockID != 0
+        let running = blockID != 0
             && blockID == target.blockID
             && target.targetClass == 2
             && (flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK))
                 == UInt16(SEYAL_APP_BLOCK_STATE_RUNNING)
+        // DirectInput (mode 3) is the ordinary REPL path; Interact remains only
+        // as an explicit Raw fallback when Runtime publishes Unavailable (0).
+        let canInteract = running && target.targetMode == 0
         card.canInteractWithRunningProgram = canInteract
         card.onInteractWithRunningProgram = canInteract
             ? { [weak self, blockID, generation = target.generation, revision = target.revision] in
@@ -35,5 +38,15 @@ extension ProductChromeHostView {
                 self.pane.inputSurface.window?.makeFirstResponder(self.pane.inputSurface)
             }
             : nil
+    }
+
+    /// When Runtime publishes Flow DirectInput, route keys into the live Metal
+    /// surface without leaving Flow chrome (#1468).
+    func focusBlockScopedDirectInputIfEligible(_ snapshot: SeyalAppSnapshot) {
+        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+        pane.inputSurface.syncInputRoutePresentation()
+        guard direct else { return }
+        pane.inputSurface.window?.makeFirstResponder(pane.inputSurface)
     }
 }

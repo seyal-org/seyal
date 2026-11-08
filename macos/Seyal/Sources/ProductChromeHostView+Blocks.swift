@@ -112,7 +112,7 @@ extension ProductChromeHostView {
     /// Rust decides presentation and input ownership; this is a thin adapter.
     @discardableResult
     func relayComposerStatus(_ status: NativeComposerStatus) -> Bool {
-        return seyal_app_apply_runtime_composer_status(
+        let accepted = seyal_app_apply_runtime_composer_status(
             pane.appHandle,
             status.eligibility,
             status.revision,
@@ -122,6 +122,11 @@ extension ProductChromeHostView {
             status.targetClass,
             status.targetMode
         ) == 0
+        if accepted {
+            let snapshot = seyal_app_snapshot(pane.appHandle)
+            focusBlockScopedDirectInputIfEligible(snapshot)
+        }
+        return accepted
     }
 
     func applyTranscriptPresentation(_ snapshot: SeyalAppSnapshot) {
@@ -130,6 +135,7 @@ extension ProductChromeHostView {
         // reconciliation. Keep AppKit's first-responder and AX route in sync
         // with Rust's authoritative eligibility on every presentation change.
         pane.inputSurface.syncInputRoutePresentation()
+        focusBlockScopedDirectInputIfEligible(snapshot)
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct

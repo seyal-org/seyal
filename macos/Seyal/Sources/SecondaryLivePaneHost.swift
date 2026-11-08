@@ -50,7 +50,7 @@ final class SecondaryLivePaneHost: NSView {
     weak var historyBridge: RustDisplayBridge?
     private(set) var displayHandle: UInt64
     private var recoveryTarget: SeyalAppPaneRecoveryTarget
-    let surface: MetalSurfaceView
+    let surface: InteractiveMetalSurfaceView
     private(set) var composer: ComposerBridgeView!
     let transcript = NSScrollView()
     let blocks = NSStackView()
@@ -108,10 +108,10 @@ final class SecondaryLivePaneHost: NSView {
         self.paneHi = paneHi
         self.displayHandle = displayHandle
         self.recoveryTarget = recoveryTarget
-        surface = MetalSurfaceView(
+        surface = InteractiveMetalSurfaceView(
             frame: .zero,
-            paneID: String(format: "live-%016llx%016llx", paneHi, paneLo),
-            allowsImplicitExecutionBootstrap: false
+            appHandle: appHandle,
+            paneID: String(format: "live-%016llx%016llx", paneHi, paneLo)
         )
         composer = ComposerBridgeView(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
         super.init(frame: .zero)
@@ -480,16 +480,40 @@ final class SecondaryLivePaneHost: NSView {
             setAccessibilityRole(.group)
             setAccessibilityLabel("Focused terminal pane")
             setAccessibilityIdentifier("seyal-pane-presentation-host")
+            focusBlockScopedDirectInputIfEligible()
         } else {
             blocks.setAccessibilityIdentifier("seyal-secondary-blocks")
             transcript.setAccessibilityIdentifier("seyal-secondary-blocks-scroll")
             setAccessibilityRole(.button)
             setAccessibilityLabel("Focus secondary terminal pane")
             setAccessibilityIdentifier("seyal-secondary-live-pane")
+            surface.syncInputRoutePresentation()
         }
         // Retag retained cards without rebuilding so focus ownership swaps do
         // not drop XCUI Block identity or force a transcript reflow (#1424).
         retagArrangedBlockAccessibilityIdentifiers()
+    }
+
+    /// Focused Flow + DirectInput: keys go to this pane's live surface (#1468).
+    private func focusBlockScopedDirectInputIfEligible() {
+        guard inputOwned else {
+            // Never stop the shared Controller bridge; only drop the borrow.
+            if surface.bridge === historyBridge {
+                surface.bridge = nil
+            }
+            return
+        }
+        // Borrow the shared Controller bridge for DirectInput key admission.
+        // This leaf must not stop or reconnect ApplicationRoot-owned clients.
+        if surface.bridge == nil, let historyBridge {
+            surface.bridge = historyBridge
+        }
+        let snapshot = seyal_app_snapshot(appHandle)
+        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+        surface.syncInputRoutePresentation()
+        guard direct else { return }
+        window?.makeFirstResponder(surface)
     }
 
     private func retagArrangedBlockAccessibilityIdentifiers() {
@@ -609,6 +633,7 @@ final class SecondaryLivePaneHost: NSView {
             // Composer visibility still follows pane-scoped reconcile().
             composer.reconcile()
             refreshInputOwnershipChrome()
+            focusBlockScopedDirectInputIfEligible()
         }
         needsLayout = true
     }

@@ -26,14 +26,18 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var activationRecoveryNotificationScheduled = false
     private static let maxComposerRecoveryFocusAttempts = 8
 
-    init(frame frameRect: NSRect, appHandle: UInt64) {
+    init(frame frameRect: NSRect, appHandle: UInt64, paneID: String = "m001-pane") {
         self.appHandle = appHandle
         self.optionAsAlt = seyal_app_option_as_alt(appHandle) != 0
-        super.init(frame: frameRect, paneID: "m001-pane")
+        super.init(
+            frame: frameRect,
+            paneID: paneID,
+            allowsImplicitExecutionBootstrap: paneID == "m001-pane"
+        )
         wantsLayer = true
         setAccessibilityIdentifier("terminal-input")
-        // Flow/unbound: composer owns IME. Raw/TUI uses a textArea role.
-        // The identifier stays in the AX tree so attach diagnostics remain
+        // Flow/unbound: composer owns IME. Raw/TUI / DirectInput use a textArea
+        // role. The identifier stays in the AX tree so attach diagnostics remain
         // observable (`connection=usable`) without becoming an IME target.
         syncInputRoutePresentation()
     }
@@ -88,7 +92,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
 
     override func restoreNativeInteractionAfterRendererReady() -> Bool {
         syncInputRoutePresentation()
-        if !allowsDirectTerminalInput {
+        if !allowsDirectTerminalKeys {
             discardUncommittedMark()
             return requestComposerFocusForRecovery()
         }
@@ -164,13 +168,14 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         }
     }
 
-    /// Consumes Rust eligibility: Metal is first-responder/IME/AX only for
-    /// Raw/TUI direct route. Flow and unbound keep the Pane composer exclusive.
+    /// Consumes Rust eligibility: Metal is first-responder/IME/AX for Raw/TUI
+    /// and for Flow Block-scoped DirectInput (#1466/#1468). Unbound/plain Flow
+    /// keep the Pane composer exclusive.
     func syncInputRoutePresentation() {
-        let direct = allowsDirectTerminalInput
+        let keys = allowsDirectTerminalKeys
         setAccessibilityElement(true)
-        setAccessibilityRole(direct ? .textArea : .group)
-        if !direct {
+        setAccessibilityRole(keys ? .textArea : .group)
+        if !keys {
             discardUncommittedMark()
             if window?.firstResponder === self {
                 window?.makeFirstResponder(nil)
@@ -178,10 +183,10 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         }
     }
 
-    override var acceptsFirstResponder: Bool { allowsDirectTerminalInput }
+    override var acceptsFirstResponder: Bool { allowsDirectTerminalKeys }
 
     override func becomeFirstResponder() -> Bool {
-        guard allowsDirectTerminalInput else { return false }
+        guard allowsDirectTerminalKeys else { return false }
         let became = super.becomeFirstResponder()
         if became {
             inputContext?.activate()
@@ -190,7 +195,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     override func resignFirstResponder() -> Bool {
-        if !allowsDirectTerminalInput {
+        if !allowsDirectTerminalKeys {
             discardUncommittedMark()
         }
         return super.resignFirstResponder()
@@ -252,7 +257,9 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     override func scrollWheel(with event: NSEvent) {
-        guard allowsDirectTerminalInput else {
+        // Block-scoped DirectInput keeps Flow chrome; local Raw scrollback is
+        // only for full-Pane Raw/TUI. Wheel over Flow still scrolls transcript.
+        guard allowsFullPaneDirectTerminal else {
             super.scrollWheel(with: event)
             return
         }
@@ -312,7 +319,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             super.keyDown(with: event)
             return
         }
-        guard allowsDirectTerminalInput else { return }
+        guard allowsDirectTerminalKeys else { return }
 
         let eligibility = seyal_app_snapshot(appHandle).eligibility
         let alternate = terminalCurrentFrame()?.alternate_screen != 0
@@ -419,7 +426,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     override func keyUp(with event: NSEvent) {
-        guard allowsDirectTerminalInput else {
+        guard allowsDirectTerminalKeys else {
             heldKeyboardKinds.removeValue(forKey: event.keyCode)
             return
         }
@@ -569,13 +576,25 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     func paste(_ sender: Any?) {
-        guard allowsDirectTerminalInput else { return }
+        guard allowsDirectTerminalKeys else { return }
         if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
             _ = terminalSubmitPaste(text)
         }
     }
 
-    private var allowsDirectTerminalInput: Bool {
+    /// Keys/IME/paste: Raw, TUI, or Flow Block-scoped DirectInput (#1468).
+    private var allowsDirectTerminalKeys: Bool {
+        let snap = seyal_app_snapshot(appHandle)
+        if snap.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0,
+            snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+        {
+            return true
+        }
+        return allowsFullPaneDirectTerminal
+    }
+
+    /// Full-Pane Raw/TUI only — mouse reports and Raw local scrollback.
+    private var allowsFullPaneDirectTerminal: Bool {
         let eligibility = seyal_app_snapshot(appHandle).eligibility
         return eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
@@ -596,7 +615,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     private func submitIfAllowed(_ text: String) {
-        guard allowsDirectTerminalInput, !text.isEmpty else { return }
+        guard allowsDirectTerminalKeys, !text.isEmpty else { return }
         if text.utf8.count > maxCompositionUTF8Bytes { return }
         _ = terminalSubmitCommittedText(text)
     }
@@ -610,9 +629,15 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     private func submitNativeMouse(_ event: NSEvent, kind: UInt8, buttonOverride: UInt8? = nil) {
-        if !allowsDirectTerminalInput {
+        if !allowsFullPaneDirectTerminal {
+            // Flow DirectInput: click focuses the live surface for keys without
+            // empty-canvas mouse reports. Plain Flow still returns to composer.
             if kind == 1 {
-                onRequestComposerFocus?()
+                if allowsDirectTerminalKeys {
+                    window?.makeFirstResponder(self)
+                } else {
+                    onRequestComposerFocus?()
+                }
             }
             return
         }

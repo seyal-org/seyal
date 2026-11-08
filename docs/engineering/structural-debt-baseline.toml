@@ -36,15 +36,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 739
+acknowledged_loc = 764
 issue = 1467
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; tip already ships 739 LOC on master with no Swift delta in #1467. Ratchet acknowledged_loc to the measured tip so silent headroom cannot hide further growth."
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys on the focused multipane leaf without a second PTY/VT authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 718
-issue = 1426
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1426 keeps the current transcript page bounded while preserving full Block scroll extent, invalidates prepared cells when source bounds or display metrics change, and maps flipped Block viewport coordinates to the correct history page. Further extraction should follow a cohesive host responsibility split, not this focused correctness fix."
+acknowledged_loc = 724
+issue = 1467
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 focus Flow DirectInput on composer-status relay without a second transcript authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
@@ -265,9 +265,9 @@ reason = "Local display-client protocol proofs stay one module; #1467 adds Direc
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
-acknowledged_loc = 739
-issue = 1442
-reason = "Interactive Metal remains the AppKit input owner; #1442 adds Raw-local wheel/PageUp/PageDown routing that calls MetalSurfaceView+RawScrollback applyRawScrollDelta without moving PTY mouse reporting or inventing a second input surface."
+acknowledged_loc = 764
+issue = 1467
+reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 admit Flow Block-scoped DirectInput keys/IME while keeping empty-canvas mouse reports on Raw/TUI only."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"

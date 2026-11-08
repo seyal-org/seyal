@@ -111,10 +111,12 @@ extension SecondaryLivePaneHost {
                     )
                 }
                 : nil
+            // DirectInput (mode 3) owns ordinary REPL keys; Interact is Raw fallback only.
             card.canInteractWithRunningProgram = inputOwned
                 && blockID != 0
                 && blockID == composerTarget.block_id
                 && composerTarget.target_class == 2
+                && composerTarget.mode == 0
                 && (row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK))
                     == UInt16(SEYAL_APP_BLOCK_STATE_RUNNING)
             card.onInteractWithRunningProgram = card.canInteractWithRunningProgram
