@@ -15,7 +15,7 @@ extension ProductChromeHostView {
                 == UInt16(SEYAL_APP_BLOCK_STATE_RUNNING)
         // DirectInput (mode 3) is the ordinary REPL path; Interact remains only
         // as an explicit Raw fallback when Runtime publishes Unavailable (0).
-        let canInteract = running && target.targetMode == 0
+        let canInteract = running && target.mode == 0
         card.canInteractWithRunningProgram = canInteract
         card.onInteractWithRunningProgram = canInteract
             ? { [weak self, blockID, generation = target.generation, revision = target.revision] in
