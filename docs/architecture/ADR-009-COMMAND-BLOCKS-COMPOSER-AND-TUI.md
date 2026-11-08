@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426; Blocks-default for supported shells accepted 2026-11-06 under #1426; **Proposed** Block-scoped direct-input amendment under #1466 (not normative until its architecture-only acceptance PR merges)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426); Blocks-default 2026-11-06 (#1426); Block-scoped direct-input Proposed 2026-11-08 (#1466)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1566,4 +1566,90 @@ numbered-stream load test with at least ten focus changes; complete per-Pane
 output and no cross-pane copies; scroll retention; and full-screen TUI
 takeover/return. A green unit or hosted run does not replace headed packaged
 app evidence.
+
+## Proposed 2026-11-08 amendment — Block-scoped direct input for Running REPLs (#1466)
+
+**Status:** Proposed under Architecture Issue #1466. Not normative and
+authorizes no production Rust/Swift until an architecture-only acceptance PR
+merges after independent human review. An author or agent comment is not that
+acceptance.
+
+### Problem
+
+On a trusted Flow Pane, submitting `node` or `python` creates a Running Block
+whose live output already paints inside that Block (ADR-009 live-tail). The
+composer becomes Busy. Character-level interaction today requires leaving Flow
+for a full-Pane direct-terminal route (Interact / Raw-class path shipped under
+#1461). Warp keeps the same class of REPL interactive **inside** the Running
+Block without a whole-Pane Raw takeover (`docs/evidence/m003-warp-local-repl-inline-forensic.md`).
+
+ADR-026 Decision item 7 already deferred “in-Block key forwarding” as a
+separate amendment. Bottom-composer Relay is line-oriented and is **not** Warp
+parity. Forcing Interact→Raw for ordinary local REPLs fights the Blocks-first
+supported-shell direction (#1426) and makes Raw feel like a broken mode switch
+rather than a rare fallback.
+
+### Proposed decision
+
+When presentation is Flow, the canonical screen is primary, the attachment is
+Controller, and the innermost integration state is `Running(b)` with a known
+Block `b`:
+
+1. **Block-scoped direct-input focus target.** The Running Block’s live region
+   may own character-level terminal input (keys, IME commits that encode
+   input, paste, and mouse reports that encode input) routed to the same PTY
+   under the existing direct-input fence. This is **not** composer Submit and
+   **not** the ADR-026 Relay line contract.
+2. **Flow chrome remains.** Prior completed Blocks stay visible; terminal
+   pixels remain clipped to Block regions; empty canvas does not expose a
+   second Raw viewport. This is still Flow presentation, not full-Pane Raw.
+3. **Composer Submit stays ineligible** while that Block runs. The dock may
+   show Busy / running guidance; it must not admit shell commands to a
+   TrustedShell target that is not AtPrompt.
+4. **TUI unchanged.** Alternate-screen programs take full-Pane TUI; on exit,
+   restore the Pane’s resting Flow (supported shell) or safe Raw fallback.
+5. **Raw remains a fallback, not the REPL success path.** Unsupported /
+   untrusted integration, quarantine, and cases outside this contract keep a
+   usable full-Pane direct-terminal path. Do **not** delete Raw. After this
+   amendment is implemented, ordinary local `node`/`python` must not require
+   Interact→Raw.
+6. **One authority.** No second PTY, VT, grid, or copied transcript. Blocks
+   remain metadata over the same `ExecutionId` / `TerminalState`.
+7. **Resting policy unchanged by this amendment.** #1426 Blocks-default for
+   supported shells and any remaining #1438 resting rules for unsupported
+   shells continue to own cold-start/resting selection. This amendment only
+   owns interaction while Flow is already the active presentation and a
+   primary-screen Block is Running.
+
+### Rejected alternatives
+
+- **Relay as Warp parity.** Rejected: line + CR in the bottom composer is not
+  in-Block character semantics.
+- **Keep Interact→Raw as the permanent REPL answer.** Rejected for product UX.
+- **Delete Raw.** Rejected: unsupported shells and out-of-contract cases need
+  a usable direct-terminal presentation.
+- **Per-expression language-REPL sub-Blocks.** Out of scope (Warp itself still
+  tracks this as a feature request).
+
+### Threat / adversarial rows (implementation must cover)
+
+- Local canonical-no-echo / password prompt while Running(b): fail closed to a
+  safe secret-entry path; do not echo secrets into Block chrome.
+- Paste / bracketed-paste / large paste while Block-scoped input is focused.
+- Interrupt (Ctrl-C) and EOF while Running; Block completion returns composer
+  Submit only on trusted AtPrompt.
+- Alternate-screen enter mid-REPL → TUI; no dual input owners.
+- Multipane: only the focused Pane’s Running Block receives keys.
+- Focus steal: composer draft must not submit when input target is
+  Block-scoped direct.
+
+### Required follow-up after acceptance
+
+1. Architecture-only merge under #1466 (this section becomes Accepted).
+2. Point ADR-026 Decision item 7 at this Accepted contract (companion docs
+   edit in the same architecture PR or immediately after).
+3. Update SPEC-008 / SPEC-006 as needed; open Ready implementation Issues for
+   Runtime eligibility publication and macOS focus/IME routing.
+4. Withdraw Interact-as-required for local REPLs once implementation Issues
+   Done; keep Interact/Raw only where this contract does not apply.
 
