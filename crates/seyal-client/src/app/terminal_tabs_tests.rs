@@ -33,7 +33,7 @@ fn new_terminal_action_adds_tab_to_focused_pane_without_splitting() {
 }
 
 #[test]
-fn close_focused_terminal_removes_only_selected_terminal_and_keeps_pane() {
+fn close_focused_terminal_removes_selected_then_last_closes_window() {
     let mut root = ApplicationRoot::new();
     let before = root.snapshot().shell;
     let pane = before.focused_pane;
@@ -84,30 +84,23 @@ fn close_focused_terminal_removes_only_selected_terminal_and_keeps_pane() {
         BindingContext::APP,
     )
     .expect("close the remaining selected terminal");
-    assert!(root
-        .snapshot()
-        .shell
-        .panes
-        .iter()
-        .find(|row| row.id == pane)
-        .unwrap()
-        .terminal_tabs
-        .is_empty());
-
-    assert_eq!(
+    let closed = root.snapshot().shell;
+    assert!(
+        closed.windows.is_empty(),
+        "final terminal in a sole Pane hierarchical-closes the Window"
+    );
+    assert!(closed.panes.is_empty());
+    assert!(
         root.invoke_workspace_command(
             WorkspaceCommand {
                 id: WorkspaceCommandId::TerminalCloseFocused,
                 ordinal: None,
             },
             BindingContext::APP,
-        ),
-        Err(crate::app::AppError::ActionUnavailable),
-        "cmd+w with an empty Pane must not fall back to closing its layout"
+        )
+        .is_err(),
+        "zero-window composition has no focused terminal to close"
     );
-    let empty = root.snapshot().shell;
-    assert_eq!(empty.windows.len(), window_count);
-    assert_eq!(empty.panes.len(), before.panes.len());
 }
 
 #[test]
