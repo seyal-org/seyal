@@ -248,7 +248,7 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 42 | R→C | `SessionOffer` — Accepted ADR-026 (#1384); shipped under #1388; exact 64 bytes |
 | 43 | C→R | `SessionConsent` — Accepted ADR-026 (#1384); shipped under #1388; exact 64 bytes |
 | 44 | R→C | `SessionStatus` — Accepted ADR-026 (#1384); shipped under #1388; exact 56 bytes |
-| 45 | R→C | `ComposerTarget` — Accepted ADR-026 (#1384); input target and target generation; not a longer type-23 body; shipped under #1388; exact 48 bytes |
+| 45 | R→C | `ComposerTarget` — Accepted ADR-026 (#1384); input target, known foreground Block identity, and target generation; not a longer type-23 body; shipped under #1388; exact 48 bytes |
 | 46 | C→R | `MintWorkspaceRequest` — ADR-028 §2.5 interim WorkspaceId mint (cold control; shares bit 10 / type-36/38 request-id space) |
 | 47 | R→C | `MintWorkspaceResult` — ADR-028 §2.5 interim WorkspaceId mint result |
 
@@ -347,7 +347,8 @@ generation values are equal.
 **Running-Block row mapping.** SPEC-008 §5.2 remains the presentation rule. This section only says which paired rows that rule may use:
 
 - The clip starts at the first visible row whose id equals the running Block's `start_line`, and continues through the last visible row. Later rows in the same consecutive id run belong to that source line.
-- If `start_line` is not in the paired vector, the start anchor has left the visible screen. The clip is the entire paired viewport. The client does not infer this from id order, does not search history, and does not invent a range.
+- If `start_line` is not in the paired vector, the start anchor has left the visible screen. The candidate clip is the entire paired viewport. The client does not infer this from id order, does not search history, and does not invent a range.
+- For either start-anchor case, the client may shorten the candidate clip only by removing a suffix proven blank by the same-generation, paired canonical display cells. `DisplayCell::blank()` is the conservative blank proof; spaces, characters/graphemes, styled cells, non-default backgrounds, and the terminal cursor row are retained. At least one row is retained. If the paired cell data is unavailable, mismatched, or cannot prove a row blank, the candidate clip is retained in full. Leading rows are never removed by this rule.
 - If the vector is absent or unpaired, there is no clip.
 
 **Publish rule.** Type 35 is bounded control output. It is not a presentation-batch member. Superseding a pending presentation batch does not delete a type 35 frame that has already started writing. A not-yet-started type 35 frame is replaced by a newer one, as bounded below.
@@ -811,7 +812,7 @@ Required now that #1083 is accepted on merge of PR #1060. The production proof l
 - a viewer that did not advertise bit 9 never receives type 35. If `ServerHello` does not advertise bit 9, the client does not wait for the frame. A type 35 frame that arrives without both advertisements is discarded and clears the stored vector;
 - a viewer that advertised bit 9 receives a type 35 frame only after a successfully queued snapshot or a delta admitted to the presentation queue, and none after a delta that was dropped or replaced by a snapshot;
 - a missing or zero id skips the whole frame;
-- `start_line` present maps to the first matching visible row through the last row; `start_line` absent maps to the entire paired viewport; an absent vector draws no clip;
+- `start_line` present maps to the first matching visible row; absent maps to the entire paired viewport before conservative blank-suffix trimming. Both retain the cursor row and every nonblank row in the existing clip. An absent vector draws no clip;
 - under sustained output to a non-reading client, queued type 35 bytes never exceed one frame plus one partially written frame, and mandatory control admission is unaffected;
 - Runtime does not write a type 35 frame for generation G before the last frame of G's display batch, or of the newer snapshot that superseded it, has been completely written; a preempting mandatory control frame does not release it early;
 - the client ignores a strictly older generation, discards a newer generation without buffering it, treats a same-generation id conflict as a fatal protocol error that closes the connection, and clears the vector when the row count does not match the committed display;

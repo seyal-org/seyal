@@ -41,6 +41,12 @@ issue = 1379
 reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1379 adds programmatic-scroll Metal republish (stuck-glyph fix) and Raw/TUI→Flow history-request discard so return-to-Flow can re-fetch Block bodies. Further split would separate scroll/history ownership from the surface that applies it."
 
 [[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
+acknowledged_loc = 718
+issue = 1426
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1426 keeps the current transcript page bounded while preserving full Block scroll extent, invalidates prepared cells when source bounds or display metrics change, and maps flipped Block viewport coordinates to the correct history page. Further extraction should follow a cohesive host responsibility split, not this focused correctness fix."
+
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
 acknowledged_loc = 834
 issue = 1117
@@ -72,13 +78,13 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1075
+ceiling_loc = 1067
 issue = 1440
 responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1136
+ceiling_loc = 1133
 issue = 1451
 responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424); #1451 adds seyal_app_should_confirm_quit on that façade so Rust owns warn_before_quit composition policy without a second ABI module."
 

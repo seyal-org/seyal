@@ -24,6 +24,8 @@ final class ProductChromeHostView: NSView {
     /// `syncTranscriptDocumentSize`, never by NSStackView distribution.
     let transcriptLeadingSpacer = NSView()
     var transcriptLeadingSpacerHeight: NSLayoutConstraint!
+    var lastTranscriptViewportSize = CGSize.zero
+    var hasPendingTranscriptViewportSync = false
     let composer: ComposerBridgeView
     let sessionBootstrap = SessionBootstrapBanner()
     /// Rust-owned history overlay (#933); internal for component tests.
@@ -76,7 +78,13 @@ final class ProductChromeHostView: NSView {
     var transcriptRelayBottomConstraint: NSLayoutConstraint?
     let transcriptTopSpacer = NSView(frame: .zero)
     var transcriptTopSpacerHeight: NSLayoutConstraint!
-    var relayTarget: (blockID: UInt64, generation: UInt64, mode: UInt8) = (0, 0, 0)
+    var relayTarget: (
+        blockID: UInt64,
+        generation: UInt64,
+        revision: UInt64,
+        targetClass: UInt8,
+        mode: UInt8
+    ) = (0, 0, 0, 0, 0)
     var composerInlineBlockID: UInt64 = 0
     var transcriptFrameRevision: UInt64 = 0
     /// Bounds zero-clip async republish so layout stalls cannot spin forever (#1379).
@@ -392,7 +400,7 @@ final class ProductChromeHostView: NSView {
             self?.reconcileChrome()
         }
         historyOverlay.onDismissed = { [weak self] in
-            self?.composer.focusEditor()
+            self?.routeFocus()
         }
         installTimelineChangeHandler()
         pane.inputSurface.onHistoryRangeChanged = { [weak self] range in
@@ -629,12 +637,41 @@ final class ProductChromeHostView: NSView {
         // Revoke Metal IME/AX before focusing the composer so Flow never keeps
         // a competing terminal first responder (#866).
         inputSurface.syncInputRoutePresentation()
+        let shell = seyal_app_shell(pane.appHandle)
+        if !centerColumn.secondaryHosts.isEmpty,
+           let host = centerColumn.presentationHost(
+               paneLo: shell.focused_pane_lo,
+               paneHi: shell.focused_pane_hi
+           )
+        {
+            let eligibility = seyal_app_eligibility_for_pane(
+                pane.appHandle,
+                shell.focused_pane_lo,
+                shell.focused_pane_hi
+            )
+            if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+                let paneComposer = seyal_app_composer_for_pane(
+                    pane.appHandle,
+                    shell.focused_pane_lo,
+                    shell.focused_pane_hi
+                )
+                if paneComposer.mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue) {
+                    host.composer.focusEditor()
+                }
+                return
+            }
+        }
         let snapshot = seyal_app_snapshot(pane.appHandle)
         let composerSnap = seyal_app_composer(pane.appHandle)
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
            composerSnap.mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
         {
-            composer.focusEditor()
+            // Multipane Flow has pane-owned editors above this hidden legacy
+            // liveContent. If its focused host is not ready, never direct
+            // keyboard input to the invisible root composer.
+            if centerColumn.secondaryHosts.isEmpty {
+                composer.focusEditor()
+            }
         } else if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {

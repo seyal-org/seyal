@@ -43,10 +43,7 @@ use encode::{
 pub use block_projection::seyal_app_block_projection;
 pub use leave_offer_ffi::seyal_app_leave_offer;
 pub(crate) use loss::{note_application_roots_client_loss, note_application_roots_execution_ended};
-pub use pane_composer::{
-    seyal_app_block_projection_for_pane, seyal_app_block_row_for_pane, seyal_app_composer_for_pane,
-    seyal_app_eligibility_for_pane, seyal_app_sync_pane_runtime_blocks,
-};
+pub use pane_composer::*;
 pub use pane_region::*;
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,

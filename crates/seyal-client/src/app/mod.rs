@@ -43,7 +43,7 @@ use errors::{
     palette_error,
 };
 
-pub use action_types::{AppAction, WindowNativeEvent};
+pub use action_types::{AppAction, RuntimeComposerTarget, WindowNativeEvent};
 pub use leave_offer::{LeaveOffer, LeaveOfferKind};
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
@@ -322,6 +322,11 @@ pub struct ApplicationRoot {
     /// Runtime reported unsupported shell integration. SPEC-008 requires
     /// full-Pane Raw until a later status says otherwise.
     integration_unsupported: bool,
+    /// Latest Runtime foreground target for the bound Pane.
+    runtime_composer_target: Option<RuntimeComposerTarget>,
+    /// Temporary direct-input request. It is cleared by a fresh trusted prompt
+    /// or a changed Runtime target; it never changes the resting Flow choice.
+    interactive_raw_target: Option<(PaneId, ExecutionId, u64, u64)>,
     /// Create-admitting Controller connection (first pane / session create).
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
@@ -441,6 +446,8 @@ impl ApplicationRoot {
             resting: PresentationMode::Flow,
             explicit_flow: true,
             integration_unsupported: false,
+            runtime_composer_target: None,
+            interactive_raw_target: None,
             #[cfg(target_os = "macos")]
             client_handle: None,
             #[cfg(target_os = "macos")]

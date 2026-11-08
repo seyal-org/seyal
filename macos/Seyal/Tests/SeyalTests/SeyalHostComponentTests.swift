@@ -1997,6 +1997,55 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testHundredThousandRowHistoryPreparesOnlyTheVisibleMetalPage() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-bounded-history-page"
+        )
+        surface.renderer.setPresentationPlan(.flow())
+        surface.activateTranscriptDisplayHandle(11)
+        let cell = NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 100_000,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: Array(repeating: [cell], count: 100_000),
+            sourceDisplayHandle: 11
+        )
+        let visibleRows = 99_800..<100_000
+        surface.retainHistoryRange(range)
+        surface.setTranscriptFrame(
+            NativeTranscriptFrame(
+                revision: 1,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: .zero,
+                        clip: NSRect(x: 0, y: 0, width: 320, height: 200),
+                        historyRows: visibleRows,
+                        historyRequestID: 1,
+                        historyRevision: 1
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        )
+
+        XCTAssertEqual(
+            surface.renderer.historyRegions[1]?.instanceCount,
+            visibleRows.count,
+            "Metal must prepare only the selected viewport page from a 100K-row Block"
+        )
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, visibleRows.count)
+    }
+
+    @MainActor
     func testIdenticalTranscriptGeometryPreparesHistoryThatArrivesLater() throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal unavailable")
@@ -2077,6 +2126,7 @@ final class SeyalHostComponentTests: XCTestCase {
             sourceDisplayHandle: 11
         )
         let clip = CGRect(x: 0, y: 0, width: CGFloat(metrics.cellWidth), height: CGFloat(metrics.cellHeight))
+        surface.renderer.setHistoryRegionOrder([77])
         try surface.renderer.update(
             historyRange: range,
             region: NativeTranscriptRegion(id: 77, origin: .zero, clip: clip),
@@ -3382,40 +3432,58 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
-    /// #1379: intentional history scroll survives a secondary rebuildBlocks pass.
     @MainActor
-    func testSecondaryRebuildBlocksPreservesScrolledOffsetAwayFromLiveEnd() throws {
+    func testSecondaryTallToShortBlockKeepsScrolledHistoryAtItsOriginalCoordinate() throws {
         let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
         layout.appHandle = seyal_app_create()
         defer { seyal_app_destroy(layout.appHandle) }
-        let region = PaneLayoutView.Region(
+        let left = PaneLayoutView.Region(
             paneLo: 1, paneHi: 0,
-            rect: CGRect(x: 0, y: 0, width: 1, height: 1),
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
             focused: true, live: true, title: "A"
         )
-        layout.apply([region], dividers: [])
+        let right = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 0,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "B"
+        )
+        layout.apply([left, right], dividers: [])
         layout.reconcileSecondaryLiveHosts(bindings: [
             (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
         ])
         layout.layoutSubtreeIfNeeded()
-        let host = try XCTUnwrap(layout.presentationHost(paneLo: 1, paneHi: 0))
+        let host = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
         host.transcript.setFrameSize(NSSize(width: 320, height: 280))
-        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
-        host.setTranscriptDocumentOffsetY(320)
-        let before = host.transcriptDocumentOffsetY
-        XCTAssertGreaterThan(before, 200)
-        XCTAssertFalse(host.followingLiveEnd)
-
-        host.rebuildBlocks()
+        let card = CommandBlockView(
+            prompt: "$",
+            title: "ssh host",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 32,
+            session: false
+        )
+        host.blocks.insertArrangedSubview(card, at: 1)
+        host.blockCards[42] = card
+        host.followingLiveEnd = false
+        host.syncTranscriptDocumentSize()
+        layout.layoutSubtreeIfNeeded()
+        let originalCardMinY = card.frame.minY
+        host.preserveDocumentHeight(1_200)
+        card.setOutputLines(2, cellHeight: 16)
+        host.followingLiveEnd = false
+        host.syncTranscriptDocumentSize()
         layout.layoutSubtreeIfNeeded()
 
+        XCTAssertGreaterThan(host.transcriptLeadingSpacerHeight.constant, 0)
         XCTAssertEqual(
-            host.transcriptDocumentOffsetY,
-            before,
+            card.frame.minY,
+            originalCardMinY,
             accuracy: 1,
-            "rebuildBlocks must restore intentional scroll away from live end"
+            "preserved document extent must not become filler before the visible Block"
         )
-        XCTAssertFalse(host.followingLiveEnd)
+        XCTAssertTrue(host.blocks.arrangedSubviews.first === host.transcriptLeadingSpacer)
     }
 
     /// The primary readiness source polls `clientHandle`; focus selection must
@@ -3484,6 +3552,45 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertTrue(tracker.clear())
         XCTAssertFalse(tracker.clear())
+
+        var targetTracker = ComposerStatusRelayTracker()
+        XCTAssertTrue(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 0,
+                targetGeneration: 0,
+                targetRevision: 0,
+                targetClass: 1,
+                targetMode: 1
+            )
+        )
+        XCTAssertTrue(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 7,
+                targetGeneration: 3,
+                targetRevision: 13,
+                targetClass: 2,
+                targetMode: 0
+            ),
+            "a foreground-target update on the same eligibility revision must reach Rust"
+        )
+        XCTAssertFalse(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 7,
+                targetGeneration: 3,
+                targetRevision: 13,
+                targetClass: 2,
+                targetMode: 0
+            )
+        )
     }
 
     @MainActor
@@ -5219,7 +5326,12 @@ final class SeyalHostComponentTests: XCTestCase {
         host.isProgrammaticTranscriptScroll = false
         host.transcriptDidScroll()
         host.transcriptDidScroll()
-        // Immediate re-read: do not wait for unrelated PTY frames.
+        // Scroll handling intentionally republishes on the main queue. Await
+        // that bounded presentation callback instead of racing it with this
+        // assertion (and without waiting for unrelated PTY frames).
+        for _ in 0..<40 where host.transcriptFrameRevision <= beforeRevision {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
         let after = try XCTUnwrap(view.terminalCurrentFrame())
 
         XCTAssertGreaterThan(
@@ -5737,6 +5849,259 @@ private func accessibilityChildren(
 
 extension SeyalHostComponentTests {
     @MainActor
+    func testHistoryRenderWindowBoundsTopMiddleAndTailPages() {
+        let total = 100_000
+        let visibleRows = 120
+
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 0, width: 400, height: 1_920),
+                isFlipped: true,
+                cellHeight: 16
+            ),
+            0,
+            "the top of a flipped Block body maps to the oldest history row"
+        )
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 98_080, width: 400, height: 1_920),
+                isFlipped: true,
+                cellHeight: 16
+            ),
+            6_130,
+            "scrolled document coordinates map from the flipped top edge"
+        )
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 0, width: 400, height: 1_920),
+                isFlipped: false,
+                cellHeight: 16
+            ),
+            6_130,
+            "the bottom of an unflipped AppKit body maps to the newest history row"
+        )
+
+        let top = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: 0,
+            visibleRowCount: visibleRows
+        )
+        let middle = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: 50_000,
+            visibleRowCount: visibleRows
+        )
+        let tail = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: total - visibleRows,
+            visibleRowCount: visibleRows
+        )
+
+        XCTAssertEqual(top.rows.lowerBound, 0)
+        XCTAssertTrue(top.rows.contains(0))
+        XCTAssertTrue(middle.rows.contains(50_000))
+        XCTAssertTrue(tail.rows.contains(total - 1))
+        for page in [top, middle, tail] {
+            XCTAssertLessThanOrEqual(page.rows.count, HistoryRenderWindow.maximumRows)
+            XCTAssertGreaterThan(page.rows.count, 0)
+        }
+        XCTAssertEqual(
+            HistoryRenderWindow(totalRows: 0, firstVisibleRow: 0, visibleRowCount: 120).rows,
+            0..<0
+        )
+        let maximum = HistoryRenderWindow(
+            totalRows: Int.max,
+            firstVisibleRow: Int.max,
+            visibleRowCount: Int.max
+        )
+        XCTAssertLessThanOrEqual(maximum.rows.count, HistoryRenderWindow.maximumRows)
+        XCTAssertEqual(maximum.rows.upperBound, Int.max)
+
+        let pageIdentity = NativeHistoryRenderPageKey(
+            displayHandle: 1,
+            startLine: 10,
+            endLine: 20,
+            totalRows: 100_000,
+            requestID: 2,
+            revision: 3,
+            rows: 500..<900,
+            cellSize: CGSize(width: 8, height: 16),
+            backingScale: 2
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 20,
+                totalRows: 100_000,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 18),
+                backingScale: 2
+            ),
+            "font metric changes must invalidate the cached page"
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 20,
+                totalRows: 100_000,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 16),
+                backingScale: 1
+            ),
+            "backing scale changes must invalidate the cached page"
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 21,
+                totalRows: 100_001,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 16),
+                backingScale: 2
+            ),
+            "new history extents must invalidate the cached page"
+        )
+    }
+
+    @MainActor
+    func testTranscriptSizingUsesIntrinsicHeightsAndAccountsForDockSpacing() {
+        let leadingSpacer = NSView()
+        let staleExpandedCard = NSView(
+            frame: NSRect(x: 0, y: 0, width: 240, height: 500)
+        )
+        staleExpandedCard.translatesAutoresizingMaskIntoConstraints = false
+        staleExpandedCard.heightAnchor.constraint(equalToConstant: 48).isActive = true
+
+        XCTAssertEqual(staleExpandedCard.bounds.height, 500)
+        XCTAssertEqual(staleExpandedCard.fittingSize.height, 48)
+        let height = TranscriptDocumentSizing.contentHeight(
+            arrangedSubviews: [leadingSpacer, staleExpandedCard],
+            leadingSpacer: leadingSpacer,
+            spacing: 10,
+            edgeInsets: NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        )
+        XCTAssertEqual(height, 74, "use the current Block height, the leading stack gap, and both insets")
+    }
+
+    @MainActor
+    func testScrolledSecondaryRebuildPreservesBlockCoordinatesWithBottomDockingSlack() {
+        let following = TranscriptDocumentSizing.spacerHeights(
+            contentHeight: 300,
+            viewportHeight: 500,
+            preservedDocumentHeight: 0
+        )
+        XCTAssertEqual(following.leading, 200)
+        XCTAssertEqual(following.trailing, 0)
+        XCTAssertEqual(following.document, 500)
+
+        let scrolledAwayAfterShrink = TranscriptDocumentSizing.spacerHeights(
+            contentHeight: 300,
+            viewportHeight: 400,
+            preservedDocumentHeight: 1_000
+        )
+        XCTAssertEqual(
+            scrolledAwayAfterShrink.leading,
+            700,
+            "preserved document space keeps blocks bottom-docked"
+        )
+        XCTAssertEqual(scrolledAwayAfterShrink.trailing, 0)
+        XCTAssertEqual(scrolledAwayAfterShrink.document, 1_000)
+    }
+
+    @MainActor
+    func testCandidateSessionActionLivesInBlockContextMenu() {
+        let block = CommandBlockView(
+            prompt: "$",
+            title: "node",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 1,
+            session: false
+        )
+        block.canRequestSessionBootstrap = true
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )!
+        XCTAssertEqual(
+            block.menu(for: event)?.items.first?.title,
+            "Enable Blocks for this session…",
+            "a Candidate must be available as an explicit action, not an unsolicited popup"
+        )
+    }
+
+    @MainActor
+    func testRunningBlockContextMenuOffersDirectInputFallback() {
+        let block = CommandBlockView(
+            prompt: "$",
+            title: "python3 -q",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 1,
+            session: false
+        )
+        block.frame = NSRect(x: 0, y: 0, width: 600, height: 80)
+        block.canInteractWithRunningProgram = true
+        block.layoutSubtreeIfNeeded()
+        let interact = (block.accessibilityChildren() ?? [])
+            .compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "seyal-running-program-interact" }
+        XCTAssertNotNil(interact, "the Running Block must expose its direct-input button")
+        if let interact {
+            XCTAssertGreaterThan(interact.frame.width, 0)
+            let buttonRect = block.convert(interact.bounds, from: interact)
+            let hit = block.hitTest(NSPoint(x: buttonRect.midX, y: buttonRect.midY))
+            XCTAssertTrue(hit === interact, "Block hit testing must preserve the button action")
+
+            block.canInteractWithRunningProgram = false
+            block.layoutSubtreeIfNeeded()
+            XCTAssertTrue(interact.isHidden, "completed Blocks hide the direct-input action")
+            block.canInteractWithRunningProgram = true
+            block.layoutSubtreeIfNeeded()
+            XCTAssertFalse(interact.isHidden, "a renewed Running Block restores the direct-input action")
+        }
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )!
+        XCTAssertEqual(
+            block.menu(for: event)?.items.first?.title,
+            "Interact with running program"
+        )
+    }
+
+    @MainActor
     func testSessionBootstrapBannerRendersRustCopyAndStaysHiddenWithoutSurface() {
         let banner = SessionBootstrapBanner()
         XCTAssertTrue(banner.isHidden)
@@ -5745,9 +6110,14 @@ extension SeyalHostComponentTests {
         let enable = String(cString: seyal_bridge_session_copy(4))
         let accept = String(cString: seyal_bridge_session_copy(2))
         let decline = String(cString: seyal_bridge_session_copy(3))
-        XCTAssertEqual(title, "Set up this SSH session")
-        XCTAssertEqual(enable, "Set up SSH session")
-        XCTAssertEqual(accept, "Set up this session")
+        XCTAssertEqual(title, "Enable Blocks for this session?")
+        XCTAssertEqual(enable, "Enable Blocks for this session…")
+        XCTAssertEqual(accept, "Enable for this session")
+        let disclosure = String(cString: seyal_bridge_session_copy(1))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("does not open an SSH connection"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("Python or Node"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("remote shell history"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("choose Not now"))
         XCTAssertEqual(decline, "Not now")
         let surface = seyal_bridge_session_surface()
         XCTAssertEqual(surface.kind, 0)

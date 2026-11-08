@@ -58,6 +58,27 @@ extension ProductChromeHostView {
     /// ownership at the moment AppKit accepts the responder change.
     func requestComposerFocusIfPaletteAllows() -> Bool {
         guard !commandPalette.isOpen else { return false }
+        if !centerColumn.secondaryHosts.isEmpty {
+            let shell = seyal_app_shell(pane.appHandle)
+            guard let host = centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            ),
+            seyal_app_eligibility_for_pane(
+                pane.appHandle,
+                shell.focused_pane_lo,
+                shell.focused_pane_hi
+            ) == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+            seyal_app_composer_for_pane(
+                pane.appHandle,
+                shell.focused_pane_lo,
+                shell.focused_pane_hi
+            ).mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+            else {
+                return false
+            }
+            return host.composer.focusEditor()
+        }
         return composer.focusEditor()
     }
 

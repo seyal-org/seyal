@@ -262,13 +262,6 @@ impl DerivedComposer {
             Self::Submit | Self::Relay { .. } => ComposerTargetReason::None,
         }
     }
-
-    pub(crate) fn block_id(self) -> u64 {
-        match self {
-            Self::Relay { block_id } => block_id,
-            Self::Submit | Self::Unavailable(_) => 0,
-        }
-    }
 }
 
 pub(crate) fn input_target(integration: ShellFact) -> InputTargetFact {

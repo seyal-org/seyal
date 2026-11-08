@@ -7,9 +7,14 @@ use std::ptr;
 
 use seyal_core::{ExecutionId, PaneId};
 
-use crate::app::{PresentationEligibility, APP_ABI_VERSION};
-use crate::composer::{BlockPresentationState, ComposerMode, ComposerSnapshot, RuntimeBlockRecord};
-use crate::live_tail::{project_block_output_until, LiveTailProjection};
+use crate::app::{
+    AppAction, AppFence, PresentationEligibility, RuntimeComposerTarget, APP_ABI_VERSION,
+};
+use crate::composer::{
+    BlockPresentationState, ComposerMode, ComposerSnapshot, RuntimeBlockRecord,
+    RuntimeComposerEligibility,
+};
+use crate::live_tail::{project_block_output_until, trim_blank_suffix, LiveTailProjection};
 use crate::presentation::PresentationMode;
 use crate::LocalDisplayClient;
 
@@ -22,7 +27,89 @@ use super::encode::{
     push_row, relocate_row_pointers, split_id, RowDraft, BLOCK_SELECTED, BLOCK_SESSION,
     BLOCK_STATE_MASK,
 };
-use super::{id16, AppHandle, SeyalAppComposer, SeyalAppRow, APPS};
+use super::{id16, AppHandle, SeyalAppAction, SeyalAppComposer, SeyalAppRow, APPS};
+
+pub(super) fn decode_runtime_composer_status(
+    action: &SeyalAppAction,
+    fence: AppFence,
+) -> Result<AppAction, i32> {
+    let eligibility = match action.reserved {
+        0 => None,
+        1 => Some(RuntimeComposerEligibility::Available),
+        2 => Some(RuntimeComposerEligibility::Busy),
+        3 => Some(RuntimeComposerEligibility::Unsupported),
+        4 => Some(RuntimeComposerEligibility::Relay),
+        _ => return Err(-6),
+    };
+    Ok(AppAction::ApplyRuntimeComposerStatus {
+        fence,
+        eligibility,
+        revision: action.target_execution_lo,
+        target: None,
+    })
+}
+
+pub(super) fn decode_interact_with_running_block(
+    action: &SeyalAppAction,
+    fence: AppFence,
+) -> Result<AppAction, i32> {
+    Ok(AppAction::InteractWithRunningBlock {
+        fence,
+        block_id: action.target_execution_lo,
+        target_generation: action.target_generation,
+        target_revision: action.target_execution_hi,
+    })
+}
+
+/// Relay Runtime eligibility and the exact foreground target atomically into
+/// Rust product state. `target_class` is ADR-026 InputTargetClass; zero means
+/// that no current target was published.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_apply_runtime_composer_status(
+    handle: u64,
+    eligibility: u8,
+    revision: u64,
+    target_block_id: u64,
+    target_generation: u64,
+    target_revision: u64,
+    target_class: u8,
+    target_mode: u8,
+) -> i32 {
+    let eligibility = match eligibility {
+        0 => None,
+        1 => Some(RuntimeComposerEligibility::Available),
+        2 => Some(RuntimeComposerEligibility::Busy),
+        3 => Some(RuntimeComposerEligibility::Unsupported),
+        4 => Some(RuntimeComposerEligibility::Relay),
+        _ => return -6,
+    };
+    let target = (target_revision != 0).then_some(RuntimeComposerTarget {
+        block_id: target_block_id,
+        target_generation,
+        revision: target_revision,
+        target_class,
+        mode: target_mode,
+    });
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        let fence = state.root.fence();
+        match state.root.apply(AppAction::ApplyRuntimeComposerStatus {
+            fence,
+            eligibility,
+            revision,
+            target,
+        }) {
+            Ok(()) => 0,
+            Err(error) => {
+                let _ = state.root.fail(error);
+                -4
+            }
+        }
+    })
+}
 
 fn empty_composer(sized: bool) -> SeyalAppComposer {
     SeyalAppComposer {
@@ -266,14 +353,19 @@ pub extern "C" fn seyal_app_block_projection_for_pane(
         let client_raw = state.root.pane_client_raw(pane);
         let projection = if running {
             with_pane_matched_client(execution, client_raw, |client| {
-                project_block_output_until(
+                match project_block_output_until(
                     mode,
                     block.start_line,
                     block.end_line,
                     true,
                     paired_viewport_line_ids(client),
                     exclusive_end,
-                )
+                ) {
+                    LiveTailProjection::PrimaryFrame(clip) => {
+                        LiveTailProjection::PrimaryFrame(trim_blank_suffix(clip, &client.cache))
+                    }
+                    other => other,
+                }
             })
             .unwrap_or(LiveTailProjection::FailClosed)
         } else {

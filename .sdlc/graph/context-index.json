@@ -134,7 +134,7 @@
         },
         {
           "path": "docs/specs/SPEC-008-M003-COMMAND-BLOCKS.md",
-          "fingerprint": "2e503e14d53d67dd6483af8e2f49a43dc4e13520"
+          "fingerprint": "2c3cf7ce8581b8dcf02ad1ad998b2a593ed1914e"
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
@@ -355,7 +355,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-026-CONSENTED-SESSION-REMOTE-SHELL-BOOTSTRAP.md",
-          "fingerprint": "dba557ddb7254bc967bdc0409f083ac4b1575c0e"
+          "fingerprint": "27b1bf37e1a8852cabfe961115e80804d4d1e15f"
         }
       ],
       "relationships": []

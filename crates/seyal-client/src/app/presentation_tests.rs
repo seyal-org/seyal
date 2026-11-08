@@ -3,6 +3,18 @@ use crate::keybinding::{WorkspaceCommand, WorkspaceCommandId};
 use crate::presentation::InputRoute;
 use crate::presentation::PresentationMode;
 
+/// Runtime published `Available` for the bound attachment: the only way
+/// the composer becomes submittable.
+pub(super) fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Available),
+        revision,
+        target: None,
+    })
+    .unwrap();
+}
+
 fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
         execution: ExecutionId::from_bytes([tag; 16]),
@@ -106,6 +118,7 @@ fn supported_flow_cannot_be_demoted_by_raw_keybinding() {
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Available),
         revision: 1,
+        target: None,
     })
     .unwrap();
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
@@ -122,6 +135,7 @@ fn supported_flow_cannot_be_demoted_by_raw_menu_action_and_restores_after_tui() 
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Available),
         revision: 2,
+        target: None,
     })
     .unwrap();
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
@@ -440,6 +454,7 @@ fn unsupported_eligibility_selects_full_pane_raw() {
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Unsupported),
         revision: 1,
+        target: None,
     })
     .unwrap();
     let raw = root.snapshot();
@@ -466,10 +481,136 @@ fn available_status_keeps_blocks_first_flow_and_enables_composer() {
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Available),
         revision: 1,
+        target: None,
     })
     .unwrap();
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
     assert!(root.snapshot().composer_eligible);
+}
+
+#[test]
+fn running_block_direct_input_is_temporary_raw_and_tui_keeps_priority() {
+    use crate::app::RuntimeComposerTarget;
+    use crate::composer::RuntimeBlockRecord;
+    use seyal_core::BlockId;
+    use seyal_protocol::framing::BlockScope;
+
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    let execution = root.snapshot().execution;
+    let mut block_bytes = [0; 16];
+    block_bytes[..8].copy_from_slice(&7_u64.to_le_bytes());
+    let block = BlockId::from_bytes(block_bytes);
+    root.apply(AppAction::ApplyRuntimeBlocks {
+        fence: root.fence(),
+        records: Some(vec![RuntimeBlockRecord {
+            id: block,
+            command: "python3 -q".into(),
+            start_line: 1,
+            end_line: None,
+            running: true,
+            exit_status: None,
+            canvas_floor: false,
+            scope: BlockScope::Local,
+        }]),
+    })
+    .unwrap();
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Busy),
+        revision: 10,
+        target: Some(RuntimeComposerTarget {
+            block_id: 7,
+            target_generation: 4,
+            revision: 10,
+            target_class: 2, // ForegroundProgram
+            mode: 3,         // Unavailable; local foreground child
+        }),
+    })
+    .unwrap();
+
+    root.apply(AppAction::InteractWithRunningBlock {
+        fence: root.fence(),
+        block_id: 7,
+        target_generation: 4,
+        target_revision: 10,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert_eq!(root.snapshot().execution, execution);
+
+    refresh(&mut root, true);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Tui);
+    refresh(&mut root, false);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Available),
+        revision: 11,
+        target: Some(RuntimeComposerTarget {
+            block_id: 0,
+            target_generation: 5,
+            revision: 11,
+            target_class: 1, // TrustedShell
+            mode: 1,         // Submit
+        }),
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+    assert_eq!(root.snapshot().execution, execution);
+}
+
+#[test]
+fn running_block_interaction_rejects_stale_or_nonforeground_targets() {
+    use crate::app::RuntimeComposerTarget;
+    use crate::composer::RuntimeBlockRecord;
+    use seyal_core::BlockId;
+    use seyal_protocol::framing::BlockScope;
+
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    let mut block_bytes = [0; 16];
+    block_bytes[..8].copy_from_slice(&7_u64.to_le_bytes());
+    root.apply(AppAction::ApplyRuntimeBlocks {
+        fence: root.fence(),
+        records: Some(vec![RuntimeBlockRecord {
+            id: BlockId::from_bytes(block_bytes),
+            command: "sleep 10".into(),
+            start_line: 1,
+            end_line: None,
+            running: true,
+            exit_status: None,
+            canvas_floor: false,
+            scope: BlockScope::Local,
+        }]),
+    })
+    .unwrap();
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Busy),
+        revision: 10,
+        target: Some(RuntimeComposerTarget {
+            block_id: 7,
+            target_generation: 4,
+            revision: 10,
+            target_class: 2,
+            mode: 3,
+        }),
+    })
+    .unwrap();
+
+    let fence = root.fence();
+    assert_eq!(
+        root.apply(AppAction::InteractWithRunningBlock {
+            fence,
+            block_id: 7,
+            target_generation: 3,
+            target_revision: 10,
+        }),
+        Err(AppError::ActionUnavailable)
+    );
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
 }
 
 #[test]
@@ -485,6 +626,7 @@ fn blocks_first_flow_survives_tui_and_raw_palette_is_unavailable() {
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Available),
         revision: 1,
+        target: None,
     })
     .unwrap();
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
@@ -561,6 +703,7 @@ fn composer_eligibility_uses_flow_except_for_unsupported_fallback() {
             fence: root.fence(),
             eligibility,
             revision,
+            target: None,
         })
         .unwrap();
         assert_eq!(root.snapshot().eligibility, expected);

@@ -42,12 +42,8 @@ extension MetalSurfaceView {
     renderer.setHistoryRegionOrder(frame.regionIDs)
     let pixelRegions = liveTailPixelRegions(in: frame)
     renderer.setTranscriptRegions(pixelRegions)
-    let pixelRegionsByID = Dictionary(uniqueKeysWithValues: pixelRegions.map { ($0.id, $0) })
-    // New Blocks move earlier cards as the transcript grows. Their history
-    // cells are already prepared in local coordinates, so update only each
-    // draw origin and scissor instead of allocating/rebuilding every buffer.
-    // A missing buffer means this is the first geometry publish after a
-    // display-handle switch or renderer reset; restore it from retained rows.
+    // History pages are bounded per Pane viewport. Geometry-only movement
+    // reuses a page, while a page/revision change rebuilds its GPU instances.
     for region in frame.regions {
       guard
         let range = historyRanges[
@@ -58,15 +54,6 @@ extension MetalSurfaceView {
           )
         ]
       else {
-        continue
-      }
-      if let pixelRegion = pixelRegionsByID[region.id],
-         renderer.setHistoryRegionGeometry(
-           id: region.id,
-           origin: pixelRegion.origin,
-           clip: pixelRegion.clip
-         )
-      {
         continue
       }
       renderHistoryRange(range, region: region)
@@ -107,7 +94,10 @@ extension MetalSurfaceView {
         displayHandle: region.displayHandle,
         origin: pixelClip.origin,
         clip: pixelClip,
-        suppressesCursor: region.suppressesCursor
+        suppressesCursor: region.suppressesCursor,
+        historyRows: region.historyRows,
+        historyRequestID: region.historyRequestID,
+        historyRevision: region.historyRevision
       )
     }
   }

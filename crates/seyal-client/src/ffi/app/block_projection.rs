@@ -9,7 +9,7 @@ use seyal_core::{AttachmentId, ExecutionId};
 
 use crate::app::PresentationEligibility;
 use crate::composer::BlockPresentationState;
-use crate::live_tail::{project_block_output_until, LiveTailProjection};
+use crate::live_tail::{project_block_output_until, trim_blank_suffix, LiveTailProjection};
 use crate::presentation::PresentationMode;
 use crate::LocalDisplayClient;
 
@@ -85,14 +85,19 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
         // ambient ACTIVE_HANDLE. History/fail-closed paths need no client.
         let projection = if running {
             with_fence_matched_client(fence.execution, fence.attachment, |client| {
-                project_block_output_until(
+                match project_block_output_until(
                     mode,
                     block.start_line,
                     block.end_line,
                     true,
                     paired_viewport_line_ids(client),
                     exclusive_end,
-                )
+                ) {
+                    LiveTailProjection::PrimaryFrame(clip) => {
+                        LiveTailProjection::PrimaryFrame(trim_blank_suffix(clip, &client.cache))
+                    }
+                    other => other,
+                }
             })
             .unwrap_or(LiveTailProjection::FailClosed)
         } else {
