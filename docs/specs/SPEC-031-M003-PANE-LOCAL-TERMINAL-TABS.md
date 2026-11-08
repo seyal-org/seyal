@@ -42,7 +42,7 @@ focused_pane: PaneId
 ```
 
 1. Fresh Workspace state has one Pane, one terminal tab, and one distinct Runtime execution.
-2. A Pane may be empty only after its final terminal tab is closed; then its selection is `None` and no terminal input is admissible.
+2. A sole Pane may be empty only after its final terminal tab is closed; then its selection is `None` and no terminal input is admissible. A non-sole Pane whose final terminal tab is closed is removed via ClosePane instead of remaining empty.
 3. Every selected TerminalTabId is a member of its Pane's ordered list. No duplicate terminal tab may occur in two Panes.
 4. Every live execution binding is unique across all terminal tabs. One ExecutionId never appears in two panes/tabs.
 5. Runtime owns one PTY/child and one canonical TerminalState per TerminalExecution. Client, AppKit, Swift, and Metal never own a duplicate VT/grid or process.
@@ -113,7 +113,7 @@ Closing a terminal tab is an explicit request to close its terminal session:
 2. Rust sends the existing explicit `TerminateExecution` operation for that ExecutionId. This is not a generic Pane/outer-Tab close action.
 3. A `TerminationRequested` response is the accepted close boundary used by the existing P4 lifecycle. Rust then removes only the named terminal tab and detaches that exact Controller; Runtime owns process termination and final drain. If termination is rejected, disconnected, or outcome-unknown, retain the tab and exact execution route with a typed error; do not detach and forget a possibly live process or retry blindly.
 4. If the closed tab was selected, choose the tab now at the removed index; if none exists, choose the preceding last tab. Closing an unselected tab leaves selection unchanged.
-5. Closing the final terminal tab leaves its Pane present and empty, with `selected_terminal_tab = None`, a visible New Terminal affordance, and no terminal input target.
+5. Closing the final terminal tab of a **sole** Pane leaf leaves that Pane present and empty, with `selected_terminal_tab = None`, a visible New Terminal affordance, and no terminal input target. Closing the final terminal tab of a Pane that still has sibling leaves in the same Seyal Tab collapses that Pane through the existing ClosePane path (sibling-first, detach-only; no terminate-on-pane-close).
 
 ### 7.2 Close Pane with one or more terminal tabs
 
@@ -168,7 +168,7 @@ Reducer tests first for the contract's success and rejection cases. Required cla
 - exact focused+selected input, paste, copy and terminal-action routing;
 - selected-terminal and per-Pane geometry routing, stale/rejected resize, and no sibling resize;
 - terminal-tab explicit termination success/rejection/unknown outcome/final drain and correct successor selection;
-- multi-tab Pane close detaches all exact sessions and preserves siblings; final empty Pane and final Pane/Window/re-entry validity;
+- multi-tab Pane close detaches all exact sessions and preserves siblings; sole-Pane final empty Pane; non-sole final terminal-tab close collapses via ClosePane; final Pane/Window/re-entry validity;
 - session enumeration/adoption, app detach/crash, Runtime restart truth, child exit while detached, and attachment recovery;
 - repeated split/create/switch/resize/close/reopen with no duplicate identities, shared execution, orphan PTY, focus jump or stale completion;
 - versioned action/snapshot migration and accessibility identifiers;

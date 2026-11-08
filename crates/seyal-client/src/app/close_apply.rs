@@ -75,6 +75,23 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             self.pane_client_raws.remove(&pane);
         }
+        // #1402: final terminal in a split leaf collapses via ClosePane
+        // (detach-only). Sole Pane keeps the empty-Pane + New Terminal contract
+        // so ClosePane cannot hierarchical-close the Tab as a side effect.
+        let should_collapse_empty_pane = {
+            let snap = self.shell.snapshot();
+            snap.panes.len() > 1
+                && snap
+                    .panes
+                    .iter()
+                    .find(|row| row.id == pane)
+                    .is_some_and(|row| row.terminal_tabs.is_empty())
+        };
+        if should_collapse_empty_pane {
+            let generation = self.shell.containment_generation();
+            let _ = self.close_pane(pane, generation);
+            return;
+        }
         if self.shell.snapshot().focused_pane == pane {
             self.activate_focused_pane_authority();
         }

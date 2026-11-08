@@ -109,3 +109,41 @@ fn close_focused_terminal_removes_only_selected_terminal_and_keeps_pane() {
     assert_eq!(empty.windows.len(), window_count);
     assert_eq!(empty.panes.len(), before.panes.len());
 }
+
+#[test]
+fn closing_final_terminal_in_a_split_pane_collapses_that_pane() {
+    use crate::shell::SplitAxis;
+
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .expect("split creates a sibling Pane");
+    let shell = root.snapshot().shell;
+    assert_eq!(shell.panes.len(), 2);
+    let split_pane = shell.focused_pane;
+    assert_ne!(split_pane, first_pane);
+    let terminal_tab = shell
+        .panes
+        .iter()
+        .find(|row| row.id == split_pane)
+        .unwrap()
+        .selected_terminal_tab
+        .unwrap();
+
+    root.apply(AppAction::CloseTerminalTab {
+        pane: split_pane,
+        terminal_tab,
+        containment_generation: shell.containment_generation,
+    })
+    .expect("final terminal in a non-sole Pane collapses the Pane");
+
+    let after = root.snapshot().shell;
+    assert_eq!(after.panes.len(), 1);
+    assert_eq!(after.panes[0].id, first_pane);
+    assert!(
+        after.panes.iter().all(|row| row.id != split_pane),
+        "collapsed Pane must leave the tree"
+    );
+}
