@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426; Blocks-default for supported shells accepted 2026-11-06 under #1426; **Proposed** Block-scoped direct-input amendment under #1466 (not normative until its architecture-only acceptance PR merges)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426); Blocks-default 2026-11-06 (#1426); Block-scoped direct-input Proposed 2026-11-08 (#1466)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426; Blocks-default for supported shells accepted 2026-11-06 under #1426; **Accepted** Block-scoped direct-input amendment under #1466 (product-owner acceptance 2026-11-08; normative on merge of architecture-only PR #1469)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426); Blocks-default 2026-11-06 (#1426); Block-scoped direct-input Accepted 2026-11-08 (#1466 / PR #1469)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1567,12 +1567,14 @@ output and no cross-pane copies; scroll retention; and full-screen TUI
 takeover/return. A green unit or hosted run does not replace headed packaged
 app evidence.
 
-## Proposed 2026-11-08 amendment — Block-scoped direct input for Running REPLs (#1466)
+## 2026-11-08 accepted amendment — Block-scoped direct input for Running REPLs (#1466)
 
-**Status:** Proposed under Architecture Issue #1466. Not normative and
-authorizes no production Rust/Swift until an architecture-only acceptance PR
-merges after independent human review. An author or agent comment is not that
-acceptance.
+**Status:** Accepted by the product owner on 2026-11-08 in chat (explicit
+“i accept the ADR”). Normative on merge of architecture-only PR #1469 under
+#1466. An author or agent comment alone is not acceptance; the product owner’s
+explicit acceptance plus merge of this PR is the acceptance record. This
+amendment does **not** authorize production Rust/Swift inside this PR;
+implementation proceeds under Ready Issues #1467 / #1468 after merge.
 
 ### Problem
 
@@ -1589,7 +1591,7 @@ parity. Forcing Interact→Raw for ordinary local REPLs fights the Blocks-first
 supported-shell direction (#1426) and makes Raw feel like a broken mode switch
 rather than a rare fallback.
 
-### Proposed decision
+### Accepted decision
 
 When presentation is Flow, the canonical screen is primary, the attachment is
 Controller, and the innermost integration state is `Running(b)` with a known
@@ -1645,11 +1647,12 @@ Block `b`:
 
 ### Required follow-up after acceptance
 
-1. Architecture-only merge under #1466 (this section becomes Accepted).
-2. Point ADR-026 Decision item 7 at this Accepted contract (companion docs
-   edit in the same architecture PR or immediately after).
-3. Update SPEC-008 / SPEC-006 as needed; open Ready implementation Issues for
-   Runtime eligibility publication and macOS focus/IME routing.
-4. Withdraw Interact-as-required for local REPLs once implementation Issues
-   Done; keep Interact/Raw only where this contract does not apply.
+1. Architecture-only merge of PR #1469 under #1466 (this section is Accepted).
+2. ADR-026 Decision item 7 points at this Accepted contract (companion edit in
+   this same architecture PR).
+3. Update SPEC-008 / SPEC-006 as needed on the implementation track; Ready
+   implementation Issues #1467 (Runtime eligibility) and #1468 (macOS
+   focus/IME routing).
+4. Withdraw Interact-as-required for local REPLs once those Issues are Done;
+   keep Interact/Raw only where this contract does not apply.
 
