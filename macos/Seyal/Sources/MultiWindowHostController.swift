@@ -147,10 +147,20 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         // Install the live Pane surfaces only in Rust's product-active window.
         if isProductActive(key) {
             installLiveHost(in: window, key: key)
+            // Zero-Window Dock/⌘⇧N re-entry must re-arm the Runtime bridge.
+            // bootstrapAfterLaunch only activates once; after the last window
+            // was destroyed (especially after multi-terminal close) the prior
+            // Controller is gone and a fresh activate is required (#1402).
+            liveHost.activateAfterWindowPresentation()
+            liveHost.reconcileChrome()
         } else {
             window.contentView = InactiveWindowPlaceholderView(frame: window.contentLayoutRect)
         }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func destroyRealization(_ key: WindowKey) {
@@ -547,15 +557,55 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Dock reopen: forward ActivateWorkspace for the last active workspace.
     func handleDockReopen() {
-        let shell = seyal_app_shell(appHandle)
+        let before = seyal_app_shell(appHandle)
+        if before.window_count == 0 {
+            var action = SeyalAppAction()
+            action.version = UInt16(SEYAL_APP_ABI_VERSION)
+            action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            action.kind = UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
+            action.target_execution_lo = before.last_active_workspace_lo
+            action.target_execution_hi = before.last_active_workspace_hi
+            let code = seyal_app_apply(appHandle, &action)
+            applyPendingEffectsAndReconcile()
+            // Fall back to CreateWindow if ActivateWorkspace did not materialize
+            // a Window (stale workspace id / provisioning rollback).
+            if code != 0 || seyal_app_shell(appHandle).window_count == 0 {
+                createWindow(nil)
+            }
+            ensureProductWindowActivated()
+            return
+        }
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
         action.kind = UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
-        action.target_execution_lo = shell.last_active_workspace_lo
-        action.target_execution_hi = shell.last_active_workspace_hi
+        action.target_execution_lo = before.last_active_workspace_lo
+        action.target_execution_hi = before.last_active_workspace_hi
         _ = seyal_app_apply(appHandle, &action)
         applyPendingEffectsAndReconcile()
+        // Rust may still list Windows while AppKit realizations were cleared.
+        realizeMissingSnapshotWindows()
+        ensureProductWindowActivated()
+    }
+
+    /// Re-create AppKit realizations for any Rust Windows missing a host window.
+    private func realizeMissingSnapshotWindows() {
+        for key in snapshotOrderedWindowKeys() where realizations[key] == nil {
+            realize(key)
+        }
+        orderedKeys = snapshotOrderedWindowKeys().filter { realizations[$0] != nil }
+    }
+
+    private func ensureProductWindowActivated() {
+        guard let key = snapshotOrderedWindowKeys().first(where: { isProductActive($0) })
+            ?? orderedKeys.first
+        else { return }
+        if realizations[key] == nil {
+            realize(key)
+        }
+        orderFrontMakeKey(key)
+        liveHost.activateAfterWindowPresentation()
+        liveHost.reconcileChrome()
     }
 
     /// ⌘W hierarchical close: ClosePane on the focused Pane. Rust peels

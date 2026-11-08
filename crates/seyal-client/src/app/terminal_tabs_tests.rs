@@ -140,3 +140,51 @@ fn closing_final_terminal_in_a_split_pane_collapses_that_pane() {
         "collapsed Pane must leave the tree"
     );
 }
+
+#[test]
+fn dock_reopen_after_closing_split_terminals_one_by_one() {
+    use crate::shell::SplitAxis;
+
+    let mut root = ApplicationRoot::new();
+    let workspace = root.snapshot().shell.active_workspace;
+    root.apply(AppAction::NewTerminal)
+        .expect("second terminal on first Pane");
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .expect("split");
+    root.apply(AppAction::NewTerminal)
+        .expect("second terminal on split Pane");
+
+    // Close every selected terminal until the Window hierarchical-closes.
+    let mut guard = 0;
+    while !root.snapshot().shell.windows.is_empty() {
+        guard += 1;
+        assert!(guard < 16, "close loop must terminate");
+        let snap = root.snapshot().shell;
+        let pane = snap.focused_pane;
+        let row = snap
+            .panes
+            .iter()
+            .find(|candidate| candidate.id == pane)
+            .expect("focused Pane");
+        let terminal_tab = row
+            .selected_terminal_tab
+            .or_else(|| row.terminal_tabs.first().map(|tab| tab.id))
+            .expect("focused Pane still has a terminal to close");
+        root.apply(AppAction::CloseTerminalTab {
+            pane,
+            terminal_tab,
+            containment_generation: snap.containment_generation,
+        })
+        .expect("close next terminal");
+    }
+
+    root.apply(AppAction::SelectWorkspace { id: workspace })
+        .expect("Dock ActivateWorkspace after multi-close must create");
+    assert_eq!(root.snapshot().shell.windows.len(), 1);
+    assert!(
+        !root.snapshot().shell.panes.is_empty(),
+        "re-created Window must project a Pane"
+    );
+}

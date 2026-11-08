@@ -621,6 +621,8 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
         XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: true))
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
+        XCTAssertEqual(host.orderedKeys.count, 1)
+        XCTAssertNotNil(host.liveHost.window, "Dock re-entry must reinstall the live host")
     }
 
     func testHierarchicalCloseMenuForwardsClosePane() {
