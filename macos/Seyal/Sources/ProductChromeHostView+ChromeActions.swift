@@ -145,17 +145,20 @@ extension ProductChromeHostView {
     }
 
     /// Close Terminal finishes after Lifecycle::Finalized; frames stop so
-    /// onFrameChanged never rebuilds the Pane tab strip. Reconcile again once
-    /// Rust has removed the tab (generation already bumped).
+    /// onFrameChanged never rebuilds the Pane tab strip or drains DestroyWindow
+    /// effects. Must call `pane.onProductChanged` (MultiWindow wraps it to
+    /// applyPendingEffects + syncDestroyAgainstSnapshot), not reconcile alone.
     func schedulePostTerminalCloseReconcile() {
-        pane.onProductChanged?()
-        reconcileChrome()
-        routeFocus()
-        for delay in [0.05, 0.15, 0.4, 1.0] as [TimeInterval] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.reconcileChrome()
-                self?.routeFocus()
-            }
+        let refresh: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.pane.onProductChanged?()
+            self.routeFocus()
+        }
+        refresh()
+        // Bound terminate can finalize after the first second; keep refreshing
+        // until Rust has collapsed the empty sole Pane / Window (#1402).
+        for delay in [0.05, 0.15, 0.4, 1.0, 2.0, 3.5, 5.0] as [TimeInterval] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: refresh)
         }
     }
 
