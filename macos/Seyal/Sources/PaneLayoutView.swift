@@ -146,6 +146,8 @@ final class PaneLayoutView: NSView {
     var onSplitPane: ((UInt64, UInt64, SplitDirection) -> Void)?
     var onClosePane: ((UInt64, UInt64) -> Void)?
     var onRetryPaneRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
+    /// Bubbled from a leaf composer after a consumed product shortcut (#1464).
+    var onPaneCommandConsumed: (() -> Void)?
     /// Rust application root the projection is read from; 0 until wired.
     var appHandle: UInt64 = 0
     private(set) var regions: [Region] = []
@@ -259,12 +261,6 @@ final class PaneLayoutView: NSView {
                 )
                 if let historyBridge { host.historyBridge = historyBridge }
                 needsRegistrySeed = true
-                host.onFocus = { [weak self] in
-                    self?.onFocusPane?(key.lo, key.hi)
-                }
-                host.onRetryRecovery = { [weak self] target in
-                    self?.onRetryPaneRecovery?(target)
-                }
                 secondaryLiveHosts[key] = host
                 // Frame before install: a zero-size host activates AutoresizingMask
                 // width/height==0 against Flow composer/transcript constraints and
@@ -273,6 +269,15 @@ final class PaneLayoutView: NSView {
                     host.frame = targetFrame
                 }
                 addSubview(host, positioned: .above, relativeTo: liveContent)
+            }
+            host.onFocus = { [weak self] in
+                self?.onFocusPane?(key.lo, key.hi)
+            }
+            host.onRetryRecovery = { [weak self] target in
+                self?.onRetryPaneRecovery?(target)
+            }
+            host.onCommandConsumed = { [weak self] in
+                self?.onPaneCommandConsumed?()
             }
             // Zoom/occlusion must remove the leaf's surface; Raw/TUI covers the
             // focused host with liveContent without destroying it (#1424).

@@ -1056,6 +1056,94 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
+    /// #1464: after Flow→Flow split, routeFocus must move first responder from the
+    /// hidden liveContent composer onto the visible pane-owned composer.
+    @MainActor
+    func testRouteFocusAfterSplitTargetsVisiblePaneComposer() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 1200, height: 760),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let handle = view.pane.appHandle
+
+        var snap = seyal_app_snapshot(handle)
+        let sourceLo = snap.pane_lo
+        let sourceHi = snap.pane_hi
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = sourceLo
+        bind.fence_pane_hi = sourceHi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x3333_3333_3333_3333
+        bind.target_attachment_lo = 0x4444_4444_4444_4444
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(view.centerColumn.liveContent.isHidden)
+        XCTAssertEqual(view.centerColumn.secondaryHosts.count, 2)
+
+        // Keep focus on the already-bound source pane so its Flow composer is
+        // Available; the freshly split leaf may still be unbound in this fixture.
+        var focusSource = SeyalAppAction()
+        focusSource.version = UInt16(SEYAL_APP_ABI_VERSION)
+        focusSource.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        focusSource.kind = UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue)
+        focusSource.target_execution_lo = sourceLo
+        focusSource.target_execution_hi = sourceHi
+        XCTAssertEqual(seyal_app_apply(handle, &focusSource), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        // Reproduce the post-⌘D defect: hidden liveContent composer still owns
+        // first responder after chrome reconcile with unchanged eligibility.
+        XCTAssertTrue(view.composer.focusEditor())
+        let hiddenEditor = try XCTUnwrap(
+            accessibilityChild(view.composer, identifier: "seyal-composer-editor")
+        )
+        XCTAssertTrue(window.firstResponder === hiddenEditor)
+
+        view.routeFocus()
+        let ownedHost = try XCTUnwrap(
+            view.centerColumn.secondaryHosts.first(where: \.inputOwned)
+        )
+        XCTAssertFalse(ownedHost.composer.isHidden)
+        XCTAssertTrue(
+            view.activeComposer === ownedHost.composer,
+            "activeComposer must prefer the input-owned pane editor"
+        )
+        let activeEditor = try XCTUnwrap(
+            accessibilityChild(view.activeComposer, identifier: "seyal-composer-editor")
+        )
+        XCTAssertTrue(
+            window.firstResponder === activeEditor,
+            "routeFocus must leave the hidden root composer for the visible pane editor"
+        )
+        XCTAssertFalse(window.firstResponder === hiddenEditor)
+    }
+
     @MainActor
     func testVisibleOutputLineCountTrimsOnlyTrailingBlankRows() {
         XCTAssertEqual(CommandBlockView.visibleOutputLineCount("first\n\nthird\n\n"), 3)

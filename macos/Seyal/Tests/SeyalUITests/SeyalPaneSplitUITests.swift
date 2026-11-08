@@ -45,6 +45,48 @@ final class SeyalPaneSplitUITests: XCTestCase {
         assertSingleLiveSurface(in: app, focusedRegion: focused)
     }
 
+    /// #1464: ⌘D from the composer must re-route first responder so typing
+    /// appears in the visible pane editor without an extra click.
+    func testComposerShowsTypedDraftImmediatelyAfterCommandDSplit() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+        let editorBefore = element(app, "seyal-composer-editor")
+        XCTAssertTrue(editorBefore.waitForExistence(timeout: 8))
+        editorBefore.click()
+
+        app.typeKey("d", modifierFlags: .command)
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        XCTAssertTrue(
+            element(app, "seyal-pane-presentation-host").waitForExistence(timeout: 8),
+            "focused Flow leaf keeps a durable presentation host after ⌘D"
+        )
+
+        let marker = "cmd-d-visible-\(Int(Date().timeIntervalSince1970) % 100_000)"
+        // Do not click the composer or pane — that masked #1464.
+        app.typeText("echo \(marker)")
+
+        let editor = element(app, "seyal-composer-editor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        let visibleDraft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", marker),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [visibleDraft], timeout: 5),
+            .completed,
+            "typed text must appear in the visible composer after ⌘D without clicking; value=\(editor.value ?? "nil")"
+        )
+        editor.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: marker)
+                .waitForExistence(timeout: 10),
+            "Return must still submit the visible draft to Blocks"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     func testSecondPaneComposerShowsTypedDraftBeforeSubmitAfterPriorCommands() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)

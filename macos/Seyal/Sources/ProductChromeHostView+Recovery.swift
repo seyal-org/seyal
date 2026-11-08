@@ -60,11 +60,7 @@ extension ProductChromeHostView {
         guard !commandPalette.isOpen else { return false }
         if !centerColumn.secondaryHosts.isEmpty {
             let shell = seyal_app_shell(pane.appHandle)
-            guard let host = centerColumn.presentationHost(
-                paneLo: shell.focused_pane_lo,
-                paneHi: shell.focused_pane_hi
-            ),
-            seyal_app_eligibility_for_pane(
+            guard seyal_app_eligibility_for_pane(
                 pane.appHandle,
                 shell.focused_pane_lo,
                 shell.focused_pane_hi
@@ -77,7 +73,7 @@ extension ProductChromeHostView {
             else {
                 return false
             }
-            return host.composer.focusEditor()
+            return activeComposer.focusEditor()
         }
         return composer.focusEditor()
     }

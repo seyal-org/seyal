@@ -188,10 +188,14 @@ extension ProductChromeHostView {
 
     @objc func splitFocusedRight() {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 0)
+        // Split keeps Flow eligibility; reconcile alone leaves the pre-split
+        // composer first responder (often inside hidden liveContent) (#1464).
+        routeFocus()
     }
 
     @objc func splitFocusedDown() {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 1)
+        routeFocus()
     }
 
     func closePane(paneLo: UInt64, paneHi: UInt64) {
