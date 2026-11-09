@@ -38,15 +38,22 @@ extension ProductChromeHostView {
                 self.pane.inputSurface.window?.makeFirstResponder(self.pane.inputSurface)
             }
             : nil
+        // Warp-like: clicking the Running Block focuses DirectInput Metal.
+        let directInput = running && target.mode == 3
+        card.onRequestDirectInputFocus = directInput
+            ? { [weak self] in
+                _ = self?.focusBlockScopedDirectInputSurface()
+            }
+            : nil
     }
 
     /// When Runtime publishes Flow DirectInput, route keys into the live Metal
     /// surface without leaving Flow chrome (#1468).
     func focusBlockScopedDirectInputIfEligible(_ snapshot: SeyalAppSnapshot) {
-        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
-            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
-        pane.inputSurface.syncInputRoutePresentation()
-        guard direct else { return }
-        pane.inputSurface.window?.makeFirstResponder(pane.inputSurface)
+        guard snapshotPublishesBlockScopedDirectInput(snapshot) else {
+            pane.inputSurface.syncInputRoutePresentation()
+            return
+        }
+        _ = focusBlockScopedDirectInputSurface()
     }
 }

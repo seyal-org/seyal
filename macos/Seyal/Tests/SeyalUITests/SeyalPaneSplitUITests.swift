@@ -192,7 +192,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         )
     }
 
-    func testSecondPanePythonReceivesInputAfterInteractAction() throws {
+    func testSecondPanePythonReceivesInputViaDirectInput() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         click(app, "seyal-split-right")
@@ -204,30 +204,31 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
 
         let secondPane = element(app, "seyal-pane-region-1")
-        let interact = element(app, "seyal-running-program-interact")
-        XCTAssertTrue(interact.waitForExistence(timeout: 10), "Python Block must offer direct input")
-        XCTAssertTrue(
-            secondPane.frame.insetBy(dx: -1, dy: -1).contains(interact.frame),
-            "Python Block interaction must belong to Pane 2; button=\(interact.frame), pane=\(secondPane.frame)"
+        XCTAssertFalse(
+            element(app, "seyal-running-program-interact").waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for Pane 2 python"
         )
-        interact.click()
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         XCTAssertTrue(terminal.waitForExistence(timeout: 8))
-        let rawRoute = expectation(
+        let directRoute = expectation(
             for: NSPredicate { _, _ in terminal.elementType == .textView },
             evaluatedWith: nil,
             handler: nil
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [rawRoute], timeout: 5),
+            XCTWaiter.wait(for: [directRoute], timeout: 5),
             .completed,
-            "Interact must route the focused second pane to its terminal input surface"
+            "Flow DirectInput must expose Pane 2 terminal input without Interact→Raw"
         )
 
-        terminal.click()
+        let pythonBody = secondPane.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        XCTAssertTrue(pythonBody.waitForExistence(timeout: 8))
+        pythonBody.click()
         let evaluatedOutput = "seyalpy-ok"
-        terminal.typeText("print('seyalpy'+'-ok')")
-        terminal.typeKey("\r", modifierFlags: [])
+        app.typeText("print('seyalpy'+'-ok')")
+        app.typeKey("\r", modifierFlags: [])
         XCTAssertTrue(secondPane.frame.insetBy(dx: -1, dy: -1).contains(terminal.frame))
         let renderedText = try waitForRenderedText(evaluatedOutput, in: terminal)
         XCTAssertTrue(
@@ -247,21 +248,26 @@ final class SeyalPaneSplitUITests: XCTestCase {
         submitComposerCommand("node", in: app, expectBlock: false)
         XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
 
-        let interact = element(app, "seyal-running-program-interact")
-        XCTAssertTrue(interact.waitForExistence(timeout: 10), "Node Block must offer direct input")
+        XCTAssertFalse(
+            element(app, "seyal-running-program-interact").waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for Pane 2 node"
+        )
         XCTAssertFalse(
             app.descendants(matching: .any)["seyal-session-bootstrap-title"].exists,
             "a local Node REPL must not be interrupted by a session setup popup"
         )
-        interact.click()
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         XCTAssertTrue(terminal.waitForExistence(timeout: 8))
         XCTAssertEqual(terminal.elementType, .textView)
 
-        terminal.click()
+        let nodeBody = element(app, "seyal-pane-region-1").descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        XCTAssertTrue(nodeBody.waitForExistence(timeout: 8))
+        nodeBody.click()
         let evaluatedOutput = "seyalnode-ok"
-        terminal.typeText("console.log('seyalnode'+'-ok')")
-        terminal.typeKey("\r", modifierFlags: [])
+        app.typeText("console.log('seyalnode'+'-ok')")
+        app.typeKey("\r", modifierFlags: [])
         XCTAssertTrue(element(app, "seyal-pane-region-1").frame.insetBy(dx: -1, dy: -1).contains(terminal.frame))
         let renderedText = try waitForRenderedText(evaluatedOutput, in: terminal)
         XCTAssertTrue(

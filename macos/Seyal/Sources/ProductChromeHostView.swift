@@ -661,13 +661,46 @@ final class ProductChromeHostView: NSView {
         return composer
     }
 
+    /// Focused Pane Metal surface for Flow DirectInput / Raw / TUI keys.
+    func focusedInputSurface() -> InteractiveMetalSurfaceView {
+        let shell = seyal_app_shell(pane.appHandle)
+        if !centerColumn.secondaryHosts.isEmpty,
+            let host = centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            )
+        {
+            return host.surface
+        }
+        return pane.inputSurface
+    }
+
+    /// ADR-009 #1466: Flow + Block-scoped DirectInput owns keys on Metal, not
+    /// the Busy composer dock.
+    func snapshotPublishesBlockScopedDirectInput(_ snapshot: SeyalAppSnapshot) -> Bool {
+        snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+    }
+
+    @discardableResult
+    func focusBlockScopedDirectInputSurface() -> Bool {
+        let surface = focusedInputSurface()
+        surface.syncInputRoutePresentation()
+        return window?.makeFirstResponder(surface) ?? false
+    }
+
     func routeFocus() {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
         guard !commandPalette.isOpen else { return }
-        // Revoke Metal IME/AX before focusing the composer so Flow never keeps
-        // a competing terminal first responder (#866).
+        // Sync Metal IME/AX with Rust eligibility before choosing a responder
+        // (#866 / #1468). DirectInput must keep Metal, not Busy composer.
+        let snapshot = seyal_app_snapshot(pane.appHandle)
         pane.inputSurface.syncInputRoutePresentation()
+        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+            _ = focusBlockScopedDirectInputSurface()
+            return
+        }
         let shell = seyal_app_shell(pane.appHandle)
         if !centerColumn.secondaryHosts.isEmpty {
             let eligibility = seyal_app_eligibility_for_pane(
@@ -687,7 +720,6 @@ final class ProductChromeHostView: NSView {
                 return
             }
         }
-        let snapshot = seyal_app_snapshot(pane.appHandle)
         let composerSnap = seyal_app_composer(pane.appHandle)
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
            composerSnap.mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
@@ -701,7 +733,7 @@ final class ProductChromeHostView: NSView {
         } else if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {
-            window?.makeFirstResponder(pane.inputSurface)
+            window?.makeFirstResponder(focusedInputSurface())
         }
     }
 

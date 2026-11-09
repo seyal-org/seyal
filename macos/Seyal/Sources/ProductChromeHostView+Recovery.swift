@@ -58,6 +58,12 @@ extension ProductChromeHostView {
     /// ownership at the moment AppKit accepts the responder change.
     func requestComposerFocusIfPaletteAllows() -> Bool {
         guard !commandPalette.isOpen else { return false }
+        // DirectInput owns the Running Block live surface; do not steal back to
+        // the Busy composer dock (#1468 / ADR-009 #1466).
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+            return focusBlockScopedDirectInputSurface()
+        }
         if !centerColumn.secondaryHosts.isEmpty {
             let shell = seyal_app_shell(pane.appHandle)
             guard seyal_app_eligibility_for_pane(
