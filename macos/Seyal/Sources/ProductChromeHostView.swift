@@ -383,6 +383,8 @@ final class ProductChromeHostView: NSView {
         composer.onFocusEligibilityChanged = { [weak self] in
             guard let self, self.composer.isFocusEligibleForRecovery else { return }
             self.pane.inputSurface.composerFocusEligibilityDidChange()
+            // Busy/DirectInput → Available (REPL exit): reclaim the dock like Warp.
+            self.routeFocus()
         }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()

@@ -495,6 +495,7 @@ final class SecondaryLivePaneHost: NSView {
     }
 
     /// Focused Flow + DirectInput: keys go to this pane's live surface (#1468).
+    /// When DirectInput ends, return keys to this pane's composer (Warp-like).
     private func focusBlockScopedDirectInputIfEligible() {
         guard inputOwned else {
             // Never stop the shared Controller bridge; only drop the borrow.
@@ -512,7 +513,10 @@ final class SecondaryLivePaneHost: NSView {
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
             && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
         surface.syncInputRoutePresentation()
-        guard direct else { return }
+        guard direct else {
+            _ = composer.focusEditor()
+            return
+        }
         window?.makeFirstResponder(surface)
     }
 

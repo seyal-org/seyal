@@ -158,6 +158,33 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             .completed,
             "keyboard input must reach the local Node REPL via Block-scoped DirectInput"
         )
+        // Warp-like: after the REPL exits, the Flow composer dock owns keys again
+        // without requiring a click back into the dock.
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer editor returns after Node exits")
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 5),
+            .completed,
+            "composer must leave Busy/DirectInput after Node exits"
+        )
+        let handoffMarker = "seyal-m003-composer-handoff"
+        app.typeText("echo \(handoffMarker)")
+        let draft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", handoffMarker),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [draft], timeout: 5),
+            .completed,
+            "composer must reclaim keyboard focus after Node exits (Warp-like handoff)"
+        )
         attachScreenshot(app, name: "m003-node-no-session-banner")
         app.terminate()
     }

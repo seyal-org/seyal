@@ -54,10 +54,14 @@ extension ProductChromeHostView {
     }
 
     /// When Runtime publishes Flow DirectInput, route keys into the live Metal
-    /// surface without leaving Flow chrome (#1468).
+    /// surface without leaving Flow chrome (#1468). When DirectInput ends
+    /// (REPL exit / Ctrl+D), Warp-like handoff returns keys to the composer.
     func focusBlockScopedDirectInputIfEligible(_ snapshot: SeyalAppSnapshot) {
         guard snapshotPublishesBlockScopedDirectInput(snapshot) else {
             pane.inputSurface.syncInputRoutePresentation()
+            // Eligibility often stays Flow across the handoff, so
+            // performChromeReconcile will not call routeFocus on its own.
+            routeFocus()
             return
         }
         _ = focusBlockScopedDirectInputSurface()
