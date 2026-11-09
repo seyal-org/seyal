@@ -36,7 +36,6 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "python3 -q")
         ).firstMatch
         XCTAssertTrue(pythonBlock.waitForExistence(timeout: 12), "Python must stay in its running Block")
-        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
 
         let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
         XCTAssertFalse(
@@ -46,25 +45,16 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
         let blocksScroll = app.scrollViews["seyal-blocks-scroll"].firstMatch
         XCTAssertTrue(blocksScroll.exists)
-        XCTAssertLessThanOrEqual(
-            composer.frame.minY - blocksScroll.frame.maxY,
-            32,
-            "the Flow viewport must end immediately above the composer"
+        // Warp-like DirectInput: Busy dock retracts so the Running Block is the
+        // only typing surface (no second composer place).
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 2),
+            "DirectInput must hide the Busy composer dock while the REPL owns keys"
         )
         XCTAssertLessThanOrEqual(
             blocksScroll.frame.maxY - pythonBlock.frame.maxY,
             96,
-            "the active Python Block must stay docked above the Pane composer"
-        )
-        XCTAssertGreaterThan(
-            composer.frame.minY - pythonBlock.frame.maxY,
-            0,
-            "the composer must remain below the active Python Block"
-        )
-        XCTAssertLessThanOrEqual(
-            composer.frame.minY - pythonBlock.frame.maxY,
-            96,
-            "the Python Block must dock directly above the composer"
+            "the active Python Block must stay docked at the live end of the transcript"
         )
         // ADR-009 #1466 DirectInput: no Interact→Raw for ordinary local REPLs.
         XCTAssertFalse(
@@ -104,6 +94,19 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             XCTWaiter.wait(for: [pythonOutput], timeout: 8),
             .completed,
             "keyboard input must reach the local Python REPL via Block-scoped DirectInput"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer dock returns after Python exits")
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 5),
+            .completed,
+            "composer must leave DirectInput after Python exits"
         )
         attachScreenshot(app, name: "m003-local-python-bottom-dock")
     }

@@ -287,7 +287,14 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let direct = boundPaneLo == nil
             && (snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
                 || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue))
-        let hidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+        // Warp-like: Block-scoped DirectInput owns keys in the Running Block.
+        // Hide the Busy dock so users are not offered a second typing surface.
+        let blockScopedDirectInput = snapshot.eligibility
+            == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+        let hidden = direct
+            || blockScopedDirectInput
+            || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
         // Presentation/epoch transitions revoke composer IME ownership: cancel
         // uncommitted marked text without submitting (SPEC-008 / #866).
         if (direct || hidden || composer.epoch != lastEpoch), hasMarkedText() {
@@ -312,7 +319,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         placeholder.stringValue = inlineRelayPresentation
             ? "" : copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
         setAccessibilityValue(
-            relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden"))
+            blockScopedDirectInput
+                ? "hidden"
+                : (relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden")))
         )
         if composer.epoch != lastEpoch {
             lastEpoch = composer.epoch

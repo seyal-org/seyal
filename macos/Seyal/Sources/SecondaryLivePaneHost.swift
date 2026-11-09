@@ -87,6 +87,8 @@ final class SecondaryLivePaneHost: NSView {
     private var surfaceTopToTranscript: NSLayoutConstraint!
     private var surfaceBottomToHost: NSLayoutConstraint!
     private var surfaceBottomToTranscript: NSLayoutConstraint!
+    private var transcriptBottomToComposer: NSLayoutConstraint!
+    private var transcriptBottomToHost: NSLayoutConstraint!
     private var flowConstraints: [NSLayoutConstraint] = []
     /// Keeps transcript document extent across Block rebuilds when the user has
     /// scrolled away from live end (#1424).
@@ -219,17 +221,21 @@ final class SecondaryLivePaneHost: NSView {
         surfaceTopToTranscript = surface.topAnchor.constraint(equalTo: transcript.topAnchor)
         surfaceBottomToHost = surface.bottomAnchor.constraint(equalTo: bottomAnchor)
         surfaceBottomToTranscript = surface.bottomAnchor.constraint(equalTo: transcript.bottomAnchor)
-        let transcriptFillsToComposer = transcript.bottomAnchor.constraint(
+        transcriptBottomToComposer = transcript.bottomAnchor.constraint(
             equalTo: composer.topAnchor,
             constant: -12
         )
-        transcriptFillsToComposer.priority = .defaultHigh
+        transcriptBottomToComposer.priority = .defaultHigh
+        transcriptBottomToHost = transcript.bottomAnchor.constraint(
+            equalTo: bottomAnchor,
+            constant: -10
+        )
         flowConstraints = [
             transcript.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             transcript.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             transcript.topAnchor.constraint(equalTo: topAnchor, constant: 10),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
-            transcriptFillsToComposer,
+            transcriptBottomToComposer,
             composer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             composer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             composer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
@@ -513,11 +519,35 @@ final class SecondaryLivePaneHost: NSView {
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
             && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
         surface.syncInputRoutePresentation()
+        applyDirectInputMergedLayout(direct)
         guard direct else {
             _ = composer.focusEditor()
             return
         }
         window?.makeFirstResponder(surface)
+    }
+
+    /// Warp-like: retract the Busy dock and fill the transcript while DirectInput
+    /// owns the Running Block; restore the dock when DirectInput ends.
+    private func applyDirectInputMergedLayout(_ directInput: Bool) {
+        if directInput {
+            if transcriptBottomToComposer.isActive {
+                transcriptBottomToComposer.isActive = false
+            }
+            if !transcriptBottomToHost.isActive {
+                transcriptBottomToHost.isActive = true
+            }
+            composer.isHidden = true
+        } else {
+            if transcriptBottomToHost.isActive {
+                transcriptBottomToHost.isActive = false
+            }
+            if !transcriptBottomToComposer.isActive {
+                transcriptBottomToComposer.isActive = true
+            }
+            composer.reconcile()
+        }
+        needsLayout = true
     }
 
     private func retagArrangedBlockAccessibilityIdentifiers() {
@@ -627,6 +657,7 @@ final class SecondaryLivePaneHost: NSView {
             // (#1379 adversarial review B2).
             historyProjectionRequests.discard(forDisplayHandle: displayHandle)
             composer.isHidden = true
+            transcriptBottomToHost.isActive = false
             clearPreservedDocumentHeight()
             surface.preserveRawScrollbackAfterPresentationChange(eligibility: eligibility)
         } else {
@@ -690,6 +721,7 @@ final class SecondaryLivePaneHost: NSView {
         } else {
             // Benign interim: fill with Metal surface until PaneLayoutView
             // publishes a non-zero region frame in the same reconcile turn.
+            transcriptBottomToHost.isActive = false
             NSLayoutConstraint.deactivate(flowConstraints)
             NSLayoutConstraint.activate([
                 surfaceLeadingToHost,
