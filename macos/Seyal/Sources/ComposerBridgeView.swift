@@ -7,6 +7,10 @@ private final class ComposerTextView: NSTextView {
     /// Returns true when the key event was consumed by Rust routing.
     var onRouteKeystroke: ((NSEvent) -> Bool)?
 
+    /// Busy / DirectInput must not let a non-editable dock steal keys from the
+    /// Running Block live surface (#1468).
+    override var acceptsFirstResponder: Bool { isEditable }
+
     override func keyDown(with event: NSEvent) {
         if onRouteKeystroke?(event) == true {
             return
@@ -178,7 +182,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
 
     @discardableResult
     func focusEditor() -> Bool {
-        window?.makeFirstResponder(textView) ?? false
+        // Never force-focus a non-editable Busy dock over DirectInput Metal.
+        guard textView.isEditable else { return false }
+        return window?.makeFirstResponder(textView) ?? false
     }
 
   var editorIsFirstResponder: Bool {
@@ -293,6 +299,10 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let busy = composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue)
         textView.isEditable = available || relay
         hasReconciledComposerState = true
+        // Resign a Busy/disabled editor so DirectInput Metal can keep keys.
+        if !textView.isEditable, window?.firstResponder === textView {
+            window?.makeFirstResponder(nil)
+        }
         let isNowFocusEligible = isFocusEligibleForRecovery
         execute.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_EXECUTE))
         execute.isEnabled = composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0

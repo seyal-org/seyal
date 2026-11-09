@@ -38,11 +38,17 @@ extension ProductChromeHostView {
                 self.pane.inputSurface.window?.makeFirstResponder(self.pane.inputSurface)
             }
             : nil
-        // Warp-like: clicking the Running Block focuses DirectInput Metal.
-        let directInput = running && target.mode == 3
-        card.onRequestDirectInputFocus = directInput
-            ? { [weak self] in
-                _ = self?.focusBlockScopedDirectInputSurface()
+        // Warp-like: click the Running foreground Block to (re)focus Metal when
+        // DirectInput is currently published. Bind for any Running match so a
+        // late DirectInput status still has a click path without rebuild.
+        card.onRequestDirectInputFocus = running
+            ? { [weak self, blockID] in
+                guard let self else { return }
+                let snap = seyal_app_snapshot(self.pane.appHandle)
+                guard self.snapshotPublishesBlockScopedDirectInput(snap),
+                    blockID == self.relayTarget.blockID
+                else { return }
+                _ = self.focusBlockScopedDirectInputSurface()
             }
             : nil
     }

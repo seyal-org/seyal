@@ -216,29 +216,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // Flow paints terminal pixels over Block bodies. Chrome owns scrolling
     // and composer hit-testing, so the compositor must not swallow events.
     // Raw scrollback temporarily suppresses drawsLiveGrid but must keep hits (#1442).
+    // Flow DirectInput click→focus is CommandBlockView-owned (#1468): Metal
+    // stays nil so Block bodies remain hittable and empty canvas never becomes
+    // a Raw surface.
     if inspectRendererPresentation().drawsLiveGrid || rawScrollOffset > 0 {
       return super.hitTest(point)
     }
-    // Flow DirectInput: only the Running Block live-tail clip is hittable so
-    // empty canvas never becomes a Raw surface (ADR-009 #1466 / #1468).
-    if admitsFlowDirectInputHit(at: point) {
-      return super.hitTest(point)
-    }
     return nil
-  }
-
-  /// Subclasses admit Flow Block-scoped DirectInput hits inside live-tail clips.
-  func admitsFlowDirectInputHit(at point: NSPoint) -> Bool {
-    _ = point
-    return false
-  }
-
-  /// AppKit clips for running live-tail regions (`historyRows == nil`).
-  func liveTailHitClips() -> [CGRect] {
-    guard let regions = lastTranscriptFrameRegions else { return [] }
-    return regions.compactMap { region in
-      region.historyRows == nil ? region.clip : nil
-    }
   }
 
   func inspectRendererPresentation() -> RendererPresentationInspection {

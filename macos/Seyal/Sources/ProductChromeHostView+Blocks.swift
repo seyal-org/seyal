@@ -77,9 +77,60 @@ extension ProductChromeHostView {
             )
             let accepted = self.relayComposerStatus(status)
             if accepted {
+                // Status can publish DirectInput / Running(b) without bumping
+                // snapshot generation. performChromeReconcile then short-circuits
+                // and never rebuildBlocks — empty transcript + Busy dock.
+                self.ensureRunningDirectInputBlockCards()
+                self.rebindDirectInputClickTargets()
                 self.reconcileChrome()
+                // After Busy resigns the dock editor, reclaim Metal for DirectInput.
+                let snap = seyal_app_snapshot(self.pane.appHandle)
+                self.focusBlockScopedDirectInputIfEligible(snap)
             }
             return accepted
+        }
+    }
+
+    /// Project + rebuild when the Running DirectInput target has no card yet.
+    /// Never rebuild against an empty timeline: that would wipe cards and, if
+    /// snapshot generation does not move, leave Busy + blank transcript.
+    func ensureRunningDirectInputBlockCards() {
+        let targetID = relayTarget.blockID
+        guard targetID != 0, relayTarget.targetClass == 2 else { return }
+        guard blockCards[targetID] == nil else { return }
+        let snap = seyal_app_snapshot(pane.appHandle)
+        let direct = snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+            || snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        // Multipane Flow owns cards on SecondaryLivePaneHost; legacy transcript
+        // stays empty by design when secondary hosts are installed.
+        guard !direct, centerColumn.secondaryHosts.isEmpty else { return }
+        projectRuntimeBlocks()
+        let composer = seyal_app_composer(pane.appHandle)
+        let timelineContainsTarget = (0..<Int(composer.block_count)).contains { index in
+            seyal_app_block_row(pane.appHandle, UInt32(index)).id_lo == targetID
+        }
+        guard timelineContainsTarget else { return }
+        rebuildBlocks()
+        publishLiveTailBlocks()
+        publishBlockOutputFrame()
+    }
+
+    /// Keep Warp-like click-to-focus wired after late DirectInput publication.
+    func rebindDirectInputClickTargets() {
+        for (blockID, card) in blockCards {
+            let isRunningTarget = blockID != 0
+                && blockID == relayTarget.blockID
+                && relayTarget.targetClass == 2
+            card.onRequestDirectInputFocus = isRunningTarget
+                ? { [weak self, blockID] in
+                    guard let self else { return }
+                    let snap = seyal_app_snapshot(self.pane.appHandle)
+                    guard self.snapshotPublishesBlockScopedDirectInput(snap),
+                        blockID == self.relayTarget.blockID
+                    else { return }
+                    _ = self.focusBlockScopedDirectInputSurface()
+                }
+                : nil
         }
     }
 

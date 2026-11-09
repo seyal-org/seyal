@@ -593,12 +593,6 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         return allowsFullPaneDirectTerminal
     }
 
-    /// Flow DirectInput hit target is the live-tail clip only — not empty canvas.
-    override func admitsFlowDirectInputHit(at point: NSPoint) -> Bool {
-        guard allowsDirectTerminalKeys, !allowsFullPaneDirectTerminal else { return false }
-        return liveTailHitClips().contains { $0.contains(point) }
-    }
-
     /// Full-Pane Raw/TUI only — mouse reports and Raw local scrollback.
     private var allowsFullPaneDirectTerminal: Bool {
         let eligibility = seyal_app_snapshot(appHandle).eligibility
