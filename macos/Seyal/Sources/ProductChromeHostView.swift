@@ -684,6 +684,31 @@ final class ProductChromeHostView: NSView {
             && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
     }
 
+    /// Multipane: prefer the focused Controller's live target over the shared
+    /// ApplicationRoot snapshot flag (sibling Available can clear it).
+    func focusedPanePublishesBlockScopedDirectInput(_ snapshot: SeyalAppSnapshot) -> Bool {
+        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+            return true
+        }
+        let shell = seyal_app_shell(pane.appHandle)
+        guard !centerColumn.secondaryHosts.isEmpty,
+            let host = centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            ),
+            host.displayHandle != 0
+        else { return false }
+        let eligibility = seyal_app_eligibility_for_pane(
+            pane.appHandle,
+            shell.focused_pane_lo,
+            shell.focused_pane_hi
+        )
+        return eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            && seyalComposerTargetIsBlockScopedDirectInput(
+                seyal_bridge_composer_target_for_handle(host.displayHandle)
+            )
+    }
+
     @discardableResult
     func focusBlockScopedDirectInputSurface() -> Bool {
         let surface = focusedInputSurface()
@@ -699,7 +724,7 @@ final class ProductChromeHostView: NSView {
         // (#866 / #1468). DirectInput must keep Metal, not Busy composer.
         let snapshot = seyal_app_snapshot(pane.appHandle)
         pane.inputSurface.syncInputRoutePresentation()
-        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+        if focusedPanePublishesBlockScopedDirectInput(snapshot) {
             _ = focusBlockScopedDirectInputSurface()
             return
         }

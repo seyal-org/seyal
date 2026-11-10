@@ -141,14 +141,14 @@ extension SecondaryLivePaneHost {
             card.onRequestDirectInputFocus = runningDirectTarget
                 ? { [weak self, blockID] in
                     guard let self else { return }
-                    let snap = seyal_app_snapshot(self.appHandle)
                     let target = seyal_bridge_composer_target_for_handle(self.displayHandle)
-                    guard snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
-                        snap.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0,
-                        blockID == target.block_id,
-                        target.target_class == 2
+                    guard seyalComposerTargetIsBlockScopedDirectInput(target),
+                        blockID == target.block_id
                     else { return }
                     self.onFocus?()
+                    if self.surface.bridge == nil, let historyBridge = self.historyBridge {
+                        self.surface.bridge = historyBridge
+                    }
                     self.surface.syncInputRoutePresentation()
                     self.window?.makeFirstResponder(self.surface)
                 }

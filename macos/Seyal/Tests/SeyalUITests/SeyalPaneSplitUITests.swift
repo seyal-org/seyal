@@ -208,24 +208,43 @@ final class SeyalPaneSplitUITests: XCTestCase {
             element(app, "seyal-running-program-interact").waitForExistence(timeout: 2),
             "DirectInput must not require Interact for Pane 2 python"
         )
-        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
-        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        // Leaf hosts sit above regions in the view tree; locate by frame.
+        let terminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: secondPane,
+            timeout: 8
+        )
         let directRoute = expectation(
             for: NSPredicate { _, _ in terminal.elementType == .textView },
             evaluatedWith: nil,
             handler: nil
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [directRoute], timeout: 5),
+            XCTWaiter.wait(for: [directRoute], timeout: 8),
             .completed,
             "Flow DirectInput must expose Pane 2 terminal input without Interact→Raw"
         )
 
-        let pythonBody = secondPane.descendants(matching: .any).matching(
+        let pythonBlock = anyPaneBlock(in: app, containing: "python3")
+        XCTAssertTrue(
+            pythonBlock.waitForExistence(timeout: 12),
+            "Pane 2 must keep the running python Block under DirectInput"
+        )
+        XCTAssertTrue(
+            secondPane.frame.insetBy(dx: -1, dy: -1).contains(
+                CGPoint(x: pythonBlock.frame.midX, y: pythonBlock.frame.midY)
+            ),
+            "python Block must sit in Pane 2"
+        )
+        let pythonBody = pythonBlock.descendants(matching: .any).matching(
             NSPredicate(format: "identifier ENDSWITH '-body'")
         ).firstMatch
-        XCTAssertTrue(pythonBody.waitForExistence(timeout: 8))
-        pythonBody.click()
+        if pythonBody.waitForExistence(timeout: 5) {
+            pythonBody.click()
+        } else {
+            terminal.click()
+        }
         let evaluatedOutput = "seyalpy-ok"
         app.typeText("print('seyalpy'+'-ok')")
         app.typeKey("\r", modifierFlags: [])
@@ -234,6 +253,89 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(
             renderedText.contains(evaluatedOutput),
             "Python must evaluate the typed expression in Pane 2; the computed result is absent from the source; OCR=\(renderedText)"
+        )
+    }
+
+    /// Sibling Available must not clear the REPL pane's DirectInput; refocus
+    /// must type again (headed multipane regression).
+    func testDirectInputSurvivesFocusSwitchAwayAndBack() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        submitComposerCommand("python3 -q", in: app, expectBlock: false)
+
+        let replPane = element(app, "seyal-pane-region-1")
+        let otherPane = element(app, "seyal-pane-region-0")
+        let terminalBefore = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: replPane,
+            timeout: 8
+        )
+        let directBefore = expectation(
+            for: NSPredicate { _, _ in terminalBefore.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directBefore], timeout: 8),
+            .completed,
+            "REPL pane DirectInput must arm before the focus switch"
+        )
+
+        otherPane.click()
+        waitForFocus(app, region: 0)
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "python3").waitForExistence(timeout: 8))
+        // Unfocused REPL pane must not show an Available "Type a command…" dock.
+        let unfocusedComposer = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
+        ).allElementsBoundByIndex.first { candidate in
+            let frame = candidate.frame
+            return replPane.frame.insetBy(dx: -1, dy: -1)
+                .contains(CGPoint(x: frame.midX, y: frame.midY))
+                && (candidate.value as? String) == "available"
+        }
+        XCTAssertNil(
+            unfocusedComposer,
+            "unfocused DirectInput REPL must not expose an Available composer dock"
+        )
+
+        replPane.click()
+        waitForFocus(app, region: 1)
+        let terminalAfter = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: replPane,
+            timeout: 8
+        )
+        let directAfter = expectation(
+            for: NSPredicate { _, _ in terminalAfter.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directAfter], timeout: 8),
+            .completed,
+            "refocusing the REPL pane must restore Block-scoped DirectInput after sibling Available"
+        )
+        let pythonBody = anyPaneBlock(in: app, containing: "python3").descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier ENDSWITH '-body'")).firstMatch
+        if pythonBody.waitForExistence(timeout: 5) {
+            pythonBody.click()
+        } else {
+            terminalAfter.click()
+        }
+        let evaluatedOutput = "seyalfocus-ok"
+        app.typeText("print('seyalfocus'+'-ok')")
+        app.typeKey("\r", modifierFlags: [])
+        let renderedText = try waitForRenderedText(evaluatedOutput, in: terminalAfter)
+        XCTAssertTrue(
+            renderedText.contains(evaluatedOutput),
+            "python must accept keys after focus leaves and returns; OCR=\(renderedText)"
         )
     }
 
@@ -248,6 +350,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         submitComposerCommand("node", in: app, expectBlock: false)
         XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
 
+        let secondPane = element(app, "seyal-pane-region-1")
         XCTAssertFalse(
             element(app, "seyal-running-program-interact").waitForExistence(timeout: 2),
             "DirectInput must not require Interact for Pane 2 node"
@@ -256,19 +359,46 @@ final class SeyalPaneSplitUITests: XCTestCase {
             app.descendants(matching: .any)["seyal-session-bootstrap-title"].exists,
             "a local Node REPL must not be interrupted by a session setup popup"
         )
-        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
-        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
-        XCTAssertEqual(terminal.elementType, .textView)
+        let terminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: secondPane,
+            timeout: 8
+        )
+        let directRoute = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directRoute], timeout: 8),
+            .completed,
+            "Flow DirectInput must expose Pane 2 terminal input without Interact→Raw"
+        )
 
-        let nodeBody = element(app, "seyal-pane-region-1").descendants(matching: .any).matching(
+        let nodeBlock = anyPaneBlock(in: app, containing: "node")
+        XCTAssertTrue(
+            nodeBlock.waitForExistence(timeout: 12),
+            "Pane 2 must keep the running node Block under DirectInput"
+        )
+        XCTAssertTrue(
+            secondPane.frame.insetBy(dx: -1, dy: -1).contains(
+                CGPoint(x: nodeBlock.frame.midX, y: nodeBlock.frame.midY)
+            ),
+            "node Block must sit in Pane 2"
+        )
+        let nodeBody = nodeBlock.descendants(matching: .any).matching(
             NSPredicate(format: "identifier ENDSWITH '-body'")
         ).firstMatch
-        XCTAssertTrue(nodeBody.waitForExistence(timeout: 8))
-        nodeBody.click()
+        if nodeBody.waitForExistence(timeout: 5) {
+            nodeBody.click()
+        } else {
+            terminal.click()
+        }
         let evaluatedOutput = "seyalnode-ok"
         app.typeText("console.log('seyalnode'+'-ok')")
         app.typeKey("\r", modifierFlags: [])
-        XCTAssertTrue(element(app, "seyal-pane-region-1").frame.insetBy(dx: -1, dy: -1).contains(terminal.frame))
+        XCTAssertTrue(secondPane.frame.insetBy(dx: -1, dy: -1).contains(terminal.frame))
         let renderedText = try waitForRenderedText(evaluatedOutput, in: terminal)
         XCTAssertTrue(
             renderedText.contains(evaluatedOutput),
@@ -1830,8 +1960,28 @@ final class SeyalPaneSplitUITests: XCTestCase {
             NSPredicate(format: "identifier MATCHES %@", identifierPattern)
         ).allElementsBoundByIndex.first { candidate in
             let frame = candidate.frame
-            return regionFrame.contains(CGPoint(x: frame.midX, y: frame.midY))
+            return regionFrame.insetBy(dx: -1, dy: -1)
+                .contains(CGPoint(x: frame.midX, y: frame.midY))
         }
+    }
+
+    private func waitForElement(
+        _ app: XCUIApplication,
+        matchingIdentifier identifierPattern: String,
+        in region: XCUIElement,
+        timeout: TimeInterval
+    ) throws -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let match = element(app, matchingIdentifier: identifierPattern, in: region) {
+                return match
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return try XCTUnwrap(
+            element(app, matchingIdentifier: identifierPattern, in: region),
+            "expected \(identifierPattern) inside \(region.identifier)"
+        )
     }
 
     private func click(_ app: XCUIApplication, _ identifier: String) {

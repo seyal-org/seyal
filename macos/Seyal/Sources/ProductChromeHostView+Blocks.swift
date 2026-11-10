@@ -83,6 +83,11 @@ extension ProductChromeHostView {
                 self.ensureRunningDirectInputBlockCards()
                 self.rebindDirectInputClickTargets()
                 self.reconcileChrome()
+                // Multipane hosts own their Busy dock; generation-stable status
+                // must still retract/restore DirectInput layout per Controller.
+                for host in self.centerColumn.secondaryHosts {
+                    host.refreshBlockScopedDirectInputPresentation()
+                }
                 // After Busy resigns the dock editor, reclaim Metal for DirectInput.
                 let snap = seyal_app_snapshot(self.pane.appHandle)
                 self.focusBlockScopedDirectInputIfEligible(snap)

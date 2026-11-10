@@ -64,6 +64,11 @@ extension ProductChromeHostView {
             self.reconcilePaneHosts(paneCount: Int(seyal_app_shell(self.pane.appHandle).pane_count))
         }
         let sharedBridge = pane.inputSurface.bridge
+        let focusedDisplayHandle =
+            bindings.first { $0.focused && $0.displayHandle != 0 }?.displayHandle ?? 0
+        // Publish window focus before leaf DirectInput sync so Metal
+        // `allowsDirectTerminalKeys` sees the matching Controller handle.
+        wireRegistryFrameRouting(focusedDisplayHandle: focusedDisplayHandle)
         centerColumn.reconcileSecondaryLiveHosts(
             bindings: bindings,
             historyBridge: sharedBridge
@@ -75,9 +80,10 @@ extension ProductChromeHostView {
             // arrive through noteRegistryPolled → reconcileFlowPresentation.
             host.reconcileFocusOwnershipPresentation()
         }
-        let focusedDisplayHandle =
-            bindings.first { $0.focused && $0.displayHandle != 0 }?.displayHandle ?? 0
-        wireRegistryFrameRouting(focusedDisplayHandle: focusedDisplayHandle)
+        // After leaf ownership + forced composer status republish, reclaim Metal
+        // FR for Block-scoped DirectInput (generation-stable status alone will
+        // not call performChromeReconcile's eligibility routeFocus).
+        routeFocus()
     }
 
     /// Primary bridge polls every Controller; secondary hosts present via
@@ -91,5 +97,10 @@ extension ProductChromeHostView {
         bridge.windowFocusedDisplayHandle = focusedDisplayHandle
         bridge.publishCurrentFrame()
         bridge.refreshPresentedTerminalTimeline()
+        // Quiet REPLs produce no poll after FOCUS_PANE. Force this Controller's
+        // composer eligibility/target back into ApplicationRoot so Block-scoped
+        // DirectInput survives a sibling Available clearing the shared target
+        // (#1467 / #1468 multipane).
+        bridge.republishFocusedComposerStatus()
     }
 }

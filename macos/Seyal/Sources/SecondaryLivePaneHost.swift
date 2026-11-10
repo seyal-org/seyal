@@ -116,6 +116,7 @@ final class SecondaryLivePaneHost: NSView {
             paneID: String(format: "live-%016llx%016llx", paneHi, paneLo)
         )
         composer = ComposerBridgeView(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
+        composer.boundDisplayHandle = displayHandle
         super.init(frame: .zero)
         surface.activateTranscriptDisplayHandle(displayHandle)
         translatesAutoresizingMaskIntoConstraints = true
@@ -293,7 +294,16 @@ final class SecondaryLivePaneHost: NSView {
         let localPoint = convert(point, from: superview)
         guard bounds.contains(localPoint) else { return nil }
         if inputOwned {
-            return super.hitTest(point)
+            let hit = super.hitTest(point)
+            // Match ThinPaneHostView: Flow Metal returns nil, but the host must
+            // not swallow the click or XCUI/`seyal-block-*-body` stay obscured.
+            if hit === self,
+                !surface.inspectRendererPresentation().drawsLiveGrid,
+                surface.rawScrollOffset == 0
+            {
+                return nil
+            }
+            return hit
         }
         let hit = super.hitTest(point)
         if let hit, hit === retryButton || hit.isDescendant(of: composer) || hit === composer {
@@ -383,6 +393,7 @@ final class SecondaryLivePaneHost: NSView {
         historyProjectionRequests.discard(forDisplayHandle: displayHandle)
         surface.activateTranscriptDisplayHandle(handle)
         displayHandle = handle
+        composer.boundDisplayHandle = handle
         restoresScrollForDisplayHandleChange = true
         updateAvailabilityPresentation()
         needsLayout = true
@@ -486,28 +497,51 @@ final class SecondaryLivePaneHost: NSView {
             setAccessibilityRole(.group)
             setAccessibilityLabel("Focused terminal pane")
             setAccessibilityIdentifier("seyal-pane-presentation-host")
-            focusBlockScopedDirectInputIfEligible()
         } else {
             blocks.setAccessibilityIdentifier("seyal-secondary-blocks")
             transcript.setAccessibilityIdentifier("seyal-secondary-blocks-scroll")
             setAccessibilityRole(.button)
             setAccessibilityLabel("Focus secondary terminal pane")
             setAccessibilityIdentifier("seyal-secondary-live-pane")
-            surface.syncInputRoutePresentation()
         }
+        // Focused: Metal/composer FR. Unfocused: still retract Busy dock while
+        // this Controller's REPL owns DirectInput (#1467 multipane).
+        focusBlockScopedDirectInputIfEligible()
         // Retag retained cards without rebuilding so focus ownership swaps do
         // not drop XCUI Block identity or force a transcript reflow (#1424).
         retagArrangedBlockAccessibilityIdentifiers()
     }
 
+    /// Status / focus path: re-hide the Busy dock and reclaim Metal without a
+    /// Block rebuild (DirectInput does not bump snapshot generation).
+    func refreshBlockScopedDirectInputPresentation() {
+        composer.reconcile()
+        focusBlockScopedDirectInputIfEligible()
+    }
+
+    /// This pane's Controller publishes Flow Block-scoped DirectInput (mode 3).
+    /// Read the handle target — do not trust the shared ApplicationRoot flag.
+    private var panePublishesBlockScopedDirectInput: Bool {
+        guard displayHandle != 0 else { return false }
+        let eligibility = seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else { return false }
+        return seyalComposerTargetIsBlockScopedDirectInput(
+            seyal_bridge_composer_target_for_handle(displayHandle)
+        )
+    }
+
     /// Focused Flow + DirectInput: keys go to this pane's live surface (#1468).
     /// When DirectInput ends, return keys to this pane's composer (Warp-like).
+    /// Unfocused panes still retract the Busy dock while their REPL owns mode 3.
     private func focusBlockScopedDirectInputIfEligible() {
+        let direct = panePublishesBlockScopedDirectInput
+        applyDirectInputMergedLayout(direct)
         guard inputOwned else {
             // Never stop the shared Controller bridge; only drop the borrow.
             if surface.bridge === historyBridge {
                 surface.bridge = nil
             }
+            surface.syncInputRoutePresentation()
             return
         }
         // Borrow the shared Controller bridge for DirectInput key admission.
@@ -515,11 +549,7 @@ final class SecondaryLivePaneHost: NSView {
         if surface.bridge == nil, let historyBridge {
             surface.bridge = historyBridge
         }
-        let snapshot = seyal_app_snapshot(appHandle)
-        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
-            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
         surface.syncInputRoutePresentation()
-        applyDirectInputMergedLayout(direct)
         guard direct else {
             _ = composer.focusEditor()
             return
@@ -548,6 +578,10 @@ final class SecondaryLivePaneHost: NSView {
             composer.reconcile()
         }
         needsLayout = true
+        // Focus-switch DirectInput must not leave Metal at a zero frame —
+        // XCUI/AppKit then synthesize keys into an empty target.
+        layoutSubtreeIfNeeded()
+        publishFrame()
     }
 
     private func retagArrangedBlockAccessibilityIdentifiers() {

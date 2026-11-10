@@ -584,13 +584,28 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
 
     /// Keys/IME/paste: Raw, TUI, or Flow Block-scoped DirectInput (#1468).
     private var allowsDirectTerminalKeys: Bool {
-        let snap = seyal_app_snapshot(appHandle)
-        if snap.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0,
-            snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
-        {
+        if allowsFullPaneDirectTerminal {
             return true
         }
-        return allowsFullPaneDirectTerminal
+        // Multipane / handle-bound surfaces must not fall back to the shared
+        // ApplicationRoot DirectInput flag — that flag is true for the focused
+        // Controller only, and would make every sibling Metal a textArea.
+        if transcriptDisplayHandle != 0 {
+            guard seyalComposerTargetIsBlockScopedDirectInput(
+                seyal_bridge_composer_target_for_handle(transcriptDisplayHandle)
+            ) else {
+                return false
+            }
+            guard let bridge, bridge.isConnected,
+                bridge.windowFocusedDisplayHandle == transcriptDisplayHandle
+            else {
+                return false
+            }
+            return true
+        }
+        let snap = seyal_app_snapshot(appHandle)
+        return snap.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+            && snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
     }
 
     /// Full-Pane Raw/TUI only — mouse reports and Raw local scrollback.

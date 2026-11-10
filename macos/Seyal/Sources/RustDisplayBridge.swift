@@ -95,6 +95,9 @@ final class RustDisplayBridge {
   /// that prepared frame. Zero keeps `clientHandle`, so a background window
   /// does not adopt another window's focus.
   var windowFocusedDisplayHandle: UInt64 = 0
+  /// When non-zero, `selectPresentedClient` prefers this Controller (pane-local
+  /// DirectInput / identity samples) without mutating window focus.
+  var submissionDisplayHandleOverride: UInt64 = 0
   var isConnected = false
   var lastRecoveryResult = RecoveryResult.current()
   /// The last bundled-helper failure is retained for the recovery coordinator
@@ -476,7 +479,21 @@ final class RustDisplayBridge {
   /// readiness client afterward so poll stays on this bridge's own fd.
   @discardableResult
   func selectPresentedClient() -> Bool {
-    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    let handle: UInt64
+    if submissionDisplayHandleOverride != 0 {
+      handle = submissionDisplayHandleOverride
+    } else if windowFocusedDisplayHandle != 0 {
+      handle = windowFocusedDisplayHandle
+    } else {
+      handle = clientHandle
+    }
+    guard isConnected, handle != 0 else { return false }
+    return seyal_bridge_select(handle) == 0
+  }
+
+  /// Select an explicit Controller for pane-local DirectInput / history work.
+  @discardableResult
+  func selectDisplayHandle(_ handle: UInt64) -> Bool {
     guard isConnected, handle != 0 else { return false }
     return seyal_bridge_select(handle) == 0
   }

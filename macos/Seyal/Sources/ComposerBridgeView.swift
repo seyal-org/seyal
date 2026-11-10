@@ -44,6 +44,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     /// Pane before mutating (ADR-009 multipane / fence authority).
     private let boundPaneLo: UInt64?
     private let boundPaneHi: UInt64?
+    /// Multipane Flow host Controller. DirectInput hide follows this handle's
+    /// live target so a sibling Available cannot resurrect the Busy dock.
+    var boundDisplayHandle: UInt64 = 0
     private let textView = ComposerTextView()
     private let placeholder = NSTextField(labelWithString: "")
     private let execute = NSButton(title: "", target: nil, action: nil)
@@ -289,9 +292,17 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
                 || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue))
         // Warp-like: Block-scoped DirectInput owns keys in the Running Block.
         // Hide the Busy dock so users are not offered a second typing surface.
-        let blockScopedDirectInput = snapshot.eligibility
-            == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
-            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+        // Pane-bound: use this Controller's target (mode 3), not the shared
+        // ApplicationRoot DirectInput flag that siblings can clear.
+        let blockScopedDirectInput: Bool = {
+            if boundDisplayHandle != 0 {
+                return seyalComposerTargetIsBlockScopedDirectInput(
+                    seyal_bridge_composer_target_for_handle(boundDisplayHandle)
+                )
+            }
+            return snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+        }()
         let hidden = direct
             || blockScopedDirectInput
             || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
