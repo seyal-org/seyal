@@ -90,9 +90,9 @@ responsibility = "Published C ABI entry points stay one façade after decode/enc
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/mod.rs"
-acknowledged_loc = 705
+acknowledged_loc = 707
 issue = 1467
-reason = "Composer target/mode projection stays one cold-path reducer; #1467 adds ComposerTargetMode::DirectInput beside Submit/Relay/Unavailable without a second composer authority."
+reason = "Composer target/mode projection stays one cold-path reducer; #1467 adds ComposerTargetMode::DirectInput beside Submit/Relay/Unavailable without a second composer authority. rustfmt wrap of the DirectInput eligibility match is included."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
