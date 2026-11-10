@@ -138,8 +138,28 @@ extension ProductChromeHostView {
         action.target_execution_hi = terminalHi
         action.target_generation = seyal_app_shell(pane.appHandle).containment_generation
         guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
-        reconcileChrome()
-        routeFocus()
+        // Bound close only begins terminate; tab removal happens after
+        // Finalized. Immediate reconcile alone leaves a zombie strip tab
+        // until a later select (#1402).
+        schedulePostTerminalCloseReconcile()
+    }
+
+    /// Close Terminal finishes after Lifecycle::Finalized; frames stop so
+    /// onFrameChanged never rebuilds the Pane tab strip or drains DestroyWindow
+    /// effects. Must call `pane.onProductChanged` (MultiWindow wraps it to
+    /// applyPendingEffects + syncDestroyAgainstSnapshot), not reconcile alone.
+    func schedulePostTerminalCloseReconcile() {
+        let refresh: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.pane.onProductChanged?()
+            self.routeFocus()
+        }
+        refresh()
+        // Bound terminate can finalize after the first second; keep refreshing
+        // until Rust has collapsed the empty sole Pane / Window (#1402).
+        for delay in [0.05, 0.15, 0.4, 1.0, 2.0, 3.5, 5.0] as [TimeInterval] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: refresh)
+        }
     }
 
     /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
@@ -155,18 +175,11 @@ extension ProductChromeHostView {
             // effects (including a Rust-owned window close) produced by the
             // command. Calling only reconcileChrome leaves the AppKit window
             // map stale until some later frame happens to arrive.
-            pane.onProductChanged?()
-            routeFocus()
-            // Close Terminal finishes after Lifecycle::Finalized; frames stop
-            // so onFrameChanged never rebuilds the Pane tab strip. Reconcile
-            // again once Rust has removed the tab (generation already bumped).
             if commandId == KeybindingShortcutRealization.terminalCloseFocused {
-                for delay in [0.05, 0.15, 0.4, 1.0] as [TimeInterval] {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                        self?.reconcileChrome()
-                        self?.routeFocus()
-                    }
-                }
+                schedulePostTerminalCloseReconcile()
+            } else {
+                pane.onProductChanged?()
+                routeFocus()
             }
         } else {
             NSApp.presentError(

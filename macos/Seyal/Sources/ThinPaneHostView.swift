@@ -43,6 +43,11 @@ final class ThinPaneHostView: NSView {
             self?.bindFromBridgeIfNeeded(force: true)
             self?.onProductChanged?()
         }
+        inputSurface.onBridgeDisconnected = { [weak self] in
+            // Close Terminal Finalized stops frames; MultiWindow must still
+            // drain DestroyWindow and sync realizations (#1402).
+            self?.onProductChanged?()
+        }
     }
 
     @available(*, unavailable)
