@@ -271,9 +271,9 @@ reason = "Local display-client protocol proofs stay one module; #1467 adds Direc
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
-acknowledged_loc = 844
+acknowledged_loc = 848
 issue = 1467
-reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 admit Flow Block-scoped DirectInput keys/IME, sticky ForegroundProgram ownership after Ctrl+C, and C0/deleteForward EOF while keeping empty-canvas mouse reports on Raw/TUI only."
+reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 admit Flow Block-scoped DirectInput keys/IME, sticky ForegroundProgram ownership after Ctrl+C, and C0/deleteForward EOF while keeping empty-canvas mouse reports on Raw/TUI only. LOC includes the #1470 master merge into the DirectInput head."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
@@ -323,9 +323,9 @@ reason = "The existing connection writer remains the single owner of bounded con
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MultiWindowHostController.swift"
-acknowledged_loc = 801
-issue = 1451
-reason = "The macOS host stays one AppKit adapter (#1158 CloseWindow/Dock/hierarchical close). #1450/#1451 add quit-confirm presentation, Dock reopen provisioning handoff, and intentional Quit helper teardown on that same host rather than a second window controller."
+acknowledged_loc = 857
+issue = 1470
+reason = "The macOS host stays one AppKit adapter (#1158 CloseWindow/Dock/hierarchical close). #1450/#1451 quit-confirm/Dock reopen remain here; #1470 adds terminal-tab close projection and non-sole empty Pane collapse on the same host rather than a second window controller."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/local/ingress.rs"
