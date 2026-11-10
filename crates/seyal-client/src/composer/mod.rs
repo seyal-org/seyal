@@ -269,6 +269,10 @@ pub struct ComposerSnapshot {
     pub pending_request_id: Option<u64>,
     pub epoch: u64,
     pub allows_direct_terminal: bool,
+    /// Type 45 DirectInput on this Pane's composer eligibility (#1466/#1468).
+    /// Independent of focus: multipane hosts retract the Busy dock from this
+    /// bit so a sibling Available cannot resurrect "Type a command…".
+    pub block_scoped_direct_input: bool,
     pub blocks: Vec<BlockProjection>,
     /// Active Flow canvas starts at this Block after `clear`. `None` while the
     /// session has not cleared, and while shell-exit reveals full history.
@@ -649,6 +653,10 @@ impl ComposerState {
             pending_request_id: composer.pending_request_id,
             epoch: composer.epoch,
             allows_direct_terminal: composer.input_route == InputRoute::DirectTerminal,
+            block_scoped_direct_input: matches!(
+                composer.runtime_eligibility.map(|(eligibility, _)| eligibility),
+                Some(RuntimeComposerEligibility::DirectInput)
+            ),
             blocks: composer.blocks.clone(),
             // Shell-exit reveals the full retained transcript for review.
             canvas_floor: if composer.execution_ended {

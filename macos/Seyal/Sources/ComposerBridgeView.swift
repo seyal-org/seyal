@@ -292,13 +292,20 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
                 || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue))
         // Warp-like: Block-scoped DirectInput owns keys in the Running Block.
         // Hide the Busy dock so users are not offered a second typing surface.
-        // Pane-bound: use this Controller's target (mode 3), not the shared
-        // ApplicationRoot DirectInput flag that siblings can clear.
+        // Pane-bound: this Pane's composer flag and/or Controller target — never
+        // the shared ApplicationRoot snapshot (siblings clear that on Available).
         let blockScopedDirectInput: Bool = {
-            if boundDisplayHandle != 0 {
+            if boundPaneLo != nil {
+                if composer.flags & UInt16(SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT) != 0 {
+                    return true
+                }
+                guard boundDisplayHandle != 0 else { return false }
                 return seyalComposerTargetIsBlockScopedDirectInput(
                     seyal_bridge_composer_target_for_handle(boundDisplayHandle)
                 )
+            }
+            if composer.flags & UInt16(SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT) != 0 {
+                return true
             }
             return snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
                 && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
@@ -327,8 +334,14 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let recall = seyal_app_composer_history(appHandle)
         history.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_HISTORY))
         history.isEnabled = available && recall.flags & UInt16(SEYAL_APP_HISTORY_HAS_ENTRIES) != 0
-        placeholder.stringValue = inlineRelayPresentation
-            ? "" : copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
+        if inlineRelayPresentation {
+            placeholder.stringValue = ""
+        } else if busy, !blockScopedDirectInput {
+            // Match Rust ComposerMode::Busy placeholder — never look Available.
+            placeholder.stringValue = "Waiting for prompt..."
+        } else {
+            placeholder.stringValue = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
+        }
         setAccessibilityValue(
             blockScopedDirectInput
                 ? "hidden"

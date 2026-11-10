@@ -435,6 +435,8 @@ enum SeyalAppComposerMode {
 
 #define SEYAL_APP_COMPOSER_CAN_SUBMIT 1u
 #define SEYAL_APP_COMPOSER_DIRECT_TERMINAL 2u
+/** Flow Block-scoped DirectInput (Type 45) for this Pane's composer eligibility. */
+#define SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT 4u
 
 #define SEYAL_APP_COPY_COMPOSER_PLACEHOLDER 0u
 #define SEYAL_APP_COPY_COMPOSER_EXECUTE 1u

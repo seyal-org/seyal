@@ -290,18 +290,39 @@ final class SeyalPaneSplitUITests: XCTestCase {
         otherPane.click()
         waitForFocus(app, region: 0)
         XCTAssertTrue(anyPaneBlock(in: app, containing: "python3").waitForExistence(timeout: 8))
-        // Unfocused REPL pane must not show an Available "Type a command…" dock.
-        let unfocusedComposer = app.descendants(matching: .any).matching(
+        // Unfocused REPL pane must retract its Busy dock (no Available/Busy chrome).
+        let unfocusedReplComposer = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
         ).allElementsBoundByIndex.first { candidate in
             let frame = candidate.frame
-            return replPane.frame.insetBy(dx: -1, dy: -1)
+            guard replPane.frame.insetBy(dx: -1, dy: -1)
                 .contains(CGPoint(x: frame.midX, y: frame.midY))
-                && (candidate.value as? String) == "available"
+            else { return false }
+            let value = candidate.value as? String
+            return value == "available" || value == "busy"
         }
         XCTAssertNil(
-            unfocusedComposer,
-            "unfocused DirectInput REPL must not expose an Available composer dock"
+            unfocusedReplComposer,
+            "unfocused DirectInput REPL must not expose an Available/Busy composer dock"
+        )
+        // Focused empty sibling must keep a visible composer (Available or
+        // pre-prompt Busy) — never inherit the sibling's DirectInput hide.
+        // Focused leaf uses primary AX id `seyal-composer` (not *-editor).
+        let focusedEmptyComposer = try waitForElement(
+            app,
+            matchingIdentifier: "^seyal-composer(-[0-9a-f]+-[0-9a-f]+)?$",
+            in: otherPane,
+            timeout: 8
+        )
+        let emptyVisible = expectation(
+            for: NSPredicate(format: "value == %@ OR value == %@", "available", "busy"),
+            evaluatedWith: focusedEmptyComposer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [emptyVisible], timeout: 5),
+            .completed,
+            "focused empty pane must keep a visible composer while the sibling REPL runs DirectInput; value=\(focusedEmptyComposer.value ?? "nil")"
         )
 
         replPane.click()
@@ -336,6 +357,88 @@ final class SeyalPaneSplitUITests: XCTestCase {
         XCTAssertTrue(
             renderedText.contains(evaluatedOutput),
             "python must accept keys after focus leaves and returns; OCR=\(renderedText)"
+        )
+    }
+
+    /// node → then split must match split → then node: REPL dock retracts,
+    /// new pane keeps Available composer (#1467 ordering asymmetry).
+    func testNodeThenSplitKeepsDirectInputAndSiblingComposer() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/node") else {
+            throw XCTSkip("Node.js is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand("node", in: app, expectBlock: false)
+        let terminalBeforeSplit = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminalBeforeSplit.waitForExistence(timeout: 8))
+        let directBefore = expectation(
+            for: NSPredicate { _, _ in terminalBeforeSplit.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directBefore], timeout: 8),
+            .completed,
+            "single-pane node must enter Block-scoped DirectInput before split"
+        )
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        // Split focuses the new leaf; original node pane is unfocused.
+        waitForFocus(app, region: 1)
+        let nodePane = element(app, "seyal-pane-region-0")
+        let newPane = element(app, "seyal-pane-region-1")
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "node").waitForExistence(timeout: 12))
+
+        let nodeComposerVisible = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
+        ).allElementsBoundByIndex.contains { candidate in
+            let frame = candidate.frame
+            guard nodePane.frame.insetBy(dx: -1, dy: -1)
+                .contains(CGPoint(x: frame.midX, y: frame.midY))
+            else { return false }
+            let value = candidate.value as? String
+            return value == "available" || value == "busy"
+        }
+        XCTAssertFalse(
+            nodeComposerVisible,
+            "after node→split, the unfocused node pane must keep DirectInput dock retracted"
+        )
+
+        let newComposer = try waitForElement(
+            app,
+            matchingIdentifier: "^seyal-composer(-[0-9a-f]+-[0-9a-f]+)?$",
+            in: newPane,
+            timeout: 8
+        )
+        let newVisible = expectation(
+            for: NSPredicate(format: "value == %@ OR value == %@", "available", "busy"),
+            evaluatedWith: newComposer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [newVisible], timeout: 5),
+            .completed,
+            "new pane after node→split must show a visible composer; value=\(newComposer.value ?? "nil")"
+        )
+
+        nodePane.click()
+        waitForFocus(app, region: 0)
+        let nodeTerminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: nodePane,
+            timeout: 8
+        )
+        let directAfter = expectation(
+            for: NSPredicate { _, _ in nodeTerminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directAfter], timeout: 8),
+            .completed,
+            "refocusing the node pane after split must restore DirectInput"
         )
     }
 

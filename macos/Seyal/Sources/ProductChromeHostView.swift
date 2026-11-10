@@ -684,13 +684,22 @@ final class ProductChromeHostView: NSView {
             && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
     }
 
-    /// Multipane: prefer the focused Controller's live target over the shared
-    /// ApplicationRoot snapshot flag (sibling Available can clear it).
+    /// Multipane: prefer the focused Pane's composer DirectInput flag / handle
+    /// target over the shared ApplicationRoot snapshot (sibling Available can
+    /// clear that shared target).
     func focusedPanePublishesBlockScopedDirectInput(_ snapshot: SeyalAppSnapshot) -> Bool {
         if snapshotPublishesBlockScopedDirectInput(snapshot) {
             return true
         }
         let shell = seyal_app_shell(pane.appHandle)
+        let paneComposer = seyal_app_composer_for_pane(
+            pane.appHandle,
+            shell.focused_pane_lo,
+            shell.focused_pane_hi
+        )
+        if seyalComposerFlagsPublishBlockScopedDirectInput(paneComposer.flags) {
+            return true
+        }
         guard !centerColumn.secondaryHosts.isEmpty,
             let host = centerColumn.presentationHost(
                 paneLo: shell.focused_pane_lo,

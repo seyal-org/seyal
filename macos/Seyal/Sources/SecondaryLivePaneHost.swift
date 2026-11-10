@@ -519,12 +519,17 @@ final class SecondaryLivePaneHost: NSView {
         focusBlockScopedDirectInputIfEligible()
     }
 
-    /// This pane's Controller publishes Flow Block-scoped DirectInput (mode 3).
-    /// Read the handle target — do not trust the shared ApplicationRoot flag.
+    /// This pane owns Flow Block-scoped DirectInput. Prefer the per-pane
+    /// composer eligibility flag (survives sibling focus); fall back to the
+    /// Controller target. Never the shared ApplicationRoot snapshot flag.
     private var panePublishesBlockScopedDirectInput: Bool {
-        guard displayHandle != 0 else { return false }
         let eligibility = seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
         guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else { return false }
+        let paneComposer = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        if paneComposer.flags & UInt16(SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT) != 0 {
+            return true
+        }
+        guard displayHandle != 0 else { return false }
         return seyalComposerTargetIsBlockScopedDirectInput(
             seyal_bridge_composer_target_for_handle(displayHandle)
         )
