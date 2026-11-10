@@ -654,7 +654,9 @@ impl ComposerState {
             epoch: composer.epoch,
             allows_direct_terminal: composer.input_route == InputRoute::DirectTerminal,
             block_scoped_direct_input: matches!(
-                composer.runtime_eligibility.map(|(eligibility, _)| eligibility),
+                composer
+                    .runtime_eligibility
+                    .map(|(eligibility, _)| eligibility),
                 Some(RuntimeComposerEligibility::DirectInput)
             ),
             blocks: composer.blocks.clone(),
