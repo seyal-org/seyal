@@ -697,30 +697,35 @@ final class ProductChromeHostView: NSView {
             shell.focused_pane_lo,
             shell.focused_pane_hi
         )
-        if seyalComposerFlagsPublishBlockScopedDirectInput(paneComposer.flags) {
-            return true
-        }
-        guard !centerColumn.secondaryHosts.isEmpty,
-            let host = centerColumn.presentationHost(
-                paneLo: shell.focused_pane_lo,
-                paneHi: shell.focused_pane_hi
-            ),
-            host.displayHandle != 0
-        else { return false }
         let eligibility = seyal_app_eligibility_for_pane(
             pane.appHandle,
             shell.focused_pane_lo,
             shell.focused_pane_hi
         )
-        return eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
-            && seyalComposerTargetIsBlockScopedDirectInput(
-                seyal_bridge_composer_target_for_handle(host.displayHandle)
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else { return false }
+        if let host = centerColumn.presentationHost(
+            paneLo: shell.focused_pane_lo,
+            paneHi: shell.focused_pane_hi
+        ), host.displayHandle != 0 {
+            return seyalPublishesBlockScopedDirectInput(
+                flags: paneComposer.flags,
+                target: seyal_bridge_composer_target_for_handle(host.displayHandle)
             )
+        }
+        return seyalPublishesBlockScopedDirectInput(
+            flags: paneComposer.flags,
+            target: seyal_bridge_composer_target()
+        )
     }
 
     @discardableResult
     func focusBlockScopedDirectInputSurface() -> Bool {
         let surface = focusedInputSurface()
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        let direct = focusedPanePublishesBlockScopedDirectInput(snapshot)
+        surface.panePublishesBlockScopedDirectInput = direct
+        // Primary ApplicationRoot surface keeps its own bridge; secondary hosts
+        // borrow in focusBlockScopedDirectInputIfEligible before routeFocus.
         surface.syncInputRoutePresentation()
         return window?.makeFirstResponder(surface) ?? false
     }
@@ -732,8 +737,13 @@ final class ProductChromeHostView: NSView {
         // Sync Metal IME/AX with Rust eligibility before choosing a responder
         // (#866 / #1468). DirectInput must keep Metal, not Busy composer.
         let snapshot = seyal_app_snapshot(pane.appHandle)
+        let direct = focusedPanePublishesBlockScopedDirectInput(snapshot)
+        // Primary ApplicationRoot surface only; secondary hosts publish via
+        // SecondaryLivePaneHost.focusBlockScopedDirectInputIfEligible.
+        pane.inputSurface.panePublishesBlockScopedDirectInput =
+            direct && focusedInputSurface() === pane.inputSurface
         pane.inputSurface.syncInputRoutePresentation()
-        if focusedPanePublishesBlockScopedDirectInput(snapshot) {
+        if direct {
             _ = focusBlockScopedDirectInputSurface()
             return
         }

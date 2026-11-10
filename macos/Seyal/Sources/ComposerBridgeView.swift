@@ -296,15 +296,18 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         // the shared ApplicationRoot snapshot (siblings clear that on Available).
         let blockScopedDirectInput: Bool = {
             if boundPaneLo != nil {
-                if composer.flags & UInt16(SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT) != 0 {
-                    return true
+                guard boundDisplayHandle != 0 else {
+                    return seyalComposerFlagsPublishBlockScopedDirectInput(composer.flags)
                 }
-                guard boundDisplayHandle != 0 else { return false }
-                return seyalComposerTargetIsBlockScopedDirectInput(
-                    seyal_bridge_composer_target_for_handle(boundDisplayHandle)
+                return seyalPublishesBlockScopedDirectInput(
+                    flags: composer.flags,
+                    target: seyal_bridge_composer_target_for_handle(boundDisplayHandle)
                 )
             }
-            if composer.flags & UInt16(SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT) != 0 {
+            if seyalPublishesBlockScopedDirectInput(
+                flags: composer.flags,
+                target: seyal_bridge_composer_target()
+            ) {
                 return true
             }
             return snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)

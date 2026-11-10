@@ -186,6 +186,9 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     override var acceptsFirstResponder: Bool { allowsDirectTerminalKeys }
 
     override func becomeFirstResponder() -> Bool {
+        // Do not call ensure from `acceptsFirstResponder` — AppKit polls it
+        // re-entrantly and bridge borrow there can crash the window.
+        onEnsureDirectInputBridge?()
         guard allowsDirectTerminalKeys else { return false }
         let became = super.becomeFirstResponder()
         if became {
@@ -297,6 +300,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     override func keyDown(with event: NSEvent) {
+        onEnsureDirectInputBridge?()
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let compositionActive = hasMarkedText()
         switch KeybindingStrokeNormalizer.route(
@@ -319,7 +323,13 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             super.keyDown(with: event)
             return
         }
-        guard allowsDirectTerminalKeys else { return }
+        guard allowsDirectTerminalKeys else {
+            // Stale FR after DirectInput ends must not swallow Ctrl+C/D.
+            if window?.firstResponder === self {
+                window?.makeFirstResponder(nil)
+            }
+            return
+        }
 
         let eligibility = seyal_app_snapshot(appHandle).eligibility
         let alternate = terminalCurrentFrame()?.alternate_screen != 0
@@ -350,6 +360,19 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         }
         if hasMarkedText() {
             interpretKeyEvents([event])
+            return
+        }
+
+        // Prefer ControlAscii for Ctrl+letter (SIGINT/EOF) before TerminalKeyV2.
+        // Flow DirectInput admits printable text via committed-text, so V2
+        // action-ID state on borrowed multipane surfaces is often cold; Ctrl+C/D
+        // must not depend on it or be swallowed when V2 admit fails (#1467).
+        if let controlScalar = TerminalNativeKeyClassifier.controlASCII(
+            modifierFlags: event.modifierFlags,
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            characters: event.characters
+        ) {
+            _ = terminalSubmitKey(kind: TerminalKeyIntent.controlASCII.rawValue, scalar: controlScalar)
             return
         }
 
@@ -396,13 +419,6 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             return
         }
 
-        if let controlScalar = TerminalNativeKeyClassifier.controlASCII(
-            modifierFlags: event.modifierFlags,
-            charactersIgnoringModifiers: event.charactersIgnoringModifiers
-        ) {
-            _ = terminalSubmitKey(kind: TerminalKeyIntent.controlASCII.rawValue, scalar: controlScalar)
-            return
-        }
         if flags.contains(.control) {
             super.keyDown(with: event)
             return
@@ -516,6 +532,16 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             return
         }
         composition.clear()
+        // AX / IME can deliver Ctrl+C/D as a lone C0 scalar instead of keyDown.
+        if allowsDirectTerminalKeys,
+            text.unicodeScalars.count == 1,
+            let scalar = text.unicodeScalars.first?.value,
+            scalar >= 0x01 && scalar <= 0x1f
+        {
+            submitControlASCIILetter(scalar + 0x40)
+            inputContext?.invalidateCharacterCoordinates()
+            return
+        }
         submitIfAllowed(text)
         inputContext?.invalidateCharacterCoordinates()
     }
@@ -561,7 +587,32 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             } else {
                 cancelOperation(nil)
             }
+            return
         }
+        // AppKit text-system can translate Ctrl+D into deleteForward: without a
+        // usable charactersIgnoringModifiers="d" keyDown. Under DirectInput that
+        // must still write EOF (0x04) to the focused PTY (#1467).
+        if allowsDirectTerminalKeys, Self.isForwardDeleteCommand(selector) {
+            submitControlASCIILetter(0x44)
+        }
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        if allowsDirectTerminalKeys {
+            submitControlASCIILetter(0x44)
+            return
+        }
+        super.deleteForward(sender)
+    }
+
+    private func submitControlASCIILetter(_ scalar: UInt32) {
+        _ = terminalSubmitKey(kind: TerminalKeyIntent.controlASCII.rawValue, scalar: scalar)
+    }
+
+    private static func isForwardDeleteCommand(_ selector: Selector) -> Bool {
+        selector == #selector(NSResponder.deleteForward(_:))
+            || selector == Selector(("deleteToEndOfParagraph:"))
+            || selector == Selector(("deleteWordForward:"))
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -582,6 +633,15 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         }
     }
 
+    /// Host-published: this Pane's Controller is in Block-scoped DirectInput.
+    /// Multipane must prefer this (and/or the per-handle target) over the shared
+    /// ApplicationRoot snapshot flag, which siblings can clear (#1467 / #1468).
+    var panePublishesBlockScopedDirectInput = false
+
+    /// Multipane secondary surfaces borrow the window bridge lazily; AX focus /
+    /// click can race ahead of host reconcile, so re-arm before key admission.
+    var onEnsureDirectInputBridge: (() -> Void)?
+
     /// Keys/IME/paste: Raw, TUI, or Flow Block-scoped DirectInput (#1468).
     private var allowsDirectTerminalKeys: Bool {
         if allowsFullPaneDirectTerminal {
@@ -591,9 +651,11 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         // ApplicationRoot DirectInput flag — that flag is true for the focused
         // Controller only, and would make every sibling Metal a textArea.
         if transcriptDisplayHandle != 0 {
-            guard seyalComposerTargetIsBlockScopedDirectInput(
-                seyal_bridge_composer_target_for_handle(transcriptDisplayHandle)
-            ) else {
+            let target = seyal_bridge_composer_target_for_handle(transcriptDisplayHandle)
+            let directInput = panePublishesBlockScopedDirectInput
+                || seyalComposerTargetIsBlockScopedDirectInput(target)
+                || seyalComposerTargetOwnsRunningForeground(target)
+            guard directInput else {
                 return false
             }
             guard let bridge, bridge.isConnected,
@@ -601,6 +663,9 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             else {
                 return false
             }
+            return true
+        }
+        if panePublishesBlockScopedDirectInput {
             return true
         }
         let snap = seyal_app_snapshot(appHandle)

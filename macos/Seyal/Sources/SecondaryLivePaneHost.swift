@@ -119,6 +119,9 @@ final class SecondaryLivePaneHost: NSView {
         composer.boundDisplayHandle = displayHandle
         super.init(frame: .zero)
         surface.activateTranscriptDisplayHandle(displayHandle)
+        surface.onEnsureDirectInputBridge = { [weak self] in
+            self?.ensureDirectInputBridgeBorrow()
+        }
         translatesAutoresizingMaskIntoConstraints = true
         clipsToBounds = true
         setAccessibilityElement(true)
@@ -526,13 +529,23 @@ final class SecondaryLivePaneHost: NSView {
         let eligibility = seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
         guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else { return false }
         let paneComposer = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
-        if paneComposer.flags & UInt16(SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT) != 0 {
-            return true
+        guard displayHandle != 0 else {
+            return seyalComposerFlagsPublishBlockScopedDirectInput(paneComposer.flags)
         }
-        guard displayHandle != 0 else { return false }
-        return seyalComposerTargetIsBlockScopedDirectInput(
-            seyal_bridge_composer_target_for_handle(displayHandle)
+        return seyalPublishesBlockScopedDirectInput(
+            flags: paneComposer.flags,
+            target: seyal_bridge_composer_target_for_handle(displayHandle)
         )
+    }
+
+    /// Re-arm borrowed bridge + DirectInput flag before AX focus / keyDown.
+    private func ensureDirectInputBridgeBorrow() {
+        let direct = panePublishesBlockScopedDirectInput
+        surface.panePublishesBlockScopedDirectInput = direct
+        guard inputOwned else { return }
+        if surface.bridge == nil, let historyBridge {
+            surface.bridge = historyBridge
+        }
     }
 
     /// Focused Flow + DirectInput: keys go to this pane's live surface (#1468).
@@ -541,6 +554,7 @@ final class SecondaryLivePaneHost: NSView {
     private func focusBlockScopedDirectInputIfEligible() {
         let direct = panePublishesBlockScopedDirectInput
         applyDirectInputMergedLayout(direct)
+        ensureDirectInputBridgeBorrow()
         guard inputOwned else {
             // Never stop the shared Controller bridge; only drop the borrow.
             if surface.bridge === historyBridge {
@@ -548,11 +562,6 @@ final class SecondaryLivePaneHost: NSView {
             }
             surface.syncInputRoutePresentation()
             return
-        }
-        // Borrow the shared Controller bridge for DirectInput key admission.
-        // This leaf must not stop or reconnect ApplicationRoot-owned clients.
-        if surface.bridge == nil, let historyBridge {
-            surface.bridge = historyBridge
         }
         surface.syncInputRoutePresentation()
         guard direct else {

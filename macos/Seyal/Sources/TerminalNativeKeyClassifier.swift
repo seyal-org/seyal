@@ -130,9 +130,26 @@ enum TerminalNativeKeyClassifier {
 
     static func controlASCII(
         modifierFlags: NSEvent.ModifierFlags,
-        charactersIgnoringModifiers: String?
+        charactersIgnoringModifiers: String?,
+        characters: String? = nil
     ) -> UInt32? {
         let flags = modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // AppKit / XCUI sometimes deliver Ctrl+C/D already as C0 bytes (U+0003 /
+        // U+0004) in `characters` or `charactersIgnoringModifiers`. Map those
+        // before requiring a literal letter so EOF/SIGINT cannot be dropped.
+        if let controlLetter = controlLetterFromC0(
+            charactersIgnoringModifiers: charactersIgnoringModifiers,
+            characters: characters
+        ) {
+            // Bare C0 (no modifier bits) still counts — text-system synthetic
+            // paths can omit .control after translating Ctrl+D → U+0004.
+            if flags.isEmpty || flags.contains(.control) {
+                let allowed: NSEvent.ModifierFlags = [.control, .shift, .capsLock]
+                if flags.subtracting(allowed).isEmpty {
+                    return controlLetter
+                }
+            }
+        }
         guard flags.contains(.control) else { return nil }
         let allowed: NSEvent.ModifierFlags = [.control, .shift, .capsLock]
         guard flags.subtracting(allowed).isEmpty,
@@ -150,6 +167,23 @@ enum TerminalNativeKeyClassifier {
             normalized = scalar
         }
         return matchesControlBase(normalized) ? normalized : nil
+    }
+
+    /// Map a single C0 control byte (0x01...0x1F) to the ControlAscii letter
+    /// (`0x04` → `'D'`). Nil when the event does not carry a lone C0 scalar.
+    static func controlLetterFromC0(
+        charactersIgnoringModifiers: String?,
+        characters: String?
+    ) -> UInt32? {
+        for candidate in [charactersIgnoringModifiers, characters] {
+            guard let candidate,
+                candidate.unicodeScalars.count == 1,
+                let scalar = candidate.unicodeScalars.first?.value,
+                scalar >= 0x01 && scalar <= 0x1f
+            else { continue }
+            return scalar + 0x40
+        }
+        return nil
     }
 
     static func semanticKey(
