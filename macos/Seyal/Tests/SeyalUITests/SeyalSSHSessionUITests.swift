@@ -511,10 +511,10 @@ final class SeyalSSHSessionUITests: XCTestCase {
         // Relay keeps the same text view first responder as it moves into the
         // live Block. Clicking the parent card would select the Block; type
         // directly into the already-focused editor in that state.
-        if expectedComposerValue == "available" {
-            XCTAssertTrue(editor.isHittable, "the docked composer editor must be hittable")
-            editor.click()
-        }
+        // Available docks and Relay-in-Block both need FR before typeText;
+        // Relay can lose keyboard focus after layout assertions (#1474).
+        XCTAssertTrue(editor.isHittable, "the composer editor must be hittable")
+        editor.click()
         editor.typeText(command)
         beforeSubmit?(editor)
         editor.typeText("\n")
