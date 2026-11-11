@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-11  
 **Branch:** `mahboobmonnamd/issue/1474`  
+**PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
 **Base:** `origin/master` @ `0122c5f2` (+ integrated #1365 / `crdileep82/issue/922`)
 
 ## Functional deliverables matrix
