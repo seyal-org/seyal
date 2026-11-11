@@ -414,6 +414,11 @@ extension SecondaryLivePaneHost {
                 rowCount: UInt16(min(projection.reserved1, UInt32(UInt16.max)))
             )
         }
+        // Focus reclaim / pane sync can briefly omit PRIMARY_CLIP. Never wipe
+        // an existing Running live-tail to empty on that race (#1476).
+        if live.isEmpty, !blockCards.isEmpty {
+            return
+        }
         surface.setLiveTailBlocks(live)
     }
 

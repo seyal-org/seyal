@@ -444,8 +444,7 @@ final class SecondaryLivePaneHost: NSView {
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
             syncBlockSelectionFromProjection()
-            publishLiveTailBlocks()
-            publishBlockOutputFrame()
+            republishFlowBlockPaintAfterLayout()
         }
     }
 
@@ -553,8 +552,10 @@ final class SecondaryLivePaneHost: NSView {
     /// Unfocused panes still retract the Busy dock while their REPL owns mode 3.
     private func focusBlockScopedDirectInputIfEligible() {
         let direct = panePublishesBlockScopedDirectInput
-        applyDirectInputMergedLayout(direct)
+        // Borrow before layout/publish so DirectInput Metal can prepare frames
+        // and admit keys on the same reclaim turn (#1476 node→split→refocus).
         ensureDirectInputBridgeBorrow()
+        applyDirectInputMergedLayout(direct)
         guard inputOwned else {
             // Never stop the shared Controller bridge; only drop the borrow.
             if surface.bridge === historyBridge {
@@ -595,7 +596,40 @@ final class SecondaryLivePaneHost: NSView {
         // Focus-switch DirectInput must not leave Metal at a zero frame —
         // XCUI/AppKit then synthesize keys into an empty target.
         layoutSubtreeIfNeeded()
+        republishFlowBlockPaintAfterLayout()
+        // Borrowing the shared bridge can propose geometry and resize the PTY
+        // on the same turn. Live-tail row windows from the pre-resize frame
+        // then fail closed (node→split→refocus blank body). Republish once
+        // after the runloop turn so projection + clips match the new grid.
+        if directInput, inputOwned {
+            DispatchQueue.main.async { [weak self] in
+                self?.republishFlowBlockPaintAfterLayout()
+            }
+        }
+    }
+
+    /// Prepare Candidate-D, sync pane Block projections, then refresh Flow
+    /// live-tail / history clips into the current AppKit body geometry.
+    private func republishFlowBlockPaintAfterLayout() {
+        let eligibility = seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
+        let rawOrTui = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+            || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        guard !rawOrTui else {
+            publishFrame()
+            return
+        }
+        _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+        // Keep Running body line counts in sync with the (possibly resized)
+        // PRIMARY_CLIP window before publishing clips.
+        republishExistingBlockProjections()
+        layoutSubtreeIfNeeded()
+        // Install clips + body geometry before Candidate-D prepare so
+        // refreshLiveTailAfterPrepare cannot fail-closed into an empty
+        // region map on the focus-reclaim resize (#1476).
+        publishLiveTailBlocks()
+        publishBlockOutputFrame()
         publishFrame()
+        publishBlockOutputFrame()
     }
 
     private func retagArrangedBlockAccessibilityIdentifiers() {
@@ -638,6 +672,7 @@ final class SecondaryLivePaneHost: NSView {
             "rows=\(frame.rows) columns=\(frame.columns) execution=\(execution) "
                 + "flow-paint=\(paint.accessibilityToken) "
                 + "history-instances=\(paint.historyInstanceCount) "
+                + "live-tail-instances=\(paint.liveTailInstanceCount) "
                 + "history-regions-painted=\(paint.paintedHistoryRegionCount) "
                 + "history-clips=\(paint.historyClipsDistinct ? "ok" : "collapse") "
                 + "history-visible-pixels=\(lastVisibleHistoryPixelCount) "
@@ -719,7 +754,11 @@ final class SecondaryLivePaneHost: NSView {
             composer.reconcile()
             refreshInputOwnershipChrome()
             focusBlockScopedDirectInputIfEligible()
-            publishFrame() // refill Flow live-tail after plan apply (#1476)
+            // Refill Candidate-D + Block clips after Flow plan apply so a new
+            // multipane host (or Raw→Flow return) does not keep a blank body.
+            publishFrame()
+            publishLiveTailBlocks()
+            publishBlockOutputFrame()
         }
         needsLayout = true
     }

@@ -219,6 +219,8 @@ extension ProductChromeHostView {
             NSLayoutConstraint.activate(paneFollowsTranscript)
             pane.inputSurface.applyRendererPresentation(plan)
             layoutSubtreeIfNeeded()
+            // Refill Running Block live-tail after Flow plan apply (#1476).
+            publishLiveTailBlocks()
             publishBlockOutputFrame()
         }
     }
