@@ -2027,6 +2027,96 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// #867 / ADR-009 Blocks-default: supported Flow shells omit manual Raw
+    /// palette verbs. Raw remains an automatic fallback path, not a resting
+    /// choice on trusted shells (#1426).
+    func testSupportedFlowPaletteOmitsUseRawTerminal() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        assertFlowBlocksOrFail(in: app)
+
+        let palette = app.descendants(matching: .any)["seyal-command-palette"]
+        app.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "⌘K opens the Rust-backed palette")
+        let queryField = app.descendants(matching: .any)["seyal-command-palette-query"]
+        XCTAssertTrue(queryField.waitForExistence(timeout: 5))
+        queryField.firstMatch.click()
+        queryField.firstMatch.typeText("Use Raw Terminal")
+        let row = app.descendants(matching: .any)["seyal-command-palette-row-0"]
+        if row.waitForExistence(timeout: 2) {
+            XCTAssertNotEqual(
+                row.label,
+                "Use Raw Terminal",
+                "trusted Flow must not offer Use Raw Terminal; got \(row.label)"
+            )
+        }
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        assertFlowBlocksOrFail(in: app)
+    }
+
+    /// #867: alternate-screen TUI takes the Pane and returns to Flow on the
+    /// same ExecutionId (Blocks-default resting policy after #1426).
+    func testTuiTakeoverReturnsToFlowPreservingExecution() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let before = terminal.firstMatch.value as? String ?? ""
+        let executionBefore = identityToken(before, key: "execution=")
+        XCTAssertFalse(executionBefore.isEmpty, "usable attach must name an execution")
+
+        try exerciseBoundedAlternateScreen(in: app) { command in
+            submitComposerCommand(app, command)
+        }
+
+        assertFlowBlocksOrFail(in: app)
+        let after = terminal.firstMatch.value as? String ?? ""
+        XCTAssertEqual(
+            identityToken(after, key: "execution="),
+            executionBefore,
+            "TUI exit back to Flow must keep the same ExecutionId"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        XCTAssertTrue(composer.isHittable, "leaving TUI must restore Flow composer")
+    }
+
+    /// #867: GUI relaunch restores one Flow presentation owner on the same
+    /// Runtime execution without creating a second terminal surface.
+    func testReconnectRestoresSinglePresentationOwner() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let before = terminal.firstMatch.value as? String ?? ""
+        let executionBefore = identityToken(before, key: "execution=")
+        XCTAssertFalse(executionBefore.isEmpty)
+
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 8))
+        app.launch()
+        waitForUsablePty(in: app)
+        let after = terminal.firstMatch.value as? String ?? ""
+        XCTAssertEqual(
+            identityToken(after, key: "execution="),
+            executionBefore,
+            "reconnect must keep the same Runtime execution"
+        )
+        assertFlowBlocksOrFail(in: app)
+        XCTAssertEqual(
+            app.descendants(matching: .any)["seyal-recovery"].firstMatch.value as? String,
+            "connected"
+        )
+        XCTAssertEqual(
+            app.descendants(matching: .any)["terminal-input"].count,
+            1,
+            "reconnect must not create a duplicate terminal surface"
+        )
+    }
+
+    private func identityToken(_ value: String, key: String) -> String {
+        guard let range = value.range(of: key) else { return "" }
+        let rest = value[range.upperBound...]
+        return rest.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+    }
+
     /// W4b / W7: production window admission + last-window close quits headed app
     /// (ADR-018 §2.5 / #1451). Dock reopen after Quit is a fresh launch.
     /// Headless Runtime survival remains covered by W7 Runtime/client proofs.
