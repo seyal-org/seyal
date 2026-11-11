@@ -5,7 +5,7 @@
 //! root generation. Copy resolves history spans here and hands final UTF-8 to
 //! the host through `seyal_bridge_take_block_copy`.
 
-use crate::ffi::{error_code, with_display_client_mut};
+use crate::ffi::error_code;
 
 use super::encode::encode_block_rows;
 use super::{SeyalAppRow, APPS};
@@ -86,9 +86,13 @@ pub extern "C" fn seyal_app_block_action_row(
 
 /// Start a Rust-owned Block pasteboard copy (#1010 / #1474). `kind` is a
 /// `SEYAL_APP_BLOCK_ACTION_COPY_*` value. Final text arrives via
-/// `seyal_bridge_take_block_copy`. Returns 0 on accept, negative on refuse.
+/// `seyal_bridge_take_block_copy` / `_for`. Returns 0 on accept, negative on refuse.
+///
+/// History is pulled from the focused Pane's Controller (`pane_client_raw`),
+/// not a stale global display selection, so multipane leaves stay exact-pane.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, kind: u16) -> i32 {
+    use crate::ffi::with_client_mut;
     use crate::history_text::BlockCopyKind;
     let Some(copy_kind) = BlockCopyKind::from_u16(kind) else {
         return -6;
@@ -96,6 +100,8 @@ pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, ki
     let prepared = APPS.with(|apps| {
         let apps = apps.borrow();
         let state = apps.get(&handle)?;
+        let pane = state.root.focused_pane_id();
+        let display = state.root.pane_client_raw(pane)?;
         let snap = state.root.snapshot();
         let composer = snap.composer?;
         let block = composer.blocks.get(block_index as usize)?;
@@ -115,12 +121,12 @@ pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, ki
         if block_id == 0 {
             return None;
         }
-        Some((block_id, block.command.clone(), output_range))
+        Some((display, block_id, block.command.clone(), output_range))
     });
-    let Some((block_id, command, output_range)) = prepared else {
+    let Some((display, block_id, command, output_range)) = prepared else {
         return -4;
     };
-    with_display_client_mut(|client| {
+    with_client_mut(display, |client| {
         client.begin_block_copy(block_id, copy_kind, command, output_range)
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))

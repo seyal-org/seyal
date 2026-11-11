@@ -297,6 +297,7 @@ typedef struct SeyalBlockCopy {
 } SeyalBlockCopy;
 /* Completed Rust-composed Block pasteboard text; empty when none ready. */
 SeyalBlockCopy seyal_bridge_take_block_copy(void);
+SeyalBlockCopy seyal_bridge_take_block_copy_for(uint64_t handle);
 uint8_t seyal_bridge_history_range_consume(uint64_t block_id, uint64_t request_id);
 uint8_t seyal_bridge_history_range_consume_for_handle(
     uint64_t handle,

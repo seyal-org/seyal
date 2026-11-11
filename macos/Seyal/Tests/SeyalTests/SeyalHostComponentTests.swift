@@ -3307,6 +3307,18 @@ final class SeyalHostComponentTests: XCTestCase {
             "shell-exit history present must not reuse hasPreparedState for SPEC-009 Usable"
         )
         XCTAssertTrue(
+            metalText.contains("Clear page keys with the wipe"),
+            "disconnect retain wipe must clear historyRenderPageKeys before buffer drop (#1379 Defect B)"
+        )
+        // activateTranscriptDisplayHandle + disconnect retain both wipe buffers;
+        // each path must clear page keys or shell-exit can geometry-only reuse.
+        let pageKeyClears = metalText.components(separatedBy: "historyRenderPageKeys.removeAll").count - 1
+        XCTAssertGreaterThanOrEqual(
+            pageKeyClears,
+            2,
+            "handle-switch and disconnect retain must both clear historyRenderPageKeys"
+        )
+        XCTAssertTrue(
             hostText.contains("removeTranscriptRegions(except: retained)"),
             "rebuildBlocks must prune historyRanges to the timeline Block id set"
         )

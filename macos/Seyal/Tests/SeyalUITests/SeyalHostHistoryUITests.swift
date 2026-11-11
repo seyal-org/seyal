@@ -326,13 +326,13 @@ final class SeyalHostHistoryUITests: XCTestCase {
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        app.ensureRunningForegroundForAttach()
         let terminal = app.descendants(matching: .any)["terminal-input"]
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
+        app.ensureRunningForegroundForAttach()
         XCTAssertEqual(
             result,
             .completed,

@@ -75,7 +75,12 @@ extension RustDisplayBridge {
   /// Deliver a completed Rust-owned Block pasteboard string, if any (#1010 / #1474).
   func publishBlockCopy() {
     guard isConnected else { return }
-    let copy = seyal_bridge_take_block_copy()
+    // Match the Controller that accepted `seyal_app_request_block_copy`
+    // (focused Pane's pane_client_raw), not a stale global display selection.
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    let copy = handle != 0
+      ? seyal_bridge_take_block_copy_for(handle)
+      : seyal_bridge_take_block_copy()
     guard copy.len > 0, let bytes = copy.utf8 else { return }
     let text = String(
       decoding: UnsafeBufferPointer(start: bytes, count: Int(copy.len)),

@@ -1,51 +1,63 @@
 # M003 consolidated campaign status (#1474)
 
-**Date:** 2026-11-11  
+**Date:** 2026-11-11 (verification resume)  
 **Branch:** `mahboobmonnamd/issue/1474`  
-**Head:** `727f1d62` (and successors on the same PR)  
+**Head:** local WIP after Defect B page-key wipe fix (see commits on PR #1478)  
 **PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
-**Base:** `origin/master`
+**Base:** `origin/master`  
+**Phase A context:** `/Users/mahboob/.cursor/plans/seyal-phase-a-reality-audit-2026-11-11.md`
 
-## Functional deliverables matrix
+## Functional deliverables matrix (this verification pass)
 
-| Deliverable | Verdict | Notes |
+| Deliverable | Verdict | Evidence |
 |---|---|---|
-| Terminal correctness | PASS (code) / PARTIAL (headed) | Gate 1 P0+P1 landed; XCUI attach still flaky under full `make ui-test` load |
-| Blocks | PASS (code) / PARTIAL (headed) | Rerun ABI 87 + history-backed Copy pasteboard path on head |
-| Composer | PASS (code) | History + DirectInput + Tab swallow (no literal `\t`) |
-| Workspace | PASS (code) / PARTIAL (multi-window live) | Splits/layouts/nav live; inactive NSWindows deferred |
-| Pane-local tabs | PASS (code) / PARTIAL (docs) | Shipped on master; ADR-025 still Proposed |
-| Presentation | PASS (code) | Blocks-default + TUI return |
-| Lifecycle | PASS (code) | W2b/W6/W7 + zero-window reopen on master |
-| Native UX | PASS (code) / PARTIAL (headed) | Chrome toggles + Rerun/Copy seams |
-| Local settings | PASS (code) | #993 human sign-off still open |
-| Quality | PASS (local `make check` + CI) / PARTIAL (full headed) | Structural-debt green; CI `repository-policy` / `rust-and-harness-quality` / `native-macos-compile` success on PR head |
+| Terminal / PTY→VT automated | **PASS** | Prior tip + campaign `make check` / CI green on `59aab4b9` |
+| #1379 Defect A (Block bleed Raw→Flow) | **UNVERIFIED / policy-limited** | Builtin Toggle Raw / View-menu Raw admission removed; `testCmdEnterRawToggleRestoresFlowBlocks` XCTSkipped; no headed Raw entry path on this candidate |
+| #1379 Defect B (shell-exit history paint) | **FAIL** on `59aab4b9` headed | Exclusive focused XCUI `testPrimaryShellExitIsReportedAndKeepsFlowHistoryVisible`: AX body text present, Metal body ink=0 / history paint false-green. Units `recovery_tests` 14/14 PASS (insufficient). |
+| Defect B fix (page-key wipe) | **CODE+component PASS; headed retest PENDING** | Cleared `historyRenderPageKeys` on disconnect retain wipe; source-order component gates PASS. Exclusive headed retest blocked while `seyal-1476` headed leftovers held the display. |
+| Composer / Flow body paint (happy path) | **PASS** headed | `testCompletedFlowBlockKeepsPaintedOutputBody` PASS |
+| Alt-screen return / clear→exit | **FAIL / flaky** under sequential focus | `testAlternateScreenReturnRestoresFlowNotRawTerminal`, `testClearThenExitKeepsPaintedBlockBodies` failed early (`composer` not hittable) in same focused batch |
+| Python/Node DirectInput | **UNVERIFIED** this pass | Only-testing names did not match suite; not re-run |
+| Multipane / tabs / scroll / SSH / reconnect | **UNVERIFIED** this pass | Deferred for exclusive full `make ui-test` after Defect B headed green |
+| Quality (`make check` + CI) | **PASS** on `59aab4b9` | CI: repository-policy, rust-and-harness-quality, native-macos-compile SUCCESS |
 
-## Landed on this PR
+## Gate 1–4 status
+
+| Gate | Verdict | Notes |
+|---|---|---|
+| Gate 1 | **FAIL** | Defect B headed FAIL on prior head; Defect A not headed-reproducible via removed Raw admission |
+| Gate 2 | **UNVERIFIED** | Multipane/composer matrix not exclusively re-run this pass |
+| Gate 3 | **PARTIAL (code)** | Workspace chrome landed; headed not re-proven exclusively |
+| Gate 4 | **PARTIAL** | `make check`+CI green; headed matrix + independent review open; resource pack incomplete |
+
+## Landed on this PR (cumulative)
 
 - Chrome toggles (#1365 / #922)
 - Blocks-default headed evidence adaptation (#867)
 - Block Rerun ABI 87 + Rust-owned action projection (#1010)
-- History-backed Block Copy (`history_text` / `block_copy` / FFI / pasteboard menu)
-- Gate 1 P0: multipane Raw/TUI focus, unfocused alt-screen TUI, composer hitTest/caret
-- Gate 1 P1: Metal prepare-when-empty, Raw scrollback clear on handle switch, sync Flow scroll latch + preserved document height, per-pane wheel eligibility, per-pane `integration_unsupported`, composer Tab swallow
-- Headed build unblockers: `target_generation` Bind field, XCUI element count query
+- History-backed Block Copy
+- Gate 1 P0/P1 multipane/scroll/Metal/prepare fixes
+- **NEW:** disconnect retain wipe clears `historyRenderPageKeys` (#1379 Defect B false-green)
 
 ## Explicit classifications
 
-- Simultaneous multi-window live Metal: **deferred** (follow-up)
+- Simultaneous multi-window live Metal: **deferred**
 - ADR-025 acceptance: **governance** (separate Architecture PR)
-- #868/#869 freeze ledger bookkeeping: **non-blocking docs follow-up**
-- #993 config confirmation: **human sign-off**
-- Full headed XCUI matrix: **PARTIAL** — partial run showed ~200 component/UI passes with intermittent XCUI attach crashes (`runningBackground` during `waitForUsablePty`); not sufficient to flip to `Closes #1474`
+- Defect A Raw admission: **policy-limited** under Blocks-default; restate via TUI round-trip / trusted Raw entry Issue if still required
+- Full headed XCUI matrix: **not green** — Defect B FAIL; exclusive retest of fix pending
+- #1476 concurrent headed: **do not dual-run XCUI**; wait for exclusive slot
 
 ## Remaining before `Closes #1474`
 
 | Severity | Item |
 |---|---|
-| P1 | Stable headed Rerun/Copy/multipane matrix evidence on this SHA |
+| P0 | Exclusive headed re-proof of Defect B (+ clear→exit) on fix SHA |
+| P1 | Exclusive multipane/tabs/scroll/composer/Python/Node/nvim/tmux/SSH/reconnect matrix |
 | P1 | Independent non-author review GO/CONDITIONAL/NO-GO |
-| P2 | ADR-025 acceptance PR by non-author |
-| P2 | #993 product-owner config confirmation |
+| P2 | ADR-025 acceptance PR; #993 human config sign-off |
+
+## Recommendation
+
+**M003: NO-GO** until Defect B headed paint is green on an exclusive Runtime and the Gate 1–3 headed matrix is recorded without contention. Do not merge PR #1478.
 
 **Do not merge without explicit product-owner confirmation.**

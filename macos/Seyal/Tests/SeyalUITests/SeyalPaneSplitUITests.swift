@@ -2480,10 +2480,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         // Multipane Flow hides liveContent/`terminal-input`; readiness is the
         // focused presentation host + composer (#1424). Raw resting is cold
         // default (#1445), so latch Flow before requiring composer.
+        app.ensureRunningForegroundForAttach()
         let presentation = element(app, "seyal-pane-presentation-host")
         if presentation.waitForExistence(timeout: 2) {
             app.ensureFlowBlocksPresentation(timeout: timeout)
@@ -2491,7 +2491,9 @@ final class SeyalPaneSplitUITests: XCTestCase {
                 element(app, "seyal-composer").waitForExistence(timeout: timeout),
                 "focused Flow presentation host must expose a composer"
             )
-            XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for multipane Flow")
+            app.ensureRunningForegroundForAttach(
+                message: "Seyal.app left foreground while waiting for multipane Flow"
+            )
             return
         }
         let terminal = app.descendants(matching: .any)["terminal-input"]
@@ -2499,7 +2501,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
+        app.ensureRunningForegroundForAttach()
         XCTAssertEqual(result, .completed, "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")")
         app.ensureFlowBlocksPresentation(timeout: timeout)
     }

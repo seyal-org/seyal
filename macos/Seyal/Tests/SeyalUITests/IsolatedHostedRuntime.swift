@@ -122,7 +122,28 @@ extension XCUIApplication {
         IsolatedHostedRuntime.writeShellConfig()
     }
     launch()
+    // Activate before waiting: Cursor/Xcode focus steal often leaves a fresh
+    // launch in RunningBackground, and waiting alone will not promote it.
+    ensureRunningForegroundForAttach()
     return self
+  }
+
+  /// Distinguishes process death from IDE/focus steal. `runningBackground` is
+  /// recoverable via `activate()`; `notRunning` is a real exit.
+  func ensureRunningForegroundForAttach(
+    message: String = "Seyal.app left foreground during PTY/runtime attach"
+  ) {
+    if state == .notRunning {
+      XCTFail("\(message) (process exited)")
+      return
+    }
+    if state != .runningForeground {
+      activate()
+    }
+    XCTAssertTrue(
+      wait(for: .runningForeground, timeout: 10),
+      "\(message) (state=\(state.rawValue))"
+    )
   }
 
   private func stripIsolatedRuntimeLaunchArguments() {

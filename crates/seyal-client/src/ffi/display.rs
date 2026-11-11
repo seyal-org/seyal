@@ -267,7 +267,13 @@ impl SeyalBlockCopy {
 /// Take one completed Block pasteboard string. Empty when none is ready.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_take_block_copy() -> SeyalBlockCopy {
-    with_display_client_mut(|client| match client.take_block_copy() {
+    seyal_bridge_take_block_copy_for(super::display_handle())
+}
+
+/// Take a completed Block pasteboard string from one registry Controller.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_take_block_copy_for(handle: u64) -> SeyalBlockCopy {
+    super::with_client_mut(handle, |client| match client.take_block_copy() {
         Some((block_id, text)) => {
             client.history_copy_text = text;
             SeyalBlockCopy {

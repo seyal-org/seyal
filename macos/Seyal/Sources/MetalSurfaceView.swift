@@ -691,8 +691,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // (#1379): that leftover frame paints loose text/cursor over Block cards.
     // Drop Metal history *buffers* (and any deferred prepares) too — keep
     // historyRanges rows so chrome can re-encode against settled AppKit clips.
+    // Clear page keys with the wipe (same as activateTranscriptDisplayHandle):
+    // a stale key can make renderHistoryRange take the geometry-only path
+    // against a missing buffer and leave AX body text with blank Metal paint
+    // after shell exit (#1379 Defect B false-green).
     clearLiveTailPresentation()
     lastTranscriptFrameRegions = nil
+    historyRenderPageKeys.removeAll(keepingCapacity: true)
     renderer.removeHistoryRegions(except: [])
     cancelPresentationRetries()
     resetPreparationRecovery()

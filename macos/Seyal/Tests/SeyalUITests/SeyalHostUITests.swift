@@ -83,11 +83,11 @@ final class SeyalHostUITests: XCTestCase {
 
     func testApplicationLaunchesOnePaneHost() throws {
         let app = hostedApp()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        app.ensureRunningForegroundForAttach(message: "Seyal.app left foreground after launch")
         // Attach/resize used to recurse into SIGSEGV within ~250ms of a real
         // `open`. Chrome existence is not enough; the process must stay up.
         RunLoop.current.run(until: Date().addingTimeInterval(2))
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed after launch")
+        app.ensureRunningForegroundForAttach(message: "Seyal.app exited or stayed background after launch settle")
         let chrome = app.descendants(matching: .any)["seyal-product-chrome"]
         XCTAssertTrue(chrome.waitForExistence(timeout: 10))
         let pane = app.descendants(matching: .any)["seyal-thin-pane"]
@@ -1291,7 +1291,9 @@ final class SeyalHostUITests: XCTestCase {
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        // Sequential headed XCUI / IDE focus steal can BackgroundSuspend the
+        // next launch; reclaim frontmost before attach waits (#1474).
+        app.ensureRunningForegroundForAttach()
         let presentation = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
         let terminal = app.descendants(matching: .any)["terminal-input"]
         if presentation.waitForExistence(timeout: 2) {
@@ -1321,10 +1323,8 @@ final class SeyalHostUITests: XCTestCase {
                 "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
             )
         }
-        XCTAssertEqual(
-            app.state,
-            .runningForeground,
-            "Seyal.app crashed while waiting for the PTY/runtime attach"
+        app.ensureRunningForegroundForAttach(
+            message: "Seyal.app left foreground while waiting for the PTY/runtime attach"
         )
         // #1065: Rust RecoveryCoordinator owns reconnect policy; the host only
         // executes effects (driveRecovery PerformAttempt/adopt) and projects
