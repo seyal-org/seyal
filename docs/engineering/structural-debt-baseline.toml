@@ -36,15 +36,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 855
+acknowledged_loc = 903
 issue = 1474
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 DirectInput borrow stays here while #1474 binds paneLo/paneHi into InteractiveMetalSurfaceView so unfocused Raw/TUI wheel scroll uses per-pane eligibility without a second PTY/VT authority."
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1474 adds live binding display-handle submit pinning and Available-gated DirectInput dock retract so multipane Busy/hittable XCUI stays on one leaf authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 798
+acknowledged_loc = 808
 issue = 1474
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1474 keeps retain-path history publishes on the last transcript Controller after shell-exit handle clear without a second Block authority."
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1474 restores dock constraints/alpha after DirectInput so Flow composer hittable evidence does not see a zero-frame AX target."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
 acknowledged_loc = 834
@@ -256,9 +256,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1066
+ceiling_loc = 1119
 issue = 1474
-responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1467/#1468 DirectInput reclaim stays here while #1474 keeps mid-history preservedDocumentHeight on the host and routes multipane Raw/TUI keys to liveContent."
+responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1474 adds per-pane ComposerResult distribution and legacy-dock AX retirement so multipane accepts cannot steal focused fences."
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
 acknowledged_loc = 728
