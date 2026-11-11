@@ -31,14 +31,14 @@ reason = "Metal surface remains the thin historyRanges/hit-test owner; #1442 add
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
 acknowledged_loc = 873
-issue = 1379
-reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and splits live-tail vs history Flow paint counts so clear→exit ink stays history-only."
+issue = 1476
+reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and splits live-tail vs history Flow paint counts so clear→exit ink stays history-only; #1476 defaults resting RendererPlan to Flow so new surfaces do not paint Raw full-grid white before host apply."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 850
+acknowledged_loc = 851
 issue = 1476
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority; #1476 applies Rust RendererPlan via resolve(eligibility) matched to the Flow/Raw branch so split/focus cannot race a second fromPane snapshot."
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority; #1476 matches RendererPlan to the Flow/Raw branch and republishes frames after plan apply so quiet REPLs refill live-tail."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"

@@ -719,6 +719,7 @@ final class SecondaryLivePaneHost: NSView {
             composer.reconcile()
             refreshInputOwnershipChrome()
             focusBlockScopedDirectInputIfEligible()
+            publishFrame() // refill Flow live-tail after plan apply (#1476)
         }
         needsLayout = true
     }

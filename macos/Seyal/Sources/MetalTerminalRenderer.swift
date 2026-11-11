@@ -26,8 +26,9 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     var historyRegions: [UInt64: HistoryRenderRegion] = [:]
     var historyRegionOrder: [UInt64] = []
     var liveTail = LiveTailRenderState()
+    // Resting Flow default — avoid Raw full-grid white before host apply (#1476).
     var presentationPlan = RendererPresentationPlan.resolve(
-        eligibility: UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+        eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
         variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
     )
     var currentRows = 0
