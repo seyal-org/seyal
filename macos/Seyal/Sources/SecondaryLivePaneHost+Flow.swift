@@ -99,7 +99,19 @@ extension SecondaryLivePaneHost {
                 state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
-            card.setOutputLines(lines, cellHeight: cellHeight)
+            if blockID != 0,
+               projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+            {
+                card.setOutputLines(
+                    ratchetedPrimaryClipLines(blockID: blockID, projection: projection),
+                    cellHeight: cellHeight
+                )
+            } else {
+                if blockID != 0 {
+                    runningPrimaryClipRowRatchet.removeValue(forKey: blockID)
+                }
+                card.setOutputLines(lines, cellHeight: cellHeight)
+            }
             card.canRequestSessionBootstrap = blockID != 0 && blockID == requestableSessionHost
             card.onRequestSessionBootstrap = card.canRequestSessionBootstrap
                 ? { [weak self, sessionDisplayHandle, blockID, sessionRevision = sessionSurface.revision] in
@@ -168,9 +180,10 @@ extension SecondaryLivePaneHost {
                    blockID: blockID,
                    displayHandle: displayHandle
                ) {
-                card.setBodyTranscript(retainedRange.transcriptText)
-                card.setOutputLines(
-                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                applyRetainedHistoryBody(
+                    card: card,
+                    projection: projection,
+                    retainedRange: retainedRange,
                     cellHeight: surface.terminalPresentationCellSize().height
                 )
             }
@@ -295,14 +308,23 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
-            card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
+            if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP) {
+                card.setOutputLines(
+                    ratchetedPrimaryClipLines(blockID: row.id_lo, projection: projection),
+                    cellHeight: cellHeight
+                )
+            } else {
+                card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
+                runningPrimaryClipRowRatchet.removeValue(forKey: row.id_lo)
+            }
             if let retainedRange = surface.retainedHistoryRange(
                 blockID: row.id_lo,
                 displayHandle: displayHandle
             ) {
-                card.setBodyTranscript(retainedRange.transcriptText)
-                card.setOutputLines(
-                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                applyRetainedHistoryBody(
+                    card: card,
+                    projection: projection,
+                    retainedRange: retainedRange,
                     cellHeight: cellHeight
                 )
             }
@@ -323,6 +345,105 @@ extension SecondaryLivePaneHost {
         default:
             return 1
         }
+    }
+
+    /// History AX text must not shrink a Running PRIMARY_CLIP body. A 1-line
+    /// retained stub after node→split→refocus clips Welcome+`>` typed input
+    /// out of the Metal clip (#1476 / #1479).
+    private func applyRetainedHistoryBody(
+        card: CommandBlockView,
+        projection: SeyalAppBlockProjection,
+        retainedRange: NativeHistoryRange,
+        cellHeight: CGFloat
+    ) {
+        card.setBodyTranscript(retainedRange.transcriptText)
+        let historyLines = CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText)
+        let lines =
+            projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+            ? ratchetedPrimaryClipLines(
+                blockID: retainedRange.blockID,
+                projection: projection,
+                floor: historyLines
+              )
+            : historyLines
+        card.setOutputLines(lines, cellHeight: cellHeight)
+    }
+
+    /// Never let a briefly trimmed PRIMARY_CLIP `reserved1` collapse a Running
+    /// body/live-tail below a previously observed row count for that Block.
+    func ratchetedPrimaryClipLines(
+        blockID: UInt64,
+        projection: SeyalAppBlockProjection,
+        floor: Int = 1
+    ) -> Int {
+        let projected = max(outputLineCount(projection: projection), floor)
+        let lines = max(projected, runningPrimaryClipRowRatchet[blockID] ?? 0)
+        runningPrimaryClipRowRatchet[blockID] = lines
+        return lines
+    }
+
+    /// Grow Running PRIMARY_CLIP body/live-tail through the prepared cursor.
+    /// Safe on the poll/light path when host geometry propose is gated on
+    /// pane-size changes only — body growth must not resize the PTY (#1479).
+    func expandRunningPrimaryClipsThroughCursor() {
+        guard displayHandle != 0 else { return }
+        guard seyal_bridge_ensure_prepared_for(displayHandle) == 0 else { return }
+        let frame = seyal_bridge_frame_for(displayHandle)
+        guard frame.rows > 0 else { return }
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        let cellHeight = surface.terminalPresentationCellSize().height
+        var live: [UInt64: LiveTailClip] = [:]
+        var retained = Set(runningPrimaryClipRowRatchet.keys)
+        for index in 0..<Int(composerSnap.block_count) {
+            let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
+            let projection = seyal_app_block_projection_for_pane(
+                appHandle,
+                paneLo,
+                paneHi,
+                UInt32(index)
+            )
+            guard row.id_lo != 0,
+                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
+                  projection.start_line > 0,
+                  projection.reserved1 > 0
+            else { continue }
+            retained.remove(row.id_lo)
+            var floor = Int(projection.reserved1)
+            if frame.cursor_row >= projection.reserved0 {
+                let throughCursor = Int(frame.cursor_row - projection.reserved0) + 1
+                let maxRows = max(Int(frame.rows) - Int(projection.reserved0), 1)
+                floor = max(floor, min(throughCursor, maxRows))
+            }
+            let lines = ratchetedPrimaryClipLines(
+                blockID: row.id_lo,
+                projection: projection,
+                floor: floor
+            )
+            if let card = blockCards[row.id_lo] {
+                card.setOutputLines(lines, cellHeight: cellHeight)
+            }
+            live[row.id_lo] = LiveTailClip(
+                startLine: projection.start_line,
+                firstRow: projection.reserved0,
+                rowCount: UInt16(min(lines, Int(UInt16.max)))
+            )
+        }
+        for stale in retained {
+            runningPrimaryClipRowRatchet.removeValue(forKey: stale)
+        }
+        if !live.isEmpty {
+            surface.setLiveTailBlocks(live)
+        }
+    }
+
+    private func blockProjection(forBlockID blockID: UInt64) -> SeyalAppBlockProjection {
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        for index in 0..<Int(composerSnap.block_count) {
+            let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
+            guard row.id_lo == blockID else { continue }
+            return seyal_app_block_projection_for_pane(appHandle, paneLo, paneHi, UInt32(index))
+        }
+        return SeyalAppBlockProjection()
     }
 
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
@@ -370,9 +491,10 @@ extension SecondaryLivePaneHost {
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
-            card.setBodyTranscript(range.transcriptText)
-            card.setOutputLines(
-                CommandBlockView.visibleOutputLineCount(range.transcriptText),
+            applyRetainedHistoryBody(
+                card: card,
+                projection: blockProjection(forBlockID: range.blockID),
+                retainedRange: range,
                 cellHeight: cellHeight
             )
         }
@@ -393,6 +515,14 @@ extension SecondaryLivePaneHost {
             surface.setLiveTailBlocks([:])
             return
         }
+        // reserved1 can lag the prepared cursor after Enter/wrap (measured
+        // cursor row 6 with reserved1=3). Extend clips through cursor without
+        // a full geometry republish; host layout skips redundant PTY proposes.
+        expandRunningPrimaryClipsThroughCursor()
+        // reserved1 can lag the prepared cursor after Enter/wrap (measured
+        // cursor row 6 with reserved1=3). Extend clips through cursor without
+        // a full geometry republish; host layout skips redundant PTY proposes.
+        expandRunningPrimaryClipsThroughCursor()
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
         var live: [UInt64: LiveTailClip] = [:]
         for index in 0..<Int(composerSnap.block_count) {
@@ -408,10 +538,11 @@ extension SecondaryLivePaneHost {
                   projection.start_line > 0,
                   projection.reserved1 > 0
             else { continue }
+            let lines = ratchetedPrimaryClipLines(blockID: row.id_lo, projection: projection)
             live[row.id_lo] = LiveTailClip(
                 startLine: projection.start_line,
                 firstRow: projection.reserved0,
-                rowCount: UInt16(min(projection.reserved1, UInt32(UInt16.max)))
+                rowCount: UInt16(min(lines, Int(UInt16.max)))
             )
         }
         // Focus reclaim / pane sync can briefly omit PRIMARY_CLIP. Never wipe

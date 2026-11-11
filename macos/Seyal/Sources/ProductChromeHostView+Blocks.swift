@@ -320,9 +320,10 @@ extension ProductChromeHostView {
                    blockID: blockID,
                    displayHandle: activeBlockDisplayHandle
                ) {
-                card.setBodyTranscript(retainedRange.transcriptText)
-                card.setOutputLines(
-                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
+                applyRetainedHistoryBody(
+                    card: card,
+                    projection: projection,
+                    retainedRange: retainedRange,
                     cellHeight: pane.inputSurface.terminalPresentationCellSize().height
                 )
             }
@@ -537,6 +538,32 @@ extension ProductChromeHostView {
         }
     }
 
+    /// History AX text must not shrink a Running PRIMARY_CLIP body (#1476).
+    private func applyRetainedHistoryBody(
+        card: CommandBlockView,
+        projection: SeyalAppBlockProjection,
+        retainedRange: NativeHistoryRange,
+        cellHeight: CGFloat
+    ) {
+        card.setBodyTranscript(retainedRange.transcriptText)
+        let historyLines = CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText)
+        let lines =
+            projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+            ? max(outputLineCount(projection: projection), historyLines)
+            : historyLines
+        card.setOutputLines(lines, cellHeight: cellHeight)
+    }
+
+    private func blockProjection(forBlockID blockID: UInt64) -> SeyalAppBlockProjection {
+        let composer = seyal_app_composer(pane.appHandle)
+        for index in 0..<Int(composer.block_count) {
+            let row = seyal_app_block_row(pane.appHandle, UInt32(index))
+            guard row.id_lo == blockID else { continue }
+            return seyal_app_block_projection(pane.appHandle, UInt32(index))
+        }
+        return SeyalAppBlockProjection()
+    }
+
     func refreshRunningBlockOutput() {
         let snapshot = seyal_app_snapshot(pane.appHandle)
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
@@ -635,9 +662,10 @@ extension ProductChromeHostView {
             || range.sourceDisplayHandle == activeBlockDisplayHandle
         else { return }
         if let card = blockCards[range.blockID], !range.rows.isEmpty {
-            card.setBodyTranscript(range.transcriptText)
-            card.setOutputLines(
-                CommandBlockView.visibleOutputLineCount(range.transcriptText),
+            applyRetainedHistoryBody(
+                card: card,
+                projection: blockProjection(forBlockID: range.blockID),
+                retainedRange: range,
                 cellHeight: cellHeight
             )
         }
