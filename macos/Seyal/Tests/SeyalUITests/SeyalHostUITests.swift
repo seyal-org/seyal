@@ -2105,7 +2105,7 @@ final class SeyalHostUITests: XCTestCase {
             "connected"
         )
         XCTAssertEqual(
-            app.descendants(matching: .any)["terminal-input"].count,
+            app.descendants(matching: .any).matching(identifier: "terminal-input").count,
             1,
             "reconnect must not create a duplicate terminal surface"
         )
