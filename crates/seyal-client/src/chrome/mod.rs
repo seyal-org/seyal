@@ -370,6 +370,15 @@ impl ChromeState {
         }
     }
 
+    /// Current shell-region visibility as `(left, inspector, tab_strip)`.
+    pub fn shell_visibility(&self) -> (bool, bool, bool) {
+        (
+            self.left_visible,
+            self.inspector_visible,
+            self.tab_strip_visible,
+        )
+    }
+
     /// `blocks` is the focused Pane's authoritative Block list from the
     /// composer projection. A selected Block absent from it is treated as
     /// unselected: rows fall back to Pane context and no Block rows are shown.

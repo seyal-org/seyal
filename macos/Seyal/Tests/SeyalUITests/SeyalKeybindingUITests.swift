@@ -156,6 +156,57 @@ final class SeyalKeybindingUITests: XCTestCase {
         assertFlowBlocksOrFail(in: app)
     }
 
+    /// SPEC-024 §14 item 23 / #922: ⌘0 and ⌥⌘0 each hide one column through
+    /// the Rust catalog, View-menu titles follow the visibility, and second
+    /// presses restore both columns without leaving Flow.
+    func testCommandZeroTogglesSidebarAndInspectorWithLiveMenuTitles() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        assertFlowBlocksOrFail(in: app)
+
+        let sidebar = app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch
+        let inspector = app.descendants(matching: .any)["seyal-inspector"].firstMatch
+        XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        XCTAssertTrue(sidebar.isHittable, "sidebar is visible by default (#922)")
+        XCTAssertTrue(inspector.isHittable, "inspector is visible by default (#922)")
+        assertViewMenuTitles(in: app, ["Hide Sidebar", "Hide Inspector"])
+
+        app.typeKey("0", modifierFlags: .command)
+        waitForHittable(sidebar, false, "⌘0 hides the sidebar")
+        XCTAssertTrue(inspector.isHittable, "⌘0 leaves the inspector")
+
+        app.typeKey("0", modifierFlags: [.command, .option])
+        waitForHittable(inspector, false, "⌥⌘0 hides the inspector")
+        XCTAssertFalse(sidebar.isHittable, "⌥⌘0 leaves the sidebar hidden")
+        assertViewMenuTitles(in: app, ["Show Sidebar", "Show Inspector"])
+
+        app.typeKey("0", modifierFlags: .command)
+        app.typeKey("0", modifierFlags: [.command, .option])
+        waitForHittable(sidebar, true, "second ⌘0 restores the sidebar")
+        waitForHittable(inspector, true, "second ⌥⌘0 restores the inspector")
+        assertFlowBlocksOrFail(in: app)
+    }
+
+    private func assertViewMenuTitles(in app: XCUIApplication, _ titles: [String]) {
+        app.menuBars.menuBarItems["View"].click()
+        for title in titles {
+            XCTAssertTrue(
+                app.menuItems[title].waitForExistence(timeout: 5),
+                "View → \(title) must come from the Rust projection"
+            )
+        }
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
+    private func waitForHittable(_ element: XCUIElement, _ hittable: Bool, _ message: String) {
+        let reached = expectation(
+            for: NSPredicate(format: "isHittable == %@", NSNumber(value: hittable)),
+            evaluatedWith: element,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [reached], timeout: 5), .completed, message)
+    }
+
     /// Reserved Quit stays on the AppKit path (cmd+q terminates; not rebound).
     func testReservedQuitStillTerminates() throws {
         let app = hostedApp()

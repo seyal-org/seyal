@@ -97,6 +97,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.presentationToggleTui, host: host))
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.paneSplitRight, host: host))
         viewMenu.addItem(projectedItem(commandId: KeybindingShortcutRealization.paneSplitDown, host: host))
+        viewMenu.addItem(NSMenuItem.separator())
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.chromeToggleLeftPanel,
+            host: host
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.chromeToggleInspector,
+            host: host
+        ))
         viewItem.submenu = viewMenu
 
         let windowItem = NSMenuItem()

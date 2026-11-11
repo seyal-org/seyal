@@ -50,7 +50,9 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneSplitRight
         | WorkspaceCommandId::PaneSplitDown
         | WorkspaceCommandId::PresentationToggleTui
-        | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
+        | WorkspaceCommandId::GotoOpen
+        | WorkspaceCommandId::ChromeToggleLeftPanel
+        | WorkspaceCommandId::ChromeToggleInspector => command.ordinal.is_none(),
         WorkspaceCommandId::AppCloseFocused
         | WorkspaceCommandId::WindowNew
         | WorkspaceCommandId::WindowClose
@@ -105,6 +107,9 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
         WorkspaceCommandId::GotoOpen => "Go to…",
+        // Stateless titles; menus show the live Hide/Show title (R5.6.2).
+        WorkspaceCommandId::ChromeToggleLeftPanel => "Toggle Sidebar",
+        WorkspaceCommandId::ChromeToggleInspector => "Toggle Inspector",
         WorkspaceCommandId::AppCloseFocused => "Close",
         WorkspaceCommandId::WindowNew => "New Window",
         WorkspaceCommandId::WindowClose => "Close Window",
@@ -128,6 +133,8 @@ fn menu_visible_commands() -> impl Iterator<Item = WorkspaceCommand> {
         WorkspaceCommandId::PaneSplitDown,
         WorkspaceCommandId::PresentationToggleTui,
         WorkspaceCommandId::GotoOpen,
+        WorkspaceCommandId::ChromeToggleLeftPanel,
+        WorkspaceCommandId::ChromeToggleInspector,
         WorkspaceCommandId::TerminalCloseFocused,
         WorkspaceCommandId::WindowNew,
         WorkspaceCommandId::WindowClose,
@@ -296,6 +303,9 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::WindowSelectOrdinal => 42,
         WorkspaceCommandId::TerminalCreate => 43,
         WorkspaceCommandId::TerminalCloseFocused => 44,
+        // SPEC-024 §5.6. Ids 22–23 belong to pane zoom/swap on current master.
+        WorkspaceCommandId::ChromeToggleLeftPanel => 45,
+        WorkspaceCommandId::ChromeToggleInspector => 46,
     }
 }
 
@@ -346,6 +356,8 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         42 => WorkspaceCommandId::WindowSelectOrdinal,
         43 => WorkspaceCommandId::TerminalCreate,
         44 => WorkspaceCommandId::TerminalCloseFocused,
+        45 => WorkspaceCommandId::ChromeToggleLeftPanel,
+        46 => WorkspaceCommandId::ChromeToggleInspector,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {

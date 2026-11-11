@@ -258,6 +258,18 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             ordinal: None,
             context: APP,
         },
+        BuiltinRow {
+            keys_notation: "cmd+0",
+            id: WorkspaceCommandId::ChromeToggleLeftPanel,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+0",
+            id: WorkspaceCommandId::ChromeToggleInspector,
+            ordinal: None,
+            context: APP,
+        },
     ]
 }
 
