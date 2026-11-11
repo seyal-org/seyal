@@ -23,6 +23,35 @@ final class SeyalHostComponentTests: XCTestCase {
         NativeThemeRealization.resetColdDiagnosticsSurfacedForTests()
     }
 
+    func testRendererPlanABIMatchesRustAuthorityAndFlowFlags() {
+        XCTAssertEqual(UInt16(SEYAL_APP_RENDERER_PLAN_ABI_VERSION), 1)
+        XCTAssertEqual(MemoryLayout<SeyalAppRendererPlan>.size, 8)
+        let flow = RendererPresentationPlan.resolve(
+            eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+            variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+        )
+        XCTAssertEqual(flow.mode, .flow)
+        XCTAssertFalse(flow.drawsFullGridBackground)
+        XCTAssertFalse(flow.drawsLiveGrid)
+        XCTAssertFalse(flow.drawsCursorOutsideBlockRegions)
+        let raw = RendererPresentationPlan.resolve(
+            eligibility: UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+            variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+        )
+        XCTAssertEqual(raw.mode, .raw)
+        XCTAssertTrue(raw.drawsFullGridBackground)
+        XCTAssertTrue(raw.drawsLiveGrid)
+        XCTAssertTrue(raw.drawsCursorOutsideBlockRegions)
+        let scrolled = RendererPresentationPlan.resolve(
+            eligibility: UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+            variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_RAW_SCROLLBACK)
+        )
+        XCTAssertEqual(scrolled.mode, .raw)
+        XCTAssertTrue(scrolled.drawsFullGridBackground)
+        XCTAssertFalse(scrolled.drawsLiveGrid)
+        XCTAssertFalse(scrolled.drawsCursorOutsideBlockRegions)
+    }
+
     func testApplicationRootABIMatchesPublishedHeader() {
         XCTAssertEqual(SEYAL_APP_ABI_VERSION, 2)
         XCTAssertEqual(MemoryLayout<SeyalAppAction>.size, Int(MemoryLayout<SeyalAppAction>.stride))

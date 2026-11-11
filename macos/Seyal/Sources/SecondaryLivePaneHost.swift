@@ -689,10 +689,15 @@ final class SecondaryLivePaneHost: NSView {
         let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct
-        let plan = RendererPresentationPlan.fromPane(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
+        // Plan from the same eligibility as `direct` (no fromPane race; #1476).
+        let plan = RendererPresentationPlan.resolve(
+            eligibility: eligibility,
+            variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT))
         if direct {
             activateDirectSurfaceConstraints()
-            if plan.mode == .tui { surface.clearRawScrollbackFollowTail() }
+            if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) {
+                surface.clearRawScrollbackFollowTail()
+            }
             surface.applyRendererPresentation(plan)
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])

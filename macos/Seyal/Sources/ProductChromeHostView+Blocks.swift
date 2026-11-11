@@ -195,11 +195,14 @@ extension ProductChromeHostView {
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct
-        let plan = RendererPresentationPlan.fromApp(pane.appHandle)
+        // Plan from the same eligibility as `direct` (no fromApp race; #1476).
+        let plan = RendererPresentationPlan.resolve(
+            eligibility: snapshot.eligibility,
+            variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT))
         if direct {
             NSLayoutConstraint.deactivate(paneFollowsTranscript)
             NSLayoutConstraint.activate(paneFillsCenter)
-            if plan.mode == .tui {
+            if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) {
                 pane.inputSurface.clearRawScrollbackFollowTail()
             }
             pane.inputSurface.applyRendererPresentation(plan)

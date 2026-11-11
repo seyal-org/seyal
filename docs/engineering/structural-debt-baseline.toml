@@ -36,15 +36,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 845
+acknowledged_loc = 850
 issue = 1476
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority; #1476 applies Rust RendererPlan via FFI instead of local presentation-mode factories and ratchets acknowledged_loc down."
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority; #1476 applies Rust RendererPlan via resolve(eligibility) matched to the Flow/Raw branch so split/focus cannot race a second fromPane snapshot."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 815
-issue = 1467
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 focus Flow DirectInput on composer-status relay and rebuild Running cards when DirectInput status publishes without a second transcript authority."
+acknowledged_loc = 817
+issue = 1476
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 focus Flow DirectInput on composer-status relay and rebuild Running cards when DirectInput status publishes without a second transcript authority; #1476 resolves RendererPlan from the same snapshot eligibility used for the Flow/Raw branch (no fromApp race)."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
