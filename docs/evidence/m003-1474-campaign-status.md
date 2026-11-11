@@ -2,10 +2,19 @@
 
 **Date:** 2026-11-11  
 **Branch:** `mahboobmonnamd/issue/1474`  
-**Head:** `1d308777094c269f33b936c343473133633fcd5d`  
+**Head:** tip after Busy-projection + structural-debt remediation (see PR #1478 commits; was `0cff51d7` + follow-ups)  
 **PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
 **Base:** `origin/master`  
 **Phase A context:** `/Users/mahboob/.cursor/plans/seyal-phase-a-reality-audit-2026-11-11.md`
+
+## Remediation delta (Busy / attach)
+
+| Item | Verdict |
+|---|---|
+| XCUI activate-before-wait attach | **PASS** on focused launch smoke earlier this tip |
+| Multipane Copy focused Controller | **CODE** on tip |
+| Busy accept latch + Submit≠override Busy | **UNIT PASS**; headed busy XCUI still **FAIL** / Flow hittable flake on this runner |
+| `make check` | **PASS** after structural-debt acknowledgement ratchet |
 
 ## Gate 1 focused XCUI (exclusive; Metal ink required)
 

@@ -24,9 +24,9 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 937
-issue = 1442
-reason = "Metal surface remains the thin historyRanges/hit-test owner; #1442 adds presentation-local Raw scroll offset fields and hit/history-except hooks that call into MetalSurfaceView+RawScrollback without inventing a second VT/history authority."
+acknowledged_loc = 944
+issue = 1474
+reason = "Metal surface remains the thin historyRanges/hit-test owner; #1474 Defect B retain wipe clears historyRenderPageKeys with buffers so shell-exit republish cannot take a geometry-only path against a missing page."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -42,9 +42,9 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 793
+acknowledged_loc = 798
 issue = 1474
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 DirectInput rebuild stays here while #1474 preserves mid-history scroll across stream rebuilds and routes Rerun/Copy seams; document sizing lives in +TranscriptLayout."
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1474 keeps retain-path history publishes on the last transcript Controller after shell-exit handle clear without a second Block authority."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
 acknowledged_loc = 834
@@ -77,9 +77,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1067
-issue = 1440
-responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority."
+ceiling_loc = 1069
+issue = 1474
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1474 Busy-accept latch requires Available republish before OpenHistory without splitting ApplicationRoot test authority."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -89,9 +89,9 @@ responsibility = "Published C ABI entry points stay one façade after decode/enc
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/mod.rs"
-acknowledged_loc = 721
+acknowledged_loc = 741
 issue = 1474
-reason = "Composer target/mode projection stays one cold-path reducer; #1467 DirectInput remains here while #1474 adds pane_integration_unsupported so Unsupported Raw resting cannot leak across Pane focus without a second composer authority."
+reason = "Composer target/mode projection stays one cold-path reducer; #1474 latches Busy on accepted submit when Runtime eligibility is still Available so quiet commands cannot flash Available before the next status publish."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/display.rs"
@@ -100,15 +100,15 @@ issue = 1474
 reason = "Display FFI stays the thin Controller/history/prepared-frame seam; #1474 adds seyal_bridge_take_block_copy/_for so Block pasteboard delivery tracks the focused Pane Controller without a second display authority."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 817
-issue = 1451
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149/#1388/#1440 lifecycle fixtures remain here. #1451 adds should_confirm_quit FFI proofs beside the existing AppHandle ABI cases; rustfmt wrap raises three lines."
+acknowledged_loc = 821
+issue = 1474
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1474 accepted_submit restores Available after Busy latch so history FFI proofs stay valid without a second ABI test module."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
-acknowledged_loc = 944
-issue = 1388
-reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module; production composer reducer stays under review_loc. #1379 adds clear canvas-floor coverage, and #1388 carries BlockScope through the RuntimeBlockRecord fixtures without a second projection test module."
+acknowledged_loc = 984
+issue = 1474
+reason = "Composer reducer proofs stay one sibling tests module; #1474 covers Busy-accept latch and Unsupported non-override without splitting the relocated composer test authority."
 
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
@@ -268,9 +268,9 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 755
+acknowledged_loc = 768
 issue = 1474
-reason = "Local display-client protocol proofs stay one module; #1467 DirectInput fixtures remain here while #1474 seeds pending/completed Block copy slots in the shared client fixture without a second local test file."
+reason = "Local display-client protocol proofs stay one module; #1474 prefers type-23 Busy over a stale Submit target during admission without a second local test file."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"

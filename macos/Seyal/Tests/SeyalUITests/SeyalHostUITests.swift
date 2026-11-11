@@ -1075,7 +1075,8 @@ final class SeyalHostUITests: XCTestCase {
         }
         let app = hostedApp()
         waitForUsablePty(in: app)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
+        proveTrustedComposerIntegration(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
         let available = NSPredicate(format: "value == 'available'")
         let busy = NSPredicate(format: "value == 'busy'")
@@ -1087,15 +1088,15 @@ final class SeyalHostUITests: XCTestCase {
             .completed,
             "composer never became available at the first prompt; value=\(composer.value ?? "nil")"
         )
-        composer.firstMatch.click()
-        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
-        let execute = app.descendants(matching: .any)["seyal-composer-execute"]
+        composer.click()
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 5), "composer editor missing")
-        editor.firstMatch.click()
-        editor.firstMatch.typeText("sleep 2")
+        editor.click()
+        editor.typeText("sleep 2")
         XCTAssertTrue(execute.waitForExistence(timeout: 2))
-        XCTAssertTrue(execute.firstMatch.isEnabled, "execute must be enabled with a draft")
-        execute.firstMatch.click()
+        XCTAssertTrue(execute.isEnabled, "execute must be enabled with a draft")
+        execute.click()
         // Runtime publishes Busy at admission; the host only relays it.
         // Pending submit keeps Busy until ComposerResult is drained (#1474).
         XCTAssertEqual(
@@ -1104,7 +1105,7 @@ final class SeyalHostUITests: XCTestCase {
                 timeout: 6
             ),
             .completed,
-            "composer stayed \(composer.value ?? "nil") editor=\(editor.firstMatch.value ?? "nil") while sleep 2 owned the shell"
+            "composer stayed \(composer.value ?? "nil") editor=\(editor.value ?? "nil") while sleep 2 owned the shell"
         )
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed during busy relay")
         // The next trusted prompt re-enables it, with the draft cleared by
@@ -1791,9 +1792,10 @@ final class SeyalHostUITests: XCTestCase {
         }
         let app = hostedApp()
         waitForUsablePty(in: app)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
-        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
-        let execute = app.descendants(matching: .any)["seyal-composer-execute"]
+        proveTrustedComposerIntegration(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
         let available = NSPredicate(format: "value == 'available'")
         let busy = NSPredicate(format: "value == 'busy'")
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
@@ -1806,29 +1808,29 @@ final class SeyalHostUITests: XCTestCase {
             "composer never became available; value=\(composer.value ?? "nil")"
         )
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
-        editor.firstMatch.click()
-        editor.firstMatch.typeText("sleep 8")
+        editor.click()
+        editor.typeText("sleep 8")
         XCTAssertTrue(execute.waitForExistence(timeout: 2))
-        XCTAssertTrue(execute.firstMatch.isEnabled, "execute must be enabled with a draft")
-        execute.firstMatch.click()
+        XCTAssertTrue(execute.isEnabled, "execute must be enabled with a draft")
+        execute.click()
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],
                 timeout: 6
             ),
             .completed,
-            "composer stayed \(composer.value ?? "nil") editor=\(editor.firstMatch.value ?? "nil") while sleep owned the shell"
+            "composer stayed \(composer.value ?? "nil") editor=\(editor.value ?? "nil") while sleep owned the shell"
         )
-        XCTAssertTrue(execute.firstMatch.exists)
-        XCTAssertFalse(execute.firstMatch.isEnabled, "busy must disable native execute")
-        let busyValue = (composer.firstMatch.value as? String) ?? ""
+        XCTAssertTrue(execute.exists)
+        XCTAssertFalse(execute.isEnabled, "busy must disable native execute")
+        let busyValue = (composer.value as? String) ?? ""
         XCTAssertFalse(
             busyValue.contains("sleep"),
             "admission/error AX must not leak the draft; value=\(busyValue)"
         )
-        execute.firstMatch.click()
+        execute.click()
         XCTAssertEqual(
-            composer.firstMatch.value as? String,
+            composer.value as? String,
             "busy",
             "disabled execute must not admit a second command"
         )
@@ -1933,6 +1935,28 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// Unsupported shells keep composer `available` forever and never emit
+    /// Blocks. Busy cases must prove trusted zsh integration first (#1474).
+    private func proveTrustedComposerIntegration(in app: XCUIApplication) {
+        let marker = "seyal-busy-trust-\(String(UUID().uuidString.prefix(8)))"
+        submitComposerCommand(app, "printf '\(marker)\\n'")
+        let body = app.descendants(matching: .any)["seyal-block-0-body"].firstMatch
+        XCTAssertTrue(
+            body.waitForExistence(timeout: 12),
+            "trusted zsh integration must publish a Flow Block before Busy cases; shell may be Unsupported"
+        )
+        let available = NSPredicate(format: "value == 'available'")
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: available, evaluatedWith: composer, handler: nil)],
+                timeout: 12
+            ),
+            .completed,
+            "composer must return to available after trust probe; value=\(composer.value ?? "nil")"
+        )
+    }
+
     private func submitComposerCommand(_ app: XCUIApplication, _ command: String) {
         let composer = app.descendants(matching: .any)["seyal-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
@@ -1945,10 +1969,15 @@ final class SeyalHostUITests: XCTestCase {
         )
         composer.firstMatch.click()
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
         if editor.waitForExistence(timeout: 2), editor.firstMatch.isHittable {
             editor.firstMatch.click()
             editor.firstMatch.typeText(command)
-            editor.firstMatch.typeKey("\r", modifierFlags: [])
+            if execute.exists, execute.isEnabled {
+                execute.click()
+            } else {
+                editor.firstMatch.typeKey("\r", modifierFlags: [])
+            }
         } else {
             composer.firstMatch.typeText(command)
             app.typeKey("\r", modifierFlags: [])

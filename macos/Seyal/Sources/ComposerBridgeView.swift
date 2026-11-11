@@ -363,11 +363,14 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         } else {
             placeholder.stringValue = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
         }
-        setAccessibilityValue(
+        let axValue: String =
             blockScopedDirectInput
-                ? "hidden"
-                : (relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden")))
-        )
+            ? "hidden"
+            : (relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden")))
+        setAccessibilityValue(axValue)
+        // XCUI samples AX asynchronously; without a value-changed post the
+        // waiter can keep a stale `available` across a quiet Busy latch (#1474).
+        NSAccessibility.post(element: self, notification: .valueChanged)
         if composer.epoch != lastEpoch {
             lastEpoch = composer.epoch
             // The Rust draft is authoritative in every mode (SPEC-008 §4). A
