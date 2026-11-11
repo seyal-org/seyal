@@ -26,8 +26,8 @@ An Issue or PR cannot override architecture/specification. Existing code is neve
 
 - Each `TerminalExecution` owns its one authoritative `TerminalState`; Runtime owns registry/composition/lifecycle authority, and the GUI never mirrors a second VT/grid authority.
 - One independent `TerminalExecution` owns one terminal endpoint/PTY and one canonical terminal state.
-- `BlockTimeline` is Runtime/workspace metadata keyed by `ExecutionId`; Blocks own no PTY, VT, grid, child, renderer, or copied output.
-- No synchronous IPC ping-pong, JSON, agents, persistence, cloud, licensing, telemetry, Lua, or Block semantics in terminal hot paths.
+- **Accepted native-Block target (#1480/#1482):** `BlockTimeline` remains Runtime/workspace metadata keyed by `ExecutionId`, while Rust `PrimaryBlockEngine` owns actual prompt/command/output **RegionGrids** backed by one canonical `RegionStore` and non-owning `VTWindowMap`. Blocks own **no independent PTY, parser, VT semantic engine, child, renderer, or copied history**. A second writable raw grid or duplicate terminal authority is prohibited. The current production `Screen` is replaced only by a tested single-owner cutover, not by parallel engines.
+- No synchronous IPC ping-pong, JSON, agents, persistence, cloud, licensing, telemetry or Lua in terminal hot paths. The accepted native Block engine may record **bounded source-unit ownership and ordered marker/mutation events within the one Rust VT mutation authority**; it must never perform per-Block IPC, renderer layout, second-parser replay or expensive all-Block recomputation in that hot path.
 - Metal is the first production macOS terminal renderer; no temporary text renderer or temporary production VT path.
 - Headless Runtime exists from M001; GUI detach/crash must not kill the execution.
 - Terminal fundamentals stay license/cloud independent.
