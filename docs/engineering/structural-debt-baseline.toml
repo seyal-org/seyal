@@ -274,7 +274,7 @@ reason = "Local display-client protocol proofs stay one module; #1467 DirectInpu
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
-acknowledged_loc = 867
+acknowledged_loc = 868
 issue = 1474
 reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 DirectInput stays here while #1474 binds optional paneLo/paneHi so unfocused Raw/TUI wheel/page scroll uses per-pane eligibility instead of the focused ApplicationRoot snapshot."
 [[cohesion_acknowledgement]]

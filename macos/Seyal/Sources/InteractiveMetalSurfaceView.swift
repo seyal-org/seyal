@@ -298,7 +298,8 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
                 _ = applyRawScrollDelta(
                     rows: delta, eligibility: eligibility, alternateScreen: alternate)
             } else {
-                let delta = event.scrollingDeltaY > 0 ? -steps : steps                _ = applyRawScrollDelta(
+                let delta = event.scrollingDeltaY > 0 ? -steps : steps
+                _ = applyRawScrollDelta(
                     rows: delta, eligibility: eligibility, alternateScreen: alternate)
             }
             return
