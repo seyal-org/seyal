@@ -1,19 +1,8 @@
 name: M001 Production Fuzz
 
 on:
-  pull_request:
-    paths:
-      - "crates/seyal-runtime/**"
-      - "crates/seyal-exec/**"
-      - "crates/seyal-protocol/**"
-      - "crates/seyal-terminal/**"
-      - "crates/seyal-agent-core/**"
-      - "crates/seyal-agent-protocol/**"
-      - "crates/seyal-agent-store/**"
-      - "crates/seyal-agent-backend/**"
-      - "fuzz/**"
-      - "docs/engineering/M001-FUZZ-EVIDENCE.md"
-      - ".github/workflows/pass5-fuzz.yml"
+  # PR libFuzzer campaigns moved off every-PR path; Foundation repository-policy
+  # still runs fuzz-registry smoke. Use schedule or workflow_dispatch for campaigns.
   schedule:
     # Nightly campaign floors for Pass 10 §6.9 evidence grade.
     - cron: "17 6 * * *"
