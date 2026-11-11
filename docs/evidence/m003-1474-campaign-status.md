@@ -2,7 +2,8 @@
 
 **Date:** 2026-11-11  
 **Branch:** `mahboobmonnamd/issue/1474`  
-**Base tip before this remediation pack:** `891e80499d2b47febb34fb6401d85f2c060d4f78` (user-cited `0cff51d` is ancestor)  
+**Exact head:** `48aaa5ef2da61db2160b86116e6a4c16537df868`  
+**Prior tip:** `891e80499d2b47febb34fb6401d85f2c060d4f78` (user-cited `0cff51d` is ancestor)  
 **PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
 **Base:** `origin/master`  
 **Claim:** `cursor-e84b5c186ac438cee93e3b285c57532e` VERIFIED (implement #1474)
@@ -48,14 +49,15 @@ Verdicts below are headed XCUI unless noted. Separate **PASS / FAIL / UNVERIFIED
 | Gate 4 perf | **UNVERIFIED** | deferred |
 | Independent human review | **UNVERIFIED** | required before merge |
 
-### After this remediation pack (dirty → commit SHA on push)
+### On exact head `48aaa5ef` (this pack pushed)
 
 | Case | Verdict | Evidence |
 |---|---|---|
-| Focus-churn scroll markers | **PASS** (once) / **FAIL**/crash (later) | **PASS** `/tmp/seyal-1474-p0-retest2.log` (44.7s) after handle-addressed submit/result; later runs **FAIL** same marker gap (`/tmp/seyal-1474-p0-retest5.log`) or runner/app exit (`retest4/6/7`) |
-| Pane-local terminal tab markers | **FAIL** | `/tmp/seyal-1474-p0-retest2.log`, `retest5.log` — draft cleared/`available`, no `SEYAL_TAB_ONE_MARKER` Block; also PTY disconnect flake on New Terminal (`retest8.log`) |
-| Full Gate 2–3 matrix on one SHA | **UNVERIFIED** | no single green tip yet |
+| Focus-churn scroll markers | **FAIL** | `/tmp/seyal-1474-p0-retest11.log` — `seyal-1424-scroll-b` missing; sibling `scroll-a` only. Earlier interim **PASS** once (`/tmp/seyal-1474-p0-retest2.log`) was not reproduced on this SHA. |
+| Pane-local terminal tab markers | **FAIL** | `/tmp/seyal-1474-p0-retest11.log` — draft cleared/`available`, no `SEYAL_TAB_ONE_MARKER`; sibling `SEYAL_PANE_TWO_MARKER` only |
+| Full Gate 2–3 matrix on one SHA | **UNVERIFIED** | blocked by P0s |
 | Gate 4 | **UNVERIFIED** | blocked on Gate 2–3 |
+| Note | — | DerivedData without `Contents/Helpers/seyal-runtime` yields false `connection=disconnected` after split (`retest8`–`10`); gate23 DD includes the helper. |
 
 ## Gate 1–4 rollup
 

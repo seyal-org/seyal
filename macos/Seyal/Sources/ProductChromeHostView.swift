@@ -731,14 +731,25 @@ final class ProductChromeHostView: NSView {
                 host.invalidateProjectionCache()
                 host.noteRegistryPolled(clientHandle: client)
                 // BlockTimeline can settle one poll after ComposerResult. When
-                // Runtime allocated a Block id, sync again from that Controller
+                // Runtime allocated a Block id, drain that Controller then sync
                 // so pane-local tab markers are not stuck empty (#1474).
                 if blockID != 0 {
-                    let after = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
-                    if after.block_count == 0 {
+                    var after = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
+                    if after.block_count == 0, client != 0 {
+                        _ = seyal_bridge_poll_for(client)
                         host.invalidateProjectionCache()
                         host.noteRegistryPolled(clientHandle: client)
+                        after = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
                     }
+                    if after.block_count == 0 {
+                        host.blocks.setAccessibilityLabel(
+                            "sync-missed-blocks request=\(requestID) block=\(blockID)"
+                        )
+                    }
+                } else {
+                    host.blocks.setAccessibilityLabel(
+                        "relay-accept request=\(requestID) handle=\(client)"
+                    )
                 }
             }
             if let failureCode {

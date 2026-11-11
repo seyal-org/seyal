@@ -2621,9 +2621,15 @@ final class SeyalPaneSplitUITests: XCTestCase {
         ).allElementsBoundByIndex.prefix(8).map {
             "\($0.identifier):\(($0.label as String?) ?? "")"
         }.joined(separator: " | ")
+        let listLabels = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES %@", "^(seyal-blocks|seyal-secondary-blocks)$")
+        ).allElementsBoundByIndex.prefix(4).map {
+            "\($0.identifier):\(($0.label as String?) ?? "")"
+        }.joined(separator: " | ")
         XCTFail(
             "the selected execution records its own submitted command; marker=\(marker) "
-                + "composer=\(composerAX) host=\(hostAX) editor=\(editorAX) blocks=[\(blockLabels)]"
+                + "composer=\(composerAX) host=\(hostAX) editor=\(editorAX) "
+                + "blocks=[\(blockLabels)] lists=[\(listLabels)]"
         )
     }
 
