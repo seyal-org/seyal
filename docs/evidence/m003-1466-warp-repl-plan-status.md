@@ -7,10 +7,9 @@
 | Forensic evidence | `docs/evidence/m003-warp-local-repl-inline-forensic.md` |
 | Architecture Issue | [#1466](https://github.com/seyal-org/seyal/issues/1466) — product owner Accepted 2026-11-08 |
 | Architecture PR | [#1469](https://github.com/seyal-org/seyal/pull/1469) — normative on merge |
-| Runtime impl Issue | [#1467](https://github.com/seyal-org/seyal/issues/1467) — Ready after #1469 merges |
-| macOS impl Issue | [#1468](https://github.com/seyal-org/seyal/issues/1468) — Ready after #1467 |
+| Runtime + macOS impl | [#1467](https://github.com/seyal-org/seyal/issues/1467) / [#1468](https://github.com/seyal-org/seyal/issues/1468) — single production PR |
 
-Production Block-scoped input may begin after #1469 merges under `implement-issue` on #1467 / #1468.
+#1466 Accepted via PR #1469. Production PR publishes type-45 `DirectInput`, routes Flow keys/IME into the Running Block live surface, and demotes Interact for covered REPLs.
 
 ## Raw / #1404 track (verified)
 
@@ -25,8 +24,8 @@ Production Block-scoped input may begin after #1469 merges under `implement-issu
 ## Current headed behavior (master)
 
 - Trusted zsh Flow/Blocks is the normal presentation (#1426).
-- Local `node`/`python`: Running Block live-tail works; composer Busy; **Interact** required for character keys (leaves Flow for fenced direct-input).
-- Warp-like in-Block typing is **not** shipped; gated on Accepted #1466 + #1467/#1468.
+- Local `node`/`python`: Running Block live-tail + Flow DirectInput keys/IME (no Interact required); composer Submit stays Busy.
+- Interact remains only as Unavailable→Raw fallback outside the DirectInput contract.
 - Raw remains available as fallback for unsupported/quarantine; not deleted.
 - TUI remains alternate-screen takeover.
 

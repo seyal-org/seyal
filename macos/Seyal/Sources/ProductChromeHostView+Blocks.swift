@@ -77,9 +77,65 @@ extension ProductChromeHostView {
             )
             let accepted = self.relayComposerStatus(status)
             if accepted {
+                // Status can publish DirectInput / Running(b) without bumping
+                // snapshot generation. performChromeReconcile then short-circuits
+                // and never rebuildBlocks — empty transcript + Busy dock.
+                self.ensureRunningDirectInputBlockCards()
+                self.rebindDirectInputClickTargets()
                 self.reconcileChrome()
+                // Multipane hosts own their Busy dock; generation-stable status
+                // must still retract/restore DirectInput layout per Controller.
+                for host in self.centerColumn.secondaryHosts {
+                    host.refreshBlockScopedDirectInputPresentation()
+                }
+                // After Busy resigns the dock editor, reclaim Metal for DirectInput.
+                let snap = seyal_app_snapshot(self.pane.appHandle)
+                self.focusBlockScopedDirectInputIfEligible(snap)
             }
             return accepted
+        }
+    }
+
+    /// Project + rebuild when the Running DirectInput target has no card yet.
+    /// Never rebuild against an empty timeline: that would wipe cards and, if
+    /// snapshot generation does not move, leave Busy + blank transcript.
+    func ensureRunningDirectInputBlockCards() {
+        let targetID = relayTarget.blockID
+        guard targetID != 0, relayTarget.targetClass == 2 else { return }
+        guard blockCards[targetID] == nil else { return }
+        let snap = seyal_app_snapshot(pane.appHandle)
+        let direct = snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+            || snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        // Multipane Flow owns cards on SecondaryLivePaneHost; legacy transcript
+        // stays empty by design when secondary hosts are installed.
+        guard !direct, centerColumn.secondaryHosts.isEmpty else { return }
+        projectRuntimeBlocks()
+        let composer = seyal_app_composer(pane.appHandle)
+        let timelineContainsTarget = (0..<Int(composer.block_count)).contains { index in
+            seyal_app_block_row(pane.appHandle, UInt32(index)).id_lo == targetID
+        }
+        guard timelineContainsTarget else { return }
+        rebuildBlocks()
+        publishLiveTailBlocks()
+        publishBlockOutputFrame()
+    }
+
+    /// Keep Warp-like click-to-focus wired after late DirectInput publication.
+    func rebindDirectInputClickTargets() {
+        for (blockID, card) in blockCards {
+            let isRunningTarget = blockID != 0
+                && blockID == relayTarget.blockID
+                && relayTarget.targetClass == 2
+            card.onRequestDirectInputFocus = isRunningTarget
+                ? { [weak self, blockID] in
+                    guard let self else { return }
+                    let snap = seyal_app_snapshot(self.pane.appHandle)
+                    guard self.snapshotPublishesBlockScopedDirectInput(snap),
+                        blockID == self.relayTarget.blockID
+                    else { return }
+                    _ = self.focusBlockScopedDirectInputSurface()
+                }
+                : nil
         }
     }
 
@@ -112,7 +168,7 @@ extension ProductChromeHostView {
     /// Rust decides presentation and input ownership; this is a thin adapter.
     @discardableResult
     func relayComposerStatus(_ status: NativeComposerStatus) -> Bool {
-        return seyal_app_apply_runtime_composer_status(
+        let accepted = seyal_app_apply_runtime_composer_status(
             pane.appHandle,
             status.eligibility,
             status.revision,
@@ -122,6 +178,11 @@ extension ProductChromeHostView {
             status.targetClass,
             status.targetMode
         ) == 0
+        if accepted {
+            let snapshot = seyal_app_snapshot(pane.appHandle)
+            focusBlockScopedDirectInputIfEligible(snapshot)
+        }
+        return accepted
     }
 
     func applyTranscriptPresentation(_ snapshot: SeyalAppSnapshot) {
@@ -130,6 +191,7 @@ extension ProductChromeHostView {
         // reconciliation. Keep AppKit's first-responder and AX route in sync
         // with Rust's authoritative eligibility on every presentation change.
         pane.inputSurface.syncInputRoutePresentation()
+        focusBlockScopedDirectInputIfEligible(snapshot)
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct
@@ -319,19 +381,22 @@ extension ProductChromeHostView {
     func applyComposerPlacement() {
         let shouldRestoreEditorFocus = composer.editorIsFirstResponder
         let snapshot = seyal_app_snapshot(pane.appHandle)
-        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+        let rawOrTui = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        if rawOrTui {
+            restoreDockComposerPresentation(restoreFocus: shouldRestoreEditorFocus)
+            return
+        }
+        // Warp-like DirectInput: retract the Busy dock and let the Running Block
+        // own the live input surface (no second typing place).
+        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+            presentDirectInputMergedBlockSurface()
+            return
+        }
         let target = relayTarget.mode == 2 && relayTarget.generation != 0
             ? blockCards[relayTarget.blockID] : nil
-        guard !direct, relayTarget.blockID != 0, let target else {
-            setRelayTranscriptViewportBottomAnchored(false)
-            if composerInlineBlockID != 0 {
-                composerInlineBlockID = 0
-                composer.setInlineRelayPresentation(false)
-                composer.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate(composerDockConstraints)
-                if shouldRestoreEditorFocus { routeFocus() }
-            }
+        guard relayTarget.blockID != 0, let target else {
+            restoreDockComposerPresentation(restoreFocus: shouldRestoreEditorFocus)
             return
         }
         // Relay positions the Pane composer over the running prompt. Keep the
@@ -360,6 +425,38 @@ extension ProductChromeHostView {
         }
         positionInlineComposerAtCurrentCursor()
         if shouldRestoreEditorFocus { routeFocus() }
+    }
+
+    /// Hide the Pane dock and fill the transcript to the Pane bottom while
+    /// Block-scoped DirectInput owns keys in the Running Block live region.
+    func presentDirectInputMergedBlockSurface() {
+        if composerInlineBlockID != 0 {
+            composerInlineBlockID = 0
+            composer.setInlineRelayPresentation(false)
+            composer.translatesAutoresizingMaskIntoConstraints = false
+        }
+        NSLayoutConstraint.deactivate(composerDockConstraints)
+        setRelayTranscriptViewportBottomAnchored(true)
+        composer.isHidden = true
+        layoutSubtreeIfNeeded()
+        syncTranscriptDocumentSize()
+        if followingLiveEnd {
+            scrollTranscriptToLiveEnd()
+        }
+        publishBlockOutputFrame()
+    }
+
+    func restoreDockComposerPresentation(restoreFocus: Bool) {
+        setRelayTranscriptViewportBottomAnchored(false)
+        if composerInlineBlockID != 0 {
+            composerInlineBlockID = 0
+            composer.setInlineRelayPresentation(false)
+            composer.translatesAutoresizingMaskIntoConstraints = false
+        }
+        composer.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate(composerDockConstraints)
+        composer.reconcile()
+        if restoreFocus { routeFocus() }
     }
 
     func setRelayTranscriptViewportBottomAnchored(_ anchored: Bool) {

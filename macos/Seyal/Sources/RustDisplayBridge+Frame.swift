@@ -172,6 +172,16 @@ extension RustDisplayBridge {
     }
   }
 
+  /// Multipane FOCUS_PANE: drop dedup and re-apply the newly focused
+  /// Controller's composer status. A sibling Available can clear the shared
+  /// ApplicationRoot target; without this, a quiet DirectInput REPL never
+  /// republishes and Metal keys die until the next status revision.
+  func republishFocusedComposerStatus() {
+    guard isConnected, windowFocusedDisplayHandle != 0 else { return }
+    composerStatusRelayTracker.abandonClaim()
+    publishComposerStatus()
+  }
+
   /// Transport lost: the relayed fact no longer describes a live attachment.
   func clearComposerStatus() {
     guard composerStatusRelayTracker.clear() else { return }

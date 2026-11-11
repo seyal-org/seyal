@@ -36,7 +36,6 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "python3 -q")
         ).firstMatch
         XCTAssertTrue(pythonBlock.waitForExistence(timeout: 12), "Python must stay in its running Block")
-        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
 
         let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
         XCTAssertFalse(
@@ -46,45 +45,42 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
         let blocksScroll = app.scrollViews["seyal-blocks-scroll"].firstMatch
         XCTAssertTrue(blocksScroll.exists)
-        XCTAssertLessThanOrEqual(
-            composer.frame.minY - blocksScroll.frame.maxY,
-            32,
-            "the Flow viewport must end immediately above the composer"
+        // Warp-like DirectInput: Busy dock retracts so the Running Block is the
+        // only typing surface (no second composer place).
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 2),
+            "DirectInput must hide the Busy composer dock while the REPL owns keys"
         )
         XCTAssertLessThanOrEqual(
             blocksScroll.frame.maxY - pythonBlock.frame.maxY,
             96,
-            "the active Python Block must stay docked above the Pane composer"
+            "the active Python Block must stay docked at the live end of the transcript"
         )
-        XCTAssertGreaterThan(
-            composer.frame.minY - pythonBlock.frame.maxY,
-            0,
-            "the composer must remain below the active Python Block"
+        // ADR-009 #1466 DirectInput: no Interact→Raw for ordinary local REPLs.
+        XCTAssertFalse(
+            app.buttons["seyal-running-program-interact"].waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for local python"
         )
-        XCTAssertLessThanOrEqual(
-            composer.frame.minY - pythonBlock.frame.maxY,
-            96,
-            "the Python Block must dock directly above the composer"
-        )
-        let interact = app.buttons["seyal-running-program-interact"]
-        XCTAssertTrue(
-            interact.waitForExistence(timeout: 3),
-            "a Running Block must visibly offer an explicit direct-input fallback"
-        )
-        interact.click()
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
-        XCTAssertEqual(
-            terminal.elementType,
-            .textView,
-            "entering Raw from a Running Block must expose the terminal's direct-input AX route"
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        let directRoute = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
         )
-        terminal.click()
-        let pythonMarker = "seyal-m003-python-repl-input"
-        app.typeText("print('\(pythonMarker)'); raise SystemExit")
-        app.typeKey("\r", modifierFlags: [])
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directRoute], timeout: 5),
+            .completed,
+            "Flow DirectInput must expose the terminal AX text route without Raw"
+        )
         let pythonBody = pythonBlock.descendants(matching: .any).matching(
             NSPredicate(format: "identifier ENDSWITH '-body'")
         ).firstMatch
+        XCTAssertTrue(pythonBody.waitForExistence(timeout: 5))
+        pythonBody.click()
+        let pythonMarker = "seyal-m003-python-repl-input"
+        app.typeText("print('\(pythonMarker)'); raise SystemExit")
+        app.typeKey("\r", modifierFlags: [])
         let pythonOutput = expectation(
             for: NSPredicate(
                 format: "label CONTAINS %@ OR value CONTAINS %@",
@@ -97,7 +93,20 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [pythonOutput], timeout: 8),
             .completed,
-            "keyboard input must reach the actual local Python REPL through its PTY"
+            "keyboard input must reach the local Python REPL via Block-scoped DirectInput"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer dock returns after Python exits")
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 5),
+            .completed,
+            "composer must leave DirectInput after Python exits"
         )
         attachScreenshot(app, name: "m003-local-python-bottom-dock")
     }
@@ -119,21 +128,25 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             setupTitle.waitForExistence(timeout: 2),
             "a non-SSH Node Candidate must not pop a session setup prompt"
         )
-        let interact = app.buttons["seyal-running-program-interact"]
-        XCTAssertTrue(
-            interact.waitForExistence(timeout: 3),
-            "a Running Block must visibly offer an explicit direct-input fallback"
+        XCTAssertFalse(
+            app.buttons["seyal-running-program-interact"].waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for local node"
         )
-        interact.click()
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
-        XCTAssertGreaterThan(terminal.frame.width, 8, "Raw must expose the direct-input surface")
-        terminal.click()
-        let nodeMarker = "seyal-m003-node-repl-input"
-        app.typeText("console.log('\(nodeMarker)'); process.exit(0)")
-        app.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        XCTAssertEqual(
+            terminal.elementType,
+            .textView,
+            "Flow DirectInput must expose the terminal AX text route without Raw"
+        )
         let nodeBody = nodeBlock.descendants(matching: .any).matching(
             NSPredicate(format: "identifier ENDSWITH '-body'")
         ).firstMatch
+        XCTAssertTrue(nodeBody.waitForExistence(timeout: 5))
+        nodeBody.click()
+        let nodeMarker = "seyal-m003-node-repl-input"
+        app.typeText("console.log('\(nodeMarker)'); process.exit(0)")
+        app.typeKey("\r", modifierFlags: [])
         let nodeOutput = expectation(
             for: NSPredicate(
                 format: "label CONTAINS %@ OR value CONTAINS %@",
@@ -146,7 +159,34 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [nodeOutput], timeout: 8),
             .completed,
-            "keyboard input must reach the actual local Node REPL through its PTY"
+            "keyboard input must reach the local Node REPL via Block-scoped DirectInput"
+        )
+        // Warp-like: after the REPL exits, the Flow composer dock owns keys again
+        // without requiring a click back into the dock.
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer editor returns after Node exits")
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 5),
+            .completed,
+            "composer must leave Busy/DirectInput after Node exits"
+        )
+        let handoffMarker = "seyal-m003-composer-handoff"
+        app.typeText("echo \(handoffMarker)")
+        let draft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", handoffMarker),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [draft], timeout: 5),
+            .completed,
+            "composer must reclaim keyboard focus after Node exits (Warp-like handoff)"
         )
         attachScreenshot(app, name: "m003-node-no-session-banner")
         app.terminate()

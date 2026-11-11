@@ -680,6 +680,9 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
         if composer.allows_direct_terminal {
             flags |= 2;
         }
+        if composer.block_scoped_direct_input {
+            flags |= 4;
+        }
         let (floor_lo, floor_hi) = match composer.canvas_floor {
             Some(id) => split_id(id.to_bytes()),
             None => (0, 0),

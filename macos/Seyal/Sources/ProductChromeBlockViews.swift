@@ -79,6 +79,8 @@ final class CommandBlockView: NSView {
         }
     }
     var onInteractWithRunningProgram: (() -> Void)?
+    /// Flow DirectInput: click the Running Block to focus Metal (#1468).
+    var onRequestDirectInputFocus: (() -> Void)?
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
     var isSelected = false {
         didSet {
@@ -312,6 +314,7 @@ final class CommandBlockView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        onRequestDirectInputFocus?()
         onSelect?(isSelected)
     }
 

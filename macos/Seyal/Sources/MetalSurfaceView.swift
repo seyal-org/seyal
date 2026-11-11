@@ -216,6 +216,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // Flow paints terminal pixels over Block bodies. Chrome owns scrolling
     // and composer hit-testing, so the compositor must not swallow events.
     // Raw scrollback temporarily suppresses drawsLiveGrid but must keep hits (#1442).
+    // Flow DirectInput click→focus is CommandBlockView-owned (#1468): Metal
+    // stays nil so Block bodies remain hittable and empty canvas never becomes
+    // a Raw surface.
     if inspectRendererPresentation().drawsLiveGrid || rawScrollOffset > 0 {
       return super.hitTest(point)
     }
@@ -734,20 +737,36 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   /// Point bridge reads at this surface's client before Bind samples execution
   /// identity. `seyal_bridge_execution_id_*` follows the active handle, which
-  /// another test can leave on a different client.
+  /// another test can leave on a different client. Prefer this surface's
+  /// transcript display handle so multipane DirectInput keys hit the right PTY.
   @discardableResult
   func selectTerminalBridge() -> Bool {
-    bridge?.selectPresentedClient() ?? false
+    guard let bridge, bridge.isConnected else { return false }
+    if transcriptDisplayHandle != 0 {
+      return bridge.selectDisplayHandle(transcriptDisplayHandle)
+    }
+    return bridge.selectPresentedClient()
+  }
+
+  /// Run a bridge mutation with this surface's Controller selected.
+  private func withSurfaceSubmissionClient(_ body: (RustDisplayBridge) -> Int32) -> Int32 {
+    guard let bridge else { return -10 }
+    let prior = bridge.submissionDisplayHandleOverride
+    if transcriptDisplayHandle != 0 {
+      bridge.submissionDisplayHandleOverride = transcriptDisplayHandle
+    }
+    defer { bridge.submissionDisplayHandleOverride = prior }
+    return body(bridge)
   }
 
   @discardableResult
   func terminalSubmitCommittedText(_ text: String) -> Int32 {
-    bridge?.submitCommittedText(text) ?? -10
+    withSurfaceSubmissionClient { $0.submitCommittedText(text) }
   }
 
   @discardableResult
   func terminalSubmitPaste(_ text: String) -> Int32 {
-    bridge?.submitPaste(text) ?? -10
+    withSurfaceSubmissionClient { $0.submitPaste(text) }
   }
 
   @discardableResult
@@ -779,11 +798,17 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   @discardableResult
   func terminalSubmitKey(kind: UInt16, scalar: UInt32) -> Int32 {
-    bridge?.submitKey(kind: kind, scalar: scalar) ?? -10
+    withSurfaceSubmissionClient { $0.submitKey(kind: kind, scalar: scalar) }
   }
 
   func terminalSupportsKeyV2() -> Bool {
-    bridge?.supportsKeyV2() ?? false
+    guard let bridge else { return false }
+    let prior = bridge.submissionDisplayHandleOverride
+    if transcriptDisplayHandle != 0 {
+      bridge.submissionDisplayHandleOverride = transcriptDisplayHandle
+    }
+    defer { bridge.submissionDisplayHandleOverride = prior }
+    return bridge.supportsKeyV2()
   }
 
   /// Stop the current attachment so the Rust RecoveryCoordinator can
@@ -794,7 +819,16 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   @discardableResult
   func terminalSubmitKeyV2(kind: UInt16, modifiers: UInt16, value: UInt32, event: UInt8, shiftedASCII: UInt32, actionID: UInt32) -> Int32 {
-    bridge?.submitKeyV2(kind: kind, modifiers: modifiers, value: value, event: event, shiftedASCII: shiftedASCII, actionID: actionID) ?? -10
+    withSurfaceSubmissionClient {
+      $0.submitKeyV2(
+        kind: kind,
+        modifiers: modifiers,
+        value: value,
+        event: event,
+        shiftedASCII: shiftedASCII,
+        actionID: actionID
+      )
+    }
   }
 
   func terminalMouseCell(for event: NSEvent) -> (UInt16, UInt16)? {

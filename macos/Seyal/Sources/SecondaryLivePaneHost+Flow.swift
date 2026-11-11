@@ -111,12 +111,15 @@ extension SecondaryLivePaneHost {
                     )
                 }
                 : nil
-            card.canInteractWithRunningProgram = inputOwned
+            // DirectInput (mode 3) owns ordinary REPL keys; Interact is Raw fallback only.
+            let runningDirectTarget = inputOwned
                 && blockID != 0
                 && blockID == composerTarget.block_id
                 && composerTarget.target_class == 2
                 && (row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK))
                     == UInt16(SEYAL_APP_BLOCK_STATE_RUNNING)
+            card.canInteractWithRunningProgram = runningDirectTarget
+                && composerTarget.mode == 0
             card.onInteractWithRunningProgram = card.canInteractWithRunningProgram
                 ? { [weak self, blockID, generation = composerTarget.target_generation,
                      revision = composerTarget.revision] in
@@ -132,6 +135,21 @@ extension SecondaryLivePaneHost {
                     action.target_generation = generation
                     guard seyal_app_apply(self.appHandle, &action) == 0 else { return }
                     self.applyTranscriptPresentation()
+                    self.window?.makeFirstResponder(self.surface)
+                }
+                : nil
+            card.onRequestDirectInputFocus = runningDirectTarget
+                ? { [weak self, blockID] in
+                    guard let self else { return }
+                    let target = seyal_bridge_composer_target_for_handle(self.displayHandle)
+                    guard seyalComposerTargetIsBlockScopedDirectInput(target),
+                        blockID == target.block_id
+                    else { return }
+                    self.onFocus?()
+                    if self.surface.bridge == nil, let historyBridge = self.historyBridge {
+                        self.surface.bridge = historyBridge
+                    }
+                    self.surface.syncInputRoutePresentation()
                     self.window?.makeFirstResponder(self.surface)
                 }
                 : nil

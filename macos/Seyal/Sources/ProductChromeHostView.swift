@@ -383,6 +383,8 @@ final class ProductChromeHostView: NSView {
         composer.onFocusEligibilityChanged = { [weak self] in
             guard let self, self.composer.isFocusEligibleForRecovery else { return }
             self.pane.inputSurface.composerFocusEligibilityDidChange()
+            // Busy/DirectInput → Available (REPL exit): reclaim the dock like Warp.
+            self.routeFocus()
         }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
@@ -661,13 +663,90 @@ final class ProductChromeHostView: NSView {
         return composer
     }
 
+    /// Focused Pane Metal surface for Flow DirectInput / Raw / TUI keys.
+    func focusedInputSurface() -> InteractiveMetalSurfaceView {
+        let shell = seyal_app_shell(pane.appHandle)
+        if !centerColumn.secondaryHosts.isEmpty,
+            let host = centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            )
+        {
+            return host.surface
+        }
+        return pane.inputSurface
+    }
+
+    /// ADR-009 #1466: Flow + Block-scoped DirectInput owns keys on Metal, not
+    /// the Busy composer dock.
+    func snapshotPublishesBlockScopedDirectInput(_ snapshot: SeyalAppSnapshot) -> Bool {
+        snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+    }
+
+    /// Multipane: prefer the focused Pane's composer DirectInput flag / handle
+    /// target over the shared ApplicationRoot snapshot (sibling Available can
+    /// clear that shared target).
+    func focusedPanePublishesBlockScopedDirectInput(_ snapshot: SeyalAppSnapshot) -> Bool {
+        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+            return true
+        }
+        let shell = seyal_app_shell(pane.appHandle)
+        let paneComposer = seyal_app_composer_for_pane(
+            pane.appHandle,
+            shell.focused_pane_lo,
+            shell.focused_pane_hi
+        )
+        let eligibility = seyal_app_eligibility_for_pane(
+            pane.appHandle,
+            shell.focused_pane_lo,
+            shell.focused_pane_hi
+        )
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else { return false }
+        if let host = centerColumn.presentationHost(
+            paneLo: shell.focused_pane_lo,
+            paneHi: shell.focused_pane_hi
+        ), host.displayHandle != 0 {
+            return seyalPublishesBlockScopedDirectInput(
+                flags: paneComposer.flags,
+                target: seyal_bridge_composer_target_for_handle(host.displayHandle)
+            )
+        }
+        return seyalPublishesBlockScopedDirectInput(
+            flags: paneComposer.flags,
+            target: seyal_bridge_composer_target()
+        )
+    }
+
+    @discardableResult
+    func focusBlockScopedDirectInputSurface() -> Bool {
+        let surface = focusedInputSurface()
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        let direct = focusedPanePublishesBlockScopedDirectInput(snapshot)
+        surface.panePublishesBlockScopedDirectInput = direct
+        // Primary ApplicationRoot surface keeps its own bridge; secondary hosts
+        // borrow in focusBlockScopedDirectInputIfEligible before routeFocus.
+        surface.syncInputRoutePresentation()
+        return window?.makeFirstResponder(surface) ?? false
+    }
+
     func routeFocus() {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
         guard !commandPalette.isOpen else { return }
-        // Revoke Metal IME/AX before focusing the composer so Flow never keeps
-        // a competing terminal first responder (#866).
+        // Sync Metal IME/AX with Rust eligibility before choosing a responder
+        // (#866 / #1468). DirectInput must keep Metal, not Busy composer.
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        let direct = focusedPanePublishesBlockScopedDirectInput(snapshot)
+        // Primary ApplicationRoot surface only; secondary hosts publish via
+        // SecondaryLivePaneHost.focusBlockScopedDirectInputIfEligible.
+        pane.inputSurface.panePublishesBlockScopedDirectInput =
+            direct && focusedInputSurface() === pane.inputSurface
         pane.inputSurface.syncInputRoutePresentation()
+        if direct {
+            _ = focusBlockScopedDirectInputSurface()
+            return
+        }
         let shell = seyal_app_shell(pane.appHandle)
         if !centerColumn.secondaryHosts.isEmpty {
             let eligibility = seyal_app_eligibility_for_pane(
@@ -687,7 +766,6 @@ final class ProductChromeHostView: NSView {
                 return
             }
         }
-        let snapshot = seyal_app_snapshot(pane.appHandle)
         let composerSnap = seyal_app_composer(pane.appHandle)
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
            composerSnap.mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
@@ -701,7 +779,7 @@ final class ProductChromeHostView: NSView {
         } else if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {
-            window?.makeFirstResponder(pane.inputSurface)
+            window?.makeFirstResponder(focusedInputSurface())
         }
     }
 

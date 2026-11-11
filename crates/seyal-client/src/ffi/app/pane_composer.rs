@@ -39,6 +39,7 @@ pub(super) fn decode_runtime_composer_status(
         2 => Some(RuntimeComposerEligibility::Busy),
         3 => Some(RuntimeComposerEligibility::Unsupported),
         4 => Some(RuntimeComposerEligibility::Relay),
+        5 => Some(RuntimeComposerEligibility::DirectInput),
         _ => return Err(-6),
     };
     Ok(AppAction::ApplyRuntimeComposerStatus {
@@ -81,6 +82,7 @@ pub extern "C" fn seyal_app_apply_runtime_composer_status(
         2 => Some(RuntimeComposerEligibility::Busy),
         3 => Some(RuntimeComposerEligibility::Unsupported),
         4 => Some(RuntimeComposerEligibility::Relay),
+        5 => Some(RuntimeComposerEligibility::DirectInput),
         _ => return -6,
     };
     let target = (target_revision != 0).then_some(RuntimeComposerTarget {
@@ -142,6 +144,9 @@ fn encode_composer_snapshot(
     }
     if composer.allows_direct_terminal {
         flags |= 2;
+    }
+    if composer.block_scoped_direct_input {
+        flags |= 4;
     }
     let (floor_lo, floor_hi) = match composer.canvas_floor {
         Some(id) => split_id(id.to_bytes()),

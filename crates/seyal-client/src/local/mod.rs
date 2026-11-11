@@ -339,7 +339,7 @@ impl LocalDisplayClient {
 
     /// Eligibility byte and revision the host should relay. Type 23 stays the
     /// legacy Busy/Available fact. When a negotiated type 45 says Relay, the
-    /// byte is 4 and the revision moves even if type 23 did not.
+    /// byte is 4; DirectInput is 5. The revision moves even if type 23 did not.
     pub fn projected_composer_status(&self) -> Option<(u8, u64, [u8; 16])> {
         let status = self.composer_status?;
         let revision = if self.composer_projection_revision == 0 {
@@ -390,6 +390,7 @@ impl LocalDisplayClient {
         ) {
             (true, Some(ComposerTargetMode::Submit)) => 1,
             (true, Some(ComposerTargetMode::Relay)) => 4,
+            (true, Some(ComposerTargetMode::DirectInput)) => 5,
             (true, Some(ComposerTargetMode::Unavailable)) => 2,
             _ => match status.eligibility {
                 ComposerEligibility::Available => 1,

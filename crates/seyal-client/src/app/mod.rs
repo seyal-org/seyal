@@ -247,6 +247,8 @@ pub struct AppSnapshot {
     pub presentation_epoch: u64,
     pub eligibility: PresentationEligibility,
     pub composer_eligible: bool,
+    /// Runtime published ADR-009 #1466 Block-scoped DirectInput while Flow.
+    pub block_scoped_direct_input: bool,
     pub frozen: bool,
     pub last_error: Option<AppError>,
     pub pending_effects: Vec<NativeEffect>,
@@ -624,6 +626,7 @@ impl ApplicationRoot {
             presentation_epoch: self.presentation.snapshot().epoch,
             eligibility,
             composer_eligible,
+            block_scoped_direct_input: self.block_scoped_direct_input_eligible(),
             frozen: self.frozen,
             last_error: self.last_error,
             pending_effects: self.pending_effects.clone(),

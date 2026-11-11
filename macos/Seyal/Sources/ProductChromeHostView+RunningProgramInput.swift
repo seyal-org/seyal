@@ -8,11 +8,14 @@ extension ProductChromeHostView {
         flags: UInt16
     ) {
         let target = relayTarget
-        let canInteract = blockID != 0
+        let running = blockID != 0
             && blockID == target.blockID
             && target.targetClass == 2
             && (flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK))
                 == UInt16(SEYAL_APP_BLOCK_STATE_RUNNING)
+        // DirectInput (mode 3) is the ordinary REPL path; Interact remains only
+        // as an explicit Raw fallback when Runtime publishes Unavailable (0).
+        let canInteract = running && target.mode == 0
         card.canInteractWithRunningProgram = canInteract
         card.onInteractWithRunningProgram = canInteract
             ? { [weak self, blockID, generation = target.generation, revision = target.revision] in
@@ -35,5 +38,32 @@ extension ProductChromeHostView {
                 self.pane.inputSurface.window?.makeFirstResponder(self.pane.inputSurface)
             }
             : nil
+        // Warp-like: click the Running foreground Block to (re)focus Metal when
+        // DirectInput is currently published. Bind for any Running match so a
+        // late DirectInput status still has a click path without rebuild.
+        card.onRequestDirectInputFocus = running
+            ? { [weak self, blockID] in
+                guard let self else { return }
+                let snap = seyal_app_snapshot(self.pane.appHandle)
+                guard self.focusedPanePublishesBlockScopedDirectInput(snap),
+                    blockID == self.relayTarget.blockID
+                else { return }
+                _ = self.focusBlockScopedDirectInputSurface()
+            }
+            : nil
+    }
+
+    /// When Runtime publishes Flow DirectInput, route keys into the live Metal
+    /// surface without leaving Flow chrome (#1468). When DirectInput ends
+    /// (REPL exit / Ctrl+D), Warp-like handoff returns keys to the composer.
+    func focusBlockScopedDirectInputIfEligible(_ snapshot: SeyalAppSnapshot) {
+        guard focusedPanePublishesBlockScopedDirectInput(snapshot) else {
+            pane.inputSurface.syncInputRoutePresentation()
+            // Eligibility often stays Flow across the handoff, so
+            // performChromeReconcile will not call routeFocus on its own.
+            routeFocus()
+            return
+        }
+        _ = focusBlockScopedDirectInputSurface()
     }
 }
