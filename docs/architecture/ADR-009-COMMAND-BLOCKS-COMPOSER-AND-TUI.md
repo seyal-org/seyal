@@ -6,14 +6,14 @@
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
 
-## Proposed amendment — Seyal native-Block terminal content architecture (#1480)
+## 2026-11-12 accepted design amendment — Seyal native-Block terminal content architecture (#1480 / #1482)
 
-- **Status:** PROPOSED, NOT ACCEPTED — 2026-11-11.
-- **Authority:** Review candidate for Issue #1480 and PR #1481. The Accepted decision below, ADR-004/010/011/015/025, and SPEC-008 remain controlling until a reviewed coordinated amendment is merged.
+- **Status:** **Accepted as the target architecture by the product owner on 2026-11-11 after merging PR #1481;** normative ownership reconciliation tracked by #1482. This is design acceptance, not proof that the engine is implemented or that G1–G10 tests pass.
+- **Authority:** Accepted target design from #1480 / merged #1481, reconciled under #1482. It **supersedes the historical per-Block-grid prohibition below for future Block-owned RegionGrids**, while preserving one terminal semantic authority and current runtime correctness. Production code remains on the existing implementation until a tested single-owner cutover; ADR-004/010/011, SPEC-008 and AGENTS.md are updated together for the target.
 - **Source analysis:** [Warp comparison and counterexamples](../evidence/block-native-primary-screen-source-review-1480.md).
 - **Goal and test contract:** [Native-Block architecture acceptance matrix](../evidence/block-native-acceptance-matrix-1480.md).
 - **Concrete storage/event contract:** [RegionGrid, VTWindowMap, attribution and viewport interfaces](../evidence/block-native-storage-contract-1480.md).
-- **No implementation authorization:** This document chooses an architecture candidate and proof obligations; it does not demonstrate working features or change #1478's release verdict.
+- **Implementation status:** Architecture accepted; production implementation requires a separate Ready issue, single-owner cutover, G1–G10 conformance, resource evidence and exact-head review. Nothing here demonstrates that Blocks already work or changes #1478's release verdict.
 
 ### Goal: Warp-grade native Blocks, Seyal-grade independent Runtime
 
@@ -21,7 +21,7 @@ A *native Block* SHALL be a first-class Rust-owned terminal content object with 
 
 **Non-negotiable outcome:** One PTY per TerminalExecution; one Rust VT parser/semantic authority; *real canonical Block-owned content regions* for the primary screen; one alternate-screen TUI; one indexed viewport; one Metal compositor and thin Swift platform host. No extra PTY/child/parser per command, no second independently mutable traditional primary screen, no synthetic terminal output, and no Swift-owned Block/content/layout authority.
 
-An architecture may be called **design GO** only if it makes G1–G10 of the acceptance matrix mutually consistent and specifies exact proof and cutover. An implementation may be called **product GO** only after measured end-to-end acceptance. Neither threshold is reached merely by merging this ADR.
+**Decision acceptance is distinct from implementation GO.** The product owner accepts this target design; its G1–G10 proof obligations remain mandatory for readiness, validation and release. The implementation may be called **product GO** only after measured end-to-end acceptance. No comparative performance claim is implied by merging an ADR.
 
 ### Chosen candidate: one terminal semantic authority containing Block-owned grids
 
@@ -99,7 +99,7 @@ Seyal deliberately differs in: one Runtime-owned PTY/session with pane-local tab
 
 Migration MUST be planned as an **all-at-once canonical terminal storage authority cutover in the relevant execution engine**, not a second writable live grid behind Flow. The old VT Screen implementation may be used in offline differential tests but not simultaneously as a shipped source of truth. Non-mergeable prototype/fixture branch may validate the address map and same-row attribution. Rollback of the production cutover must restore the previous single canonical engine, without mixing old/new persisted snapshots. Keep M003 #1478 gates independent; the new ADR does not make current Blocks production-ready.
 
-**Design acceptance is conditional on passing the exact counterexamples and review matrix** in the linked evidence: cross-Block VT edits, same-row output, marker ordering, Unicode/reflow, ED2, SSH/REPL/TUI, long-history viewport, focus/scroll/reconnect, memory bounds and full native usability. A human non-author must review the architecture changes and coordinated ADR-004/010/011/spec compatibility before declaring **design GO**. No claim of "better than Warp" is justified before native Block features and long-uptime performance are measured.
+**Implementation acceptance remains conditional** on passing the exact counterexamples and review matrix in the linked evidence: cross-Block VT edits, same-row output, marker ordering, Unicode/reflow, ED2, SSH/REPL/TUI, long-history viewport, focus/scroll/reconnect, memory bounds and full native usability. A human non-author must independently review the reconciled architecture and implementation. No claim of "better than Warp" is justified before native Block features and long-uptime performance are measured.
 
 ---
 
@@ -112,9 +112,13 @@ Block containing that command's output range and lifecycle metadata. The
 composer belongs to the Pane, not to an individual Block and not to the
 application globally.
 
-This is a logical projection over the same authoritative `ExecutionId`, PTY,
-VT state and terminal history. A Block never owns a PTY, terminal grid, copied
-transcript, renderer or child process.
+**Current deployed implementation:** the original BlockTimeline is a logical
+projection of canonical terminal history. **Accepted target (§2026-11-12):**
+native `BlockContent` owns prompt/command and output `RegionGrid` content
+through one authoritative `PrimaryBlockEngine`/`RegionStore`, addressed by
+one non-owning `VTWindowMap`; `BlockTimeline` remains metadata. A Block never
+owns its own PTY, VT parser/semantic engine, renderer or child process, and
+no duplicate writable raw grid or copied canonical transcript may exist.
 
 A `TerminalExecution` has one canonical terminal authority but may have different
 **mutually exclusive user-visible presentations**:
@@ -123,7 +127,8 @@ A `TerminalExecution` has one canonical terminal authority but may have differen
 TerminalExecution
   ├─ PTY / child
   ├─ authoritative TerminalState
-  │    ├─ primary grid + canonical retained history
+  │    ├─ primary: canonical native Block regions/RegionStore (target)
+  │    ├─ single VTWindowMap + cursor/modes/damage (target)
   │    └─ alternate grid / terminal modes
   └─ derived presentation
        ├─ Flow → native Block transcript + Pane composer
