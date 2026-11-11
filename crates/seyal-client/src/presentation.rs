@@ -74,6 +74,41 @@ impl RendererPlan {
             PresentationMode::Raw | PresentationMode::Tui => Self::full_pane(mode),
         }
     }
+
+    /// Raw scrolled history overlay: keep the full-pane background, suppress the
+    /// live grid/cursor so SPEC-010 history paint owns the Metal surface.
+    /// Portable policy — hosts must not invent these flags locally (ADR-015).
+    pub fn raw_scrollback_overlay() -> Self {
+        Self {
+            mode: PresentationMode::Raw,
+            draws_full_grid_background: true,
+            draws_live_grid: false,
+            draws_cursor_outside_block_regions: false,
+        }
+    }
+
+    /// Resolve draw flags from a presentation mode plus an optional variant.
+    /// Unknown/non-Raw scrollback variants fail closed to [`Self::for_mode`].
+    pub fn resolve(mode: PresentationMode, variant: RendererPlanVariant) -> Self {
+        match variant {
+            RendererPlanVariant::Default => Self::for_mode(mode),
+            RendererPlanVariant::RawScrollback => {
+                if mode == PresentationMode::Raw {
+                    Self::raw_scrollback_overlay()
+                } else {
+                    Self::for_mode(mode)
+                }
+            }
+        }
+    }
+}
+
+/// Host-visible plan variant. Presentation-local Raw scroll offset selects
+/// [`RawScrollback`]; resting eligibility uses [`Default`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RendererPlanVariant {
+    Default,
+    RawScrollback,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -373,6 +408,28 @@ mod tests {
         assert!(raw.draws_full_grid_background);
         assert!(raw.draws_live_grid);
         assert!(raw.draws_cursor_outside_block_regions);
+    }
+
+    #[test]
+    fn raw_scrollback_overlay_suppresses_live_grid_and_cursor() {
+        let plan = RendererPlan::raw_scrollback_overlay();
+        assert_eq!(plan.mode, PresentationMode::Raw);
+        assert!(plan.draws_full_grid_background);
+        assert!(!plan.draws_live_grid);
+        assert!(!plan.draws_cursor_outside_block_regions);
+        assert_eq!(
+            RendererPlan::resolve(PresentationMode::Raw, RendererPlanVariant::RawScrollback),
+            plan
+        );
+        // Non-Raw eligibility fails closed to the resting mode plan.
+        assert_eq!(
+            RendererPlan::resolve(PresentationMode::Flow, RendererPlanVariant::RawScrollback),
+            RendererPlan::flow()
+        );
+        assert_eq!(
+            RendererPlan::resolve(PresentationMode::Tui, RendererPlanVariant::Default),
+            RendererPlan::full_pane(PresentationMode::Tui)
+        );
     }
 
     #[test]

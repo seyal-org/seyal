@@ -2057,7 +2057,12 @@ final class SeyalHostComponentTests: XCTestCase {
             )
         }
         let clip = NSRect(x: 0, y: 0, width: 320, height: 120)
-        surface.renderer.setPresentationPlan(.flow())
+        surface.renderer.setPresentationPlan(
+            RendererPresentationPlan.resolve(
+                eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+                variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+            )
+        )
         surface.retainHistoryRange(range)
         surface.activateTranscriptDisplayHandle(11)
         surface.setTranscriptFrame(frame(revision: 1, clip: clip))
@@ -2093,7 +2098,12 @@ final class SeyalHostComponentTests: XCTestCase {
             frame: NSRect(x: 0, y: 0, width: 320, height: 200),
             paneID: "pane-bounded-history-page"
         )
-        surface.renderer.setPresentationPlan(.flow())
+        surface.renderer.setPresentationPlan(
+            RendererPresentationPlan.resolve(
+                eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+                variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+            )
+        )
         surface.activateTranscriptDisplayHandle(11)
         let cell = NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
         let range = NativeHistoryRange(
@@ -2168,7 +2178,12 @@ final class SeyalHostComponentTests: XCTestCase {
             )
         }
 
-        surface.renderer.setPresentationPlan(.flow())
+        surface.renderer.setPresentationPlan(
+            RendererPresentationPlan.resolve(
+                eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+                variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+            )
+        )
         surface.activateTranscriptDisplayHandle(11)
         surface.setTranscriptFrame(frame(revision: 1))
         XCTAssertNil(surface.renderer.historyRegions[1])
@@ -2195,7 +2210,12 @@ final class SeyalHostComponentTests: XCTestCase {
             frame: NSRect(x: 0, y: 0, width: 320, height: 200),
             paneID: "pane-narrowed-history-clip"
         )
-        surface.renderer.setPresentationPlan(.flow())
+        surface.renderer.setPresentationPlan(
+            RendererPresentationPlan.resolve(
+                eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+                variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+            )
+        )
         let metrics = surface.renderer.glyphAtlas.metrics(backingScale: 1)
         let range = NativeHistoryRange(
             startLine: 1,
@@ -2268,7 +2288,12 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         var frameRequested = false
         surface.renderer.onNeedsCurrentFrame = { frameRequested = true }
-        surface.renderer.setPresentationPlan(.flow())
+        surface.renderer.setPresentationPlan(
+            RendererPresentationPlan.resolve(
+                eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+                variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+            )
+        )
         surface.renderer.requestPresent()
         XCTAssertTrue(surface.renderer.beginValidationFrameInFlight())
 
@@ -5056,7 +5081,12 @@ final class SeyalHostComponentTests: XCTestCase {
             throw XCTSkip("Metal unavailable")
         }
         let renderer = try MetalTerminalRenderer(device: device)
-        renderer.setPresentationPlan(.flow())
+        renderer.setPresentationPlan(
+            RendererPresentationPlan.resolve(
+                eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+                variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+            )
+        )
         var requestedIdleFrameCount = 0
         renderer.onNeedsCurrentFrame = { requestedIdleFrameCount += 1 }
 

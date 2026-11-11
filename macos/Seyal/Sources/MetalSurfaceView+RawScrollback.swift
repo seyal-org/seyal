@@ -26,7 +26,12 @@ extension MetalSurfaceView {
     /// Follow-tail in Raw: clear scroll offset and restore live grid paint.
     func restoreRawFollowTailLiveGrid() {
         clearRawScrollbackFollowTail()
-        applyRendererPresentation(.fullPane(.raw))
+        applyRendererPresentation(
+            RendererPresentationPlan.resolve(
+                eligibility: UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+                variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+            )
+        )
         publishCurrentTerminalFrame()
     }
 
@@ -166,12 +171,11 @@ extension MetalSurfaceView {
             }
         }
         // History covers the scrolled window; suppress live grid while offset > 0.
+        // Flags come from Rust (`raw_scrollback_overlay`), not a Swift literal.
         applyRendererPresentation(
-            RendererPresentationPlan(
-                mode: .raw,
-                drawsFullGridBackground: true,
-                drawsLiveGrid: false,
-                drawsCursorOutsideBlockRegions: false
+            RendererPresentationPlan.resolve(
+                eligibility: UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+                variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_RAW_SCROLLBACK)
             )
         )
         // Flow publishes order via setTranscriptFrame. Raw must set it here or

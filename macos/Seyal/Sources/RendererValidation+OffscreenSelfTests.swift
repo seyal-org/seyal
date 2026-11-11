@@ -60,7 +60,12 @@ extension RendererValidation {
         guard let device = MTLCreateSystemDefaultDevice() else { return false }
         do {
             let renderer = try MetalTerminalRenderer(device: device)
-            renderer.setPresentationPlan(.fullPane(.raw))
+            renderer.setPresentationPlan(
+                RendererPresentationPlan.resolve(
+                    eligibility: UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+                    variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+                )
+            )
             var damage = DamageMask()
             damage.mark(row: 0)
             // Empty/default cell so the sample corner is clear-fill, not glyph coverage.
@@ -308,7 +313,12 @@ extension RendererValidation {
         guard let device = MTLCreateSystemDefaultDevice() else { return false }
         do {
             let renderer = try MetalTerminalRenderer(device: device)
-            renderer.setPresentationPlan(.flow())
+            renderer.setPresentationPlan(
+                RendererPresentationPlan.resolve(
+                    eligibility: UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+                    variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+                )
+            )
             let liveCells = ["A", "B", "H", "i", "!", "!"].map {
                 preparedCell(scalar: UInt32(Character($0).asciiValue!))
             }

@@ -26,7 +26,10 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     var historyRegions: [UInt64: HistoryRenderRegion] = [:]
     var historyRegionOrder: [UInt64] = []
     var liveTail = LiveTailRenderState()
-    var presentationPlan = RendererPresentationPlan.fullPane(.raw)
+    var presentationPlan = RendererPresentationPlan.resolve(
+        eligibility: UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+        variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT)
+    )
     var currentRows = 0
     var currentColumns = 0
     var currentMetrics: TerminalFontMetrics?

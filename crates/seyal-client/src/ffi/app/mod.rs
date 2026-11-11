@@ -10,6 +10,7 @@ mod loss;
 mod pane_composer;
 pub mod pane_recovery;
 mod pane_region;
+mod renderer_plan;
 mod shortcut;
 mod visual;
 mod window;
@@ -45,6 +46,7 @@ pub use leave_offer_ffi::seyal_app_leave_offer;
 pub(crate) use loss::{note_application_roots_client_loss, note_application_roots_execution_ended};
 pub use pane_composer::*;
 pub use pane_region::*;
+pub use renderer_plan::*;
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
     seyal_app_shortcut_enabled, seyal_app_shortcut_item, seyal_app_shortcut_title,

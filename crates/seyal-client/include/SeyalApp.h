@@ -1104,6 +1104,37 @@ uint16_t seyal_app_eligibility_for_pane(
     uint64_t handle,
     uint64_t pane_lo,
     uint64_t pane_hi);
+
+/*
+ * Portable renderer presentation plan (ADR-015 / #1476).
+ * Hosts apply these flags; they must not invent Flow/Raw/TUI draw policy.
+ * Versioned independently of SEYAL_APP_ABI_VERSION; fail closed on mismatch.
+ */
+#define SEYAL_APP_RENDERER_PLAN_ABI_VERSION 1u
+#define SEYAL_APP_RENDERER_PLAN_FULL_GRID_BACKGROUND 1u
+#define SEYAL_APP_RENDERER_PLAN_LIVE_GRID 2u
+#define SEYAL_APP_RENDERER_PLAN_CURSOR_OUTSIDE_BLOCKS 4u
+#define SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT 0u
+#define SEYAL_APP_RENDERER_PLAN_VARIANT_RAW_SCROLLBACK 1u
+
+typedef struct SeyalAppRendererPlan {
+    uint16_t version;
+    uint16_t size;
+    /* Same codes as eligibility: 0 unbound, 1 Flow, 2 Raw, 3 Tui. */
+    uint16_t mode;
+    uint16_t flags;
+} SeyalAppRendererPlan;
+
+SeyalAppRendererPlan seyal_app_renderer_plan(uint64_t handle);
+SeyalAppRendererPlan seyal_app_renderer_plan_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
+/* Pure policy resolve for resting eligibility or Raw scrollback overlay. */
+SeyalAppRendererPlan seyal_app_renderer_plan_resolve(
+    uint16_t eligibility,
+    uint16_t variant);
+
 uint64_t seyal_app_recovery_param(uint64_t handle);
 
 /** 1 when New shell has prepared an ended Pane and is waiting for Create+Bind. */

@@ -689,14 +689,11 @@ final class SecondaryLivePaneHost: NSView {
         let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct
+        let plan = RendererPresentationPlan.fromPane(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
         if direct {
             activateDirectSurfaceConstraints()
-            let mode: TerminalPresentationMode =
-                eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
-            if mode == .tui {
-                surface.clearRawScrollbackFollowTail()
-            }
-            surface.applyRendererPresentation(.fullPane(mode))
+            if plan.mode == .tui { surface.clearRawScrollbackFollowTail() }
+            surface.applyRendererPresentation(plan)
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])
             // Wiping Metal/history caches must also clear the settled request
@@ -712,7 +709,7 @@ final class SecondaryLivePaneHost: NSView {
             // Same as primary: Raw scrollback must not survive into Flow Metal.
             surface.clearRawScrollbackFollowTail()
             activateFlowConstraintsIfSized()
-            surface.applyRendererPresentation(.flow())
+            surface.applyRendererPresentation(plan)
             // Composer visibility still follows pane-scoped reconcile().
             composer.reconcile()
             refreshInputOwnershipChrome()

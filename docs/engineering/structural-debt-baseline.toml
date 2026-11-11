@@ -36,9 +36,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 848
-issue = 1467
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
+acknowledged_loc = 845
+issue = 1476
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority; #1476 applies Rust RendererPlan via FFI instead of local presentation-mode factories and ratchets acknowledged_loc down."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
@@ -84,9 +84,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1136
-issue = 1467
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 exposes block_scoped_direct_input on the same AppHandle snapshot façade rather than a second ABI module."
+ceiling_loc = 1138
+issue = 1476
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 exposes block_scoped_direct_input on the same AppHandle snapshot façade rather than a second ABI module; #1476 registers the renderer_plan sibling so RendererPlan flags publish through the same AppHandle façade without a second ABI root."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/mod.rs"

@@ -195,15 +195,14 @@ extension ProductChromeHostView {
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct
+        let plan = RendererPresentationPlan.fromApp(pane.appHandle)
         if direct {
             NSLayoutConstraint.deactivate(paneFollowsTranscript)
             NSLayoutConstraint.activate(paneFillsCenter)
-            let mode: TerminalPresentationMode =
-                snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
-            if mode == .tui {
+            if plan.mode == .tui {
                 pane.inputSurface.clearRawScrollbackFollowTail()
             }
-            pane.inputSurface.applyRendererPresentation(.fullPane(mode))
+            pane.inputSurface.applyRendererPresentation(plan)
             pane.inputSurface.setLiveTailBlocks([:])
             pane.inputSurface.removeTranscriptRegions(except: [])
             layoutSubtreeIfNeeded()
@@ -215,7 +214,7 @@ extension ProductChromeHostView {
             pane.inputSurface.clearRawScrollbackFollowTail()
             NSLayoutConstraint.deactivate(paneFillsCenter)
             NSLayoutConstraint.activate(paneFollowsTranscript)
-            pane.inputSurface.applyRendererPresentation(.flow())
+            pane.inputSurface.applyRendererPresentation(plan)
             layoutSubtreeIfNeeded()
             publishBlockOutputFrame()
         }
