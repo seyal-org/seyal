@@ -1,7 +1,7 @@
 # M003 consolidated campaign status (#1474)
 
 **Date:** 2026-11-11  
-**Exact head:** tip of this evidence commit (nvim/tmux/htop XCUI + open-PR reconciliation)  
+**Exact head:** `37554faaf1c6c463cdb4185c4f7a604459870549`  
 **Branch:** `mahboobmonnamd/issue/1474`  
 **PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
 **Base:** `origin/master`  
