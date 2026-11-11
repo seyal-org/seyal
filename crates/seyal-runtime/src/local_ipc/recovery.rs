@@ -4,6 +4,7 @@
 //! recovery scheduling. Keeping the deduplication rule pure lets fuzzing
 //! exercise production behavior without creating PTYs or sockets per input.
 
+use crate::AttachmentId;
 use std::collections::{HashSet, VecDeque};
 
 /// Records one pending current-snapshot requirement for `token`.
@@ -13,14 +14,16 @@ use std::collections::{HashSet, VecDeque};
 /// requests for the same connection therefore collapse to one queued token.
 #[doc(hidden)]
 pub fn schedule_snapshot_recovery(
-    queue: &mut VecDeque<u64>,
-    pending: &mut HashSet<u64>,
+    queue: &mut VecDeque<(u64, AttachmentId)>,
+    pending: &mut HashSet<(u64, AttachmentId)>,
     token: u64,
+    attachment_id: AttachmentId,
 ) -> bool {
-    if !pending.insert(token) {
+    let target = (token, attachment_id);
+    if !pending.insert(target) {
         return false;
     }
-    queue.push_back(token);
+    queue.push_back(target);
     true
 }
 
@@ -33,10 +36,26 @@ mod tests {
         let mut queue = VecDeque::new();
         let mut pending = HashSet::new();
 
-        assert!(schedule_snapshot_recovery(&mut queue, &mut pending, 7));
-        assert!(!schedule_snapshot_recovery(&mut queue, &mut pending, 7));
-        assert!(!schedule_snapshot_recovery(&mut queue, &mut pending, 7));
-        assert_eq!(queue.into_iter().collect::<Vec<_>>(), vec![7]);
+        let attachment = AttachmentId::from_bytes(1u128.to_le_bytes());
+        assert!(schedule_snapshot_recovery(
+            &mut queue,
+            &mut pending,
+            7,
+            attachment
+        ));
+        assert!(!schedule_snapshot_recovery(
+            &mut queue,
+            &mut pending,
+            7,
+            attachment
+        ));
+        assert!(!schedule_snapshot_recovery(
+            &mut queue,
+            &mut pending,
+            7,
+            attachment
+        ));
+        assert_eq!(queue.into_iter().collect::<Vec<_>>(), vec![(7, attachment)]);
         assert_eq!(pending.len(), 1);
     }
 
@@ -45,10 +64,29 @@ mod tests {
         let mut queue = VecDeque::new();
         let mut pending = HashSet::new();
 
-        assert!(schedule_snapshot_recovery(&mut queue, &mut pending, 1));
-        assert!(schedule_snapshot_recovery(&mut queue, &mut pending, 2));
-        assert!(!schedule_snapshot_recovery(&mut queue, &mut pending, 1));
-        assert_eq!(queue.into_iter().collect::<Vec<_>>(), vec![1, 2]);
+        let attachment = AttachmentId::from_bytes(1u128.to_le_bytes());
+        assert!(schedule_snapshot_recovery(
+            &mut queue,
+            &mut pending,
+            1,
+            attachment
+        ));
+        assert!(schedule_snapshot_recovery(
+            &mut queue,
+            &mut pending,
+            2,
+            attachment
+        ));
+        assert!(!schedule_snapshot_recovery(
+            &mut queue,
+            &mut pending,
+            1,
+            attachment
+        ));
+        assert_eq!(
+            queue.into_iter().collect::<Vec<_>>(),
+            vec![(1, attachment), (2, attachment)]
+        );
         assert_eq!(pending.len(), 2);
     }
 }

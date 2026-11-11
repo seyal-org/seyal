@@ -1,34 +1,77 @@
 # SPEC-008 — M003 command Blocks, Pane composer and presentation modes
 
-- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`) and the duration / shell-metadata boundary amendment accepted by #686 / PR #1022
-- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686)
-- **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract
+- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`), the duration / shell-metadata boundary amendment accepted by #686 / PR #1022, the Blocks-first supported-shell amendment for #1426, and tab-wide split-to-Flow behavior included with implementation in PR #1448.
+- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 alignment accepted 2026-10-29 (#1384); grid-first resting presentation 2026-11-04 (#1438/#1440); split-created Flow and Blocks-first default 2026-11-05/06 (#1426)
+- **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract. Accepted ADR-026 (#1384) is the authority for the session-bootstrap and input-target amendments in §3.1, §3.2, §3.5, §4, §5.5, §8 and §10.
 - **Depends on:** accepted SPEC-001 through SPEC-007 and completed Pass 7
 
 ## 1. Observable contract
 
-The default supported structured-shell presentation is a scrollable Flow/Blocks
-transcript. A Pane has one composer. When trusted shell integration reports a
-supported structured command-entry state, submitting the composer creates one
-new logical command Block. The Block displays the submitted command metadata and
-canonical terminal output projection produced by that command. Multiple
-completed and running Blocks remain ordered in the Pane transcript.
+Under the 2026-11-06 ADR-009 amendment, a newly started trusted,
+Flow-capable, non-TUI terminal session presents **Flow/Blocks by default**.
+Users do not need to split a Pane or manually leave a Raw terminal view to get
+Blocks. The full-Pane Raw viewport is not shown during normal supported shell
+operation and is never visible underneath or beside Flow; supported-shell
+menus, palette commands, and built-in shortcuts do not offer Raw. A full-screen
+alternate-screen application takes over its Pane as TUI and restores Flow on
+exit. Unsupported or untrusted integration retains the existing safe fallback
+until structured Block boundaries can be proven.
+
+A successful explicit split opts the affected Tab into Flow for every
+trusted, Flow-capable Pane in that Tab, including existing panes and the new
+leaf. Other Tabs retain their own presentation state. An active TUI remains
+full-Pane through the split and restores the newly stored Flow resting mode on
+exit.
+
+Every Pane continues to project its own execution and BlockTimeline. Adding
+splits or terminal tabs must preserve each Pane's mode, Block bodies, live
+output, and transcript scroll state. Focus changes affect only input focus and
+composer target. A Pane failure or recovery cannot suspend a healthy sibling.
+A Block has exactly one visible and accessible projection, owned by the Pane
+whose timeline contains it; hidden single-pane chrome must not duplicate a
+focused multipane Block or expose a sibling's contents as the focused Pane's.
+A Pane still has one composer; when the user has
+opted into Flow and trusted shell integration reports a supported structured
+command-entry state, submitting the composer creates one new logical command
+Block. The Block displays the submitted command metadata and canonical terminal
+output projection produced by that command. Multiple completed and running
+Blocks remain ordered in the Pane transcript. `BlockTimeline` may still
+accumulate under Raw; Timeline existence does not require Flow to be visible.
 
 The same Pane and `ExecutionId` remain authoritative throughout. A command Block
 is not a terminal session and does not contain copied terminal state.
 
-Under the accepted #858 amendment, Flow, Raw and TUI are mutually exclusive
-user-visible presentations:
+Presentation mode is stored per Pane and survives focus changes. A hidden
+composer on an unfocused Pane does not mean that Pane selected Raw: Flow panes
+keep rendering their Block transcript and completed output while another Pane
+owns keyboard focus. Focus changes only the active input/composer target and
+must not change another Pane's selected presentation or remove its Blocks.
+When a Flow Pane is split, its new sibling starts in Flow and receives its own
+Pane-scoped composer, terminal authority, Block timeline, and transcript. Adding
+another split or terminal tab must preserve every existing Pane's mode, Blocks,
+output, and transcript scroll state.
+
+For a trusted SSH session, the local host Block owns only the transcript before
+the first session-scoped command Block. Its output range ends immediately before
+that Block's start anchor, even after the SSH process exits. Remote command
+output belongs only to its session-scoped Block and must never be repeated in
+the host Block. Session command Blocks remain ordered in the same Pane history.
+
+Flow, Raw and TUI remain mutually exclusive presentations over the same
+authoritative execution. For supported shell operation, Flow is the default;
+Raw is not exposed as a normal resting UI. Unsupported or untrusted
+integration retains the safe fallback, and full-screen alternate-screen
+applications receive TUI takeover:
 
 ```text
-supported structured shell state
+supported trusted shell state / successful explicit split
   -> Flow: Block transcript + Pane composer
-
-unsupported/unsafe character-level terminal state or explicit Raw
-  -> Raw: full-Pane primary terminal grid
 
 alternate/full-screen application state
   -> TUI: full-Pane terminal application presentation
+
+unsupported or untrusted shell state
+  -> existing safe fallback until structured Block boundaries are proven
 ```
 
 A renderer/compositor may be reused internally across these modes, but the UI
@@ -42,7 +85,7 @@ eligible composer
   -> command accepted by trusted integration
   -> Block(Current, command identity, start LineId)
   -> canonical execution/output continues
-  -> running Block receives bounded live-tail projection
+  -> running Block receives bounded live-tail projection, with a proven blank suffix omitted from its card geometry
   -> trusted command completion + accepted final drain
   -> Block(Completed, end LineId, exit metadata)
 ```
@@ -50,6 +93,16 @@ eligible composer
 The Runtime owns lifecycle truth. Missing, malformed, conflicting or stale
 metadata causes the client to quarantine the structured projection and select a
 safe presentation; it never changes PTY/VT authority.
+
+The running Block's live-tail projection preserves every visible row from its
+trusted start anchor through the last row containing terminal content or the
+cursor. The paired Rust display may prove that rows after this boundary are
+blank; those trailing rows are omitted from the Block card so a short live
+Block stays docked above its Pane composer. No leading row, nonblank/styled
+row, or cursor row may be removed. If the same-generation cell proof is
+unavailable, the complete candidate clip is retained. This changes only the
+Block projection geometry; the authoritative VT grid, cursor, and PTY remain
+unchanged.
 
 ## 3. Presentation state contract
 
@@ -83,6 +136,11 @@ If the current projection protocol cannot produce the running Block's live tail,
 implementation must refine that projection first. Rendering the full current
 terminal grid behind the Block transcript is not an allowed substitute.
 
+**Accepted ADR-026 (#1384):** Relay is a line-level
+Flow input mode, distinct from Raw. It never routes character-level input.
+When character-level semantics are required, presentation still transitions to
+full-Pane Raw first (ADR-009 invariant 11).
+
 ### 3.2 Raw
 
 Raw is a full-Pane conventional terminal presentation over the same canonical
@@ -99,6 +157,60 @@ Enter Raw when any of the following applies:
 
 Entering Raw yields Flow interaction/composer. Raw is a replacement presentation,
 not another viewport added to Flow.
+
+**Accepted ADR-026 (#1384):** labeled Relay is not
+Raw and does not satisfy this section. Raw remains the full-Pane
+character-level presentation.
+
+**Running-program interaction fallback:** Runtime's current `Running(BlockId)`
+and composer `Busy` facts do not prove whether a foreground program accepts
+line input, requires character-level input, or is simply producing output.
+Seyal must not infer that distinction from command text, terminal output, or a
+hidden Raw view. A Running Block therefore exposes an explicit **Interact with
+running program** action. The action is available only for the current live
+Block and is bound to its Pane, ExecutionId, Controller attachment, target
+generation, and presentation epoch. Rust rejects stale or mismatched actions.
+
+On acceptance, Rust temporarily presents that Pane's same execution in full-Pane
+Raw before native keyboard, mouse, paste, or IME input can be admitted. Ordinary
+Running Blocks remain in Flow until the user requests interaction. Alternate
+screen still takes TUI priority. The temporary Raw presentation ends only when
+Runtime reports a fresh trusted local-shell prompt for that execution or the
+execution ends; Raw is retained across an intervening TUI session while the
+same foreground program remains active. A stale target, detached Controller,
+or changed presentation epoch admits no input and cannot change a sibling Pane.
+
+This action requests direct terminal interaction; it does not enable session
+bootstrap, alter SSH trust, or use Relay. Trusted session Relay remains a
+separate line-input route. Unsupported foreground programs and character-level
+workflows use Raw; line-oriented trusted session programs may continue using
+Relay when that is sufficient.
+
+Type 45 carries the known foreground `BlockId` and target generation even when
+composer mode is `Unavailable`. The `Unavailable` mode still prohibits Submit
+and Relay; the identity is solely the Rust-validated target for the explicit
+direct-input action above. This lets local Python/Node and other Running
+programs expose the same deliberate Raw fallback without presenting session
+bootstrap or guessing from command text.
+
+**User-confirmed #1398 SSH Flow UX requirement:** While a trusted, line-oriented
+foreground program is in Relay, the existing Pane composer is presented on the
+Running Block's active terminal cursor row and column. The terminal-painted
+cursor is suppressed for that row while the composer owns input, so the user
+sees one input location. The Running Block remains the active terminal surface
+and becomes completed history only after the command exits. When the transcript
+is shorter than its viewport, its Blocks are bottom-aligned to the live input
+surface; overflowing history retains normal scrolling and live-end following.
+While Relay is inline, the transcript viewport extends to the Pane's bottom
+inset so the running prompt remains visually connected to the Pane edge.
+This is presentation over the same ExecutionId and PTY, not a second input
+engine or Block-owned terminal state.
+
+The composer remains a Pane-level input component and is painted above the
+terminal surface. Its frame follows the active cursor after transcript scroll,
+terminal frame updates, and Pane resize. The accessibility tree must continue
+to expose the one Pane composer independently from the Running Block; the Block
+owns output and history, while the Pane composer owns editable input.
 
 Leaving Raw re-evaluates current structured eligibility. Existing trusted Block
 history remains stable; untrusted raw interaction is not retroactively turned
@@ -155,7 +267,13 @@ ExecutionId
 + presentation/input epoch
 + relevant canonical generation and terminal mode state
 + trusted shell-integration generation/state
++ input target            # Accepted ADR-026 (#1384); carried on SPEC-004 type 45 once shipped
++ target generation       # Accepted ADR-026 (#1384); carried on SPEC-004 type 45 once shipped
 ```
+
+A submission is bound to the target and generation the client displayed
+(ADR-026 §3.2); a mismatch is a correlated refusal and the draft is kept.
+Type 45 is allocated by Accepted ADR-026 and shipped under #1388. A generation mismatch refuses the submit and keeps the draft.
 
 The exact wire/internal representation may differ. The observable requirement is
 that stale evidence cannot authorize a newer execution, attachment or
@@ -190,22 +308,53 @@ snapshot.
 - Shift-Return inserts a newline;
 - failed admission leaves the draft intact and exposes a functional error;
 - successful admission creates the next Block and preserves Pane focus;
-- while a normal foreground command occupies the shell, the composer is
-  disabled or represented by real busy state as specified by product behavior;
+- composer availability follows the Accepted ADR-026 (#1384) §3.2 input
+  target. A `TrustedShell` target, including `TrustedShell(session)`, is
+  composer mode `Submit`. A `ForegroundProgram` target may be labeled
+  `Relay` (line-level) or `DirectInput` (ADR-009 #1466 Block-scoped
+  character-level while Flow remains). Neither Submit nor Relay is implied by
+  Block lifecycle `Running` alone. When the input target is `None`, the
+  composer is disabled or represented by real busy state;
 - supported Pane-level control actions such as an explicit interrupt may route
   through typed input semantics without turning empty Flow space into a raw
   terminal surface;
-- arbitrary character-level terminal input is not routed through Flow merely
-  because a hidden Metal view exists; the Pane transitions to Raw first when
-  such semantics are required;
+- under Accepted ADR-009 #1466, when presentation is Flow, the canonical
+  screen is primary, the attachment is Controller, and the input target is
+  `ForegroundProgram(b)` with mode `DirectInput`, character-level terminal
+  input (keys, IME commits that encode input, paste, and mouse reports that
+  encode input) may be routed into Running Block `b`'s live region without a
+  full-Pane Raw transition. Empty Flow canvas still must not expose a second
+  Raw viewport or empty-canvas terminal hit-test. Cases outside that contract
+  keep a usable full-Pane Raw/TUI direct-terminal path;
 - IME/first-responder/accessibility/mouse ownership follows the active
-  presentation mode and section 3.4 transition fence.
+  presentation mode, the DirectInput focus target when published, and
+  section 3.4 transition fence.
+- in multipane Flow, keyboard focus routes to the Rust-focused Pane's visible,
+  Pane-owned composer; the hidden single-pane composer must not receive text or
+  submit on that Pane's behalf. Single-pane Flow keeps the root composer, while
+  Raw/TUI routes to the focused terminal surface.
+- a Pane draft mutation is fenced to its PaneId. If Rust focus differs, transfer
+  focus and restore the native editor before applying it; once Rust focus
+  matches, do not reapply focus during each edit or steal subsequent characters.
+
+When the current Flow input target is `ForegroundProgram(b)` with an admitted
+line-level Relay, the Pane's single Rust-owned composer/editor is visually
+anchored over the terminal cursor in Running Block `b`, beside its live output.
+The composer remains the distinct Pane-level input component and keeps its
+existing draft, IME and target-generation authority; the Block owns only the
+displayed program output and scope. Submitted lines appear through the
+program's PTY output in that same Running Block and do not create child Blocks.
+When the target returns to
+`TrustedShell(session)`, the composer returns to the Pane input position. TUI
+takeover hides the composer and yields the full Pane to the terminal program.
 
 Direct-terminal event classification, committed-text atomicity, composition-only
 IME document semantics, key encoding, queue bounds and resize transactions remain
 governed by SPEC-006. Under accepted ADR-009/#858 those direct-terminal
 interaction rules apply to the **active Raw/TUI/direct-terminal presentation
-endpoint**, not to a hidden/focusable surface under Flow.
+endpoint**, and under Accepted ADR-009 #1466 also to the **Block-scoped
+DirectInput focus target** on a primary-screen Running Block while Flow chrome
+remains — not to a hidden/focusable empty-canvas surface under Flow.
 
 ## 5. Flow output projection
 
@@ -214,6 +363,22 @@ endpoint**, not to a hidden/focusable surface under Flow.
 A completed Block references a bounded canonical history range from its trusted
 start/end anchors. The client may cache disposable prepared GPU data for visible
 ranges, but the range remains authoritative in Runtime terminal/history state.
+
+For output longer than one bounded history response, the Pane transcript keeps
+the Block's full intrinsic scroll extent while the renderer prepares only a
+bounded page for the rows visible in that Pane (with bounded overscan). A page
+is addressed through the Block's stable history anchors and Runtime history
+range protocol; the client must not concatenate an unbounded Block into one
+GPU buffer or substitute a second terminal/history model. Scrolling, resize,
+and backing-scale changes request or prepare the page for the new viewport and
+preserve the user's Pane scroll position. The rendered page cache is keyed by
+Pane/execution, Block, history revision and visible range; a content or range
+change invalidates glyph data even when clip geometry is unchanged. PTY/VT
+progress must not wait for page retrieval or GPU preparation. The renderer's
+per-page row/cell bounds remain enforced for every request and buffer.
+Changes to source line bounds, total history extent, cell metrics, or backing
+scale also invalidate the prepared page so resize/font changes cannot reuse
+stale glyph positions.
 
 ### 5.2 Running Block
 
@@ -308,7 +473,8 @@ M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
 | Interactive Bash | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
 | Interactive fish | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
 | `/bin/sh` and any other shell without an accepted integration | Unsupported → full-Pane Raw; no guessed Blocks |
-| Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
+| Nested shell / SSH child (no session trust) | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim. Unsupported for trusted Blocks → Raw, or labeled relay (Accepted ADR-026). **Accepted #1396:** auto session trust for eligible depth-one SSH bash/zsh when ADR-026 Decision item 4 (spawn-time / non-typed-into-unproven-reader delivery) holds — no Enable Blocks consent |
+| Consented session (SSH / `docker exec -it` / interactive bash or zsh), ADR-026 | Session-trusted `A`/`C`/`D` with a session secret; session-scoped Blocks; composer `Submit` at a session prompt (Accepted ADR-026 #1384). Decline, unsupported shell, or failed bootstrap → labeled relay / Raw. The offer hint never authorizes bootstrap. **Accepted #1396:** withdraw Enable Blocks; auto-arm Allowed only under ADR-026 Decision item 4; typed stager stays consent- or readiness-gated; decline of *companion install* (#1385) must not disable Blocks; incomplete interactive work stays inside the Running session Block with Block-scoped line input as primary for line-oriented programs; alternate-screen → TUI; Relay/Raw after bootstrap *failure* / unsupported / no-auto-arm remain degraded |
 | Startup working directory | Launch/config policy (#676 / related launch-policy Issues) may supply initial CWD; not inferred from terminal output |
 | Live CWD / OSC 7 | **Deferred** for M003 Block semantics; OSC 7 and other terminal-emitted path text remain untrusted and must not populate Block or Workspace authority |
 
@@ -316,9 +482,29 @@ M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
 
 - **Accepted for M003:** zsh trusted integration; Unsupported/Raw for all other
   interactive shells; Runtime-owned completed-Block duration as above.
-- **Deferred for M003:** trusted live CWD; Bash/fish (or other) integrations;
-  remote/SSH Block or live-CWD claims. Any later requirement needs a separate
-  architecture/spec decision before production readiness.
+- **Deferred for M003:** trusted live CWD; Bash/fish (or other) local
+  integrations. Live-CWD claims stay deferred. Remote/SSH Block claims are
+  no longer in this deferred list.
+- **Accepted under ADR-026 (#1384), consent-gated:** remote/SSH Block
+  claims. Decline does not create a trusted remote Block. Local
+  Bash/fish Flow integration and trusted live CWD stay deferred. The
+  contract is normative; production bootstrap is not yet shipped.
+- **Accepted under #1396:** auto-arm
+  non-durable session bootstrap for eligible depth-one SSH bash/zsh
+  **only** when delivery does not type into an unproven live reader
+  (spawn-time / remote-command class per ADR-026 Decision item 4);
+  consent for remote install/modify (#1385) and for typed-into-live-reader
+  delivery. Withdraw Enable Blocks as the headed SSH Blocks gate. See
+  ADR-026 2026-10-31 amendment.
+- **Default offer-hint argv (ADR-026 §4.2):**
+  the proactive hint matches a foreground process-group leader whose program
+  basename is `ssh`. Nested `ssh` is excluded: an `ssh` whose host Block is
+  already a session scope is not a proactive hint. The list is
+  user-configurable. The hint never authorizes bootstrap and never grants
+  trust. An explicit "Enable Blocks for this session" action does not require
+  the hint (Accepted today). **Accepted #1396:** hint selects auto-arm
+  *eligibility* for Decision item 4 delivery — it does not authorize typed
+  inject into an unproven reader.
 - Evidence disposition and remaining zsh gaps are recorded in
   `docs/evidence/m003-686-shell-metadata-decision.md`.
 
@@ -384,6 +570,13 @@ a different execution, attachment or presentation epoch.
 | secret/interactive child requiring direct input | Pane becomes Raw before arbitrary terminal input is routed |
 | Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
 | unsupported/nested SSH interaction | full-Pane Raw fallback; no simultaneous Flow + raw viewport |
+| consented session (ADR-026) | Discrete session-scoped Blocks under the host Running Block, and a retained composer (`Submit`) at a session-trusted prompt (Accepted ADR-026). **Accepted #1396:** same after Decision item 4 auto-arm (no Enable Blocks); while a session command is Running, Block-scoped line input to that program is primary for line-oriented interactive work |
+| trusted SSH session completes | Host Block history stops before the first session-scoped Block; each remote command and its output appears only in its own session Block, without duplicate remote transcript in the host |
+| declined session (ADR-026) | Labeled relay; no guessed Block. **Accepted #1396:** “declined” applies to companion install (#1385), typed-path decline, or bootstrap *failure* — not to skipping Enable Blocks; ordinary SSH Continues with Blocks when Decision item 4 auto-arm succeeds |
+| forged remote `A`/`D` (ADR-026) | Ignored; no secret match, so no trusted session transition |
+| depth-two session (ADR-026) | Relay or Raw; no second session secret. A candidate requires F4 ∈ {None, Declined, Failed}; arming while `Trusted(_)` is forbidden |
+| auth/password prompt (ADR-026) | Local canonical-no-echo: bootstrap is not offered and relay is suppressed when F9 is available. A remote password prompt remains a residual plaintext risk even when F9 is available. Raw is held during `Armed`/`Delivering` and available otherwise |
+| session alternate-screen (ADR-026) | TUI takeover of the Pane; composer hidden |
 | Neovim/htop/full-screen app | TUI owns full Pane; composer/Flow interaction absent |
 | TUI exit | same execution returns to Flow or Raw after eligibility re-evaluation |
 | detach/reattach | Block IDs/anchors and selected presentation recover without duplicate execution |
@@ -423,5 +616,5 @@ This specification does not require:
 - AppKit text reconstruction of terminal output;
 - a portable cross-platform GUI abstraction;
 - prompt/output scraping to recover missing trusted command boundaries;
-- Bash/fish/remote trusted integration or trusted live CWD in M003;
+- Bash/fish local Flow integration or trusted live CWD in M003. Remote trusted integration is consent-gated per Accepted ADR-026 and is not covered by this non-goal; local Bash/fish Flow integration and trusted live CWD remain non-goals;
 - commercial/agent/cloud services on the terminal path.

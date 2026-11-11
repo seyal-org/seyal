@@ -113,12 +113,35 @@ typedef struct SeyalComposerResult {
 } SeyalComposerResult;
 
 /* Runtime-published composer eligibility (#978): eligibility uses
- * SeyalAppComposerEligibility; revision 0 means nothing published yet. */
+ * SeyalAppComposerEligibility; revision 0 means no status was published.
+ * Revisions are execution-scoped, and attachment identity identifies the
+ * focused display client whose status is reported. */
 typedef struct SeyalComposerStatus {
     uint64_t revision;
+    uint64_t attachment_id_low;
+    uint64_t attachment_id_high;
     uint8_t eligibility;
     uint8_t reserved[7];
 } SeyalComposerStatus;
+
+/* Read-only target for placing the one composer editor beside a live Relay Block. */
+typedef struct SeyalComposerTarget {
+    uint64_t block_id;
+    uint64_t target_generation;
+    uint64_t revision;
+    uint8_t mode;
+    uint8_t target_class;
+    uint8_t reserved[6];
+} SeyalComposerTarget;
+
+/* ADR-026 session surface. kind: 0 hidden banner, 2 consent offer. A hidden
+ * surface may carry a Candidate host Block id for its explicit context menu. */
+typedef struct SeyalSessionSurface {
+    uint8_t kind;
+    uint8_t reserved[7];
+    uint64_t host_block_id;
+    uint64_t revision;
+} SeyalSessionSurface;
 
 typedef struct SeyalRecoveryResult {
     uint8_t stage;
@@ -169,6 +192,8 @@ int32_t seyal_bridge_connect_first(void);
 /// test host selected the directory; environment variables are ignored.
 int32_t seyal_bridge_set_runtime_dir(const char *path);
 uint64_t seyal_bridge_open_first(void);
+/** SPEC-004 §18: create one execution and attach that id. Never list-order attach. */
+uint64_t seyal_bridge_open_created_execution(void);
 uint64_t seyal_bridge_open_first_until(uint64_t budget_micros);
 uint64_t seyal_bridge_open_first_observer_until(uint64_t budget_micros);
 uint64_t seyal_bridge_open_execution(uint64_t execution_low, uint64_t execution_high);
@@ -204,6 +229,7 @@ int32_t seyal_bridge_wants_write_for(uint64_t handle);
 int32_t seyal_bridge_flush_writable(void);
 int32_t seyal_bridge_flush_writable_for(uint64_t handle);
 int32_t seyal_bridge_submit_utf8(const uint8_t *bytes, uint32_t len);
+int32_t seyal_bridge_submit_utf8_for(uint64_t handle, const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_submit_paste(const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_submit_host_selection(
     uint8_t action,
@@ -230,13 +256,56 @@ int32_t seyal_bridge_request_history_range(
     uint32_t max_cells,
     uint32_t start_unit
 );
+/* History on one registry Controller without changing focus (#1426). */
+int32_t seyal_bridge_request_history_range_for(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t start_line,
+    uint64_t end_line,
+    uint16_t max_lines,
+    uint32_t max_cells,
+    uint32_t start_unit
+);
 uint64_t seyal_bridge_next_history_request_id(void);
+uint64_t seyal_bridge_next_history_request_id_for(uint64_t handle);
 SeyalHistoryRange seyal_bridge_history_range_peek_for(uint64_t block_id, uint64_t request_id);
+SeyalHistoryRange seyal_bridge_history_range_peek_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id
+);
 SeyalHistoryRow seyal_bridge_history_range_row_for(uint64_t block_id, uint64_t request_id, uint32_t index);
+SeyalHistoryRow seyal_bridge_history_range_row_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id,
+    uint32_t index
+);
 SeyalHistorySidecar seyal_bridge_history_range_sidecar_for(uint64_t block_id, uint64_t request_id);
+SeyalHistorySidecar seyal_bridge_history_range_sidecar_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id
+);
 uint8_t seyal_bridge_history_range_consume(uint64_t block_id, uint64_t request_id);
+uint8_t seyal_bridge_history_range_consume_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id
+);
 SeyalComposerResult seyal_bridge_composer_result(void);
 SeyalComposerStatus seyal_bridge_composer_status(void);
+SeyalComposerTarget seyal_bridge_composer_target(void);
+SeyalComposerTarget seyal_bridge_composer_target_for_handle(uint64_t handle);
+SeyalSessionSurface seyal_bridge_session_surface(void);
+SeyalSessionSurface seyal_bridge_session_surface_for_handle(uint64_t handle);
+const char *seyal_bridge_session_copy(uint8_t kind);
+int32_t seyal_bridge_session_request_for_handle(
+    uint64_t handle,
+    uint64_t expected_host_block_id,
+    uint64_t expected_revision
+);
+int32_t seyal_bridge_session_consent(uint8_t accept);
 SeyalRecoveryResult seyal_bridge_last_recovery_result(void);
 /** Classify a failed open into a SeyalAppRecoveryOutcome code (Rust-owned). */
 uint32_t seyal_bridge_classify_open_result(uint8_t failure_class, uint8_t retryable);
@@ -270,13 +339,18 @@ int32_t seyal_bridge_propose_geometry(
     double horizontal_insets,
     double vertical_insets,
     double cell_width,
-    double cell_height,
-    uint8_t meaningful_layout_epoch
+    double cell_height
 );
 int32_t seyal_bridge_retry_resize(void);
 int32_t seyal_bridge_input_failure(void);
 int32_t seyal_bridge_resize_failure(void);
 SeyalPreparedFrame seyal_bridge_frame(void);
+/* Prepared frame for one registry handle without changing focus (#936). */
+SeyalPreparedFrame seyal_bridge_frame_for(uint64_t handle);
+/* Paired ViewportLineIds[0] for Raw presentation scroll (#1442); 0 if unpaired. */
+uint64_t seyal_bridge_viewport_start_line_id(void);
+uint64_t seyal_bridge_viewport_start_line_id_for(uint64_t handle);
+int32_t seyal_bridge_ensure_prepared_for(uint64_t handle);
 uint64_t seyal_bridge_block_timeline_revision(void);
 uint64_t seyal_bridge_next_composer_request_id(void);
 uint32_t seyal_bridge_block_count(void);

@@ -18,9 +18,15 @@ extension MetalSurfaceView {
     metalDisplayLinkLease = nil
   }
 
+  /// Live Candidate-D frame or retained Flow history may present. Only
+  /// `hasPreparedState` advances SPEC-009 Usable.
+  var canPresentSurface: Bool {
+    hasPreparedState || hasRetainedHistoryPresentation
+  }
+
   func armMetalDisplayLink() {
     guard shouldRender,
-      hasPreparedState,
+      canPresentSurface,
       presentationState.pending,
       !presentationState.exhausted,
       renderer.hasPresentablePreparedState,
@@ -61,7 +67,7 @@ extension MetalSurfaceView {
     renderer.drainGPUCompletionsIfNeeded()
 
     guard shouldRender,
-      hasPreparedState,
+      canPresentSurface,
       renderer.persistentDisplayFailure == nil,
       !presentationState.exhausted,
       presentationState.consumeOpportunity()
@@ -104,13 +110,14 @@ extension MetalSurfaceView {
 
   func invalidatePreparedPresentation() {
     hasPreparedState = false
+    hasRetainedHistoryPresentation = false
     cancelPresentationRetries()
     resetPreparationRecovery()
   }
 
   func schedulePresentationRetry(after delay: TimeInterval) {
     guard shouldRender,
-      hasPreparedState,
+      canPresentSurface,
       presentationState.pending,
       !presentationRetryScheduled,
       !presentationState.exhausted
@@ -132,7 +139,7 @@ extension MetalSurfaceView {
     guard generation == presentationRetryGeneration else { return }
     presentationRetryTimer = nil
     presentationRetryScheduled = false
-    guard shouldRender, hasPreparedState, presentationState.pending else { return }
+    guard shouldRender, canPresentSurface, presentationState.pending else { return }
     armMetalDisplayLink()
   }
 
@@ -147,7 +154,6 @@ extension MetalSurfaceView {
     guard !proposingGeometry else { return }
     guard terminalBridgeIsConnected, bounds.width > 8, bounds.height > 8 else { return }
     let rounded = bounds.integral
-    guard rounded != lastProposedGeometry else { return }
     let cell = terminalPresentationCellSize()
     guard cell.width > 0, cell.height > 0 else { return }
     proposingGeometry = true
@@ -158,8 +164,7 @@ extension MetalSurfaceView {
       horizontalInsets: 0,
       verticalInsets: 0,
       cellWidth: Double(cell.width),
-      cellHeight: Double(cell.height),
-      meaningfulLayoutEpoch: true
+      cellHeight: Double(cell.height)
     )
     if result == 0 {
       lastProposedGeometry = rounded

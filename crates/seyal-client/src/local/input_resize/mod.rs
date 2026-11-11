@@ -12,13 +12,15 @@ use super::{
 };
 
 mod geometry;
+mod layout;
 mod planner;
 
 #[cfg(test)]
 mod tests;
 
 pub use geometry::{
-    cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
+    cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, LayoutMetrics,
+    ResizeFailure,
 };
 pub(crate) use planner::{
     classify_server_error, newest_pending_geometry, resize_needs_mutation,
@@ -33,33 +35,6 @@ impl LocalDisplayClient {
 
     pub fn resize_failure(&self) -> Option<ResizeFailure> {
         self.resize_failure
-    }
-
-    pub fn submit_composer_command(&mut self, command: &str) -> Result<(), ClientError> {
-        self.require_controller()?;
-        if !self.command_blocks_supported {
-            return Err(ClientError::UnsupportedInteractiveCapability);
-        }
-        let request_id = self.next_composer_request_id;
-        self.next_composer_request_id = request_id.checked_add(1).unwrap_or(1);
-        let payload = seyal_runtime::local_ipc::framing::ComposerCommandRef {
-            attachment_id: self.attachment_id,
-            request_id,
-            command,
-        }
-        .encode();
-        let frame = encode_frame(MessageType::ComposerCommand, &payload);
-        if let Err(error) = self.admit_frame(frame, OutboundKind::ComposerCommand) {
-            self.input_failure = Some(InputAdmissionFailure::ClientBackpressure);
-            return Err(error);
-        }
-        self.pending_composer_requests.insert(request_id);
-        self.input_failure = None;
-        let result = self.flush_control_write();
-        if result.is_err() {
-            self.pending_composer_requests.remove(&request_id);
-        }
-        result
     }
 
     pub fn outbound_wire_bytes(&self) -> usize {
@@ -319,11 +294,7 @@ impl LocalDisplayClient {
         }
     }
 
-    pub fn set_desired_geometry(&mut self, geometry: GridGeometry) -> Result<(), ClientError> {
-        self.set_desired_geometry_for_layout(geometry, false)
-    }
-
-    pub fn set_desired_geometry_for_layout(
+    pub(super) fn set_desired_geometry_with_epoch(
         &mut self,
         geometry: GridGeometry,
         meaningful_layout_epoch: bool,

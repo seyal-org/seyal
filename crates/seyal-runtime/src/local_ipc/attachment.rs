@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 use crate::{local_ipc::framing::Role, AttachmentId, ExecutionId};
 
-pub const MAX_LIVE_ATTACHMENTS: usize = 16;
+pub const MAX_LIVE_ATTACHMENTS: usize = 100;
+pub const MAX_ATTACHMENTS_PER_CONNECTION: usize = 100;
+pub const MAX_ATTACHMENTS_PER_CONNECTION_LEGACY: usize = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentError {
@@ -17,6 +19,13 @@ pub enum AttachmentError {
     StaleIdentity,
     PermissionDenied,
     WrongConnection,
+    InvalidResumeSequence,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliveryState {
+    Delivering,
+    Suspended,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +33,8 @@ struct AttachmentRecord {
     execution_id: ExecutionId,
     role: Role,
     connection_token: u64,
+    delivery: DeliveryState,
+    resume_sequence: u64,
 }
 
 #[derive(Default)]
@@ -69,6 +80,8 @@ impl AttachmentRegistry {
                 execution_id,
                 role,
                 connection_token,
+                delivery: DeliveryState::Delivering,
+                resume_sequence: 0,
             },
         );
     }
@@ -125,6 +138,105 @@ impl AttachmentRegistry {
             .iter()
             .filter(|(_, record)| record.execution_id == execution_id)
             .map(|(id, record)| (*id, record.connection_token))
+            .collect()
+    }
+
+    pub fn delivering_viewers_for_execution(
+        &self,
+        execution_id: ExecutionId,
+    ) -> Vec<(AttachmentId, u64)> {
+        self.attachments
+            .iter()
+            .filter(|(_, record)| {
+                record.execution_id == execution_id && record.delivery == DeliveryState::Delivering
+            })
+            .map(|(id, record)| (*id, record.connection_token))
+            .collect()
+    }
+
+    pub fn attachments_on_connection(&self, connection_token: u64) -> Vec<AttachmentId> {
+        self.attachments
+            .iter()
+            .filter(|(_, record)| record.connection_token == connection_token)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    /// A connection may have at most one live attachment to a given execution.
+    /// Delivery suspension does not release the attachment or its Controller
+    /// authority, so it must not make a duplicate attach appear admissible.
+    pub fn has_execution_on_connection(
+        &self,
+        connection_token: u64,
+        execution_id: ExecutionId,
+    ) -> bool {
+        self.attachments.values().any(|record| {
+            record.connection_token == connection_token && record.execution_id == execution_id
+        })
+    }
+
+    pub fn delivery_of(
+        &self,
+        attachment_id: AttachmentId,
+    ) -> Result<DeliveryState, AttachmentError> {
+        self.attachments
+            .get(&attachment_id)
+            .map(|record| record.delivery)
+            .ok_or(AttachmentError::StaleIdentity)
+    }
+
+    pub fn resume_sequence_of(&self, attachment_id: AttachmentId) -> Result<u64, AttachmentError> {
+        self.attachments
+            .get(&attachment_id)
+            .map(|record| record.resume_sequence)
+            .ok_or(AttachmentError::StaleIdentity)
+    }
+
+    /// Atomically adopt a valid resume epoch and return the prior delivery state.
+    pub fn resume_delivery(
+        &mut self,
+        attachment_id: AttachmentId,
+        resume_sequence: u64,
+    ) -> Result<DeliveryState, AttachmentError> {
+        let record = self
+            .attachments
+            .get_mut(&attachment_id)
+            .ok_or(AttachmentError::StaleIdentity)?;
+        if resume_sequence == 0 || resume_sequence <= record.resume_sequence {
+            return Err(AttachmentError::InvalidResumeSequence);
+        }
+        let previous = record.delivery;
+        record.resume_sequence = resume_sequence;
+        record.delivery = DeliveryState::Delivering;
+        Ok(previous)
+    }
+
+    /// Returns previous delivery state.
+    pub fn set_delivery(
+        &mut self,
+        attachment_id: AttachmentId,
+        delivery: DeliveryState,
+    ) -> Result<DeliveryState, AttachmentError> {
+        let record = self
+            .attachments
+            .get_mut(&attachment_id)
+            .ok_or(AttachmentError::StaleIdentity)?;
+        let previous = record.delivery;
+        record.delivery = delivery;
+        Ok(previous)
+    }
+
+    pub fn delivering_on_connection(
+        &self,
+        connection_token: u64,
+    ) -> Vec<(AttachmentId, ExecutionId)> {
+        self.attachments
+            .iter()
+            .filter(|(_, record)| {
+                record.connection_token == connection_token
+                    && record.delivery == DeliveryState::Delivering
+            })
+            .map(|(id, record)| (*id, record.execution_id))
             .collect()
     }
 
@@ -297,5 +409,94 @@ mod tests {
         assert_eq!(registry.remove_all_for_execution(exec(1)).len(), 2);
         assert!(!registry.has_controller(exec(1)));
         assert_eq!(registry.attachments_for_execution(exec(2)), 1);
+    }
+
+    #[test]
+    fn delivery_state_is_independent_per_attachment() {
+        let mut registry = AttachmentRegistry::new();
+        let first = registry
+            .create_attachment(exec(1), Role::Controller, 1)
+            .unwrap();
+        let second = registry
+            .create_attachment(exec(2), Role::Observer, 1)
+            .unwrap();
+        assert_eq!(
+            registry.delivery_of(first).unwrap(),
+            DeliveryState::Delivering
+        );
+        assert_eq!(
+            registry
+                .set_delivery(first, DeliveryState::Suspended)
+                .unwrap(),
+            DeliveryState::Delivering
+        );
+        assert_eq!(registry.delivering_viewers_for_execution(exec(1)).len(), 0);
+        assert_eq!(registry.delivering_viewers_for_execution(exec(2)).len(), 1);
+        assert_eq!(registry.attachments_on_connection(1).len(), 2);
+        let _ = second;
+    }
+
+    #[test]
+    fn suspended_attachment_still_reserves_execution_on_its_connection() {
+        let mut registry = AttachmentRegistry::new();
+        let first = registry
+            .create_attachment(exec(1), Role::Observer, 7)
+            .unwrap();
+        assert!(registry.has_execution_on_connection(7, exec(1)));
+        registry
+            .set_delivery(first, DeliveryState::Suspended)
+            .unwrap();
+        assert!(registry.has_execution_on_connection(7, exec(1)));
+        assert!(!registry.has_execution_on_connection(8, exec(1)));
+        assert!(!registry.has_execution_on_connection(7, exec(2)));
+        registry.detach_for_connection(7, first).unwrap();
+        assert!(!registry.has_execution_on_connection(7, exec(1)));
+    }
+
+    #[test]
+    fn resume_sequences_are_strictly_increasing_and_attachment_scoped() {
+        let mut registry = AttachmentRegistry::new();
+        let first = registry
+            .create_attachment(exec(1), Role::Observer, 1)
+            .unwrap();
+        let second = registry
+            .create_attachment(exec(2), Role::Observer, 1)
+            .unwrap();
+        registry
+            .set_delivery(first, DeliveryState::Suspended)
+            .unwrap();
+
+        assert_eq!(registry.resume_sequence_of(first), Ok(0));
+        assert_eq!(
+            registry.resume_delivery(first, 1),
+            Ok(DeliveryState::Suspended)
+        );
+        assert_eq!(registry.resume_sequence_of(first), Ok(1));
+        assert_eq!(registry.delivery_of(first), Ok(DeliveryState::Delivering));
+        assert_eq!(
+            registry.resume_delivery(first, 1),
+            Err(AttachmentError::InvalidResumeSequence)
+        );
+        assert_eq!(
+            registry.resume_delivery(first, 0),
+            Err(AttachmentError::InvalidResumeSequence)
+        );
+        assert_eq!(registry.resume_sequence_of(first), Ok(1));
+        assert_eq!(registry.resume_sequence_of(second), Ok(0));
+    }
+
+    #[test]
+    fn negotiated_connection_retains_required_attachment_capacities() {
+        for expected in [1, 10, 50, 100] {
+            let mut registry = AttachmentRegistry::with_capacity(MAX_LIVE_ATTACHMENTS);
+            for index in 0..expected {
+                registry
+                    .create_attachment(exec(index as u128 + 1), Role::Observer, 77)
+                    .expect("all required negotiated attachments fit one connection");
+            }
+            assert_eq!(registry.attachments_on_connection(77).len(), expected);
+            assert_eq!(registry.delivering_on_connection(77).len(), expected);
+            assert!(registry.attachments_on_connection(78).is_empty());
+        }
     }
 }

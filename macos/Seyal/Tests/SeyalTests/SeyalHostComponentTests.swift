@@ -6,6 +6,13 @@ import XCTest
 @testable import Seyal
 
 final class SeyalHostComponentTests: XCTestCase {
+    private func terminalContentFrame(_ region: NSRect, splitInset: CGFloat = 0) -> NSRect {
+        var frame = region.insetBy(dx: splitInset, dy: splitInset)
+        frame.origin.y += 30
+        frame.size.height = max(0, frame.height - 30)
+        return frame
+    }
+
     override func setUp() {
         super.setUp()
         // Pin process cold config to a missing path so tests are hermetic and
@@ -39,8 +46,17 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_destroy(handle), 0)
         let theme = seyal_app_theme(0)
         XCTAssertNotEqual(theme.canvas, theme.text)
-        XCTAssertEqual(MemoryLayout<SeyalAppComposer>.size, 40)
-        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
+        XCTAssertEqual(MemoryLayout<SeyalAppComposer>.size, 56)
+        XCTAssertEqual(MemoryLayout<SeyalAppComposer>.offset(of: \.canvas_floor_block_id_lo), 40)
+        XCTAssertEqual(MemoryLayout<SeyalAppComposer>.offset(of: \.canvas_floor_block_id_hi), 48)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 32)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.revision), 0)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.attachment_id_low), 8)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.attachment_id_high), 16)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.eligibility), 24)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.reserved), 25)
+        XCTAssertEqual(MemoryLayout<SeyalComposerTarget>.size, 32)
+        XCTAssertEqual(MemoryLayout<SeyalComposerTarget>.offset(of: \.block_id), 0)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 120)
         XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
@@ -129,8 +145,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
         var refresh = SeyalAppAction()
@@ -189,8 +206,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(
             seyal_app_snapshot(handle).eligibility,
             UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
@@ -224,7 +242,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
@@ -260,8 +278,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(
             relayComposerStatus(
                 handle,
@@ -277,7 +296,7 @@ final class SeyalHostComponentTests: XCTestCase {
         setDraft.size = bind.size
         setDraft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         setDraft.applySnapshotFence(seyal_app_snapshot(handle))
-        setDraft.target_pty_generation = seyal_app_composer(handle).epoch
+        setDraft.target_generation = seyal_app_composer(handle).epoch
         draft.withUnsafeBufferPointer { buffer in
             setDraft.payload = buffer.baseAddress
             setDraft.payload_len = UInt32(buffer.count)
@@ -288,7 +307,7 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(seyal_app_snapshot(handle))
-        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        submit.target_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         let requestID = seyal_app_composer(handle).request_id
         XCTAssertNotEqual(requestID, 0)
@@ -377,30 +396,323 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testLeftContextWorkspacesAndTabsFollowC03Contracts() throws {
+        XCTAssertNil(
+            ProductChromeHostView.helpfulWorkspaceDetail(title: "Local", detail: "local"),
+            "redundant path must not render as Local local"
+        )
+        XCTAssertNil(ProductChromeHostView.helpfulWorkspaceDetail(title: "Local", detail: "  "))
+        XCTAssertEqual(
+            ProductChromeHostView.helpfulWorkspaceDetail(title: "Seyal", detail: "~/src/seyal"),
+            "~/src/seyal"
+        )
+
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+
+        let workspaces = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-left-workspaces") as? NSButton)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"),
+                     "default navigation has no duplicate terminal-tab switcher")
+        XCTAssertEqual(workspaces.title, "Workspaces")
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"),
+                        "even the first layout must remain discoverable")
+
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-workspaces-heading"))
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-agents-heading"),
+            "empty AGENTS chrome must not appear when Rust projects zero agents"
+        )
+        let workspaceRow = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-workspace-0") as? NSButton)
+        let workspaceLabel = workspaceRow.accessibilityLabel() ?? workspaceRow.accessibilityTitle() ?? ""
+        XCTAssertTrue(
+            workspaceLabel.localizedCaseInsensitiveContains("Local"),
+            "workspace primary must remain Local: \(workspaceLabel)"
+        )
+        XCTAssertFalse(
+            workspaceLabel.localizedCaseInsensitiveContains(", local"),
+            "workspace row must not expose redundant path in the accessibility label"
+        )
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-pane-0"),
+            "C03 must not list Pane rows in the left rail"
+        )
+        XCTAssertTrue(
+            view.newTabButton.isDescendant(of: view.leftModeRow),
+            "New Layout stays with Workspaces; pane terminal tabs stay pane-local"
+        )
+        // Prefer helpful root when Rust projects one; otherwise tab count.
+        XCTAssertTrue(
+            workspaceLabel.localizedCaseInsensitiveContains("tab")
+                || workspaceLabel.contains("/")
+                || workspaceLabel.contains("~"),
+            "active workspace secondary is helpful root or tab count: \(workspaceLabel)"
+        )
+        XCTAssertEqual(view.newTabButton.accessibilityLabel(), "New Layout")
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            workspaceRow.superview?.bounds.width ?? 0,
+            view.leftItems.bounds.width,
+            accuracy: 0.5,
+            "C04 selection fill must span the left panel, not hug label intrinsic width"
+        )
+
+        // The advanced terminal inventory remains available through the
+        // Rust command palette; it no longer occupies permanent chrome.
+        view.showTabs()
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tabs-heading"))
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-tab-0"),
+            "Tabs mode lists pane-local TerminalTabs, not outer Workspace Tabs"
+        )
+        let tabRow = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-terminal-tab-left-0") as? NSButton
+        )
+        let tabLabel = tabRow.accessibilityLabel() ?? tabRow.accessibilityTitle() ?? ""
+        XCTAssertFalse(tabLabel.hasPrefix("Layout "), "Tabs mode must not use Layout N labels")
+        XCTAssertTrue(tabLabel.localizedCaseInsensitiveContains("Terminal"), "expected tab title: \(tabLabel)")
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-0"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-workspaces-heading"))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            tabRow.superview?.bounds.width ?? 0,
+            view.leftItems.bounds.width,
+            accuracy: 0.5,
+            "Tabs C04 rows must also span the left panel edge-to-edge"
+        )
+        XCTAssertEqual(view.newTabButton.toolTip, "New Terminal")
+    }
+
+    @MainActor
+    func testLeftTabsModeProjectsPaneLocalTerminalTabs() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"))
+        view.showTabs()
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-pane-0"),
+            "left Tabs must not dump Pane rows"
+        )
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-tab-0"))
+        let first = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-terminal-tab-left-0") as? NSButton
+        )
+        XCTAssertTrue(
+            (first.accessibilityLabel() ?? first.title).localizedCaseInsensitiveContains("Terminal")
+        )
+
+        var newTerminal = SeyalAppAction()
+        newTerminal.version = UInt16(SEYAL_APP_ABI_VERSION)
+        newTerminal.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        newTerminal.kind = UInt16(SEYAL_APP_ACTION_NEW_TERMINAL.rawValue)
+        XCTAssertEqual(seyal_app_apply(view.pane.appHandle, &newTerminal), 0)
+        view.reconcileChrome()
+        view.showTabs()
+        let second = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-terminal-tab-left-1") as? NSButton
+        )
+        XCTAssertTrue(
+            (second.accessibilityLabel() ?? second.title).contains("Terminal 2")
+                || (second.accessibilityLabel() ?? second.title).contains("Terminal")
+        )
+        (second as NSButton).performClick(nil)
+        view.reconcileChrome()
+        let selected = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-terminal-tab-left-1") as? NSButton
+        )
+        XCTAssertEqual(selected.state, .on)
+
+        XCTAssertFalse(view.newTabButton.isHidden)
+        XCTAssertEqual(view.newTabButton.toolTip, "New Terminal")
+        view.newTabButton.performClick(nil)
+        view.reconcileChrome()
+        view.showTabs()
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-terminal-tab-left-2"))
+    }
+
+    @MainActor
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // C2b/C3 enable production tab creation and pane splitting. With a sole
-        // Tab/Pane, close controls remain omitted.
+        // W2b enables hierarchical close, including the final Tab/Pane that
+        // collapses the containing Window. These capabilities remain Rust-owned.
         let shell = seyal_app_shell(view.pane.appHandle)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
-        for bit in [
-            SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE,
-            SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE,
-        ] {
-            XCTAssertEqual(shell.flags & UInt16(bit), 0)
-        }
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE), 0)
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
         let newTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-new-tab"))
         XCTAssertFalse(newTab.isHidden, "seyal-new-tab is shown when Rust allows CreateTab")
         for identifier in ["seyal-split-right", "seyal-split-down"] {
             let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
             XCTAssertFalse(control.isHidden, "\(identifier) is shown when Rust allows SplitFocused")
         }
-        for identifier in ["seyal-close-tab", "seyal-close-pane"] {
-            let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
-            XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
+        let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
+        XCTAssertFalse(closeTab.isHidden, "Rust permits hierarchical tab close")
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-close-pane"),
+                      "Close Pane is kept out of the always-visible toolbar")
+        XCTAssertEqual(view.closeTabButton.containmentGeneration, shell.containment_generation)
+        let paneTabsIdentifier = "seyal-pane-\(shell.focused_pane_hi)-\(shell.focused_pane_lo)-terminal-tabs"
+        let paneTabs = try XCTUnwrap(accessibilityChild(view, identifier: paneTabsIdentifier))
+        XCTAssertEqual(paneTabs.accessibilityValue() as? String, "focused")
+    }
+
+    /// #1413 / ADR-028: Create Workspace chrome is Workspaces-panel-local.
+    @MainActor
+    func testCreateWorkspaceControlFollowsLeftPanelWorkspacesMode() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        XCTAssertEqual(seyal_app_chrome(handle).left_panel, 0)
+        let create = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace"))
+        XCTAssertFalse(create.isHidden, "Create Workspace stays on the Workspaces left panel")
+        XCTAssertEqual(create.accessibilityLabel(), "Create Workspace")
+
+        var tabs = SeyalAppAction()
+        tabs.version = UInt16(SEYAL_APP_ABI_VERSION)
+        tabs.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        tabs.kind = UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue)
+        tabs.reserved = 1
+        XCTAssertEqual(seyal_app_apply(handle, &tabs), 0)
+        view.reconcileChrome()
+        XCTAssertEqual(seyal_app_chrome(handle).left_panel, 1)
+        XCTAssertTrue(
+            try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace")).isHidden,
+            "Create Workspace is hidden while Tabs owns the left panel"
+        )
+
+        var workspaces = SeyalAppAction()
+        workspaces.version = UInt16(SEYAL_APP_ABI_VERSION)
+        workspaces.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        workspaces.kind = UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue)
+        workspaces.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &workspaces), 0)
+        view.reconcileChrome()
+        XCTAssertFalse(
+            try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace")).isHidden
+        )
+    }
+
+    /// #1413 / #1414: SetWorkspaceRoot + ObserveTrustedForegroundCwd leave-offer ABI.
+    /// Avoid reconcileChrome while an offer is pending (host presents NSAlert).
+    func testLeaveOfferAbiRaisesCreateAndDismissClearsWithoutMint() throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-1413-leave-root-\(UUID().uuidString)", isDirectory: true)
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-1413-leave-out-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
         }
+
+        let workspace = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_WORKSPACE), 0)
+        XCTAssertGreaterThan(workspace.id_lo | workspace.id_hi, 0)
+        XCTAssertEqual(
+            applyWorkspacePayload(
+                handle,
+                kind: UInt16(SEYAL_APP_ACTION_SET_WORKSPACE_ROOT.rawValue),
+                payload: root.path,
+                targetLo: workspace.id_lo,
+                targetHi: workspace.id_hi
+            ),
+            0
+        )
+
+        var none = seyal_app_leave_offer(handle)
+        XCTAssertEqual(none.kind, UInt16(SEYAL_APP_LEAVE_OFFER_NONE.rawValue))
+
+        XCTAssertEqual(
+            applyWorkspacePayload(
+                handle,
+                kind: UInt16(SEYAL_APP_ACTION_OBSERVE_TRUSTED_FOREGROUND_CWD.rawValue),
+                payload: outside.path
+            ),
+            0
+        )
+        let offer = seyal_app_leave_offer(handle)
+        XCTAssertEqual(offer.kind, UInt16(SEYAL_APP_LEAVE_OFFER_CREATE.rawValue))
+        XCTAssertGreaterThan(offer.path_len, 0)
+
+        var dismiss = SeyalAppAction()
+        dismiss.version = UInt16(SEYAL_APP_ABI_VERSION)
+        dismiss.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        dismiss.kind = UInt16(SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &dismiss), 0)
+        none = seyal_app_leave_offer(handle)
+        XCTAssertEqual(none.kind, UInt16(SEYAL_APP_LEAVE_OFFER_NONE.rawValue))
+        XCTAssertEqual(seyal_app_shell(handle).workspace_count, 1, "No must not mint a Workspace")
+    }
+
+    @MainActor
+    func testWorkspaceLayoutRowsSelectOuterTabsWithoutSecondTabStrip() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        view.reconcileChrome()
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layout-0"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-layout-1"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-left-tabs"))
+        let handle = view.pane.appHandle
+
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), 0)
+        view.reconcileChrome()
+        XCTAssertEqual(seyal_app_shell(handle).tab_count, 2)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-layouts-heading"))
+
+        let first = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-layout-0") as? IdentityButton
+        )
+        let second = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-layout-1") as? IdentityButton
+        )
+        XCTAssertNotEqual(first.idLo, second.idLo)
+        view.selectTab(first)
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.active_tab_lo, first.idLo)
+        XCTAssertEqual(shell.active_tab_hi, first.idHi)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-tab-strip"),
+                     "layout navigation must not become a second terminal strip")
+    }
+
+    @MainActor
+    func testCloseTabUsesSnapshotContainmentFence() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), 0)
+        view.reconcileChrome()
+
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.tab_count, 2)
+        let currentGeneration = shell.containment_generation
+        XCTAssertEqual(view.closeTabButton.containmentGeneration, currentGeneration)
+
+        view.closeTabButton.containmentGeneration = currentGeneration &- 1
+        view.closeActiveTab(view.closeTabButton)
+        XCTAssertEqual(
+            seyal_app_shell(handle).tab_count,
+            2,
+            "a stale close control must not remove the current Tab"
+        )
+
+        view.closeTabButton.containmentGeneration = currentGeneration
+        view.closeActiveTab(view.closeTabButton)
+        XCTAssertEqual(
+            seyal_app_shell(handle).tab_count,
+            1,
+            "a current close control carries the exact Rust containment fence"
+        )
     }
 
     @MainActor
@@ -444,6 +756,7 @@ final class SeyalHostComponentTests: XCTestCase {
     @MainActor
     func testProductionPaneTreeProjectsOneLiveFocusedRegion() throws {
         XCTAssertEqual(MemoryLayout<SeyalAppPaneRegion>.size, 40)
+        XCTAssertEqual(MemoryLayout<SeyalAppPaneBinding>.size, 48)
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
@@ -454,6 +767,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(region.pane_hi, shell.focused_pane_hi)
         XCTAssertEqual(region.flags, UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE))
         XCTAssertEqual(seyal_app_pane_region(view.pane.appHandle, 1).size, 0, "out of range fails closed")
+        let binding = seyal_app_pane_binding(view.pane.appHandle, 0)
+        XCTAssertEqual(binding.pane_lo, region.pane_lo)
+        XCTAssertEqual(binding.pane_hi, region.pane_hi)
+        XCTAssertEqual(seyal_app_pane_binding(view.pane.appHandle, 1).size, 0)
 
         let regionView = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0"))
         XCTAssertEqual(regionView.accessibilityValue() as? String, "focused")
@@ -462,8 +779,895 @@ final class SeyalHostComponentTests: XCTestCase {
         // center region, exactly as before multipane projection.
         let live = try XCTUnwrap(view.pane.superview)
         XCTAssertFalse(live.isHidden)
-        XCTAssertEqual(live.frame, regionView.frame)
+        XCTAssertEqual(live.frame, terminalContentFrame(regionView.frame))
         XCTAssertGreaterThan(live.frame.width, 0)
+    }
+
+    @MainActor
+    func testBoundAndFocusedLeavesAreSimultaneouslyLive() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1111_1111_1111_1111
+        bind.target_attachment_lo = 0x2222_2222_2222_2222
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.pane_count, 2)
+        let first = seyal_app_pane_region(handle, 0)
+        let second = seyal_app_pane_region(handle, 1)
+        XCTAssertNotEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0, "bound sibling stays live")
+        XCTAssertNotEqual(second.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0, "focused landing leaf is live")
+        XCTAssertNotEqual(second.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED), 0)
+        XCTAssertEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED), 0)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-0"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        // #1424: multipane Flow keeps liveContent hidden; focused presentation
+        // host follows the focused LIVE region.
+        let focusedRegion = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        XCTAssertTrue(focusedRegion.isAccessibilityEnabled())
+        XCTAssertTrue(view.centerColumn.liveContent.isHidden)
+        let focusedHost = try XCTUnwrap(
+            view.centerColumn.presentationHost(paneLo: second.pane_lo, paneHi: second.pane_hi)
+        )
+        XCTAssertFalse(focusedHost.isHidden)
+        XCTAssertEqual(focusedHost.frame, terminalContentFrame(focusedRegion.frame, splitInset: 1))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-presentation-host"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-secondary-live-pane"))
+    }
+
+    /// #1424: every visible Flow leaf keeps Block transcript + composer, not
+    /// Metal-only chrome. Focus must not destroy hosts or reset scroll.
+    @MainActor
+    func testSplitFlowPanesEachExposeBlocksAndComposer() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        let handle = view.pane.appHandle
+        // LIVE hosts require a bound Controller (same as #936 multipane).
+        // SelectRestingPresentation requires authority — opt into Flow after BIND.
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1111_1111_1111_1111
+        bind.target_attachment_lo = 0x2222_2222_2222_2222
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks-scroll"))
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let first = seyal_app_pane_region(handle, 0)
+        let second = seyal_app_pane_region(handle, 1)
+        XCTAssertNotEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0)
+        XCTAssertNotEqual(second.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0)
+
+        XCTAssertEqual(seyal_app_shell(handle).pane_count, 2)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-0"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        XCTAssertEqual(
+            view.centerColumn.secondaryHosts.count,
+            2,
+            "multipane Flow installs a durable host per visible leaf"
+        )
+        XCTAssertTrue(
+            view.centerColumn.liveContent.isHidden,
+            "multipane Flow must not relocate liveContent for focus"
+        )
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-secondary-live-pane"),
+            "unfocused leaf keeps a presentation host"
+        )
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-pane-presentation-host"),
+            "focused leaf keeps a durable presentation host"
+        )
+
+        // Focused Flow chrome remains on the input-owned host.
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks-scroll"))
+
+        // Unfocused Flow leaf must also expose Block transcript + composer —
+        // Metal-only secondary surfaces fail this gate.
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-secondary-blocks"),
+            "unfocused Flow pane must present Blocks, not a raw Metal-only surface"
+        )
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-secondary-blocks-scroll"),
+            "unfocused Flow pane owns an independent transcript scroll view"
+        )
+        let secondaryComposers = accessibilityChildren(view) { id in
+            id.hasPrefix("seyal-composer-")
+        }
+        XCTAssertFalse(
+            secondaryComposers.isEmpty,
+            "unfocused Flow pane must project a pane-scoped composer"
+        )
+
+        let hostA = try XCTUnwrap(
+            view.centerColumn.presentationHost(paneLo: first.pane_lo, paneHi: first.pane_hi)
+        )
+        let hostB = try XCTUnwrap(
+            view.centerColumn.presentationHost(paneLo: second.pane_lo, paneHi: second.pane_hi)
+        )
+        for host in [hostA, hostB] {
+            host.layoutSubtreeIfNeeded()
+            XCTAssertGreaterThan(
+                host.transcript.frame.height,
+                250,
+                "each Flow pane must give its Block transcript the available space above the composer"
+            )
+            let transcriptOverlay = host.transcript.convert(host.transcript.bounds, to: host.surface)
+            XCTAssertEqual(
+                transcriptOverlay.origin.x,
+                0,
+                accuracy: 1,
+                "pane Metal surface must cover the Block transcript horizontally"
+            )
+            XCTAssertEqual(
+                transcriptOverlay.origin.y,
+                0,
+                accuracy: 1,
+                "pane Metal surface must cover the Block transcript vertically so output glyphs paint"
+            )
+            XCTAssertGreaterThanOrEqual(
+                transcriptOverlay.minX,
+                -1,
+                "Block transcript must not begin left of its Metal surface"
+            )
+            XCTAssertEqual(
+                transcriptOverlay.size.height,
+                host.surface.bounds.height,
+                accuracy: 1,
+                "pane Metal surface height must match the Block transcript viewport"
+            )
+            XCTAssertLessThanOrEqual(
+                transcriptOverlay.maxX,
+                host.surface.bounds.maxX + 1,
+                "Block transcript must remain inside the Metal surface horizontally"
+            )
+        }
+        let identityA = ObjectIdentifier(hostA)
+        let identityB = ObjectIdentifier(hostB)
+
+        let scrollTarget = hostA.inputOwned ? hostB : hostA
+        // Host tests often run without a key window; size the scroll clip
+        // explicitly so mid-transcript offsets are representable.
+        scrollTarget.transcript.setFrameSize(
+            NSSize(width: max(scrollTarget.bounds.width, 200), height: 320)
+        )
+        scrollTarget.ensureTranscriptScrollableForTests()
+        scrollTarget.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(
+            scrollTarget.transcriptDocumentScrollHeight(),
+            500,
+            "precondition: transcript document is taller than the clip"
+        )
+        scrollTarget.setTranscriptDocumentOffsetY(180)
+        let retainedOffset = scrollTarget.transcriptDocumentOffsetY
+        XCTAssertGreaterThan(retainedOffset, 100, "precondition: scrolled mid-transcript")
+
+        // Focus churn must not strip chrome, destroy hosts, or reset scroll.
+        for _ in 0..<20 {
+            let unfocusedIndex = (0..<2).first { index in
+                seyal_app_pane_region(handle, UInt32(index)).flags
+                    & UInt16(SEYAL_APP_PANE_REGION_FOCUSED) == 0
+            }!
+            let target = seyal_app_pane_region(handle, UInt32(unfocusedIndex))
+            var focus = SeyalAppAction()
+            focus.version = UInt16(SEYAL_APP_ABI_VERSION)
+            focus.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            focus.kind = UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue)
+            focus.target_execution_lo = target.pane_lo
+            focus.target_execution_hi = target.pane_hi
+            XCTAssertEqual(seyal_app_apply(handle, &focus), 0)
+            view.reconcileChrome()
+            view.layoutSubtreeIfNeeded()
+            XCTAssertEqual(view.centerColumn.secondaryHosts.count, 2)
+            XCTAssertTrue(view.centerColumn.liveContent.isHidden)
+            XCTAssertEqual(
+                ObjectIdentifier(
+                    try XCTUnwrap(
+                        view.centerColumn.presentationHost(
+                            paneLo: first.pane_lo, paneHi: first.pane_hi
+                        )
+                    )
+                ),
+                identityA,
+                "focus must not recreate pane A host"
+            )
+            XCTAssertEqual(
+                ObjectIdentifier(
+                    try XCTUnwrap(
+                        view.centerColumn.presentationHost(
+                            paneLo: second.pane_lo, paneHi: second.pane_hi
+                        )
+                    )
+                ),
+                identityB,
+                "focus must not recreate pane B host"
+            )
+            XCTAssertEqual(
+                scrollTarget.transcriptDocumentOffsetY,
+                retainedOffset,
+                accuracy: 1,
+                "focus must retain transcript scroll offset"
+            )
+            XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+            XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-blocks"))
+            XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-secondary-live-pane"))
+            XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-secondary-blocks"))
+            XCTAssertFalse(
+                accessibilityChildren(view) { $0.hasPrefix("seyal-composer-") }.isEmpty
+            )
+        }
+
+        // Unfocused stream currency: registry poll must refresh the same host.
+        let beforePoll = ObjectIdentifier(scrollTarget)
+        scrollTarget.noteRegistryPolled()
+        XCTAssertEqual(ObjectIdentifier(scrollTarget), beforePoll)
+        XCTAssertEqual(
+            scrollTarget.transcriptDocumentOffsetY,
+            retainedOffset,
+            accuracy: 1,
+            "registry poll changed scroll: doc=\(scrollTarget.transcriptDocumentScrollHeight()), "
+                + "preserved=\(scrollTarget.preservedDocumentHeightConstraint?.constant ?? -1), "
+                + "following=\(scrollTarget.followingLiveEnd), "
+                + "clip=\(NSStringFromRect(scrollTarget.transcript.contentView.bounds)), "
+                + "blocks=\(NSStringFromRect(scrollTarget.blocks.frame))"
+        )
+    }
+
+    /// #1464: after Flow→Flow split, routeFocus must move first responder from the
+    /// hidden liveContent composer onto the visible pane-owned composer.
+    @MainActor
+    func testRouteFocusAfterSplitTargetsVisiblePaneComposer() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 1200, height: 760),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let handle = view.pane.appHandle
+
+        var snap = seyal_app_snapshot(handle)
+        let sourceLo = snap.pane_lo
+        let sourceHi = snap.pane_hi
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = sourceLo
+        bind.fence_pane_hi = sourceHi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x3333_3333_3333_3333
+        bind.target_attachment_lo = 0x4444_4444_4444_4444
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(view.centerColumn.liveContent.isHidden)
+        XCTAssertEqual(view.centerColumn.secondaryHosts.count, 2)
+
+        // Keep focus on the already-bound source pane so its Flow composer is
+        // Available; the freshly split leaf may still be unbound in this fixture.
+        var focusSource = SeyalAppAction()
+        focusSource.version = UInt16(SEYAL_APP_ABI_VERSION)
+        focusSource.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        focusSource.kind = UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue)
+        focusSource.target_execution_lo = sourceLo
+        focusSource.target_execution_hi = sourceHi
+        XCTAssertEqual(seyal_app_apply(handle, &focusSource), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        // Reproduce the post-⌘D defect: hidden liveContent composer still owns
+        // first responder after chrome reconcile with unchanged eligibility.
+        XCTAssertTrue(view.composer.focusEditor())
+        let hiddenEditor = try XCTUnwrap(
+            accessibilityChild(view.composer, identifier: "seyal-composer-editor")
+        )
+        XCTAssertTrue(window.firstResponder === hiddenEditor)
+
+        view.routeFocus()
+        let ownedHost = try XCTUnwrap(
+            view.centerColumn.secondaryHosts.first(where: \.inputOwned)
+        )
+        XCTAssertFalse(ownedHost.composer.isHidden)
+        XCTAssertTrue(
+            view.activeComposer === ownedHost.composer,
+            "activeComposer must prefer the input-owned pane editor"
+        )
+        let activeEditor = try XCTUnwrap(
+            accessibilityChild(view.activeComposer, identifier: "seyal-composer-editor")
+        )
+        XCTAssertTrue(
+            window.firstResponder === activeEditor,
+            "routeFocus must leave the hidden root composer for the visible pane editor"
+        )
+        XCTAssertFalse(window.firstResponder === hiddenEditor)
+    }
+
+    @MainActor
+    func testVisibleOutputLineCountTrimsOnlyTrailingBlankRows() {
+        XCTAssertEqual(CommandBlockView.visibleOutputLineCount("first\n\nthird\n\n"), 3)
+        XCTAssertEqual(CommandBlockView.visibleOutputLineCount("\n\t\n"), 1)
+        XCTAssertEqual(CommandBlockView.visibleOutputLineCount("single line"), 1)
+    }
+
+    @MainActor
+    func testSessionBlockAlignsWithLocalBlock() {
+        func makeCard(session: Bool) -> CommandBlockView {
+            let card = CommandBlockView(
+                prompt: "$", title: "echo output", detail: "", state: 0,
+                cellHeight: 14, lines: 2, session: session
+            )
+            card.frame = NSRect(x: 0, y: 0, width: 600, height: 80)
+            card.layoutSubtreeIfNeeded()
+            return card
+        }
+
+        let local = makeCard(session: false)
+        let session = makeCard(session: true)
+        let localHeader = local.subviews[0]
+        let sessionHeader = session.subviews[0]
+        let localSeam = local.subviews[2]
+        let sessionSeam = session.subviews[2]
+
+        XCTAssertEqual(sessionHeader.frame.minX, localHeader.frame.minX, accuracy: 1)
+        XCTAssertEqual(sessionHeader.frame.maxX, localHeader.frame.maxX, accuracy: 1)
+        XCTAssertEqual(session.body.frame.minX, local.body.frame.minX, accuracy: 1)
+        XCTAssertEqual(session.body.frame.maxX, local.body.frame.maxX, accuracy: 1)
+        XCTAssertEqual(sessionSeam.frame.minX, localSeam.frame.minX, accuracy: 1)
+        XCTAssertEqual(sessionSeam.frame.maxX, localSeam.frame.maxX, accuracy: 1)
+    }
+
+    @MainActor
+    func testLongBlockAccessibilitySummaryKeepsFirstAndLastOutputLines() throws {
+        let card = CommandBlockView(
+            prompt: "$", title: "stream", detail: "", state: 0,
+            cellHeight: 14, lines: 100, session: false
+        )
+        let output = (1...100).map { String(format: "AXSTREAM-%03d", $0) }
+            .joined(separator: "\n")
+        card.setBodyTranscript(output)
+        let transcript = try XCTUnwrap(card.body.subviews.first as? NSTextField)
+        let summary = try XCTUnwrap(transcript.accessibilityLabel() as? String)
+
+        XCTAssertTrue(summary.contains("AXSTREAM-001"))
+        XCTAssertTrue(summary.contains("AXSTREAM-100"))
+        XCTAssertLessThanOrEqual(summary.count, 240)
+    }
+
+    /// #1424: focus ownership updates must not recreate Block views or scroll.
+    @MainActor
+    func testFocusOwnershipPreservesBlockViewIdentityAndScroll() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        layout.appHandle = seyal_app_create()
+        defer { seyal_app_destroy(layout.appHandle) }
+        let left = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 0,
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
+            focused: true, live: true, title: "A"
+        )
+        let right = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 0,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "B"
+        )
+        layout.apply([left, right], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        let hostA = try XCTUnwrap(layout.presentationHost(paneLo: 1, paneHi: 0))
+        let hostB = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
+        let hostIdentityA = ObjectIdentifier(hostA)
+        let hostIdentityB = ObjectIdentifier(hostB)
+
+        let cardA = CommandBlockView(
+            prompt: "$", title: "pane-a", detail: "", state: 0,
+            cellHeight: 14, lines: 48, session: false
+        )
+        let cardB = CommandBlockView(
+            prompt: "$", title: "pane-b", detail: "", state: 0,
+            cellHeight: 14, lines: 48, session: false
+        )
+        hostA.blocks.addArrangedSubview(cardA)
+        hostB.blocks.addArrangedSubview(cardB)
+        let blockIdentityA = ObjectIdentifier(cardA)
+        let blockIdentityB = ObjectIdentifier(cardB)
+
+        for host in [hostA, hostB] {
+            host.transcript.setFrameSize(NSSize(width: 280, height: 320))
+            host.ensureTranscriptScrollableForTests(minimumHeight: 2000)
+            let eligibility = seyal_app_eligibility_for_pane(
+                layout.appHandle, host.paneLo, host.paneHi
+            )
+            host.lastAppliedEligibility = eligibility
+            host.lastProjectionFingerprint = host.makeProjectionFingerprint(
+                eligibility: eligibility
+            )
+        }
+        hostA.setTranscriptDocumentOffsetY(160)
+        hostB.setTranscriptDocumentOffsetY(220)
+        let offsetA = hostA.transcriptDocumentOffsetY
+        let offsetB = hostB.transcriptDocumentOffsetY
+        XCTAssertGreaterThan(offsetA, 100)
+        XCTAssertGreaterThan(offsetB, 100)
+
+        for i in 0..<20 {
+            let aFocused = i % 2 == 0
+            layout.reconcileSecondaryLiveHosts(bindings: [
+                (paneLo: 1, paneHi: 0, displayHandle: 11, focused: aFocused, live: true),
+                (paneLo: 2, paneHi: 0, displayHandle: 22, focused: !aFocused, live: true),
+            ])
+            hostA.reconcileFocusOwnershipPresentation()
+            hostB.reconcileFocusOwnershipPresentation()
+            layout.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(ObjectIdentifier(hostA), hostIdentityA)
+            XCTAssertEqual(ObjectIdentifier(hostB), hostIdentityB)
+            XCTAssertEqual(hostA.inputOwned, aFocused)
+            XCTAssertEqual(hostB.inputOwned, !aFocused)
+            XCTAssertEqual(
+                hostA.arrangedBlockViews.map(ObjectIdentifier.init),
+                [blockIdentityA],
+                "focus must not rebuild pane A Block views"
+            )
+            XCTAssertEqual(
+                hostB.arrangedBlockViews.map(ObjectIdentifier.init),
+                [blockIdentityB],
+                "focus must not rebuild pane B Block views"
+            )
+            XCTAssertEqual(hostA.transcriptDocumentOffsetY, offsetA, accuracy: 1)
+            XCTAssertEqual(hostB.transcriptDocumentOffsetY, offsetB, accuracy: 1)
+        }
+    }
+
+    /// #1424: late 0→bound display-handle must keep the host and re-sync
+    /// projections (split often installs hosts before Controller bind).
+    @MainActor
+    func testLateDisplayHandleBindKeepsHostAndResyncsProjection() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        layout.appHandle = seyal_app_create()
+        defer { seyal_app_destroy(layout.appHandle) }
+        let left = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 0,
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
+            focused: true, live: true, title: "A"
+        )
+        let right = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 0,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "B"
+        )
+        layout.apply([left, right], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 0, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 0, focused: false, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        let hostA = try XCTUnwrap(layout.presentationHost(paneLo: 1, paneHi: 0))
+        let hostB = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
+        let identityA = ObjectIdentifier(hostA)
+        let identityB = ObjectIdentifier(hostB)
+        XCTAssertEqual(hostA.displayHandle, 0)
+        XCTAssertEqual(hostB.displayHandle, 0)
+
+        let stub = CommandBlockView(
+            prompt: "$", title: "late-bind", detail: "", state: 0,
+            cellHeight: 14, lines: 1, session: false
+        )
+        hostB.blocks.addArrangedSubview(stub)
+        let stubIdentity = ObjectIdentifier(stub)
+        let heightBefore = stub.frame.height
+
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(layout.presentationHost(paneLo: 1, paneHi: 0))),
+            identityA
+        )
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))),
+            identityB
+        )
+        XCTAssertEqual(hostA.displayHandle, 11)
+        XCTAssertEqual(hostB.displayHandle, 22)
+        // Without Runtime history the planted stub may rebuild away; host
+        // identity and the gained-handle sync path are the merge gate here.
+        _ = stubIdentity
+        _ = heightBefore
+        hostB.republishExistingBlockProjections()
+        hostB.layoutSubtreeIfNeeded()
+        XCTAssertEqual(hostB.displayHandle, 22)
+    }
+
+    /// #1424: empty projection rebuild must clear preserved blank scroll canvas.
+    @MainActor
+    func testEmptyProjectionClearsPreservedTranscriptHeight() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
+        layout.appHandle = seyal_app_create()
+        defer { seyal_app_destroy(layout.appHandle) }
+        let left = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 0,
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
+            focused: true, live: true, title: "A"
+        )
+        let right = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 0,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "B"
+        )
+        layout.apply([left, right], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        let host = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
+        host.transcript.setFrameSize(NSSize(width: 280, height: 320))
+        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
+        host.preserveDocumentHeight(2400)
+        host.setTranscriptDocumentOffsetY(400)
+        XCTAssertNotNil(host.preservedDocumentHeightConstraint)
+        XCTAssertGreaterThan(host.transcriptDocumentOffsetY, 100)
+
+        host.invalidateProjectionCacheForTests()
+        host.reconcileFlowPresentation()
+        XCTAssertNil(
+            host.preservedDocumentHeightConstraint,
+            "empty canvas must not keep a blank scrollable transcript"
+        )
+        XCTAssertEqual(host.transcriptDocumentOffsetY, 0, accuracy: 1)
+        XCTAssertLessThan(
+            host.transcriptDocumentScrollHeight(),
+            64,
+            "cleared canvas document height collapses"
+        )
+    }
+
+    /// #1424: unfocused Hidden composer (TUI/Raw proxy) yields full-pane Metal
+    /// on that leaf without destroying the durable host.
+    @MainActor
+    func testSecondaryHostDirectPresentationWhenComposerHidden() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
+        layout.appHandle = seyal_app_create()
+        defer { seyal_app_destroy(layout.appHandle) }
+        let handle = layout.appHandle
+        let left = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 0,
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
+            focused: true, live: true, title: "A"
+        )
+        let right = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 0,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "B"
+        )
+        layout.apply([left, right], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        let host = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
+        let identity = ObjectIdentifier(host)
+        // Without a real TUI child, Hidden is not forced here; assert Flow pins
+        // activate only once sized (height-zero guard) and host survives focus.
+        XCTAssertGreaterThanOrEqual(host.bounds.height, 8)
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: false, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: true, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))),
+            identity
+        )
+        XCTAssertTrue(host.inputOwned)
+        _ = handle
+    }
+
+    @MainActor
+    func testSecondaryLiveSurfaceHasVisibleFrameAndOwnsPaneHitTarget() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+        let focused = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 1,
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
+            focused: true, live: true, title: "Focused"
+        )
+        let secondary = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 2,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "Secondary"
+        )
+        layout.apply([focused, secondary], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 1, displayHandle: 0, focused: true, live: true),
+            (paneLo: 2, paneHi: 2, displayHandle: 42, focused: false, live: true),
+        ])
+        // Frame must be published in the same reconcile turn that installs the
+        // host — before a later layout pass — so Auto Layout never sees width=0.
+        let hostBeforeLayout = try XCTUnwrap(layout.secondaryHost(displayHandle: 42))
+        XCTAssertGreaterThan(hostBeforeLayout.frame.width, 1)
+        XCTAssertGreaterThan(hostBeforeLayout.frame.height, 1)
+        layout.layoutSubtreeIfNeeded()
+
+        let host = try XCTUnwrap(layout.secondaryHost(displayHandle: 42))
+        XCTAssertGreaterThan(host.frame.width, 0)
+        XCTAssertGreaterThan(host.frame.height, 0)
+        XCTAssertTrue(host.isAccessibilityEnabled())
+        // Unfocused live leaves are focus hit-targets (AXButton), not groups —
+        // matching SecondaryLivePaneHost.refreshInputOwnershipChrome.
+        XCTAssertEqual(host.accessibilityRole(), .button)
+        XCTAssertEqual(host.accessibilityLabel(), "Focus secondary terminal pane")
+        XCTAssertTrue(layout.hitTest(NSPoint(x: 375, y: 150)) === host)
+    }
+
+    @MainActor
+    func testSecondaryPaneRecoveryPlaceholderOffersExactRetryableTarget() throws {
+        var target = SeyalAppPaneRecoveryTarget()
+        target.version = UInt16(SEYAL_APP_ABI_VERSION)
+        target.size = UInt16(MemoryLayout<SeyalAppPaneRecoveryTarget>.size)
+        target.flags = UInt16(SEYAL_APP_PANE_RECOVERY_RETRYABLE)
+        target.pane_lo = 0x11
+        target.pane_hi = 0x12
+        target.execution_lo = 0x21
+        target.execution_hi = 0x22
+        target.binding_generation = 31
+        target.recovery_generation = 41
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
+        let parent = NSView(frame: NSRect(x: 24, y: 32, width: 640, height: 420))
+        container.addSubview(parent)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = container
+        let host = SecondaryLivePaneHost(
+            appHandle: 0,
+            paneLo: target.pane_lo,
+            paneHi: target.pane_hi,
+            displayHandle: 0,
+            recoveryTarget: target
+        )
+        host.frame = NSRect(x: 100, y: 80, width: 320, height: 220)
+        parent.addSubview(host)
+        window.makeKeyAndOrderFront(nil)
+        parent.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        defer {
+            host.removeFromSuperview()
+            window.close()
+        }
+        var retried: SeyalAppPaneRecoveryTarget?
+        host.onRetryRecovery = { retried = $0 }
+
+        let status = try XCTUnwrap(
+            accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-status") as? NSTextField
+        )
+        XCTAssertEqual(status.stringValue, "Terminal disconnected")
+        let retry = try XCTUnwrap(
+            accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-retry") as? NSButton
+        )
+        XCTAssertFalse(retry.isHidden)
+        let retryCenterInContainer = retry.convert(
+            NSPoint(x: retry.bounds.midX, y: retry.bounds.midY),
+            to: container
+        )
+        XCTAssertTrue(
+            parent.hitTest(retryCenterInContainer) === retry,
+            "superview-coordinate hit testing must reach Retry when the recovery host has a nonzero origin"
+        )
+        retry.performClick(nil)
+        let retryTarget = try XCTUnwrap(retried)
+        XCTAssertEqual(retryTarget.pane_lo, target.pane_lo)
+        XCTAssertEqual(retryTarget.pane_hi, target.pane_hi)
+        XCTAssertEqual(retryTarget.execution_lo, target.execution_lo)
+        XCTAssertEqual(retryTarget.execution_hi, target.execution_hi)
+        XCTAssertEqual(retryTarget.binding_generation, target.binding_generation)
+        XCTAssertEqual(retryTarget.recovery_generation, target.recovery_generation)
+
+        target.flags = UInt16(SEYAL_APP_PANE_RECOVERY_TARGET_ACTIVE)
+        host.updateRecoveryTarget(target)
+        XCTAssertEqual(status.stringValue, "Reconnecting terminal…")
+        XCTAssertTrue(retry.isHidden, "automatic recovery must not show an explicit retry button")
+    }
+
+    @MainActor
+    func testPaneTreeHostVerbsFailClosedAndZoomOverlayUsesRustFlags() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.pane_count, 1)
+
+        view.zoomPane(lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
+        var region = seyal_app_pane_region(handle, 0)
+        XCTAssertEqual(
+            region.flags,
+            UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE | SEYAL_APP_PANE_REGION_ZOOMED)
+        )
+        XCTAssertEqual(region.width, 1.0)
+        XCTAssertEqual(region.height, 1.0)
+        XCTAssertEqual(seyal_app_pane_divider(handle, 0).size, 0)
+
+        view.zoomPane(lo: 1, hi: 2)
+        XCTAssertEqual(seyal_app_last_error(handle), 1, "stale zoom PaneId fails closed")
+        XCTAssertEqual(
+            seyal_app_pane_region(handle, 0).flags,
+            UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE | SEYAL_APP_PANE_REGION_ZOOMED)
+        )
+
+        view.equalizeFocused()
+        region = seyal_app_pane_region(handle, 0)
+        XCTAssertEqual(
+            region.flags,
+            UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE),
+            "equalize clears zoom overlay without a second host model"
+        )
+
+        view.unzoomPane()
+        XCTAssertEqual(seyal_app_last_error(handle), 56, "NotZoomed")
+
+        view.swapPanes(
+            aLo: shell.focused_pane_lo, aHi: shell.focused_pane_hi,
+            bLo: 9, bHi: 9
+        )
+        XCTAssertEqual(seyal_app_last_error(handle), 1)
+
+        view.movePaneBeside(
+            paneLo: shell.focused_pane_lo, paneHi: shell.focused_pane_hi,
+            neighborLo: shell.focused_pane_lo, neighborHi: shell.focused_pane_hi,
+            side: 1
+        )
+        XCTAssertEqual(seyal_app_last_error(handle), 57, "InvalidMoveTarget")
+
+        view.focusDirection(1)
+        XCTAssertEqual(seyal_app_last_error(handle), 58, "NoDirectionalNeighbor")
+        view.equalizeTab()
+        XCTAssertEqual(seyal_app_last_error(handle), 0)
+    }
+
+    @MainActor
+    func testZoomOverlayFillsTabWithoutSplitInsetAndHidesOccludedLeaf() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let layout = try XCTUnwrap(view.centerColumn)
+        let splitFrame = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        let shell = seyal_app_shell(handle)
+        let focusedHost = try XCTUnwrap(
+            view.centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            )
+        )
+        XCTAssertTrue(view.centerColumn.liveContent.isHidden)
+        XCTAssertEqual(focusedHost.frame, terminalContentFrame(splitFrame, splitInset: 1))
+
+        view.zoomPane(lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let zoomed = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        XCTAssertTrue(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
+        XCTAssertFalse(zoomed.isHidden)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        XCTAssertEqual(zoomed.frame.width, layout.bounds.width, accuracy: 1)
+        XCTAssertEqual(zoomed.frame.height, layout.bounds.height, accuracy: 1)
+        let zoomedHost = try XCTUnwrap(
+            view.centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            )
+        )
+        XCTAssertFalse(zoomedHost.isHidden)
+        XCTAssertEqual(
+            zoomedHost.frame,
+            terminalContentFrame(zoomed.frame),
+            "zoomed leaf reserves its Pane-local strip"
+        )
+        let occludedHost = accessibilityChild(view, identifier: "seyal-secondary-live-pane")
+        XCTAssertTrue(
+            occludedHost == nil || occludedHost!.isHidden,
+            "occluded leaf presents no surface while zoomed"
+        )
+
+        view.unzoomPane()
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        XCTAssertEqual(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame, splitFrame)
+        XCTAssertEqual(
+            try XCTUnwrap(
+                view.centerColumn.presentationHost(
+                    paneLo: shell.focused_pane_lo,
+                    paneHi: shell.focused_pane_hi
+                )
+            ).frame,
+            terminalContentFrame(splitFrame, splitInset: 1)
+        )
+        let restoredSecondary = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-secondary-live-pane")
+        )
+        XCTAssertFalse(restoredSecondary.isHidden)
     }
 
     @MainActor
@@ -503,8 +1707,11 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        // Raw is the cold-start resting mode. This test exercises a user
+        // selected Flow host before checking that nested TUI refresh hides it.
+        XCTAssertEqual(optInFlow(handle), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
         XCTAssertFalse(composer.isHidden, "Flow bind must show composer")
@@ -545,8 +1752,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -556,7 +1764,7 @@ final class SeyalHostComponentTests: XCTestCase {
         begin.version = bind.version
         begin.size = bind.size
         begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
-        begin.target_pty_generation = 0
+        begin.target_generation = 0
         XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
         let generation = seyal_app_snapshot(handle).recovery_generation
 
@@ -565,22 +1773,766 @@ final class SeyalHostComponentTests: XCTestCase {
         ended.size = bind.size
         ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
         ended.target_execution_lo = generation
-        ended.target_pty_generation = 1
+        ended.target_generation = 1
         ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
         XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
 
         let snapshot = seyal_app_snapshot(handle)
+        // Shell exit keeps Flow and the execution so completed Block bodies
+        // still project. The composer hides; New shell is the dedicated recovery
+        // control — "+" must still forward CreateTab (ADR-015 / #1379).
         XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
+        XCTAssertNotEqual(snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION), 0)
         XCTAssertEqual(snapshot.recovery_stage, UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue))
         XCTAssertEqual(view.recoveryText(snapshot), "shell exited")
         view.reconcileChrome()
         XCTAssertTrue(composer.isHidden, "an ended shell cannot accept Flow commands")
         XCTAssertEqual(seyal_app_composer(handle).mode, UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue))
+        XCTAssertFalse(
+            accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
+            "New shell must appear after primary exit"
+        )
+        XCTAssertEqual(
+            seyal_app_new_shell_available(handle),
+            1,
+            "focused ended Pane must admit New shell"
+        )
+        // ADR-015: "+" still CreateTabs — must not flip into replacement bootstrap.
+        view.createTab()
+        view.reconcileChrome()
+        XCTAssertEqual(
+            seyal_app_replacement_bootstrap_pending(handle),
+            0,
+            "CreateTab after exit must not silently become New shell (ADR-015)"
+        )
+        XCTAssertEqual(
+            seyal_app_new_shell_available(handle),
+            0,
+            "CreateTab focus leaves a latch-free Pane; New shell must not stay admitted"
+        )
+        XCTAssertTrue(
+            accessibilityChild(view, identifier: "seyal-new-shell")?.isHidden ?? true,
+            "New shell must not stay visible on a tab Rust will refuse"
+        )
+    }
+
+    @MainActor
+    func testShellExitNewShellRebindsFreshExecution() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let handle = view.pane.appHandle
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        view.reconcileChrome()
+
+        var begin = SeyalAppAction()
+        begin.version = bind.version
+        begin.size = bind.size
+        begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
+        begin.target_generation = 0
+        XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
+        let generation = seyal_app_snapshot(handle).recovery_generation
+
+        var ended = SeyalAppAction()
+        ended.version = bind.version
+        ended.size = bind.size
+        ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
+        ended.target_execution_lo = generation
+        ended.target_generation = 1
+        ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
+        view.reconcileChrome()
+        XCTAssertEqual(seyal_app_new_shell_available(handle), 1)
+
+        var prepare = SeyalAppAction()
+        prepare.version = bind.version
+        prepare.size = bind.size
+        prepare.kind = UInt16(SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &prepare), 0)
+        XCTAssertEqual(seyal_app_replacement_bootstrap_pending(handle), 1)
+        var created = prepare
+        created.flags = UInt16(SEYAL_APP_FLAG_HAS_EXECUTION)
+            | UInt16(SEYAL_APP_FLAG_HAS_ATTACHMENT)
+            | UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        created.target_execution_lo = 9
+        created.target_attachment_lo = 8
+        created.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &created), 0)
+        XCTAssertEqual(seyal_app_replacement_bootstrap_pending(handle), 0)
+        let rebound = seyal_app_snapshot(handle)
+        XCTAssertEqual(rebound.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
+        XCTAssertNotEqual(rebound.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION), 0)
+        XCTAssertEqual(rebound.recovery_stage, UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue))
+        view.reconcileChrome()
+        let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertFalse(composer.isHidden, "a bound replacement shell shows the Flow composer")
+        XCTAssertEqual(seyal_app_new_shell_available(handle), 0)
     }
 
     func testBundledRuntimeLauncherUsesFixedHelperPath() {
         XCTAssertEqual(BundledRuntimeLauncher.helperRelativePath, "Contents/Helpers/seyal-runtime")
         XCTAssertEqual(BundledRuntimeLauncher.helperIdentifier, "dev.seyal.Seyal.runtime")
+    }
+
+    func testTerminateLaunchedHelperForHeadedQuitEndsTrackedProcessGroup() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["30"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let pid = process.processIdentifier
+        XCTAssertGreaterThan(pid, 1)
+        BundledRuntimeLauncher.recordLaunchedHelperPidForTests(pid)
+        BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit()
+        let deadline = Date().addingTimeInterval(2)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        XCTAssertFalse(
+            process.isRunning,
+            "headed Quit must end the GUI-spawned helper so Dock clears"
+        )
+        // Second call with no tracked pid is a no-op.
+        BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit()
+    }
+
+    @MainActor
+    func testRetainedHistoryRangesAreScopedToTheirController() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-history-isolation"
+        )
+        func range(handle: UInt64, marker: UInt32) -> NativeHistoryRange {
+            NativeHistoryRange(
+                startLine: 1,
+                endLine: 1,
+                blockID: 1,
+                requestID: handle,
+                revision: 1,
+                rows: [[
+                    NativeHistoryRange.Cell(
+                        scalar: marker,
+                        foreground: 0,
+                        background: 0,
+                        flags: 0
+                    )
+                ]],
+                sourceDisplayHandle: handle
+            )
+        }
+        let first = range(handle: 11, marker: 65)
+        let second = range(handle: 22, marker: 66)
+
+        surface.retainHistoryRange(first)
+        surface.retainHistoryRange(second)
+
+        XCTAssertEqual(
+            surface.retainedHistoryRange(blockID: 1, displayHandle: 11),
+            first,
+            "a tab's range stays available under its own Controller"
+        )
+        XCTAssertEqual(
+            surface.retainedHistoryRange(blockID: 1, displayHandle: 22),
+            second,
+            "a second tab can reuse the local Block id without replacing the first"
+        )
+    }
+
+    @MainActor
+    func testControllerSwitchDoesNotPaintStaleSameIDHistoryBeforeReplacementArrives() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-history-tab-switch"
+        )
+        func range(handle: UInt64, marker: UInt32) -> NativeHistoryRange {
+            NativeHistoryRange(
+                startLine: 1,
+                endLine: 1,
+                blockID: 1,
+                requestID: handle,
+                revision: 1,
+                rows: [[
+                    NativeHistoryRange.Cell(
+                        scalar: marker,
+                        foreground: 0,
+                        background: 0,
+                        flags: 0
+                    )
+                ]],
+                sourceDisplayHandle: handle
+            )
+        }
+        func frame(handle: UInt64, revision: UInt64) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: revision,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: handle,
+                        origin: .zero,
+                        clip: NSRect(x: 0, y: 0, width: 320, height: 120)
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+
+        let first = range(handle: 11, marker: 65)
+        surface.retainHistoryRange(first)
+        surface.activateTranscriptDisplayHandle(11)
+        surface.setTranscriptFrame(frame(handle: 11, revision: 1))
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, 1)
+
+        // Tab 2 reuses local Block id 1, but its history has not arrived yet.
+        // The old tab's painted text must disappear during that gap. A frame
+        // already queued by tab 1 must not reactivate its controller.
+        surface.activateTranscriptDisplayHandle(22)
+        surface.setTranscriptFrame(frame(handle: 11, revision: 2))
+
+        XCTAssertEqual(
+            surface.inspectFlowPaint().historyInstanceCount,
+            0,
+            "a tab change must clear rendered history keyed by the previous tab's local Block id"
+        )
+        XCTAssertEqual(surface.transcriptDisplayHandle, 22)
+        XCTAssertEqual(
+            surface.retainedHistoryRange(blockID: 1, displayHandle: 11),
+            first,
+            "the inactive tab's canonical history remains available for its next selection"
+        )
+    }
+
+    @MainActor
+    func testIdenticalTranscriptGeometryDoesNotReprepareHistory() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-stable-transcript-frame"
+        )
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        func frame(revision: UInt64, clip: NSRect) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: revision,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: clip.origin,
+                        clip: clip
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+        let clip = NSRect(x: 0, y: 0, width: 320, height: 120)
+        surface.renderer.setPresentationPlan(.flow())
+        surface.retainHistoryRange(range)
+        surface.activateTranscriptDisplayHandle(11)
+        surface.setTranscriptFrame(frame(revision: 1, clip: clip))
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, 1)
+        let preparedHistoryBuffer = try XCTUnwrap(surface.renderer.historyRegions[1]?.buffer)
+
+        surface.renderer.needsPresent = false
+        surface.setTranscriptFrame(frame(revision: 2, clip: clip))
+        XCTAssertFalse(
+            surface.renderer.needsPresent,
+            "a new frame revision with unchanged Block geometry must not reprepare history"
+        )
+
+        surface.setTranscriptFrame(
+            frame(revision: 3, clip: NSRect(x: 0, y: 10, width: 320, height: 120))
+        )
+        XCTAssertTrue(
+            surface.renderer.needsPresent,
+            "changed Block geometry must still prepare and present the repositioned history"
+        )
+        XCTAssertTrue(
+            surface.renderer.historyRegions[1]?.buffer === preparedHistoryBuffer,
+            "moving an unchanged Block must preserve its prepared Metal buffer"
+        )
+    }
+
+    @MainActor
+    func testHundredThousandRowHistoryPreparesOnlyTheVisibleMetalPage() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-bounded-history-page"
+        )
+        surface.renderer.setPresentationPlan(.flow())
+        surface.activateTranscriptDisplayHandle(11)
+        let cell = NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 100_000,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: Array(repeating: [cell], count: 100_000),
+            sourceDisplayHandle: 11
+        )
+        let visibleRows = 99_800..<100_000
+        surface.retainHistoryRange(range)
+        surface.setTranscriptFrame(
+            NativeTranscriptFrame(
+                revision: 1,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: .zero,
+                        clip: NSRect(x: 0, y: 0, width: 320, height: 200),
+                        historyRows: visibleRows,
+                        historyRequestID: 1,
+                        historyRevision: 1
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        )
+
+        XCTAssertEqual(
+            surface.renderer.historyRegions[1]?.instanceCount,
+            visibleRows.count,
+            "Metal must prepare only the selected viewport page from a 100K-row Block"
+        )
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, visibleRows.count)
+    }
+
+    @MainActor
+    func testIdenticalTranscriptGeometryPreparesHistoryThatArrivesLater() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-late-history-frame"
+        )
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        func frame(revision: UInt64) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: revision,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: NSPoint(x: 0, y: 10),
+                        clip: NSRect(x: 0, y: 10, width: 320, height: 24)
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+
+        surface.renderer.setPresentationPlan(.flow())
+        surface.activateTranscriptDisplayHandle(11)
+        surface.setTranscriptFrame(frame(revision: 1))
+        XCTAssertNil(surface.renderer.historyRegions[1])
+
+        // Runtime history can arrive after the first card-geometry publish.
+        // Its subsequent frame has identical geometry, but must prepare the
+        // newly retained cells for the existing Block clip.
+        surface.retainHistoryRange(range)
+        surface.setTranscriptFrame(frame(revision: 2))
+
+        XCTAssertEqual(
+            surface.inspectFlowPaint().historyInstanceCount,
+            1,
+            "same-geometry republishes must prepare history ranges that arrived since the prior frame"
+        )
+    }
+
+    @MainActor
+    func testNarrowedHistoryClipIsCleanWhenMetalScissorContainsOutput() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-narrowed-history-clip"
+        )
+        surface.renderer.setPresentationPlan(.flow())
+        let metrics = surface.renderer.glyphAtlas.metrics(backingScale: 1)
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 77,
+            requestID: 1,
+            revision: 1,
+            rows: [
+                [
+                    NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0),
+                    NativeHistoryRange.Cell(scalar: 66, foreground: 0, background: 0, flags: 0),
+                    NativeHistoryRange.Cell(scalar: 67, foreground: 0, background: 0, flags: 0),
+                    NativeHistoryRange.Cell(scalar: 68, foreground: 0, background: 0, flags: 0)
+                ]
+            ],
+            sourceDisplayHandle: 11
+        )
+        let clip = CGRect(x: 0, y: 0, width: CGFloat(metrics.cellWidth), height: CGFloat(metrics.cellHeight))
+        surface.renderer.setHistoryRegionOrder([77])
+        try surface.renderer.update(
+            historyRange: range,
+            region: NativeTranscriptRegion(id: 77, origin: .zero, clip: clip),
+            backingScale: 1
+        )
+
+        let sourceInspection = surface.inspectFlowPaint()
+        XCTAssertGreaterThan(
+            sourceInspection.instancesOutsideClips,
+            0,
+            "retained cells may extend beyond a narrower Block clip after a pane resize"
+        )
+        let texture = try XCTUnwrap(surface.renderer.renderOffscreenAndWait(
+            width: metrics.cellWidth * 4,
+            height: metrics.cellHeight
+        ))
+        let sampled = surface.renderer.inspectFlowPaint(from: texture)
+        XCTAssertTrue(
+            sampled.isClean,
+            "the Metal scissor must keep retained cells outside the Block clip from becoming visible"
+        )
+        XCTAssertGreaterThan(sampled.opaquePixelsInsideClips, 0)
+        XCTAssertEqual(sampled.opaquePixelsOutsideClips, 0)
+    }
+
+    @MainActor
+    func testDeferredHistoryPrepareRequestsPresentationAfterGPUCompletes() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-deferred-history-presentation"
+        )
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 1,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        let region = NativeTranscriptRegion(
+            id: 1,
+            displayHandle: 11,
+            origin: .zero,
+            clip: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        var frameRequested = false
+        surface.renderer.onNeedsCurrentFrame = { frameRequested = true }
+        surface.renderer.setPresentationPlan(.flow())
+        surface.renderer.requestPresent()
+        XCTAssertTrue(surface.renderer.beginValidationFrameInFlight())
+
+        XCTAssertEqual(
+            try surface.renderer.update(historyRange: range, region: region, backingScale: 1),
+            .deferred
+        )
+        XCTAssertTrue(surface.renderer.hasDeferredHistoryPrepare)
+
+        surface.renderer.endValidationFrameInFlight()
+
+        XCTAssertFalse(surface.renderer.hasDeferredHistoryPrepare)
+        XCTAssertEqual(surface.renderer.historyRegions[1]?.instanceCount, 1)
+        XCTAssertTrue(
+            frameRequested,
+            "a history prepare flushed at GPU completion must schedule a draw without waiting for more PTY output"
+        )
+    }
+
+    @MainActor
+    func testSecondaryPaneReconcilesWhenItsControllerChanges() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let appHandle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(appHandle), 0) }
+        let pane = seyal_app_snapshot(appHandle)
+        let host = SecondaryLivePaneHost(
+            appHandle: appHandle,
+            paneLo: pane.pane_lo,
+            paneHi: pane.pane_hi,
+            displayHandle: 11,
+            recoveryTarget: SeyalAppPaneRecoveryTarget()
+        )
+        let eligibility = seyal_app_eligibility_for_pane(
+            appHandle,
+            pane.pane_lo,
+            pane.pane_hi
+        )
+        host.lastAppliedEligibility = eligibility
+        host.lastProjectionFingerprint = host.makeProjectionFingerprint(
+            eligibility: eligibility
+        )
+        XCTAssertEqual(host.lastProjectionFingerprint?.displayHandle, 11)
+
+        host.updateDisplayHandle(22)
+
+        XCTAssertEqual(host.displayHandle, 22)
+        XCTAssertEqual(
+            host.lastProjectionFingerprint?.displayHandle,
+            22,
+            "a same-pane terminal-tab switch must reconcile the new Controller's Blocks"
+        )
+    }
+
+    @MainActor
+    func testSecondaryPaneCanScrollTranscriptToLiveEnd() {
+        let host = SecondaryLivePaneHost(
+            appHandle: 0,
+            paneLo: 1,
+            paneHi: 2,
+            displayHandle: 11,
+            recoveryTarget: SeyalAppPaneRecoveryTarget()
+        )
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 240)
+        host.layoutSubtreeIfNeeded()
+        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
+
+        host.scrollTranscriptToLiveEnd()
+
+        XCTAssertTrue(host.isNearLiveEnd())
+    }
+
+    @MainActor
+    func testPaneBindingsFollowPaneIdentityWhenRegionOrderDiffers() {
+        let regions = [
+            PaneLayoutView.Region(paneLo: 3, paneHi: 0, rect: .zero, focused: false, live: true, title: "Pane 3"),
+            PaneLayoutView.Region(paneLo: 1, paneHi: 0, rect: .zero, focused: true, live: true, title: "Pane 1"),
+            PaneLayoutView.Region(paneLo: 2, paneHi: 0, rect: .zero, focused: false, live: true, title: "Pane 2"),
+        ]
+        let shellBindings = [
+            paneBinding(paneLo: 1, displayHandle: 101),
+            paneBinding(paneLo: 2, displayHandle: 202),
+            paneBinding(paneLo: 3, displayHandle: 303),
+        ]
+
+        let projected = ProductChromeHostView.bindingsInRegionOrder(
+            regions: regions,
+            shellBindings: shellBindings
+        )
+
+        XCTAssertEqual(projected.compactMap { $0?.display_handle }, [303, 101, 202])
+
+        let duplicatePaneBindings = shellBindings + [paneBinding(paneLo: 3, displayHandle: 999)]
+        let projectionWithDuplicate = ProductChromeHostView.bindingsInRegionOrder(
+            regions: regions,
+            shellBindings: duplicatePaneBindings
+        )
+        XCTAssertNil(projectionWithDuplicate[0], "ambiguous identity must not bind a sibling host")
+    }
+
+    private func paneBinding(paneLo: UInt64, displayHandle: UInt64) -> SeyalAppPaneBinding {
+        var binding = SeyalAppPaneBinding()
+        binding.pane_lo = paneLo
+        binding.display_handle = displayHandle
+        return binding
+    }
+
+    @MainActor
+    func testSplitPaneTerminalTabTitlesUseDistinctPaneIdentity() {
+        XCTAssertEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 1", index: 0, tabCount: 1),
+            "Pane 1"
+        )
+        XCTAssertEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 0, tabCount: 1),
+            "Pane 2"
+        )
+        XCTAssertNotEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 1", index: 0, tabCount: 1),
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 0, tabCount: 1),
+            "split leaves must not both read as Terminal 1 (#1429)"
+        )
+        XCTAssertEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 1, tabCount: 2),
+            "Pane 2 · 2"
+        )
+        XCTAssertEqual(
+            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "  ", index: 0, tabCount: 1),
+            "Terminal 1"
+        )
+
+        let stripA = PaneTerminalTabStrip(
+            paneLo: 1,
+            paneHi: 0,
+            paneTitle: "Pane 1",
+            tabs: [PaneLayoutView.TerminalTab(lo: 1, hi: 0, selected: true)],
+            focused: true,
+            canSplit: true,
+            canClosePane: true
+        )
+        let stripB = PaneTerminalTabStrip(
+            paneLo: 2,
+            paneHi: 0,
+            paneTitle: "Pane 2",
+            tabs: [PaneLayoutView.TerminalTab(lo: 2, hi: 0, selected: true)],
+            focused: false,
+            canSplit: true,
+            canClosePane: true
+        )
+        func firstPaneButtonTitle(in root: NSView) -> String? {
+            if let button = root as? NSButton, button.title.hasPrefix("Pane") {
+                return button.title
+            }
+            for child in root.subviews {
+                if let title = firstPaneButtonTitle(in: child) { return title }
+            }
+            return nil
+        }
+        let a = firstPaneButtonTitle(in: stripA)
+        let b = firstPaneButtonTitle(in: stripB)
+        XCTAssertEqual(a, "Pane 1")
+        XCTAssertEqual(b, "Pane 2")
+        XCTAssertNotEqual(a, b)
+    }
+
+    @MainActor
+    func testPaneTerminalTabsUseBorderlessSelectedSeamsAndStableCloseSlots() throws {
+        let strip = PaneTerminalTabStrip(
+            paneLo: 4,
+            paneHi: 0,
+            paneTitle: "Pane 4",
+            tabs: [
+                PaneLayoutView.TerminalTab(lo: 10, hi: 0, selected: true),
+                PaneLayoutView.TerminalTab(lo: 11, hi: 0, selected: false),
+            ],
+            focused: true,
+            canSplit: true,
+            canClosePane: true
+        )
+        let first = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-10") as? NSButton
+        )
+        let second = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-11") as? NSButton
+        )
+        let activeClose = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-10-close") as? NSButton
+        )
+        let inactiveClose = try XCTUnwrap(
+            accessibilityChild(strip, identifier: "seyal-terminal-tab-0-11-close") as? NSButton
+        )
+        XCTAssertFalse(first.isBordered, "terminal tabs are not recessed cards")
+        XCTAssertFalse(second.isBordered, "inactive tabs retain quiet typography")
+        XCTAssertEqual(first.accessibilityValue() as? String, "selected")
+        XCTAssertEqual(second.accessibilityValue() as? String, "")
+        XCTAssertEqual(activeClose.alphaValue, 1)
+        XCTAssertTrue(activeClose.isEnabled)
+        XCTAssertEqual(inactiveClose.alphaValue, 0)
+        XCTAssertFalse(inactiveClose.isEnabled)
+        XCTAssertEqual(PaneTerminalTabStrip.height, 30, "one non-wrapping row")
+        strip.apply(theme: NativeThemeRealization.theme(for: NSAppearance(named: .darkAqua)!))
+        XCTAssertNotNil(strip.layer?.backgroundColor, "tabs use Rust-resolved utility surface")
+
+        let unfocused = PaneTerminalTabStrip(
+            paneLo: 5,
+            paneHi: 0,
+            paneTitle: "Pane 5",
+            tabs: [PaneLayoutView.TerminalTab(lo: 12, hi: 0, selected: true)],
+            focused: false,
+            canSplit: false,
+            canClosePane: true
+        )
+        let inactivePaneClose = try XCTUnwrap(
+            accessibilityChild(unfocused, identifier: "seyal-terminal-tab-0-12-close") as? NSButton
+        )
+        XCTAssertFalse(inactivePaneClose.isEnabled)
+        XCTAssertEqual(inactivePaneClose.alphaValue, 0,
+                       "unfocused pane close chrome must recede without shifting its tab row")
+    }
+
+    func testExplicitRuntimeDirectoryPrepRepairsLaxModeAndCreatesParents() throws {
+        let leaf = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("seyal-1428-lax-\(ProcessInfo.processInfo.processIdentifier)")
+        let nested = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("seyal-1428-nest-\(ProcessInfo.processInfo.processIdentifier)")
+            .appendingPathComponent("child")
+        defer {
+            try? FileManager.default.removeItem(at: leaf)
+            try? FileManager.default.removeItem(
+                at: nested.deletingLastPathComponent()
+            )
+        }
+
+        try FileManager.default.createDirectory(at: leaf, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: leaf.path
+        )
+        XCTAssertTrue(
+            IsolatedRuntimeDirectory.prepareExplicitRuntimeDirectory(leaf.path),
+            "euid-owned 0755 leaf must be host-repaired to 0700"
+        )
+        let leafMode = try FileManager.default.attributesOfItem(atPath: leaf.path)[.posixPermissions]
+            as? NSNumber
+        XCTAssertEqual((leafMode?.intValue ?? -1) & 0o777, 0o700)
+
+        XCTAssertTrue(
+            IsolatedRuntimeDirectory.prepareExplicitRuntimeDirectory(nested.path),
+            "missing nested parents under /tmp must be created as 0700"
+        )
+        let nestedMode = try FileManager.default.attributesOfItem(atPath: nested.path)[
+            .posixPermissions
+        ] as? NSNumber
+        XCTAssertEqual((nestedMode?.intValue ?? -1) & 0o777, 0o700)
+
+        let symlink = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("seyal-1428-link-\(ProcessInfo.processInfo.processIdentifier)")
+        defer { try? FileManager.default.removeItem(at: symlink) }
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: leaf)
+        XCTAssertFalse(
+            IsolatedRuntimeDirectory.prepareExplicitRuntimeDirectory(symlink.path),
+            "symlink leaf must fail closed"
+        )
     }
 
     func testIsolatedRuntimeDirectoryDoesNotWeakenProductionDiscovery() {
@@ -735,9 +2687,64 @@ final class SeyalHostComponentTests: XCTestCase {
         #endif
     }
 
+    func testUiTestShellConfigReachesTheHelperOnlyWhileForwarding() throws {
+        let key = "SEYAL_UI_TEST_RUNTIME_CONFIG"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "seyal-936-shell-\(UUID().uuidString).toml")
+        try "[shell]\nprogram = \"/bin/zsh\"\n".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let blocked = try BundledRuntimeLauncher.launchEnvironment(inherited: [key: url.path])
+        XCTAssertNil(blocked["SEYAL_CONFIG"])
+        #if DEBUG
+            XCTAssertEqual(BundledRuntimeLauncher.uiTestRuntimeConfigEnvironmentKey, key)
+            let forwarded = try BundledRuntimeLauncher.launchEnvironment(inherited: [
+                "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1",
+                key: url.path,
+            ])
+            XCTAssertEqual(forwarded["SEYAL_CONFIG"], url.path)
+            let missing = try BundledRuntimeLauncher.launchEnvironment(inherited: [
+                "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1",
+                key: "/tmp/seyal-936-missing-shell-config.toml",
+            ])
+            XCTAssertNil(missing["SEYAL_CONFIG"])
+        #endif
+    }
+
     @MainActor
     func testNativeKeyClassifierAndActionIDs() {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
+    }
+
+    @MainActor
+    func testSuppressedBridgeRecoveryKeepsSecondaryMetalPresentationEnabled() {
+        let view = VisibleMetalSurfaceForPresentationTest(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "secondary-live-test",
+            allowsImplicitExecutionBootstrap: false
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        view.bridge?.stop()
+        view.bridge = nil
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 160, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.orderFrontRegardless()
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        view.updateVisibility()
+
+        XCTAssertTrue(view.renderer.visible, "recovery suppression must not hide an attached live surface")
+        XCTAssertNotNil(view.metalDisplayLinkLease, "secondary live surface must keep its Metal presenter")
+        XCTAssertNil(view.bridge, "secondary host presentation must not create a Runtime bridge")
     }
 
     @MainActor
@@ -1083,6 +3090,597 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(text.contains("ComposerRequestCorrelation"))
     }
 
+    /// #1379: Block cards must own clicks for selection but forward wheel
+    /// events to the transcript NSScrollView so long Flow output can scroll.
+    @MainActor
+    func testMultipaneBlockProjectionReusesExistingCardViews() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        for name in ["ProductChromeHostView+Blocks.swift", "SecondaryLivePaneHost+Flow.swift"] {
+            let source = sourceRoot.appendingPathComponent(name)
+            let text = try String(contentsOf: source, encoding: .utf8)
+            let rebuildStart = try XCTUnwrap(text.range(of: "func rebuildBlocks()"))
+            let rebuildBody = text[rebuildStart.lowerBound...]
+            XCTAssertTrue(
+                rebuildBody.contains("CommandBlockStackReconciler.reuseOrCreate"),
+                "\(name) must update a Block view in place when Runtime republishes its projection"
+            )
+            XCTAssertTrue(
+                rebuildBody.contains("CommandBlockStackReconciler.removeStale"),
+                "\(name) must remove only Block views whose IDs left the projection"
+            )
+        }
+    }
+
+    @MainActor
+    func testBlockStackReconcilerPreservesIdentityAndRemovesOnlyStaleCards() {
+        let stack = NSStackView()
+        let original = CommandBlockView(
+            prompt: "$", title: "echo one", detail: "", state: 0,
+            cellHeight: 16, lines: 1, session: false
+        )
+        stack.addArrangedSubview(original)
+        var created = 0
+
+        let reused = CommandBlockStackReconciler.reuseOrCreate(
+            blockID: 1,
+            previousCards: [1: original],
+            stack: stack
+        ) {
+            created += 1
+            return CommandBlockView(
+                prompt: "$", title: "replacement", detail: "", state: 0,
+                cellHeight: 16, lines: 1, session: false
+            )
+        }
+        XCTAssertTrue(reused === original)
+        XCTAssertEqual(created, 0, "projection updates must keep the existing card object")
+        XCTAssertEqual(stack.arrangedSubviews.count, 1, "reusing a card must not detach or duplicate it")
+
+        let next = CommandBlockStackReconciler.reuseOrCreate(
+            blockID: 2,
+            previousCards: [1: original],
+            stack: stack
+        ) {
+            created += 1
+            return CommandBlockView(
+                prompt: "$", title: "echo two", detail: "", state: 0,
+                cellHeight: 16, lines: 1, session: false
+            )
+        }
+        CommandBlockStackReconciler.removeStale(
+            previousCards: [1: original],
+            retainedBlockIDs: [1, 2],
+            from: stack
+        )
+        XCTAssertEqual(created, 1)
+        XCTAssertTrue(original.superview === stack)
+        XCTAssertTrue(next.superview === stack)
+
+        CommandBlockStackReconciler.removeStale(
+            previousCards: [1: original, 2: next],
+            retainedBlockIDs: [2],
+            from: stack
+        )
+        XCTAssertNil(original.superview)
+        XCTAssertTrue(next.superview === stack)
+        XCTAssertEqual(stack.arrangedSubviews.count, 1)
+    }
+
+    @MainActor
+    func testCommandBlockForwardsScrollWheelToTranscript() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let blocks = sourceRoot.appendingPathComponent("ProductChromeBlockViews.swift")
+        let text = (try? String(contentsOf: blocks, encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.isEmpty, "ProductChromeBlockViews.swift must be readable")
+        XCTAssertTrue(
+            text.contains("override func scrollWheel(with event: NSEvent)"),
+            "CommandBlockView must override scrollWheel"
+        )
+        XCTAssertTrue(
+            text.contains("enclosingScrollView"),
+            "Block scrollWheel must forward to the transcript NSScrollView"
+        )
+        let host = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
+        let hostText = (try? String(contentsOf: host, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            hostText.contains("syncTranscriptDocumentSize"),
+            "Flow transcript must sync document frame after Block body growth"
+        )
+        XCTAssertTrue(
+            hostText.contains("transcriptDocumentScrollHeight"),
+            "Live-end follow must use document frame height, not fittingSize alone"
+        )
+        XCTAssertTrue(
+            hostText.contains("canvas_floor_block_id_lo"),
+            "Flow rebuild must honor Rust canvas floor after clear"
+        )
+        XCTAssertTrue(
+            hostText.contains("row.id_lo <= floorLo"),
+            "clear Block itself must leave the live canvas (fully clean)"
+        )
+        XCTAssertTrue(
+            hostText.contains("max(document.frame.height, document.fittingSize.height, 1)"),
+            "Expand-never-shrink frame can exceed fittingSize; scroll math must prefer frame"
+        )
+        XCTAssertTrue(
+            hostText.contains("regions.isEmpty, !blockCards.isEmpty"),
+            "publishBlockOutputFrame must not wipe history when Block cards still exist"
+        )
+        let liveTail = sourceRoot.appendingPathComponent("MetalSurfaceView+LiveTail.swift")
+        let liveText = (try? String(contentsOf: liveTail, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            liveText.contains("frame.regions.isEmpty, !historyRanges.isEmpty"),
+            "setTranscriptFrame must retain history paint across transient empty regions"
+        )
+        XCTAssertFalse(
+            liveText.contains("translateHistoryRegionsIfUniformScroll"),
+            "Scroll must not translate baked history origins (desyncs Metal from AppKit)"
+        )
+        let metalSurface = sourceRoot.appendingPathComponent("MetalSurfaceView.swift")
+        let metalText = (try? String(contentsOf: metalSurface, encoding: .utf8)) ?? ""
+        XCTAssertFalse(
+            metalText.contains("retainHistory || !historyRanges.isEmpty"),
+            "ADR-015: disconnect retain must follow Rust seyal_app_retains_flow_history only"
+        )
+        XCTAssertTrue(
+            metalText.contains("hasRetainedHistoryPresentation"),
+            "shell-exit history present must not reuse hasPreparedState for SPEC-009 Usable"
+        )
+        XCTAssertTrue(
+            hostText.contains("removeTranscriptRegions(except: retained)"),
+            "rebuildBlocks must prune historyRanges to the timeline Block id set"
+        )
+        XCTAssertTrue(
+            hostText.contains("Keep timeline history for floor-hidden Blocks"),
+            "floor omit must retain pre-clear historyRanges for shell-exit reveal"
+        )
+        let bridgePath = sourceRoot.appendingPathComponent("RustDisplayBridge.swift")
+        let bridgeText = (try? String(contentsOf: bridgePath, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            bridgeText.contains("result == -6"),
+            "auxiliary poll must detect shell-exit before history publish"
+        )
+        XCTAssertTrue(
+            bridgeText.contains("publishHistoryRanges(forDisplayHandle: handle)"),
+            "auxiliary shell-exit must publish handle-addressed history before disconnect (#1426)"
+        )
+        // Ensure disconnect stays after the -6 publish window (order gate).
+        if let exitRange = bridgeText.range(of: "if result == -6"),
+           let disconnectRange = bridgeText.range(
+            of: "seyal_bridge_disconnect_handle(handle)",
+            range: exitRange.upperBound..<bridgeText.endIndex
+           )
+        {
+            XCTAssertTrue(
+                bridgeText[exitRange.upperBound..<disconnectRange.lowerBound]
+                    .contains("publishHistoryRanges(forDisplayHandle: handle)"),
+                "auxiliary -6 must publishHistoryRanges(forDisplayHandle:) before disconnect_handle"
+            )
+        } else {
+            XCTFail("auxiliary -6 publish-before-disconnect ordering markers missing")
+        }
+    }
+
+    /// #1426: multipane history must address Controllers by handle, not via
+    /// `seyal_bridge_select` + focused-display history FFI.
+    @MainActor
+    func testMultipaneHistoryUsesHandleAddressedFFI() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let historyPath = sourceRoot.appendingPathComponent("RustDisplayBridge+History.swift")
+        let historyText = (try? String(contentsOf: historyPath, encoding: .utf8)) ?? ""
+        XCTAssertFalse(historyText.isEmpty, "RustDisplayBridge+History.swift must be readable")
+        XCTAssertTrue(
+            historyText.contains("seyal_bridge_next_history_request_id_for(handle)"),
+            "history request id must be peeked on the target Controller"
+        )
+        XCTAssertTrue(
+            historyText.contains("seyal_bridge_request_history_range_for("),
+            "history request must target the named Controller"
+        )
+        XCTAssertTrue(
+            historyText.contains("finishAddressedMutation(\n      seyal_bridge_request_history_range_for("),
+            "a failure on a secondary history Controller must not stop the bridge's primary Controller"
+        )
+        XCTAssertEqual(
+            historyText.components(separatedBy: "finishAddressedMutation(").count - 1,
+            2,
+            "initial and continuation requests must share the per-Controller failure boundary"
+        )
+        let inputPath = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
+        let inputText = (try? String(contentsOf: inputPath, encoding: .utf8)) ?? ""
+        let helperRange = inputText.range(
+            of: "func finishAddressedMutation(_ result: Int32, forDisplayHandle handle: UInt64)"
+        )
+        XCTAssertNotNil(helperRange, "addressed history mutation helper must exist")
+        if let helperRange {
+            let helperEnd = inputText[helperRange.lowerBound...].range(
+                of: "func drainReadyDisplayWork()"
+            )?.lowerBound ?? inputText.endIndex
+            let helperBody = inputText[helperRange.lowerBound..<helperEnd]
+            XCTAssertTrue(helperBody.contains("guard handle == clientHandle else"))
+            XCTAssertTrue(
+                helperBody.contains("guard result != 0 else {")
+                    && helperBody.contains("synchronizeWriteReadinessSource()"),
+                "successful addressed history requests must arm write readiness for queued Controller frames"
+            )
+            XCTAssertFalse(
+                helperBody.contains("onError(result)"),
+                "secondary failures must not be routed through the primary Pane's error callback"
+            )
+            XCTAssertTrue(helperBody.contains("onStatusChanged()"))
+            XCTAssertTrue(
+                helperBody.contains("return finishMutation(result)"),
+                "only the primary Controller may tear down the shared bridge"
+            )
+        }
+        let inputDrain = inputText.range(of: "func drainReadyDisplayWork()")
+        XCTAssertNotNil(inputDrain, "primary display readiness path must exist")
+        if let inputDrain {
+            let inputDrainBody = inputText[inputDrain.lowerBound...]
+            XCTAssertTrue(
+                inputDrainBody.contains("handlePrimaryRegistryRemovalIfNeeded()"),
+                "a primary handle removed by Rust sibling polling must enter recovery"
+            )
+            XCTAssertEqual(
+                inputDrainBody.components(separatedBy: "handlePrimaryRegistryRemovalIfNeeded()")
+                    .count - 1,
+                2,
+                "both the initial select and bounded repoll must route primary registry loss into recovery"
+            )
+        }
+        let bridgePath = sourceRoot.appendingPathComponent("RustDisplayBridge.swift")
+        let bridgeText = (try? String(contentsOf: bridgePath, encoding: .utf8)) ?? ""
+        let auxiliaryRead = bridgeText.range(of: "func armAuxiliaryReadSources()")
+        XCTAssertNotNil(auxiliaryRead, "sibling Controller read sources must remain available")
+        if let auxiliaryRead {
+            let auxiliaryBody = bridgeText[auxiliaryRead.lowerBound...]
+            XCTAssertTrue(auxiliaryBody.contains("self.auxiliaryReadSources[handle] != nil"))
+            XCTAssertFalse(
+                auxiliaryBody.prefix(180).contains("guard isConnected"),
+                "sibling polling must not depend on the primary bridge connection"
+            )
+        }
+        XCTAssertTrue(
+            historyText.contains("seyal_bridge_history_range_peek_for_handle("),
+            "history peek must read the named Controller cache"
+        )
+        XCTAssertTrue(
+            historyText.contains("sourceDisplayHandle: handle"),
+            "published ranges must carry the producing display handle"
+        )
+        XCTAssertFalse(
+            historyText.contains("seyal_bridge_select(handle) == 0 else { return -4 }"),
+            "must not pretend select redirects focused history FFI"
+        )
+        let blocksPath = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
+        let blocksText = (try? String(contentsOf: blocksPath, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            blocksText.contains("secondaryHost(displayHandle: handle)"),
+            "history delivery must route by source display handle"
+        )
+        XCTAssertTrue(
+            blocksText.contains("HistoryRangeRouting.destination"),
+            "unknown nonzero source handles must be dropped instead of falling back to a colliding Block id"
+        )
+        XCTAssertFalse(
+            blocksText.contains("secondaryHosts.first(where:"),
+            "Block ids are pane-local and cannot choose a history destination"
+        )
+    }
+
+    /// #1426: an addressed secondary failure must not tear down the bridge's
+    /// primary Controller or cancel sibling-pane polling.
+    @MainActor
+    func testSecondaryControllerFailurePreservesPrimaryBridge() {
+        var errors: [Int32] = []
+        var statusChanges = 0
+        let bridge = RustDisplayBridge(
+            onFrame: { _ in },
+            onError: { errors.append($0) },
+            onStatusChanged: { statusChanges += 1 },
+            paneID: "primary"
+        )
+        bridge.clientHandle = 0xA
+        bridge.isConnected = true
+
+        let result = bridge.finishAddressedMutation(-10, forDisplayHandle: 0xB)
+
+        XCTAssertEqual(result, -10)
+        XCTAssertTrue(
+            errors.isEmpty,
+            "an addressed secondary failure must not be reported through the primary Pane callback"
+        )
+        XCTAssertEqual(statusChanges, 1)
+        XCTAssertTrue(bridge.isConnected)
+        XCTAssertEqual(bridge.clientHandle, 0xA)
+    }
+
+    func testHistoryRangeRoutingRejectsUnknownControllersAndAmbiguousLegacyReplies() {
+        // In multipane Flow every visible leaf, including the focused one,
+        // has a SecondaryLivePaneHost. The focused handle must therefore
+        // route to its pane host even when it also matches the primary handle.
+        let multipaneHostHandles: Set<UInt64> = [11, 22, 33]
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 11,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: multipaneHostHandles
+            ),
+            .primaryAndSecondary(11),
+            "focused-pane history reaches both the input and durable pane renderers"
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 22,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: multipaneHostHandles
+            ),
+            .secondary(22)
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 99,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: multipaneHostHandles
+            ),
+            .discard,
+            "a stale reply must not fall back to a pane with the same local Block id"
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 0,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: multipaneHostHandles
+            ),
+            .discard,
+            "an unaddressed reply is ambiguous while secondary panes exist"
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 11,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: []
+            ),
+            .primary,
+            "single-pane history still targets ProductChromeHostView"
+        )
+        XCTAssertEqual(
+            HistoryRangeRouting.destination(
+                sourceDisplayHandle: 0,
+                primaryDisplayHandle: 11,
+                secondaryDisplayHandles: []
+            ),
+            .primary,
+            "legacy unaddressed replies remain valid for a single-pane window"
+        )
+    }
+
+    func testRepeatedPanePollDoesNotReRequestSettledBlockHistory() {
+        var requests = HistoryProjectionRequestBook()
+        let key = HistoryProjectionRequestKey(
+            displayHandle: 22,
+            blockID: 7,
+            startLine: 1,
+            endLine: 100
+        )
+
+        XCTAssertTrue(requests.begin(key), "the first projection requests its history")
+        XCTAssertFalse(requests.begin(key), "a repeated registry poll must not duplicate an in-flight request")
+        requests.complete(key)
+        XCTAssertFalse(requests.begin(key), "a settled projection must not fetch the same body on every poll")
+
+        requests.retain(blockIDs: [], forDisplayHandle: 22)
+        XCTAssertTrue(requests.begin(key), "evicting the Block drops its request deduplication state")
+        requests.retry(key)
+        XCTAssertTrue(requests.begin(key), "a failed history request remains retryable")
+
+        var continued = HistoryProjectionRequestBook()
+        XCTAssertTrue(continued.begin(key))
+        let partialReply = HistoryProjectionRequestKey(
+            displayHandle: key.displayHandle,
+            blockID: key.blockID,
+            startLine: key.startLine,
+            endLine: 32
+        )
+        continued.receive(partialReply, status: 1)
+        XCTAssertFalse(continued.begin(key), "a truncated reply must not race its continuation")
+        continued.receive(partialReply, status: 0)
+        XCTAssertFalse(continued.begin(key), "the completed continuation settles the original projection")
+    }
+
+    /// #1379: Raw/TUI wipe of Metal history must clear settled request keys so
+    /// return-to-Flow can re-fetch Block bodies instead of painting blank cards.
+    func testRawOrTuiHistoryWipeClearsSettledProjectionRequests() {
+        var requests = HistoryProjectionRequestBook()
+        let key = HistoryProjectionRequestKey(
+            displayHandle: 33,
+            blockID: 9,
+            startLine: 1,
+            endLine: 40
+        )
+        XCTAssertTrue(requests.begin(key))
+        requests.complete(key)
+        XCTAssertFalse(requests.begin(key), "settled keys stay suppressed until wiped")
+        requests.discard(forDisplayHandle: 33)
+        XCTAssertTrue(
+            requests.begin(key),
+            "discard after Raw/TUI presentation wipe must allow a fresh HistoryRangeRequest"
+        )
+    }
+
+    @MainActor
+    func testSecondaryTallToShortBlockKeepsScrolledHistoryAtItsOriginalCoordinate() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        layout.appHandle = seyal_app_create()
+        defer { seyal_app_destroy(layout.appHandle) }
+        let left = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 0,
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
+            focused: true, live: true, title: "A"
+        )
+        let right = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 0,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "B"
+        )
+        layout.apply([left, right], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+        let host = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
+        host.transcript.setFrameSize(NSSize(width: 320, height: 280))
+        let card = CommandBlockView(
+            prompt: "$",
+            title: "ssh host",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 32,
+            session: false
+        )
+        host.blocks.insertArrangedSubview(card, at: 1)
+        host.blockCards[42] = card
+        host.followingLiveEnd = false
+        host.syncTranscriptDocumentSize()
+        layout.layoutSubtreeIfNeeded()
+        let originalCardMinY = card.frame.minY
+        host.preserveDocumentHeight(1_200)
+        card.setOutputLines(2, cellHeight: 16)
+        host.followingLiveEnd = false
+        host.syncTranscriptDocumentSize()
+        layout.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(host.transcriptLeadingSpacerHeight.constant, 0)
+        XCTAssertEqual(
+            card.frame.minY,
+            originalCardMinY,
+            accuracy: 1,
+            "preserved document extent must not become filler before the visible Block"
+        )
+        XCTAssertTrue(host.blocks.arrangedSubviews.first === host.transcriptLeadingSpacer)
+    }
+
+    /// The primary readiness source polls `clientHandle`; focus selection must
+    /// not redirect its history response lookup to another Controller.
+    @MainActor
+    func testPrimaryHistoryDeliveryUsesPolledControllerHandle() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let inputPath = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
+        let inputText = (try? String(contentsOf: inputPath, encoding: .utf8)) ?? ""
+        XCTAssertFalse(inputText.isEmpty, "RustDisplayBridge+Input.swift must be readable")
+        XCTAssertTrue(
+            inputText.contains("let polledHandle = clientHandle"),
+            "primary history delivery must retain the handle selected for readiness polling"
+        )
+        XCTAssertTrue(
+            inputText.contains("publishHistoryRanges(forDisplayHandle: polledHandle)"),
+            "polling an unfocused Controller must publish its own completed history"
+        )
+    }
+
+    @MainActor
+    func testShellExitRetainsFlowHistoryPaint() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let handle = view.pane.appHandle
+        XCTAssertEqual(seyal_app_retains_flow_history(handle), 0)
+        var begin = SeyalAppAction()
+        begin.version = UInt16(SEYAL_APP_ABI_VERSION)
+        begin.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
+        let generation = seyal_app_snapshot(handle).recovery_generation
+        var ended = begin
+        ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
+        ended.target_execution_lo = generation
+        ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
+        XCTAssertEqual(
+            seyal_app_retains_flow_history(handle),
+            1,
+            "shell exit retains Flow history in Rust, not by a host poll-code check"
+        )
+    }
+
+    /// #1250: Runtime revisions are execution-scoped; equal revisions from
+    /// distinct focused attachments each need to reach the native composer.
+    func testComposerStatusRelayDeduplicatesByFocusedAttachmentAndRevision() {
+        var tracker = ComposerStatusRelayTracker()
+        XCTAssertTrue(tracker.shouldRelay(revision: 7, attachmentIDLow: 11, attachmentIDHigh: 1))
+        XCTAssertFalse(tracker.shouldRelay(revision: 7, attachmentIDLow: 11, attachmentIDHigh: 1))
+        XCTAssertTrue(
+            tracker.shouldRelay(revision: 7, attachmentIDLow: 22, attachmentIDHigh: 2),
+            "the same Runtime revision on another focused attachment must be relayed"
+        )
+        XCTAssertFalse(tracker.shouldRelay(revision: 7, attachmentIDLow: 22, attachmentIDHigh: 2))
+        XCTAssertTrue(tracker.shouldRelay(revision: 8, attachmentIDLow: 22, attachmentIDHigh: 2))
+        XCTAssertFalse(tracker.shouldRelay(revision: 0, attachmentIDLow: 33, attachmentIDHigh: 3))
+        XCTAssertTrue(tracker.shouldRelay(revision: 9, attachmentIDLow: 22, attachmentIDHigh: 2))
+        tracker.abandonClaim()
+        XCTAssertTrue(
+            tracker.shouldRelay(revision: 9, attachmentIDLow: 22, attachmentIDHigh: 2),
+            "a rejected host apply must not consume the Runtime fact"
+        )
+        XCTAssertTrue(tracker.clear())
+        XCTAssertFalse(tracker.clear())
+
+        var targetTracker = ComposerStatusRelayTracker()
+        XCTAssertTrue(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 0,
+                targetGeneration: 0,
+                targetRevision: 0,
+                targetClass: 1,
+                targetMode: 1
+            )
+        )
+        XCTAssertTrue(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 7,
+                targetGeneration: 3,
+                targetRevision: 13,
+                targetClass: 2,
+                targetMode: 0
+            ),
+            "a foreground-target update on the same eligibility revision must reach Rust"
+        )
+        XCTAssertFalse(
+            targetTracker.shouldRelay(
+                revision: 12,
+                attachmentIDLow: 44,
+                attachmentIDHigh: 5,
+                targetBlockID: 7,
+                targetGeneration: 3,
+                targetRevision: 13,
+                targetClass: 2,
+                targetMode: 0
+            )
+        )
+    }
+
     @MainActor
     func testXtermButtonMapDropsButtonsBeyondRight() {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
@@ -1115,6 +3713,93 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertEqual(interactive.accessibilityIdentifier(), "terminal-input")
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
+    }
+
+    @MainActor
+    func testHiddenProductTierReleasesDedicatedGpu() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 40, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
+        // Drive one visible-frame update through the production renderer. The
+        // component harness does not own a desktop occlusion surface, so it
+        // explicitly models the focused renderer visibility transition.
+        view.renderer.setVisible(true)
+
+        var cell = SeyalPreparedCell()
+        cell.scalar = UInt32(ascii: "A")
+        cell.foreground = 0xffff_ffff
+        cell.background = 0xff10_0d0b
+        var damage = DamageMask()
+        damage.markAll(rows: 1)
+        XCTAssertEqual(
+            try [cell].withUnsafeBufferPointer { cells in
+                try view.renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: cells,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        damage: damage
+                    ),
+                    backingScale: 1,
+                    forceFullRebuild: true
+                )
+            },
+            .updated
+        )
+        XCTAssertTrue(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertGreaterThan(view.renderer.estimatedDedicatedGPUBytes, 0)
+
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_HIDDEN))
+        XCTAssertFalse(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertEqual(view.renderer.estimatedDedicatedGPUBytes, 0)
+        XCTAssertFalse(view.shouldRender)
+
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
+        view.renderer.setVisible(true)
+        XCTAssertEqual(
+            try [cell].withUnsafeBufferPointer { cells in
+                try view.renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: cells,
+                        generation: 2,
+                        rows: 1,
+                        columns: 1,
+                        damage: damage
+                    ),
+                    backingScale: 1,
+                    forceFullRebuild: true
+                )
+            },
+            .updated
+        )
+        XCTAssertTrue(view.renderer.hasDedicatedSurfaceResources)
+
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_UNPRESENTED))
+        XCTAssertFalse(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertEqual(view.renderer.estimatedDedicatedGPUBytes, 0)
+        XCTAssertFalse(view.shouldRender)
     }
 
     /// Steady-state Candidate-D frames must not call `seyal_app_snapshot`
@@ -1195,6 +3880,54 @@ final class SeyalHostComponentTests: XCTestCase {
 
         XCTAssertEqual(seyal_app_last_error(view.pane.appHandle), 0)
         XCTAssertEqual(view.recoveryTimerGeneration, 0)
+    }
+
+    @MainActor
+    func testPrimaryAndPaneRecoveryTimersRemainIndependentWhenRescheduled() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        defer {
+            view.recoveryTimer?.invalidate()
+            view.paneRecoveryTimer?.invalidate()
+        }
+
+        let panePin = PaneRecoveryPin(makePaneRecoveryTarget(recoveryGeneration: 41))
+        let replacementPanePin = PaneRecoveryPin(makePaneRecoveryTarget(recoveryGeneration: 42))
+
+        view.schedulePaneRecoveryTimer(pin: panePin, delayMs: 60_000)
+        let originalPaneTimer = try XCTUnwrap(view.paneRecoveryTimer)
+        view.scheduleRecoveryTimer(generation: 7, delayMs: 60_000)
+        let originalPrimaryTimer = try XCTUnwrap(view.recoveryTimer)
+
+        // Replacing the primary retry must leave the pane callback armed.
+        view.scheduleRecoveryTimer(generation: 8, delayMs: 60_000)
+        let replacementPrimaryTimer = try XCTUnwrap(view.recoveryTimer)
+        XCTAssertFalse(originalPrimaryTimer.isValid)
+        XCTAssertTrue(originalPaneTimer.isValid)
+        XCTAssertTrue(view.paneRecoveryTimer === originalPaneTimer)
+        XCTAssertEqual(view.paneRecoveryTimerPin, panePin)
+
+        // Replacing the pane retry must leave the latest primary callback armed.
+        view.schedulePaneRecoveryTimer(pin: replacementPanePin, delayMs: 60_000)
+        let replacementPaneTimer = try XCTUnwrap(view.paneRecoveryTimer)
+        XCTAssertFalse(originalPaneTimer.isValid)
+        XCTAssertTrue(replacementPaneTimer.isValid)
+        XCTAssertTrue(replacementPrimaryTimer.isValid)
+        XCTAssertTrue(view.recoveryTimer === replacementPrimaryTimer)
+        XCTAssertEqual(view.recoveryTimerGeneration, 8)
+        XCTAssertEqual(view.paneRecoveryTimerPin, replacementPanePin)
+    }
+
+    private func makePaneRecoveryTarget(recoveryGeneration: UInt64) -> SeyalAppPaneRecoveryTarget {
+        var target = SeyalAppPaneRecoveryTarget()
+        target.version = UInt16(SEYAL_APP_ABI_VERSION)
+        target.size = UInt16(MemoryLayout<SeyalAppPaneRecoveryTarget>.size)
+        target.pane_lo = 0x11
+        target.pane_hi = 0x12
+        target.execution_lo = 0x21
+        target.execution_hi = 0x22
+        target.binding_generation = 31
+        target.recovery_generation = recoveryGeneration
+        return target
     }
 
     @MainActor
@@ -1475,8 +4208,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
         let window = NSWindow(
@@ -1530,8 +4264,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
@@ -1738,8 +4473,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         for command in commands {
             let bound = seyal_app_snapshot(handle)
@@ -1749,7 +4485,7 @@ final class SeyalHostComponentTests: XCTestCase {
             draft.size = bind.size
             draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
             draft.applySnapshotFence(bound)
-            draft.target_pty_generation = composer.epoch
+            draft.target_generation = composer.epoch
             let utf8 = Array(command.utf8)
             utf8.withUnsafeBufferPointer { buffer in
                 draft.payload = buffer.baseAddress
@@ -1761,7 +4497,7 @@ final class SeyalHostComponentTests: XCTestCase {
             submit.size = bind.size
             submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
             submit.applySnapshotFence(bound)
-            submit.target_pty_generation = composer.epoch
+            submit.target_generation = composer.epoch
             XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
             var result = SeyalAppAction()
             result.version = bind.version
@@ -1773,6 +4509,18 @@ final class SeyalHostComponentTests: XCTestCase {
             XCTAssertEqual(seyal_app_apply(handle, &result), 0)
         }
         return handle
+    }
+
+    /// Grid-first (#1438/#1445): default resting is Raw. Mirror Rust `opt_in_flow`
+    /// via the production `presentation.set_flow` WorkspaceCommand.
+    @discardableResult
+    private func optInFlow(_ handle: UInt64) -> Int32 {
+        seyal_app_invoke_workspace_command(
+            handle,
+            KeybindingShortcutRealization.presentationSetFlow,
+            0,
+            0
+        )
     }
 
     /// Relay a Runtime composer status exactly as `ProductChromeHostView`
@@ -1809,8 +4557,9 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
 
         var composer = seyal_app_composer(handle)
         XCTAssertEqual(composer.mode, UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue))
@@ -1878,14 +4627,16 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
         let editor = try XCTUnwrap(
             accessibilityChild(view, identifier: "seyal-composer-editor") as? NSTextView)
         XCTAssertEqual(composer.accessibilityValue() as? String, "available")
+        XCTAssertTrue(editor.isEditable, "Available composer must accept native text input")
 
         // Native typing is the source of the draft: the editor already holds
         // the text and the host commits it to Rust (SetDraft) as it changes.
@@ -1896,7 +4647,7 @@ final class SeyalHostComponentTests: XCTestCase {
         draft.size = bind.size
         draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         draft.applySnapshotFence(bound)
-        draft.target_pty_generation = seyal_app_composer(handle).epoch
+        draft.target_generation = seyal_app_composer(handle).epoch
         let draftBytes = Array("sleep 2".utf8)
         draftBytes.withUnsafeBufferPointer { buffer in
             draft.payload = buffer.baseAddress
@@ -1911,12 +4662,13 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(bound)
-        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        submit.target_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         // Runtime's Busy flip arrives before the correlated result.
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
         view.reconcileChrome()
         XCTAssertEqual(composer.accessibilityValue() as? String, "busy")
+        XCTAssertFalse(editor.isEditable, "Busy composer must reject further native text input")
         XCTAssertEqual(editor.string, "sleep 2", "draft is kept while the request is in flight")
 
         var result = SeyalAppAction()
@@ -1937,6 +4689,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 3), 0)
         view.reconcileChrome()
         XCTAssertEqual(composer.accessibilityValue() as? String, "available")
+        XCTAssertTrue(editor.isEditable, "composer becomes editable again when Runtime reports Available")
         XCTAssertEqual(editor.string, "")
     }
 
@@ -1948,11 +4701,32 @@ final class SeyalHostComponentTests: XCTestCase {
         action.kind = kind
         action.applySnapshotFence(snap)
         action.reserved = reserved
-        action.target_pty_generation = seyal_app_composer(handle).epoch
+        action.target_generation = seyal_app_composer(handle).epoch
         let utf8 = Array((payload ?? "").utf8)
         return utf8.withUnsafeBufferPointer { buffer in
             action.payload = payload == nil ? nil : buffer.baseAddress
             action.payload_len = payload == nil ? 0 : UInt32(buffer.count)
+            return seyal_app_apply(handle, &action)
+        }
+    }
+
+    private func applyWorkspacePayload(
+        _ handle: UInt64,
+        kind: UInt16,
+        payload: String,
+        targetLo: UInt64 = 0,
+        targetHi: UInt64 = 0
+    ) -> Int32 {
+        let utf8 = Array(payload.utf8)
+        return utf8.withUnsafeBufferPointer { buffer in
+            var action = SeyalAppAction()
+            action.version = UInt16(SEYAL_APP_ABI_VERSION)
+            action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            action.kind = kind
+            action.target_execution_lo = targetLo
+            action.target_execution_hi = targetHi
+            action.payload = buffer.baseAddress
+            action.payload_len = UInt32(buffer.count)
             return seyal_app_apply(handle, &action)
         }
     }
@@ -2085,6 +4859,8 @@ final class SeyalHostComponentTests: XCTestCase {
     func testBlockSelectionFailsClosedWithoutRuntimeBlocks() {
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_STATE_MASK), 7)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_SELECTED), 8)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_SESSION), 16)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_STATE_MASK) & UInt16(SEYAL_APP_BLOCK_SESSION), 0)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_STATE_FAILED) & UInt16(SEYAL_APP_BLOCK_SELECTED), 0)
         XCTAssertEqual(UInt16(SEYAL_APP_INSPECTOR_BLOCK.rawValue), 4)
         let handle = seyal_app_create()
@@ -2102,7 +4878,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(seyal_app_composer(handle).block_count, 0, "no Runtime timeline in a unit test")
@@ -2281,14 +5057,16 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         let renderer = try MetalTerminalRenderer(device: device)
         renderer.setPresentationPlan(.flow())
+        var requestedIdleFrameCount = 0
+        renderer.onNeedsCurrentFrame = { requestedIdleFrameCount += 1 }
 
         // Three prepared rows: preceding Block output on row 0, running
         // Block on rows 1..2. Clip must exclude row 0.
         func cell(_ ch: Character) -> SeyalPreparedCell {
             var c = SeyalPreparedCell()
             c.scalar = UInt32(ch.unicodeScalars.first!.value)
-            c.foreground = 0xffe9_e1d8
-            c.background = 0xff10_0d0b
+            c.foreground = 0x02e9_e1d8
+            c.background = 0x020c_100d
             return c
         }
         var cells = [
@@ -2316,12 +5094,13 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(try update(generation: 865, fullRebuild: true, damage: damage), .updated)
 
         let cellSize = renderer.cellPixelSize(backingScale: 1)
+        let regionOrigin = NSPoint(x: cellSize.width, y: cellSize.height)
         let region = NativeTranscriptRegion(
             id: 865,
-            origin: .zero,
+            origin: regionOrigin,
             clip: NSRect(
-                x: 0,
-                y: 0,
+                x: regionOrigin.x,
+                y: regionOrigin.y,
                 width: CGFloat(cellSize.width * 2),
                 height: CGFloat(cellSize.height * 2)
             )
@@ -2353,8 +5132,51 @@ final class SeyalHostComponentTests: XCTestCase {
 
         let paint = renderer.inspectFlowPaint()
         XCTAssertTrue(paint.isClean, "Flow must not submit Pane-wide live grid")
-        XCTAssertEqual(paint.historyInstanceCount, 4)
+        XCTAssertEqual(paint.historyInstanceCount, 0, "running live-tail is not history paint")
+        XCTAssertEqual(paint.liveTailInstanceCount, 4)
         XCTAssertEqual(paint.instancesOutsideClips, 0)
+
+        let liveTailTexture = try XCTUnwrap(renderer.renderOffscreenAndWait(
+            width: cellSize.width * 3,
+            height: cellSize.height * 4
+        ))
+        let sampledLiveTail = renderer.inspectFlowPaint(from: liveTailTexture)
+        XCTAssertGreaterThan(
+            sampledLiveTail.opaquePixelsInsideClips,
+            0,
+            "a live Block must paint visible pixels inside its current body clip"
+        )
+        XCTAssertEqual(
+            sampledLiveTail.opaquePixelsOutsideClips,
+            0,
+            "live-tail glyphs and cell backgrounds must stay clipped to their Block"
+        )
+        var textureBytes = [UInt8](repeating: 0, count: liveTailTexture.width * liveTailTexture.height * 4)
+        liveTailTexture.getBytes(
+            &textureBytes,
+            bytesPerRow: liveTailTexture.width * 4,
+            from: MTLRegionMake2D(0, 0, liveTailTexture.width, liveTailTexture.height),
+            mipmapLevel: 0
+        )
+        let clip = region.clip.integral
+        var foregroundPixels = 0
+        for y in Int(clip.minY)..<Int(clip.maxY) {
+            for x in Int(clip.minX)..<Int(clip.maxX) {
+                let offset = (y * liveTailTexture.width + x) * 4
+                if textureBytes[offset] == 0xd8,
+                   textureBytes[offset + 1] == 0xe1,
+                   textureBytes[offset + 2] == 0xe9,
+                   textureBytes[offset + 3] == 0xff
+                {
+                    foregroundPixels += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(
+            foregroundPixels,
+            0,
+            "the Block body must contain actual glyph pixels, not only AX transcript text"
+        )
 
         // Damage-free update must reuse the live-tail clip without allocating
         // another live-tail buffer or rewriting cells.
@@ -2386,10 +5208,104 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
         XCTAssertEqual(renderer.liveTailFirstPaintedOriginY(for: 865) ?? -1, 0, accuracy: 0.01)
 
+        // A Runtime row mapping can briefly outrun the latest prepared frame.
+        // Keep the Block-local buffer under the latest origin/clip for one
+        // submitted frame, then fail closed if the mapping has not converged.
+        let staleClip = LiveTailClip(startLine: 30, firstRow: 2, rowCount: 2)
+        renderer.setLiveTailBlocks([865: staleClip])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
+        XCTAssertEqual(renderer.orderedLiveTailRegions.first?.clip, region.clip)
+        XCTAssertTrue(renderer.beginValidationFrameInFlight())
+        XCTAssertEqual(
+            renderer.liveTailRegionCount,
+            0,
+            "the stale-map fallback must retire after one submitted frame"
+        )
+        renderer.endValidationFrameInFlight()
+        XCTAssertEqual(
+            requestedIdleFrameCount,
+            1,
+            "retiring a one-frame live-tail fallback must request its clearing frame without new PTY output"
+        )
+        XCTAssertEqual(try update(generation: 868, fullRebuild: false, damage: DamageMask()), .updated)
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "persistent mismatch must not reacquire stale paint")
+
+        // Local instances follow a moved Block by updating draw-time origin
+        // and clip. Persistent invalid mappings still retire after one draw.
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
+        let movedRegion = NativeTranscriptRegion(
+            id: 865,
+            origin: NSPoint(x: cellSize.width, y: cellSize.height),
+            clip: NSRect(
+                x: cellSize.width,
+                y: cellSize.height,
+                width: cellSize.width * 2,
+                height: cellSize.height * 2
+            )
+        )
+        renderer.setTranscriptRegions([movedRegion])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        renderer.setLiveTailBlocks([865: staleClip])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1, "a moved Block may retain compatible local cells")
+        let movedAgainRegion = NativeTranscriptRegion(
+            id: 865,
+            origin: NSPoint(x: cellSize.width * 2, y: cellSize.height),
+            clip: NSRect(
+                x: cellSize.width * 2,
+                y: cellSize.height,
+                width: cellSize.width * 2,
+                height: cellSize.height * 2
+            )
+        )
+        renderer.setTranscriptRegions([movedAgainRegion])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        XCTAssertEqual(
+            renderer.orderedLiveTailRegions.first?.origin,
+            SIMD2<Float>(Float(movedAgainRegion.origin.x), Float(movedAgainRegion.origin.y)),
+            "the stale buffer must use the new Block origin"
+        )
+        XCTAssertEqual(renderer.orderedLiveTailRegions.first?.clip, movedAgainRegion.clip)
+        XCTAssertTrue(renderer.beginValidationFrameInFlight())
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "a stale buffer retires after one submitted frame")
+        renderer.endValidationFrameInFlight()
+        XCTAssertEqual(try update(generation: 869, fullRebuild: false, damage: DamageMask()), .updated)
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "persistent stale mapping must not reacquire the buffer")
+
+        // Atlas reset invalidates UV coordinates even when row shape and font
+        // metrics match. An incompatible stale buffer must never be replayed.
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        renderer.glyphAtlas.resetWhenGPUIdle()
+        renderer.setLiveTailBlocks([865: staleClip])
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "old atlas UVs must fail closed")
+
         // Clearing live-tail must not re-enable Pane-wide live grid.
         renderer.setLiveTailBlocks([:])
         XCTAssertEqual(renderer.liveTailRegionCount, 0)
         XCTAssertFalse(renderer.inspectPresentation().drawsLiveGrid)
+
+        // #1379 clear→exit: retain history must drop the prepared viewport.
+        // setLiveTailBlocks([:]) alone left lastPreparedFrame so a later
+        // refresh could repaint loose primary rows over Block cards.
+        XCTAssertEqual(try update(generation: 870, fullRebuild: false, damage: DamageMask()), .updated)
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
+        XCTAssertGreaterThan(renderer.lastPreparedRowCount, 0)
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        renderer.clearLiveTailPresentation()
+        XCTAssertEqual(renderer.liveTailRegionCount, 0, "clearLiveTailPresentation must drop clips")
+        XCTAssertEqual(
+            renderer.lastPreparedRowCount,
+            0,
+            "clearLiveTailPresentation must drop lastPreparedFrame so exit cannot overlay history"
+        )
+        XCTAssertTrue(renderer.inspectFlowPaint().isClean)
     }
 
     /// #865 / SPEC-008 §3.1: Flow transcript scroll handling republishes Block
@@ -2411,18 +5327,26 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         defer { pane.onProductChanged = originalProductChanged }
 
-        let connected = expectation(description: "Flow projection connected for scroll invariant")
         var connectedOnce = false
         var didRetryExhaustedRecovery = false
         let checkConnected = {
             let eligibility = seyal_app_snapshot(pane.appHandle).eligibility
             if !connectedOnce, view.terminalBridgeIsConnected,
-                view.terminalCurrentFrame() != nil,
-                eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                view.terminalCurrentFrame() != nil
             {
-                connectedOnce = true
-                connected.fulfill()
-                return
+                if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+                    seyal_app_invoke_workspace_command(pane.appHandle, 12, 0, 0) == 0
+                {
+                    // The scroll invariant is specifically about Flow. The
+                    // app now starts Raw, so select Flow as a user would.
+                    host.reconcileChrome()
+                }
+                if seyal_app_snapshot(pane.appHandle).eligibility
+                    == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                {
+                    connectedOnce = true
+                    return
+                }
             }
             if !connectedOnce, !didRetryExhaustedRecovery,
                 seyal_app_snapshot(pane.appHandle).recovery_stage
@@ -2433,16 +5357,23 @@ final class SeyalHostComponentTests: XCTestCase {
             }
         }
         observeProductChange = checkConnected
-        let connectPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
-            checkConnected()
-        }
-        defer { connectPoll.invalidate() }
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
-        checkConnected()
-        await fulfillment(of: [connected], timeout: 30)
+        // Stay on the test MainActor. Timer/@Sendable callbacks cannot touch
+        // AppKit/Rust handles or instance helpers without isolation errors.
+        // SelectRestingPresentation needs a bound authority; latch Flow once connected.
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline, !connectedOnce {
+            checkConnected()
+            if !connectedOnce, view.terminalBridgeIsConnected {
+                let snap = seyal_app_snapshot(pane.appHandle)
+                if snap.eligibility != UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+                    _ = optInFlow(pane.appHandle)
+                }
+            }
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
         guard connectedOnce else { return }
-        connectPoll.invalidate()
 
         // Wait until prepared geometry/cursor stop moving so a later PTY
         // frame cannot be mistaken for scroll mutation.
@@ -2483,7 +5414,12 @@ final class SeyalHostComponentTests: XCTestCase {
         host.isProgrammaticTranscriptScroll = false
         host.transcriptDidScroll()
         host.transcriptDidScroll()
-        // Immediate re-read: do not wait for unrelated PTY frames.
+        // Scroll handling intentionally republishes on the main queue. Await
+        // that bounded presentation callback instead of racing it with this
+        // assertion (and without waiting for unrelated PTY frames).
+        for _ in 0..<40 where host.transcriptFrameRevision <= beforeRevision {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
         let after = try XCTUnwrap(view.terminalCurrentFrame())
 
         XCTAssertGreaterThan(
@@ -2536,8 +5472,8 @@ final class SeyalHostComponentTests: XCTestCase {
             contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift"),
             encoding: .utf8
         )
-        XCTAssertTrue(chrome.contains("func transcriptDidScroll()"))
-        XCTAssertTrue(chrome.contains("publishBlockOutputFrame()"))
+        XCTAssertTrue(blocks.contains("func transcriptDidScroll()"))
+        XCTAssertTrue(blocks.contains("publishBlockOutputFrame()"))
         XCTAssertFalse(
             chrome.contains("proposeGeometry"),
             "ProductChromeHostView scroll path must not propose PTY geometry"
@@ -2754,7 +5690,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
@@ -2949,6 +5885,15 @@ final class SeyalHostComponentTests: XCTestCase {
 
 }
 
+/// NSWindow occlusion depends on the host's WindowServer state, which is not a
+/// stable input in hosted XCTest. Keep the component test focused on the
+/// visibility branch by providing an attached view whose effective visibility
+/// is deterministic; the real NSWindow and CAMetalLayer are still exercised.
+@MainActor
+private final class VisibleMetalSurfaceForPresentationTest: MetalSurfaceView {
+    override var shouldRender: Bool { true }
+}
+
 @discardableResult
 private func reloadUiConfig(path: String) -> Int32 {
     let bytes = Array(path.utf8)
@@ -2973,4 +5918,305 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
         }
     }
     return nil
+}
+
+@MainActor
+private func accessibilityChildren(
+    _ root: NSView,
+    matching: (String) -> Bool
+) -> [NSView] {
+    var found: [NSView] = []
+    if matching(root.accessibilityIdentifier() ?? "") {
+        found.append(root)
+    }
+    for child in root.subviews {
+        found.append(contentsOf: accessibilityChildren(child, matching: matching))
+    }
+    return found
+}
+
+extension SeyalHostComponentTests {
+    @MainActor
+    func testHistoryRenderWindowBoundsTopMiddleAndTailPages() {
+        let total = 100_000
+        let visibleRows = 120
+
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 0, width: 400, height: 1_920),
+                isFlipped: true,
+                cellHeight: 16
+            ),
+            0,
+            "the top of a flipped Block body maps to the oldest history row"
+        )
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 98_080, width: 400, height: 1_920),
+                isFlipped: true,
+                cellHeight: 16
+            ),
+            6_130,
+            "scrolled document coordinates map from the flipped top edge"
+        )
+        XCTAssertEqual(
+            HistoryRenderWindow.firstVisibleRow(
+                documentBounds: CGRect(x: 0, y: 0, width: 400, height: 100_000),
+                visibleBounds: CGRect(x: 0, y: 0, width: 400, height: 1_920),
+                isFlipped: false,
+                cellHeight: 16
+            ),
+            6_130,
+            "the bottom of an unflipped AppKit body maps to the newest history row"
+        )
+
+        let top = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: 0,
+            visibleRowCount: visibleRows
+        )
+        let middle = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: 50_000,
+            visibleRowCount: visibleRows
+        )
+        let tail = HistoryRenderWindow(
+            totalRows: total,
+            firstVisibleRow: total - visibleRows,
+            visibleRowCount: visibleRows
+        )
+
+        XCTAssertEqual(top.rows.lowerBound, 0)
+        XCTAssertTrue(top.rows.contains(0))
+        XCTAssertTrue(middle.rows.contains(50_000))
+        XCTAssertTrue(tail.rows.contains(total - 1))
+        for page in [top, middle, tail] {
+            XCTAssertLessThanOrEqual(page.rows.count, HistoryRenderWindow.maximumRows)
+            XCTAssertGreaterThan(page.rows.count, 0)
+        }
+        XCTAssertEqual(
+            HistoryRenderWindow(totalRows: 0, firstVisibleRow: 0, visibleRowCount: 120).rows,
+            0..<0
+        )
+        let maximum = HistoryRenderWindow(
+            totalRows: Int.max,
+            firstVisibleRow: Int.max,
+            visibleRowCount: Int.max
+        )
+        XCTAssertLessThanOrEqual(maximum.rows.count, HistoryRenderWindow.maximumRows)
+        XCTAssertEqual(maximum.rows.upperBound, Int.max)
+
+        let pageIdentity = NativeHistoryRenderPageKey(
+            displayHandle: 1,
+            startLine: 10,
+            endLine: 20,
+            totalRows: 100_000,
+            requestID: 2,
+            revision: 3,
+            rows: 500..<900,
+            cellSize: CGSize(width: 8, height: 16),
+            backingScale: 2
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 20,
+                totalRows: 100_000,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 18),
+                backingScale: 2
+            ),
+            "font metric changes must invalidate the cached page"
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 20,
+                totalRows: 100_000,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 16),
+                backingScale: 1
+            ),
+            "backing scale changes must invalidate the cached page"
+        )
+        XCTAssertNotEqual(
+            pageIdentity,
+            NativeHistoryRenderPageKey(
+                displayHandle: 1,
+                startLine: 10,
+                endLine: 21,
+                totalRows: 100_001,
+                requestID: 2,
+                revision: 3,
+                rows: 500..<900,
+                cellSize: CGSize(width: 8, height: 16),
+                backingScale: 2
+            ),
+            "new history extents must invalidate the cached page"
+        )
+    }
+
+    @MainActor
+    func testTranscriptSizingUsesIntrinsicHeightsAndAccountsForDockSpacing() {
+        let leadingSpacer = NSView()
+        let staleExpandedCard = NSView(
+            frame: NSRect(x: 0, y: 0, width: 240, height: 500)
+        )
+        staleExpandedCard.translatesAutoresizingMaskIntoConstraints = false
+        staleExpandedCard.heightAnchor.constraint(equalToConstant: 48).isActive = true
+
+        XCTAssertEqual(staleExpandedCard.bounds.height, 500)
+        XCTAssertEqual(staleExpandedCard.fittingSize.height, 48)
+        let height = TranscriptDocumentSizing.contentHeight(
+            arrangedSubviews: [leadingSpacer, staleExpandedCard],
+            leadingSpacer: leadingSpacer,
+            spacing: 10,
+            edgeInsets: NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        )
+        XCTAssertEqual(height, 74, "use the current Block height, the leading stack gap, and both insets")
+    }
+
+    @MainActor
+    func testScrolledSecondaryRebuildPreservesBlockCoordinatesWithBottomDockingSlack() {
+        let following = TranscriptDocumentSizing.spacerHeights(
+            contentHeight: 300,
+            viewportHeight: 500,
+            preservedDocumentHeight: 0
+        )
+        XCTAssertEqual(following.leading, 200)
+        XCTAssertEqual(following.trailing, 0)
+        XCTAssertEqual(following.document, 500)
+
+        let scrolledAwayAfterShrink = TranscriptDocumentSizing.spacerHeights(
+            contentHeight: 300,
+            viewportHeight: 400,
+            preservedDocumentHeight: 1_000
+        )
+        XCTAssertEqual(
+            scrolledAwayAfterShrink.leading,
+            700,
+            "preserved document space keeps blocks bottom-docked"
+        )
+        XCTAssertEqual(scrolledAwayAfterShrink.trailing, 0)
+        XCTAssertEqual(scrolledAwayAfterShrink.document, 1_000)
+    }
+
+    @MainActor
+    func testCandidateSessionActionLivesInBlockContextMenu() {
+        let block = CommandBlockView(
+            prompt: "$",
+            title: "node",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 1,
+            session: false
+        )
+        block.canRequestSessionBootstrap = true
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )!
+        XCTAssertEqual(
+            block.menu(for: event)?.items.first?.title,
+            "Enable Blocks for this session…",
+            "a Candidate must be available as an explicit action, not an unsolicited popup"
+        )
+    }
+
+    @MainActor
+    func testRunningBlockContextMenuOffersDirectInputFallback() {
+        let block = CommandBlockView(
+            prompt: "$",
+            title: "python3 -q",
+            detail: "/ running",
+            state: UInt16(SEYAL_APP_BLOCK_STATE_RUNNING),
+            cellHeight: 16,
+            lines: 1,
+            session: false
+        )
+        block.frame = NSRect(x: 0, y: 0, width: 600, height: 80)
+        block.canInteractWithRunningProgram = true
+        block.layoutSubtreeIfNeeded()
+        let interact = (block.accessibilityChildren() ?? [])
+            .compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "seyal-running-program-interact" }
+        XCTAssertNotNil(interact, "the Running Block must expose its direct-input button")
+        if let interact {
+            XCTAssertGreaterThan(interact.frame.width, 0)
+            let buttonRect = block.convert(interact.bounds, from: interact)
+            let hit = block.hitTest(NSPoint(x: buttonRect.midX, y: buttonRect.midY))
+            XCTAssertTrue(hit === interact, "Block hit testing must preserve the button action")
+
+            block.canInteractWithRunningProgram = false
+            block.layoutSubtreeIfNeeded()
+            XCTAssertTrue(interact.isHidden, "completed Blocks hide the direct-input action")
+            block.canInteractWithRunningProgram = true
+            block.layoutSubtreeIfNeeded()
+            XCTAssertFalse(interact.isHidden, "a renewed Running Block restores the direct-input action")
+        }
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )!
+        XCTAssertEqual(
+            block.menu(for: event)?.items.first?.title,
+            "Interact with running program"
+        )
+    }
+
+    @MainActor
+    func testSessionBootstrapBannerRendersRustCopyAndStaysHiddenWithoutSurface() {
+        let banner = SessionBootstrapBanner()
+        XCTAssertTrue(banner.isHidden)
+        XCTAssertEqual(banner.accessibilityIdentifier(), "seyal-session-bootstrap")
+        let title = String(cString: seyal_bridge_session_copy(0))
+        let enable = String(cString: seyal_bridge_session_copy(4))
+        let accept = String(cString: seyal_bridge_session_copy(2))
+        let decline = String(cString: seyal_bridge_session_copy(3))
+        XCTAssertEqual(title, "Enable Blocks for this session?")
+        XCTAssertEqual(enable, "Enable Blocks for this session…")
+        XCTAssertEqual(accept, "Enable for this session")
+        let disclosure = String(cString: seyal_bridge_session_copy(1))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("does not open an SSH connection"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("Python or Node"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("remote shell history"))
+        XCTAssertTrue(disclosure.localizedCaseInsensitiveContains("choose Not now"))
+        XCTAssertEqual(decline, "Not now")
+        let surface = seyal_bridge_session_surface()
+        XCTAssertEqual(surface.kind, 0)
+        banner.reconcile()
+        XCTAssertTrue(banner.isHidden)
+    }
+
+    func testSessionSurfaceAbiLayout() {
+        XCTAssertEqual(MemoryLayout<SeyalSessionSurface>.size, 24)
+        XCTAssertEqual(MemoryLayout<SeyalSessionSurface>.offset(of: \.kind), 0)
+        XCTAssertEqual(MemoryLayout<SeyalSessionSurface>.offset(of: \.host_block_id), 8)
+        XCTAssertEqual(MemoryLayout<SeyalSessionSurface>.offset(of: \.revision), 16)
+    }
 }

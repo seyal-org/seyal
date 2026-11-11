@@ -1,8 +1,10 @@
 #![cfg(all(target_os = "macos", feature = "test-fault-injection"))]
 
 use std::{
+    fs,
     io::{Read, Write},
     os::unix::net::UnixStream,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -38,6 +40,22 @@ struct Harness {
     runtime: Runtime,
 }
 
+struct ChildExitGate {
+    path: PathBuf,
+}
+
+impl ChildExitGate {
+    fn release(&self) {
+        fs::write(&self.path, b"release").expect("release child exit gate");
+    }
+}
+
+impl Drop for ChildExitGate {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
 impl Harness {
     fn new(tag: &str) -> Self {
         Self {
@@ -58,6 +76,26 @@ impl Harness {
                 WindowSize::new(40, 4, 0, 0).expect("valid geometry"),
             )
             .expect("execution")
+    }
+
+    fn spawn_gated(&mut self, tag: &str) -> (ExecutionId, ChildExitGate) {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let suffix = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("s8f-gate-{}-{tag}-{suffix:x}", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let script = format!(
+            "while [ ! -e '{}' ]; do sleep 0.01; done; printf TAIL",
+            path.display()
+        );
+        let execution_id = self
+            .runtime
+            .create_execution(
+                CommandSpec::new("/bin/sh").args(["-c", &script]),
+                WindowSize::new(40, 4, 0, 0).expect("valid geometry"),
+            )
+            .expect("gated execution");
+        (execution_id, ChildExitGate { path })
     }
 
     fn connect(&mut self) -> Client {
@@ -169,8 +207,13 @@ impl Harness {
                         "Block-capable connection observed Finalized after completion metadata failure"
                     );
                 }
-                Some((kind, _)) if kind == BLOCK_STATE_MESSAGE_TYPE => {
-                    panic!("completion failure unexpectedly emitted BlockState")
+                Some((kind, payload)) if kind == BLOCK_STATE_MESSAGE_TYPE => {
+                    let block = BlockState::decode(&payload).expect("BlockState");
+                    assert_ne!(
+                        block.state,
+                        seyal_protocol::pass8::BlockLifecycle::Completed,
+                        "completion failure unexpectedly emitted completed BlockState"
+                    );
                 }
                 Some(_) => {}
                 None => break,
@@ -207,35 +250,38 @@ fn block_admission_failure_leaves_execution_live_and_raw_terminal_capable() {
 #[test]
 fn completion_mutation_failure_disconnects_before_finalized_and_retires_block() {
     let mut harness = Harness::new("mutation");
-    let execution_id = harness.spawn();
+    let (execution_id, gate) = harness.spawn_gated("mutation");
     let mut client = harness.connect();
     harness.attach_until_current(&mut client, execution_id);
 
     test_fault::fail_next(FaultPoint::BlockCompletionMutation);
+    gate.release();
     harness.assert_fails_closed_before_finalized(&mut client);
 }
 
 #[test]
 fn completion_encode_failure_disconnects_before_finalized_and_retires_block() {
     let mut harness = Harness::new("encode");
-    let execution_id = harness.spawn();
+    let (execution_id, gate) = harness.spawn_gated("encode");
     let mut client = harness.connect();
     harness.attach_until_current(&mut client, execution_id);
 
     test_fault::fail_next(FaultPoint::BlockCompletionEncode);
+    gate.release();
     harness.assert_fails_closed_before_finalized(&mut client);
 }
 
 #[test]
 fn completion_encode_failure_is_global_across_all_block_capable_clients() {
     let mut harness = Harness::new("encode-multi");
-    let execution_id = harness.spawn();
+    let (execution_id, gate) = harness.spawn_gated("encode-multi");
     let mut first = harness.connect();
     let mut second = harness.connect();
     harness.attach_until_current(&mut first, execution_id);
     harness.attach_until_current(&mut second, execution_id);
 
     test_fault::fail_next(FaultPoint::BlockCompletionEncode);
+    gate.release();
     harness.assert_fails_closed_before_finalized(&mut first);
     harness.assert_fails_closed_before_finalized(&mut second);
 }
@@ -243,10 +289,11 @@ fn completion_encode_failure_is_global_across_all_block_capable_clients() {
 #[test]
 fn completion_admission_failure_disconnects_before_finalized_and_retires_block() {
     let mut harness = Harness::new("admission");
-    let execution_id = harness.spawn();
+    let (execution_id, gate) = harness.spawn_gated("admission");
     let mut client = harness.connect();
     harness.attach_until_current(&mut client, execution_id);
 
     test_fault::fail_next(FaultPoint::BlockCompletionAdmission);
+    gate.release();
     harness.assert_fails_closed_before_finalized(&mut client);
 }

@@ -1,6 +1,6 @@
 //! Issue #1217 / M003 C3 — pane splitting on the C1 create→attach→bind route.
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, TerminalTabId};
 use seyal_protocol::framing::ErrorCode;
 use seyal_runtime::local_ipc::framing::{
     CreateExecutionResult, CreateExecutionResultCode, MessageType, HEADER_LEN,
@@ -72,6 +72,93 @@ fn complete_pending_split(root: &mut ApplicationRoot, pane: PaneId, execution: E
     );
 }
 
+fn complete_pending_terminal(
+    root: &mut ApplicationRoot,
+    pane: PaneId,
+    terminal_tab: TerminalTabId,
+    execution: ExecutionId,
+) {
+    let intent = root
+        .provisioning()
+        .pending_intent(pane)
+        .expect("terminal create pending")
+        .clone();
+    assert_eq!(intent.terminal_tab, Some(terminal_tab));
+    root.wire_client_mut()
+        .unwrap()
+        .accept_create_result(CreateExecutionResult {
+            execution_id: execution,
+            request_id: intent.request_id,
+            result_code: CreateExecutionResultCode::Created,
+            detail_code: 0,
+        })
+        .unwrap();
+    root.absorb_wire_create_result()
+        .expect("absorb create")
+        .expect("create present");
+    root.complete_create_attach_and_bind(intent.request_id, attachment(execution.to_bytes()[0]))
+        .expect("attach and bind terminal tab");
+}
+
+#[test]
+fn multiple_terminal_tabs_in_one_pane_keep_distinct_execution_bindings_and_selection() {
+    let mut root = ApplicationRoot::new();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    let pane = root.snapshot().shell.focused_pane;
+    let original_terminal = root.shell.selected_terminal_tab(pane).unwrap().unwrap();
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(0xA0),
+    })
+    .unwrap();
+    root.apply(AppAction::NewTerminal)
+        .expect("New Terminal adds a same-Pane session");
+    let second_terminal = root.shell.selected_terminal_tab(pane).unwrap().unwrap();
+    assert_ne!(original_terminal, second_terminal);
+    assert_eq!(root.snapshot().shell.panes.len(), 1);
+    complete_pending_terminal(&mut root, pane, second_terminal, exec(0xA1));
+
+    assert_eq!(
+        root.shell
+            .terminal_execution(pane, original_terminal)
+            .unwrap(),
+        Some(exec(0xA0))
+    );
+    assert_eq!(
+        root.shell
+            .terminal_execution(pane, second_terminal)
+            .unwrap(),
+        Some(exec(0xA1))
+    );
+    assert_eq!(
+        root.snapshot().execution,
+        None,
+        "new unbound selection fenced the old input route"
+    );
+    root.adopt_authority_for_provisioned_pane(evidence(0xA1))
+        .unwrap();
+    root.apply(AppAction::SelectTerminalTab {
+        pane,
+        terminal_tab: original_terminal,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, pane);
+    assert_eq!(root.snapshot().execution, Some(exec(0xA0)));
+    root.apply(AppAction::SelectTerminalTab {
+        pane,
+        terminal_tab: second_terminal,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().execution, Some(exec(0xA1)));
+    assert_eq!(
+        root.shell
+            .terminal_execution(pane, original_terminal)
+            .unwrap(),
+        Some(exec(0xA0))
+    );
+}
+
 #[test]
 fn split_focus_has_no_live_region_until_bound_then_moves_authority_to_new_leaf() {
     let mut root = ApplicationRoot::new();
@@ -91,7 +178,13 @@ fn split_focus_has_no_live_region_until_bound_then_moves_authority_to_new_leaf()
     .unwrap();
     let new_pane = root.snapshot().shell.focused_pane;
     assert_ne!(new_pane, first);
-    assert!(root.pane_regions().iter().all(|region| !region.live));
+    let regions = root.pane_regions();
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == first && region.live));
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == new_pane && region.focused && region.live));
     assert_eq!(root.snapshot().execution, None);
 
     complete_pending_split(&mut root, new_pane, exec(0xA1));
@@ -107,13 +200,13 @@ fn split_focus_has_no_live_region_until_bound_then_moves_authority_to_new_leaf()
         first_evidence.execution
     );
     let regions = root.pane_regions();
-    assert_eq!(regions.iter().filter(|region| region.live).count(), 1);
+    assert_eq!(regions.iter().filter(|region| region.live).count(), 2);
     assert!(regions
         .iter()
         .any(|region| region.pane == new_pane && region.focused && region.live));
     assert!(regions
         .iter()
-        .any(|region| region.pane == first && !region.live));
+        .any(|region| region.pane == first && region.live));
 }
 
 fn build_two_by_two(root: &mut ApplicationRoot) -> [PaneId; 4] {
@@ -254,7 +347,11 @@ fn closing_one_pane_detaches_only_and_leaves_sibling_executions() {
     let exec_second = root.provisioning().recorded_execution(second).unwrap();
     let exec_third = root.provisioning().recorded_execution(third).unwrap();
 
-    root.apply(AppAction::ClosePane { id: third }).unwrap();
+    root.apply(AppAction::ClosePane {
+        id: third,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
     assert!(root.provisioning().is_unreferenced(exec_third));
     assert_eq!(
         root.provisioning().recorded_execution(second),

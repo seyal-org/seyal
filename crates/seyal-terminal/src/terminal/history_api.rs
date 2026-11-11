@@ -4,10 +4,46 @@ use super::state::TerminalState;
 use crate::{
     selection::format_history_copy, Cell, CellRole, HistoryAnchor, HistoryAnchorResolution,
     HistoryBreakAfter, HistoryMatch, HistoryRangeError, HistoryUnitView, HistoryWireCell, LineId,
-    ReflowRow,
+    ReflowRow, Style,
 };
 
 impl TerminalState {
+    /// Adjust a completed Block's `[start, end]` when CSI ED2 reminted the
+    /// primary between them (#1379).
+    ///
+    /// `clear` seals the running command's `start_line` into history (including
+    /// blank rows below the cursor), remints a full viewport of fresh LineIds,
+    /// then may print more output. A numeric `[start, finish]` would otherwise
+    /// include every sealed pre-remint blank and paint a viewport-tall empty
+    /// Flow body after clear → exit.
+    ///
+    /// Spans that cross the latest ED2 remint frontier advance `start` to that
+    /// frontier and keep `end`, so post-clear output (`clear && ls`) remains
+    /// while sealed pre-remint blanks are dropped. Bare `clear` yields a
+    /// frontier-sized span (typically one reminted row). Long scrolled output
+    /// that never crossed ED2 is unchanged.
+    pub fn clamp_block_span_across_ed2_remint(
+        &self,
+        start: LineId,
+        end: LineId,
+    ) -> (LineId, LineId) {
+        if end < start {
+            return (start, start);
+        }
+        let Some(frontier) = self.core.primary.ed2_remint_frontier else {
+            return (start, end);
+        };
+        if start < frontier && end >= frontier {
+            return (frontier, end);
+        }
+        (start, end)
+    }
+
+    /// Backward-compatible end-only helper used by older call sites/tests.
+    pub fn clamp_block_end_across_ed2_remint(&self, start: LineId, end: LineId) -> LineId {
+        self.clamp_block_span_across_ed2_remint(start, end).1
+    }
+
     /// Returns a bounded primary-screen history range. The returned rows are
     /// an explicit read-only projection of **primary** retained history plus
     /// primary visible rows. Alternate-screen cells are never included; the
@@ -105,10 +141,19 @@ impl TerminalState {
             if id > end {
                 break;
             }
-            let cells = skip_wire_leads(entry.wire_cells(), &mut skip);
-            if cells.is_empty() {
-                continue;
-            }
+            let wire = entry.wire_cells();
+            let had_units = !wire.is_empty();
+            let cells = skip_wire_leads(wire, &mut skip);
+            // Retain blank LineIds (and lines fully consumed only when skip is
+            // done) so Raw scrollback pages keep one row per LineId (#1442).
+            let cells = if cells.is_empty() {
+                if skip > 0 && had_units {
+                    continue;
+                }
+                blank_wire_row()
+            } else {
+                cells
+            };
             if let Some((last_id, last_cells)) = lines.last_mut()
                 && *last_id == id
             {
@@ -174,12 +219,17 @@ impl TerminalState {
                     }
                 }
             }
-            lines.push((id, skip_wire_leads(wire, &mut skip)));
-            if let Some((_, cells)) = lines.last()
-                && cells.is_empty()
-            {
-                lines.pop();
-            }
+            let had_content = !wire.is_empty();
+            let cells = skip_wire_leads(wire, &mut skip);
+            let cells = if cells.is_empty() {
+                if skip > 0 && had_content {
+                    continue;
+                }
+                blank_wire_row()
+            } else {
+                cells
+            };
+            lines.push((id, cells));
             if skip == 0 && lines.len() >= max_lines {
                 break;
             }
@@ -396,6 +446,15 @@ impl TerminalState {
         let units = self.primary_history_selection(start, end)?;
         format_history_copy(&units)
     }
+}
+
+fn blank_wire_row() -> Vec<HistoryWireCell> {
+    vec![HistoryWireCell {
+        text: " ".into(),
+        width: 1,
+        style: Style::default(),
+        continuation: false,
+    }]
 }
 
 fn skip_wire_leads(cells: Vec<HistoryWireCell>, skip: &mut u32) -> Vec<HistoryWireCell> {

@@ -1,7 +1,7 @@
 //! V2 chunk span planning for grapheme sidecars and partial-row cuts.
 
 use seyal_exec::{CellRole, ProjectionCell};
-use seyal_protocol::framing::MAX_FRAME_PAYLOAD;
+use seyal_protocol::framing::{PresentationEnvelope, MAX_FRAME_PAYLOAD};
 
 use super::{
     DisplayError, DISPLAY_CELL_LEN, DISPLAY_CHUNK_HEADER_V2_LEN, MAX_GRAPHEME_SIDECAR_BYTES,
@@ -21,6 +21,12 @@ pub(crate) fn plan_v2_spans(
     columns: u16,
     cells: &[ProjectionCell],
 ) -> Result<Vec<SpanPlan>, DisplayError> {
+    // Negotiated bit-11 clients prepend this fixed envelope after display
+    // encoding. Keep every encoded frame small enough for that later prefix;
+    // otherwise a legal maximum-size V2 chunk cannot be put on the wire.
+    let max_chunk_payload = (MAX_FRAME_PAYLOAD as usize)
+        .checked_sub(PresentationEnvelope::PREFIX_LEN)
+        .ok_or(DisplayError::Overflow)?;
     let columns_usize = columns as usize;
     if !cells.len().is_multiple_of(columns_usize) {
         return Err(DisplayError::InvalidDamage);
@@ -50,7 +56,7 @@ pub(crate) fn plan_v2_spans(
                 )
                 .and_then(|v| v.checked_add(next_sidecar))
                 .ok_or(DisplayError::Overflow)?;
-            if next_sidecar > MAX_GRAPHEME_SIDECAR_BYTES || payload > MAX_FRAME_PAYLOAD as usize {
+            if next_sidecar > MAX_GRAPHEME_SIDECAR_BYTES || payload > max_chunk_payload {
                 break;
             }
             sidecar_bytes = next_sidecar;
@@ -104,8 +110,7 @@ pub(crate) fn plan_v2_spans(
                     )
                     .and_then(|v| v.checked_add(next_sidecar))
                     .ok_or(DisplayError::Overflow)?;
-                if next_sidecar > MAX_GRAPHEME_SIDECAR_BYTES || payload > MAX_FRAME_PAYLOAD as usize
-                {
+                if next_sidecar > MAX_GRAPHEME_SIDECAR_BYTES || payload > max_chunk_payload {
                     break;
                 }
                 sidecar_bytes = next_sidecar;

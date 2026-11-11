@@ -40,7 +40,7 @@ fn mini_shell() -> (ShellState, WorkspaceId, TabId, PaneId) {
         workspace,
         true,
         true,
-        false,
+        true,
     )
     .expect("seed");
     (shell, workspace, tab, pane)

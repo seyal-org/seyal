@@ -82,13 +82,9 @@ impl Runtime {
             return;
         }
 
-        // Rule 5: attachment_id is this connection's current live attachment.
-        let current_attachment = self.local_ipc.as_ref().and_then(|state| {
-            state
-                .connections
-                .get(&token)
-                .and_then(|meta| meta.attachment)
-        });
+        // Rule 5: attachment_id is live on this connection. Negotiated
+        // multi-attachment connections must validate the request's explicit
+        // identity instead of the legacy primary attachment.
         if request.attachment_id.to_bytes() == [0; 16] {
             self.send_terminate_execution_result(
                 token,
@@ -98,18 +94,13 @@ impl Runtime {
             );
             return;
         }
-        let Some(live_attachment) = current_attachment else {
-            // Attached state without a live attachment identity is not expected;
-            // treat as InvalidState rather than inventing authority.
-            self.send_terminate_execution_result(
-                token,
-                request.attachment_id,
-                request.request_id,
-                TerminateExecutionResultCode::Error(ErrorCode::InvalidState),
-            );
-            return;
-        };
-        if request.attachment_id != live_attachment {
+        let attached_execution = self.local_ipc.as_ref().and_then(|state| {
+            state
+                .attachments
+                .execution_for_connection(token, request.attachment_id)
+                .ok()
+        });
+        let Some(attached_execution) = attached_execution else {
             self.send_terminate_execution_result(
                 token,
                 request.attachment_id,
@@ -117,22 +108,9 @@ impl Runtime {
                 TerminateExecutionResultCode::Error(ErrorCode::StaleIdentity),
             );
             return;
-        }
+        };
 
         // Rule 6: execution_id matches that attachment's execution.
-        let Some(attached_execution) = self
-            .local_ipc
-            .as_ref()
-            .and_then(|state| state.attachments.execution_of(live_attachment).ok())
-        else {
-            self.send_terminate_execution_result(
-                token,
-                request.attachment_id,
-                request.request_id,
-                TerminateExecutionResultCode::Error(ErrorCode::StaleIdentity),
-            );
-            return;
-        };
         if request.execution_id != attached_execution {
             self.send_terminate_execution_result(
                 token,
@@ -147,7 +125,7 @@ impl Runtime {
         let role = self
             .local_ipc
             .as_ref()
-            .and_then(|state| state.attachments.role_of(live_attachment).ok());
+            .and_then(|state| state.attachments.role_of(request.attachment_id).ok());
         if role != Some(Role::Controller) {
             self.send_terminate_execution_result(
                 token,

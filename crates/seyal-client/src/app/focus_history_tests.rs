@@ -5,7 +5,9 @@ use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 use super::*;
 use crate::keybinding::{WorkspaceCommand, WorkspaceCommandId};
 use crate::navigation::{FocusSeq, ResourceAddress};
-use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
+use crate::shell::{
+    FocusDirection, ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+};
 
 fn evidence(pty_generation: u64, controller: bool, alternate_screen: bool) -> BindingEvidence {
     BindingEvidence {
@@ -47,7 +49,7 @@ fn two_pane_root() -> (ApplicationRoot, WorkspaceId, TabId, PaneId, PaneId) {
         w1,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -175,7 +177,11 @@ fn close_focused_pane_purges_then_commits_successor() {
     })
     .unwrap();
     // Close focused p2: R6.7a purge → reposition → successor commit (p1).
-    root.apply(AppAction::ClosePane { id: p2 }).unwrap();
+    root.apply(AppAction::ClosePane {
+        id: p2,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
     assert_eq!(root.snapshot().shell.focused_pane, p1);
     // Destroyed p2 is gone before any Back; Back from sole surviving entry is unavailable.
     let seq = root
@@ -349,7 +355,7 @@ fn open_attention_cross_window_drains_the_window_raise_effect() {
         workspace,
         true,
         true,
-        false,
+        true,
     )
     .unwrap();
     let mut root = ApplicationRoot::with_shell(shell);
@@ -381,7 +387,7 @@ fn open_attention_cross_window_drains_the_window_raise_effect() {
     })
     .unwrap();
 
-    assert_eq!(root.snapshot().shell.active_window, target_window);
+    assert_eq!(root.snapshot().shell.active_window, Some(target_window));
     assert!(root
         .snapshot()
         .pending_effects
@@ -456,7 +462,7 @@ fn two_tab_bound_root() -> (
         w1,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -622,7 +628,7 @@ fn history_traverses_unbound_pane_without_mutating_sibling_binding() {
         w1,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -654,7 +660,11 @@ fn history_traverses_unbound_pane_without_mutating_sibling_binding() {
     .unwrap();
     assert_eq!(root.snapshot().shell.focused_pane, p2);
     assert!(root.snapshot().execution.is_none());
-    assert!(root.pane_regions().iter().all(|region| !region.live));
+    let regions = root.pane_regions();
+    assert_eq!(regions.len(), 1);
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == p2 && region.focused && region.live));
     assert_eq!(
         root.apply(AppAction::SubmitInput {
             fence: root.fence(),
@@ -735,6 +745,52 @@ fn focus_pane_onto_unbound_leaf_clears_authority() {
 }
 
 #[test]
+fn zoom_and_directional_focus_commit_focus_and_input_authority() {
+    let (mut root, workspace, tab, p1, p2) = two_pane_root();
+    let bound = root.snapshot().execution;
+    assert!(bound.is_some());
+
+    root.apply(AppAction::ZoomPane { id: p2 }).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert_eq!(root.snapshot().shell.zoomed, Some(p2));
+    assert!(
+        root.snapshot().execution.is_none(),
+        "zoom moves input authority with focus"
+    );
+    assert_eq!(
+        root.focus_history.cursor_target(),
+        Some(ResourceAddress::Pane {
+            workspace,
+            tab,
+            pane: p2
+        })
+    );
+    assert_eq!(
+        root.apply(AppAction::SubmitInput {
+            fence: root.fence(),
+            text: "must fail closed".into()
+        }),
+        Err(AppError::UnboundUnauthorized)
+    );
+
+    root.apply(AppAction::FocusDirection {
+        direction: FocusDirection::Left,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_eq!(root.snapshot().shell.zoomed, None);
+    assert_eq!(root.snapshot().execution, bound);
+    assert_eq!(
+        root.focus_history.cursor_target(),
+        Some(ResourceAddress::Pane {
+            workspace,
+            tab,
+            pane: p1
+        })
+    );
+}
+
+#[test]
 fn split_focus_on_unbound_leaf_fails_closed_and_retains_sibling_binding() {
     let (mut root, _workspace, _tab, p1, _p2) = two_pane_root();
     let sibling_authority = root.pane_authorities.get(&p1).copied();
@@ -746,7 +802,13 @@ fn split_focus_on_unbound_leaf_fails_closed_and_retains_sibling_binding() {
     assert_ne!(focused, p1);
     assert_eq!(root.fence().pane, focused);
     assert!(root.snapshot().execution.is_none());
-    assert!(root.pane_regions().iter().all(|region| !region.live));
+    let regions = root.pane_regions();
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == p1 && region.live));
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == focused && region.focused && region.live));
     assert_eq!(root.pane_authorities.get(&p1).copied(), sibling_authority);
     assert_eq!(
         root.apply(AppAction::SubmitInput {
@@ -771,7 +833,11 @@ fn closing_unbound_focused_pane_restores_retained_sibling_authority() {
     let unbound = root.snapshot().shell.focused_pane;
     assert!(root.snapshot().execution.is_none());
 
-    root.apply(AppAction::ClosePane { id: unbound }).unwrap();
+    root.apply(AppAction::ClosePane {
+        id: unbound,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
 
     assert_eq!(root.snapshot().shell.focused_pane, p1);
     assert_eq!(root.snapshot().execution, Some(sibling_execution));
@@ -810,7 +876,11 @@ fn closing_active_tab_restores_successor_pane_authority() {
     let (mut root, t1, t2, _p1, p2, _exec1, exec2) = two_tab_bound_root();
     assert_eq!(root.snapshot().shell.active_tab, t1);
 
-    root.apply(AppAction::CloseTab { id: t1 }).unwrap();
+    root.apply(AppAction::CloseTab {
+        id: t1,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
 
     assert_eq!(root.snapshot().shell.active_tab, t2);
     assert_eq!(root.snapshot().shell.focused_pane, p2);

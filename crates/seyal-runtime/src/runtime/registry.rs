@@ -17,6 +17,8 @@ use super::entry::{Entry, ExecutionSummary};
 use super::integration_state::IntegrationState;
 use super::lifecycle::{BlockCompletion, Lifecycle};
 #[cfg(target_os = "macos")]
+use super::session_overlay::{InputTargetFact, SessionOverlay};
+#[cfg(target_os = "macos")]
 use super::shell_integration::ShellIntegrationMode;
 use super::Runtime;
 #[cfg(target_os = "macos")]
@@ -45,6 +47,17 @@ impl Runtime {
 
     pub fn default_workspace_id(&self) -> WorkspaceId {
         self.default_workspace
+    }
+
+    /// ADR-028 §2.5: mint an opaque WorkspaceId and admit it for CreateExecution.
+    pub fn mint_workspace(&mut self) -> WorkspaceId {
+        let id = WorkspaceId::new();
+        self.admitted_workspaces.insert(id);
+        id
+    }
+
+    pub fn is_workspace_admitted(&self, workspace: WorkspaceId) -> bool {
+        self.admitted_workspaces.contains(&workspace)
     }
 
     pub fn execution_count(&self) -> usize {
@@ -149,6 +162,19 @@ impl Runtime {
         size: WindowSize,
         launch_policy_detail_negotiated: bool,
     ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
+        self.create_interactive_execution_with_detail_cap_in_workspace(
+            size,
+            launch_policy_detail_negotiated,
+            self.default_workspace,
+        )
+    }
+
+    pub(in crate::runtime) fn create_interactive_execution_with_detail_cap_in_workspace(
+        &mut self,
+        size: WindowSize,
+        launch_policy_detail_negotiated: bool,
+        workspace_id: WorkspaceId,
+    ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
         let resolution = match crate::launch_policy::resolve_default_interactive() {
             Ok(resolution) => resolution,
             Err(failure) => return Err(RuntimeError::LaunchPolicy(failure)),
@@ -160,7 +186,7 @@ impl Runtime {
         }
         let warnings = crate::encode_created_warnings(&resolution.warnings);
         let command = crate::launch_policy::command_spec_from_policy(&resolution);
-        let execution_id = self.create_execution(command, size)?;
+        let execution_id = self.create_execution_in_workspace(command, size, workspace_id)?;
         let detail_code = if launch_policy_detail_negotiated {
             warnings.detail_code
         } else {
@@ -177,12 +203,25 @@ impl Runtime {
         command: CommandSpec,
         size: WindowSize,
     ) -> Result<ExecutionId, RuntimeError> {
+        self.create_execution_in_workspace(command, size, self.default_workspace)
+    }
+
+    pub fn create_execution_in_workspace(
+        &mut self,
+        command: CommandSpec,
+        size: WindowSize,
+        workspace_id: WorkspaceId,
+    ) -> Result<ExecutionId, RuntimeError> {
         if self.shutting_down {
             return Err(RuntimeError::ExecutionNotRunning);
         }
         if self.entries.len() >= self.config.max_executions {
             return Err(RuntimeError::CapacityExceeded);
         }
+        debug_assert!(
+            self.is_workspace_admitted(workspace_id),
+            "CreateExecution must only publish into an admitted Workspace"
+        );
 
         let composed = crate::launch_policy::compose_child_command(
             command,
@@ -251,7 +290,7 @@ impl Runtime {
         let entry = Entry {
             execution,
             token,
-            workspace_id: self.default_workspace,
+            workspace_id,
             attachments: HashSet::new(),
             lifecycle: Lifecycle::Running,
             pty_eof_reap_probe: None,
@@ -280,6 +319,28 @@ impl Runtime {
             published_composer_eligibility: None,
             #[cfg(target_os = "macos")]
             composer_status_revision: 0,
+            #[cfg(target_os = "macos")]
+            session: SessionOverlay::None,
+            #[cfg(target_os = "macos")]
+            input_target: InputTargetFact::None,
+            #[cfg(target_os = "macos")]
+            target_generation: 1,
+            #[cfg(target_os = "macos")]
+            published_target_generation: 0,
+            #[cfg(target_os = "macos")]
+            composer_target_revision: 0,
+            #[cfg(target_os = "macos")]
+            published_target_stamp: None,
+            #[cfg(target_os = "macos")]
+            direct_input_held: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_os = "macos")]
+            session_revision: 0,
+            #[cfg(target_os = "macos")]
+            next_offer_generation: 1,
+            #[cfg(target_os = "macos")]
+            offer_presentation_epoch: 0,
+            #[cfg(target_os = "macos")]
+            session_runtime: super::session_bootstrap::SessionRuntime::default(),
         };
         let previous = self.by_token.insert(token, id);
         debug_assert!(previous.is_none());
@@ -290,9 +351,7 @@ impl Runtime {
         // metadata. Admission happens only after TerminalExecution publication
         // and can never roll back or terminate an otherwise valid execution.
         if let Some(start_line_id) = initial_primary_line_id {
-            let _ = self
-                .execution_blocks
-                .admit(self.default_workspace, id, start_line_id);
+            let _ = self.execution_blocks.admit(workspace_id, id, start_line_id);
         }
         Ok(id)
     }
@@ -314,6 +373,10 @@ impl Runtime {
             self.config.aggregate_input_bytes,
             Arc::clone(&entry.reserved_input),
             self.config.per_execution_input_bytes,
+            #[cfg(target_os = "macos")]
+            Some(Arc::clone(&entry.direct_input_held)),
+            #[cfg(not(target_os = "macos"))]
+            None,
         ))
     }
     pub fn attach(&mut self, id: ExecutionId) -> Result<AttachmentId, RuntimeError> {

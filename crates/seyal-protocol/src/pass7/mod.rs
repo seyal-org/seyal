@@ -6,6 +6,7 @@ mod command_blocks;
 mod composer;
 mod history;
 mod resize;
+mod session_bootstrap;
 mod terminal_key;
 mod viewport_line_ids;
 
@@ -14,7 +15,9 @@ mod tests;
 
 use crate::{framing::FramingError, AttachmentId};
 
-pub use command_blocks::{BlockTimeline, CommandBlock, CommandBlockState};
+pub use command_blocks::{
+    BlockTimeline, CommandBlock, CommandBlockState, COMMAND_BLOCK_FLAG_CANVAS_FLOOR,
+};
 pub use composer::{
     ComposerCommandRef, ComposerEligibility, ComposerResult, ComposerResultCode, ComposerStatus,
 };
@@ -26,6 +29,11 @@ pub use history::{
     MAX_HISTORY_SIDECAR_BYTES,
 };
 pub use resize::{ResizeRequest, ResizeResult, ResizeResultCode, CAP_CORRELATED_RESIZE};
+pub use session_bootstrap::{
+    BlockScope, BlockTrust, ComposerTarget, ComposerTargetMode, ComposerTargetReason,
+    InputTargetClass, SessionConsent, SessionConsentDecision, SessionOffer, SessionOverlayWire,
+    SessionStatus, CAP_SESSION_BOOTSTRAP,
+};
 pub use terminal_key::{
     TerminalKey, TerminalKeyKind, TerminalKeyModifiers, TerminalKeyV2, TerminalKeyV2Event,
     TerminalKeyV2Kind, TerminalKeyV2Modifiers, CAP_EXTENDED_TERMINAL_KEY,

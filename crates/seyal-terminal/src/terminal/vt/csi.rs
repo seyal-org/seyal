@@ -345,16 +345,9 @@ impl TerminalCore {
             b'J' => {
                 self.invalidate_active_grapheme();
                 let mode = param_zero(params, 0);
-                let store = &mut self.grapheme_store;
-                if self.modes.alternate_screen {
-                    if let Some(screen) = &mut self.alternate {
-                        screen.erase_display(mode, store)
-                    } else {
-                        self.primary.erase_display(mode, store)
-                    }
-                } else {
-                    self.primary.erase_display(mode, store)
-                }
+                self.editing_mutation(|screen, line_ids, store| {
+                    screen.erase_display(mode, line_ids, store)
+                })
             }
             b'K' => {
                 self.invalidate_active_grapheme();

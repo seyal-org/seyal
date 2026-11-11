@@ -42,25 +42,46 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
     match command.id {
         WorkspaceCommandId::CommandPaletteOpen
         | WorkspaceCommandId::TabCreate
+        | WorkspaceCommandId::TerminalCreate
+        | WorkspaceCommandId::TerminalCloseFocused
         | WorkspaceCommandId::TabCloseFocused
         | WorkspaceCommandId::TabSelectPrevious
         | WorkspaceCommandId::TabSelectNext
         | WorkspaceCommandId::PaneSplitRight
         | WorkspaceCommandId::PaneSplitDown
-        | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationToggleTui
-        | WorkspaceCommandId::GotoOpen
-        | WorkspaceCommandId::ChromeToggleLeftPanel
-        | WorkspaceCommandId::ChromeToggleInspector => command.ordinal.is_none(),
+        | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
+        WorkspaceCommandId::AppCloseFocused
+        | WorkspaceCommandId::WindowNew
+        | WorkspaceCommandId::WindowClose
+        | WorkspaceCommandId::WindowCycleNext
+        | WorkspaceCommandId::WindowCyclePrevious => command.ordinal.is_none(),
         // Ordinal tabs are key-only; not separate menu rows in M003.
         // Focus-history is key-only in M003 (K8); not a K5 menu row.
         WorkspaceCommandId::TabSelectOrdinal
+        | WorkspaceCommandId::WindowSelectOrdinal
         | WorkspaceCommandId::CommandPaletteClose
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
         | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::PaneFocusLeft
+        | WorkspaceCommandId::PaneFocusRight
+        | WorkspaceCommandId::PaneFocusUp
+        | WorkspaceCommandId::PaneFocusDown
+        | WorkspaceCommandId::PaneZoomToggle
+        | WorkspaceCommandId::PaneSwapLeft
+        | WorkspaceCommandId::PaneSwapRight
+        | WorkspaceCommandId::PaneSwapUp
+        | WorkspaceCommandId::PaneSwapDown
+        | WorkspaceCommandId::PaneMoveLeft
+        | WorkspaceCommandId::PaneMoveRight
+        | WorkspaceCommandId::PaneMoveUp
+        | WorkspaceCommandId::PaneMoveDown
+        | WorkspaceCommandId::PaneEqualizeFocused
+        | WorkspaceCommandId::PaneEqualizeTab
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
+        | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationSetFlow
         | WorkspaceCommandId::PresentationSetRaw
         | WorkspaceCommandId::PresentationSetTui
@@ -74,6 +95,8 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
     match command.id {
         WorkspaceCommandId::CommandPaletteOpen => "Command Palette",
         WorkspaceCommandId::TabCreate => "New Tab",
+        WorkspaceCommandId::TerminalCreate => "New Terminal",
+        WorkspaceCommandId::TerminalCloseFocused => "Close Terminal",
         WorkspaceCommandId::TabCloseFocused => "Close Tab",
         WorkspaceCommandId::TabSelectPrevious => "Previous Tab",
         WorkspaceCommandId::TabSelectNext => "Next Tab",
@@ -82,9 +105,11 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
         WorkspaceCommandId::GotoOpen => "Go to…",
-        // Stateless titles; menus show the live Hide/Show title (R5.6.2).
-        WorkspaceCommandId::ChromeToggleLeftPanel => "Toggle Sidebar",
-        WorkspaceCommandId::ChromeToggleInspector => "Toggle Inspector",
+        WorkspaceCommandId::AppCloseFocused => "Close",
+        WorkspaceCommandId::WindowNew => "New Window",
+        WorkspaceCommandId::WindowClose => "Close Window",
+        WorkspaceCommandId::WindowCycleNext => "Next Window",
+        WorkspaceCommandId::WindowCyclePrevious => "Previous Window",
         // Focus-history remains key-only in M003 (K8); not a K5 menu title.
         other => other.as_str(),
     }
@@ -95,16 +120,19 @@ fn menu_visible_commands() -> impl Iterator<Item = WorkspaceCommand> {
     [
         WorkspaceCommandId::CommandPaletteOpen,
         WorkspaceCommandId::TabCreate,
+        WorkspaceCommandId::TerminalCreate,
         WorkspaceCommandId::TabCloseFocused,
         WorkspaceCommandId::TabSelectPrevious,
         WorkspaceCommandId::TabSelectNext,
         WorkspaceCommandId::PaneSplitRight,
         WorkspaceCommandId::PaneSplitDown,
-        WorkspaceCommandId::PresentationToggleRaw,
         WorkspaceCommandId::PresentationToggleTui,
         WorkspaceCommandId::GotoOpen,
-        WorkspaceCommandId::ChromeToggleLeftPanel,
-        WorkspaceCommandId::ChromeToggleInspector,
+        WorkspaceCommandId::TerminalCloseFocused,
+        WorkspaceCommandId::WindowNew,
+        WorkspaceCommandId::WindowClose,
+        WorkspaceCommandId::WindowCycleNext,
+        WorkspaceCommandId::WindowCyclePrevious,
     ]
     .into_iter()
     .map(|id| WorkspaceCommand { id, ordinal: None })
@@ -245,8 +273,29 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::FocusHistoryBack => 19,
         WorkspaceCommandId::FocusHistoryForward => 20,
         WorkspaceCommandId::GotoOpen => 21,
-        WorkspaceCommandId::ChromeToggleLeftPanel => 22,
-        WorkspaceCommandId::ChromeToggleInspector => 23,
+        WorkspaceCommandId::PaneZoomToggle => 22,
+        WorkspaceCommandId::PaneSwapLeft => 23,
+        WorkspaceCommandId::PaneSwapRight => 24,
+        WorkspaceCommandId::PaneSwapUp => 25,
+        WorkspaceCommandId::PaneSwapDown => 26,
+        WorkspaceCommandId::PaneMoveLeft => 27,
+        WorkspaceCommandId::PaneMoveRight => 28,
+        WorkspaceCommandId::PaneMoveUp => 29,
+        WorkspaceCommandId::PaneMoveDown => 30,
+        WorkspaceCommandId::PaneFocusLeft => 31,
+        WorkspaceCommandId::PaneFocusRight => 32,
+        WorkspaceCommandId::PaneFocusUp => 33,
+        WorkspaceCommandId::PaneFocusDown => 34,
+        WorkspaceCommandId::PaneEqualizeFocused => 35,
+        WorkspaceCommandId::PaneEqualizeTab => 36,
+        WorkspaceCommandId::AppCloseFocused => 37,
+        WorkspaceCommandId::WindowNew => 38,
+        WorkspaceCommandId::WindowClose => 39,
+        WorkspaceCommandId::WindowCycleNext => 40,
+        WorkspaceCommandId::WindowCyclePrevious => 41,
+        WorkspaceCommandId::WindowSelectOrdinal => 42,
+        WorkspaceCommandId::TerminalCreate => 43,
+        WorkspaceCommandId::TerminalCloseFocused => 44,
     }
 }
 
@@ -274,8 +323,29 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         19 => WorkspaceCommandId::FocusHistoryBack,
         20 => WorkspaceCommandId::FocusHistoryForward,
         21 => WorkspaceCommandId::GotoOpen,
-        22 => WorkspaceCommandId::ChromeToggleLeftPanel,
-        23 => WorkspaceCommandId::ChromeToggleInspector,
+        22 => WorkspaceCommandId::PaneZoomToggle,
+        23 => WorkspaceCommandId::PaneSwapLeft,
+        24 => WorkspaceCommandId::PaneSwapRight,
+        25 => WorkspaceCommandId::PaneSwapUp,
+        26 => WorkspaceCommandId::PaneSwapDown,
+        27 => WorkspaceCommandId::PaneMoveLeft,
+        28 => WorkspaceCommandId::PaneMoveRight,
+        29 => WorkspaceCommandId::PaneMoveUp,
+        30 => WorkspaceCommandId::PaneMoveDown,
+        31 => WorkspaceCommandId::PaneFocusLeft,
+        32 => WorkspaceCommandId::PaneFocusRight,
+        33 => WorkspaceCommandId::PaneFocusUp,
+        34 => WorkspaceCommandId::PaneFocusDown,
+        35 => WorkspaceCommandId::PaneEqualizeFocused,
+        36 => WorkspaceCommandId::PaneEqualizeTab,
+        37 => WorkspaceCommandId::AppCloseFocused,
+        38 => WorkspaceCommandId::WindowNew,
+        39 => WorkspaceCommandId::WindowClose,
+        40 => WorkspaceCommandId::WindowCycleNext,
+        41 => WorkspaceCommandId::WindowCyclePrevious,
+        42 => WorkspaceCommandId::WindowSelectOrdinal,
+        43 => WorkspaceCommandId::TerminalCreate,
+        44 => WorkspaceCommandId::TerminalCloseFocused,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {
@@ -284,6 +354,9 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         super::types::Ordinal1To9::new(ordinal)
     };
     if id == WorkspaceCommandId::TabSelectOrdinal && ordinal.is_none() {
+        return None;
+    }
+    if id == WorkspaceCommandId::WindowSelectOrdinal && ordinal.is_none() {
         return None;
     }
     Some(WorkspaceCommand { id, ordinal })

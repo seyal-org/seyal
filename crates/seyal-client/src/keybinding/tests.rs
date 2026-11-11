@@ -207,11 +207,11 @@ ordinal = 1
 
 [[keybindings]]
 keys = "cmd+w"
-action = "window.new"
+action = "window.explode"
 
 [[keybindings]]
 keys = "cmd+opt+left"
-action = "pane.focus_left"
+action = "window.not-a-command"
 
 [[keybindings]]
 keys = "cmd+["
@@ -400,13 +400,35 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     );
     assert!(contexts_for(&table, "cmd+[").is_empty());
     assert!(contexts_for(&table, "cmd+]").is_empty());
-    // Exclusions: ADR-021 pane focus/zoom, ADR-018 window
-    assert!(contexts_for(&table, "cmd+opt+left").is_empty());
-    assert!(contexts_for(&table, "cmd+shift+enter").is_empty());
+    // §5.1 / K7: zoom + directional focus builtins; equalize has catalog ids, no builtins.
+    let zoom = binding_for(
+        &table,
+        "cmd+shift+enter",
+        WorkspaceCommandId::PaneZoomToggle,
+    )
+    .expect("cmd+shift+enter pane.zoom_toggle");
+    assert_eq!(zoom.context, BindingContext::APP);
+    let focus_left = binding_for(&table, "cmd+opt+left", WorkspaceCommandId::PaneFocusLeft)
+        .expect("cmd+opt+left pane.focus_left");
+    assert_eq!(focus_left.context, BindingContext::APP);
+    assert_eq!(
+        WorkspaceCommandId::parse("pane.equalize_focused"),
+        Some(WorkspaceCommandId::PaneEqualizeFocused)
+    );
+    assert_eq!(
+        WorkspaceCommandId::parse("pane.equalize_tab"),
+        Some(WorkspaceCommandId::PaneEqualizeTab)
+    );
+    assert!(
+        table
+            .bindings
+            .iter()
+            .all(|b| b.action.id != WorkspaceCommandId::PaneEqualizeFocused),
+        "no equalize builtin"
+    );
 
-    assert!(binding_for(&table, "cmd+n", WorkspaceCommandId::TabCreate).is_some());
     assert!(contexts_for(&table, "cmd+,").is_empty());
-    assert!(contexts_for(&table, "cmd+w").is_empty());
+    assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TerminalCloseFocused).is_some());
     assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TabCloseFocused).is_none());
 }
 
@@ -619,7 +641,7 @@ context = ["raw"]
 
 #[test]
 fn conflict_worked_example_disjoint_contexts_both_remain() {
-    // builtin cmd+t → tab.create [app]
+    // builtin cmd+t → terminal.create [app]
     // user cmd+t → pane.split_down [raw]
     // → both remain
     let toml = r#"
@@ -633,7 +655,7 @@ context = ["raw"]
     assert_eq!(rows.len(), 2);
     assert!(rows
         .iter()
-        .any(|(id, ctx)| *id == WorkspaceCommandId::TabCreate && *ctx == BindingContext::APP));
+        .any(|(id, ctx)| *id == WorkspaceCommandId::TerminalCreate && *ctx == BindingContext::APP));
     assert!(rows.iter().any(|(id, ctx)| {
         *id == WorkspaceCommandId::PaneSplitDown && *ctx == BindingContext::RAW
     }));

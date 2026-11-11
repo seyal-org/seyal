@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::presentation::PresentationMode;
-use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use super::tree::PaneTree;
 use super::ShellError;
@@ -12,9 +12,40 @@ use super::ShellError;
 pub(super) struct Pane {
     pub(super) id: PaneId,
     pub(super) title: String,
-    pub(super) execution: Option<ExecutionId>,
+    pub(super) terminal_tabs: Vec<TerminalTab>,
+    pub(super) selected_terminal_tab: Option<TerminalTabId>,
     pub(super) allows_implicit_execution_bootstrap: bool,
+    /// Currently visible mode; TUI is a transient full-screen takeover.
     pub(super) presentation_mode: PresentationMode,
+    /// Resting mode restored after a TUI exits.
+    pub(super) resting_presentation_mode: PresentationMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TerminalTab {
+    pub(super) id: TerminalTabId,
+    pub(super) execution: Option<ExecutionId>,
+}
+
+impl Pane {
+    pub(super) fn selected_terminal(&self) -> Option<&TerminalTab> {
+        let selected = self.selected_terminal_tab?;
+        self.terminal_tabs
+            .iter()
+            .find(|terminal| terminal.id == selected)
+    }
+
+    pub(super) fn selected_terminal_mut(&mut self) -> Option<&mut TerminalTab> {
+        let selected = self.selected_terminal_tab?;
+        self.terminal_tabs
+            .iter_mut()
+            .find(|terminal| terminal.id == selected)
+    }
+
+    pub(super) fn execution(&self) -> Option<ExecutionId> {
+        self.selected_terminal()
+            .and_then(|terminal| terminal.execution)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,12 +69,19 @@ pub(super) struct Window {
     pub(super) workspace_id: WorkspaceId,
     pub(super) tabs: Vec<Tab>,
     pub(super) active_tab: TabId,
+    /// Host-forwarded occlusion (fully occluded Window → Hidden leaves).
+    pub(super) occluded: bool,
+    /// Host-forwarded miniaturize (Dock minimize → Hidden leaves).
+    pub(super) miniaturized: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Workspace {
     pub(super) id: WorkspaceId,
     pub(super) name: String,
+    /// Bound root path attribute (ADR-028). Display detail is derived from this
+    /// when helpful; identity is never derived from the path.
+    pub(super) root_path: Option<String>,
     pub(super) detail: Option<String>,
     pub(super) attention: bool,
     pub(super) windows: Vec<Window>,
@@ -101,6 +139,8 @@ impl Window {
             workspace_id,
             tabs,
             active_tab,
+            occluded: false,
+            miniaturized: false,
         })
     }
 
@@ -117,14 +157,20 @@ impl Workspace {
                 .tabs
                 .into_iter()
                 .map(|tab| {
+                    let terminal_id = TerminalTabId::new();
                     let pane = Pane {
                         id: tab.pane.id,
                         title: tab.pane.title,
-                        execution: None,
+                        terminal_tabs: vec![TerminalTab {
+                            id: terminal_id,
+                            execution: None,
+                        }],
+                        selected_terminal_tab: Some(terminal_id),
                         allows_implicit_execution_bootstrap: tab
                             .pane
                             .allows_implicit_execution_bootstrap,
                         presentation_mode: PresentationMode::Flow,
+                        resting_presentation_mode: PresentationMode::Flow,
                     };
                     let mut composed = Tab::with_pane(tab.id, tab.title, pane);
                     composed.attention = tab.attention;
@@ -149,11 +195,22 @@ impl Workspace {
         Ok(Self {
             id: seed.id,
             name: seed.name,
+            // Seeds historically carried path-ish detail; treat as bound root
+            // when present so ADR-028 leave matching has a root attribute.
+            root_path: seed.detail.clone(),
             detail: seed.detail,
             attention: seed.attention,
             active_window,
             windows,
         })
+    }
+
+    pub(super) fn bind_root_path(&mut self, root_path: String) {
+        let normalized = normalize_workspace_root(&root_path);
+        let name = workspace_name_from_root(&normalized);
+        self.root_path = Some(normalized.clone());
+        self.detail = helpful_workspace_detail(&name, &normalized);
+        self.name = name;
     }
 
     pub(super) fn tab_count(&self) -> usize {
@@ -208,13 +265,6 @@ impl Workspace {
             .active_tab)
     }
 
-    /// The active Window's last Tab cannot be closed. Closing it would leave a
-    /// zero-Tab Window, which is not a W1 close-window path.
-    pub(super) fn allows_tab_close(&self) -> bool {
-        self.active_window()
-            .is_some_and(|window| window.tabs.len() > 1)
-    }
-
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), ShellError> {
         let window_id = self
             .windows
@@ -235,37 +285,6 @@ impl Workspace {
         let window = self.window_mut(window).ok_or(ShellError::UnknownWindow)?;
         window.active_tab = tab.id;
         window.tabs.push(tab);
-        Ok(())
-    }
-
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
-        // One Tab in the Workspace fails closed before the id is resolved, so a
-        // stale id and the real last Tab report the same cause.
-        if self.tab_count() <= 1 {
-            return Err(ShellError::CannotCloseLastTab);
-        }
-        let Some(window_index) = self
-            .windows
-            .iter()
-            .position(|window| window.tabs.iter().any(|tab| tab.id == id))
-        else {
-            return Err(ShellError::UnknownTab);
-        };
-        if self.windows[window_index].tabs.len() <= 1 {
-            return Err(ShellError::CannotCloseLastTab);
-        }
-        let Some(tab_index) = self.windows[window_index]
-            .tabs
-            .iter()
-            .position(|tab| tab.id == id)
-        else {
-            return Err(ShellError::UnknownTab);
-        };
-        self.windows[window_index].tabs.remove(tab_index);
-        if self.windows[window_index].active_tab == id {
-            let replacement = tab_index.min(self.windows[window_index].tabs.len() - 1);
-            self.windows[window_index].active_tab = self.windows[window_index].tabs[replacement].id;
-        }
         Ok(())
     }
 
@@ -338,6 +357,39 @@ impl Workspace {
     }
 }
 
+pub(super) fn normalize_workspace_root_for_match(path: &str) -> String {
+    normalize_workspace_root(path)
+}
+
+fn normalize_workspace_root(path: &str) -> String {
+    let trimmed = path.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // Keep absolute paths stable; collapse trivial `./` noise without a crate.
+    if let Ok(canonical) = std::fs::canonicalize(trimmed) {
+        return canonical.to_string_lossy().into_owned();
+    }
+    trimmed.to_owned()
+}
+
+fn workspace_name_from_root(root: &str) -> String {
+    std::path::Path::new(root)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Workspace")
+        .to_owned()
+}
+
+fn helpful_workspace_detail(name: &str, root: &str) -> Option<String> {
+    if root.is_empty() || name.eq_ignore_ascii_case(root) {
+        None
+    } else {
+        Some(root.to_owned())
+    }
+}
+
 impl super::ShellState {
     pub(crate) fn set_presentation_mode(
         &mut self,
@@ -349,6 +401,33 @@ impl super::ShellState {
                 for tab in &mut window.tabs {
                     if let Some(pane) = tab.panes.get_mut(&pane_id) {
                         pane.presentation_mode = mode;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(ShellError::UnknownPane)
+    }
+
+    pub(crate) fn resting_presentation_mode(&self, pane_id: PaneId) -> Option<PresentationMode> {
+        self.pane(pane_id)
+            .ok()
+            .map(|pane| pane.resting_presentation_mode)
+    }
+
+    pub(crate) fn set_resting_presentation_mode(
+        &mut self,
+        pane_id: PaneId,
+        mode: PresentationMode,
+    ) -> Result<(), ShellError> {
+        for workspace in &mut self.workspaces {
+            for window in &mut workspace.windows {
+                for tab in &mut window.tabs {
+                    if let Some(pane) = tab.panes.get_mut(&pane_id) {
+                        pane.resting_presentation_mode = mode;
+                        if pane.presentation_mode != PresentationMode::Tui {
+                            pane.presentation_mode = mode;
+                        }
                         return Ok(());
                     }
                 }
@@ -372,17 +451,6 @@ impl Tab {
             focused: pane_id,
             zoomed: None,
         }
-    }
-
-    /// The last Pane of a Tab cannot be closed.
-    pub(super) fn allows_pane_close(&self) -> bool {
-        self.panes.len() > 1
-    }
-
-    /// `ClosePane` of the focused Pane would be accepted: not the last Pane.
-    /// A bound Pane may close; provisioning records detach-only disposition.
-    pub(super) fn allows_focused_pane_close(&self) -> bool {
-        self.allows_pane_close()
     }
 
     #[cfg(test)]

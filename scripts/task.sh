@@ -81,6 +81,8 @@ case "$cmd" in
     bash scripts/check-toolchain.sh
     bash -n scripts/*.sh
     bash scripts/validate-governance.sh
+    python3 scripts/check-pbxproj-unique-ids.py
+    python3 scripts/check-pbxproj-unique-ids.py --self-test
     python3 scripts/check-doc-links.py
     python3 scripts/check-layering.py
     python3 scripts/check-hot-path.py

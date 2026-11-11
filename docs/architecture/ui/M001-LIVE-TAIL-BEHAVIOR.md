@@ -55,16 +55,18 @@ A normal active composer must not imply that another unrelated shell command can
 
 Preferred presentation:
 
-- retract or disable the Pane composer while the foreground process owns the shell;
+- the composer is not unconditionally retracted while a foreground child runs (Accepted ADR-026 §3.2 / §8). If that child is a consented session-trusted shell at its prompt, the composer is `Submit` to that shell. If it is an eligible foreground program, a clearly labeled `Relay` may be offered. Retraction remains correct when the input target is `None`;
 - optionally show a compact running-process/status strip;
 - preserve the Pane's draft state;
-- restore the normal composer after the process exits/is interrupted and the shell becomes available.
+- restore the normal composer when the input target is `TrustedShell`, and after the process exits or is interrupted and the shell becomes available.
 
 Parallel work belongs in another Pane/Tab/execution.
 
 ## 7. New Blocks while running
 
 A foreground long-running process owns that shell, so unrelated same-shell commands cannot create later command Blocks until it exits or is interrupted.
+
+A session-trusted shell produces session-scoped Blocks nested under the host Running Block (Accepted ADR-026 §7.2). That is the same execution's session scope, not a second same-shell execution path.
 
 Other panes/tabs may continue independently.
 

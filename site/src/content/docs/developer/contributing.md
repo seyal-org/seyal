@@ -5,6 +5,15 @@ description: The required Seyal contribution workflow.
 
 Seyal treats engineering evidence as part of the feature, not as cleanup after implementation.
 
+## Finding work
+
+Contributors pick up work from two lists, also posted on [#1367](https://github.com/seyal-org/seyal/issues/1367). Authority for the labels is [`ISSUE-PROTOCOL.md`](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ISSUE-PROTOCOL.md).
+
+- [Development](https://github.com/seyal-org/seyal/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22%20no%3Aassignee) — `help wanted`. Ready and unassigned. Claim one and implement it.
+- [Refinement](https://github.com/seyal-org/seyal/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22needs-refinement%22%20no%3Aassignee) — `needs-refinement`. Unassigned. One pass writes the plan and moves the issue to Development, or marks it `blocked` on a specific issue.
+
+Comment `Owner: @your-login` when GitHub will not let you assign yourself, then start. Stop when another person already owns the issue. `blocked` issues are waiting on a named dependency. `historical-evidence` issues are not current work.
+
 ## Workflow
 
 ```text

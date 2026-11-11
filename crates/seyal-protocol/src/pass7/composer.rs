@@ -167,4 +167,50 @@ impl<'a> ComposerCommandRef<'a> {
             command,
         })
     }
+
+    /// Session-bootstrap schema. Selected when `CAP_SESSION_BOOTSTRAP` was
+    /// negotiated, not by comparing payload length with the legacy header.
+    pub fn encode_fenced(&self, target_generation: u64) -> Vec<u8> {
+        let bytes = self.command.as_bytes();
+        debug_assert!(!bytes.is_empty() && bytes.len() <= MAX_COMPOSER_COMMAND_BYTES);
+        debug_assert!(target_generation != 0);
+        const HEADER: usize = 40;
+        let mut out = Vec::with_capacity(HEADER + bytes.len());
+        out.extend_from_slice(&self.attachment_id.to_bytes());
+        out.extend_from_slice(&self.request_id.to_le_bytes());
+        out.extend_from_slice(&target_generation.to_le_bytes());
+        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    pub fn decode_fenced(bytes: &'a [u8]) -> Result<(Self, u64), FramingError> {
+        const HEADER: usize = 40;
+        if bytes.len() < HEADER {
+            return Err(FramingError::TruncatedPayload);
+        }
+        let request_id = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
+        let target_generation = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
+        let declared = u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
+        if request_id == 0
+            || target_generation == 0
+            || u32::from_le_bytes(bytes[36..40].try_into().unwrap()) != 0
+            || declared == 0
+            || declared > MAX_COMPOSER_COMMAND_BYTES
+            || bytes.len() != HEADER + declared
+        {
+            return Err(FramingError::MalformedPayload);
+        }
+        let command =
+            std::str::from_utf8(&bytes[HEADER..]).map_err(|_| FramingError::MalformedPayload)?;
+        Ok((
+            Self {
+                attachment_id: attachment_id_from(&bytes[..16]),
+                request_id,
+                command,
+            },
+            target_generation,
+        ))
+    }
 }

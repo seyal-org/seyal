@@ -236,6 +236,49 @@ pub extern "C" fn seyal_bridge_connect_first() -> i32 {
     }
 }
 
+/// SPEC-004 §18 New shell: create one execution and attach that id.
+/// Does not call `open_first` / list-order attach.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_open_created_execution() -> u64 {
+    seyal_bridge_open_created_execution_until(DEFAULT_RECOVERY_BUDGET_MICROS)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_open_created_execution_until(budget_micros: u64) -> u64 {
+    let deadline = match recovery_deadline(budget_micros) {
+        Ok(deadline) => deadline,
+        Err(error) => {
+            set_recovery_failure(error);
+            return 0;
+        }
+    };
+    let socket_path = match verified_recovery_socket_path() {
+        Ok(path) => path,
+        Err(error) => {
+            set_recovery_failure(error);
+            return 0;
+        }
+    };
+    let client = match LocalDisplayClient::connect_created_execution_until(deadline) {
+        Ok(client) => client,
+        Err(error) => {
+            set_recovery_failure(error);
+            return 0;
+        }
+    };
+    if let Err(error) = verify_connected_recovery_client(&client, &socket_path, deadline) {
+        set_recovery_failure(error);
+        return 0;
+    }
+    match register_pending_client(client, 4) {
+        Ok(handle) => handle,
+        Err(error) => {
+            set_recovery_failure(error);
+            0
+        }
+    }
+}
+
 /// Opens the first running execution as a new independent client handle. This
 /// is retained for the current single-execution shell bootstrap; production
 /// panes should prefer `seyal_bridge_open_execution` once their Runtime
@@ -384,6 +427,22 @@ pub extern "C" fn seyal_bridge_adopt_handle(handle: u64) -> i32 {
     // steal FOCUSED_DISPLAY_HANDLE). Bootstrap `seyal_bridge_connect_first`
     // claims display only when nothing is focused yet.
     0
+}
+
+/// Name `handle` as the focused display client when it is the Controller for
+/// `execution`. A leftover active handle from another pane does not match.
+pub(crate) fn adopt_focused_bridge(
+    root: &mut crate::app::ApplicationRoot,
+    fence: crate::app::AppFence,
+    execution: ExecutionId,
+) -> bool {
+    let live = active_handle();
+    let matches =
+        live != 0 && super::with_client(live, |client| client.execution_id()) == Some(execution);
+    if matches {
+        let _ = root.adopt_bridge_handle(fence, live);
+    }
+    matches
 }
 
 /// Selects the client used by readiness-driven poll/flush for `handle`'s fd.

@@ -56,7 +56,52 @@ func openRuntimeRecoveryHandle(
   guard handle != 0 else {
     let result = seyal_bridge_last_recovery_result()
     // Rust owns failure_class → outcome mapping (ADR-015 / #1065).
-    switch seyal_bridge_classify_open_result(result.failure_class, result.retryable) {
+    let classified = seyal_bridge_classify_open_result(result.failure_class, result.retryable)
+    let outcome: RuntimeRecoveryAttemptOutcome
+    switch classified {
+    case UInt32(SEYAL_APP_RECOVERY_ENDPOINT_MISSING.rawValue):
+      outcome = .endpointMissing
+    case UInt32(SEYAL_APP_RECOVERY_CONTROLLER_BUSY.rawValue):
+      outcome = .controllerBusy
+    case UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue):
+      outcome = .executionEnded
+    case UInt32(SEYAL_APP_RECOVERY_RETRYABLE.rawValue):
+      outcome = .retryable
+    default:
+      outcome = .blocked
+    }
+    NSLog(
+      "seyal: open_first fail class=%u retryable=%u → %@",
+      result.failure_class,
+      result.retryable,
+      String(describing: outcome) as NSString
+    )
+    return outcome
+  }
+  // `LAST_RECOVERY_RESULT` is executor-local in the Rust bridge. Capture the
+  // accepted attachment identities on this lifecycle queue and carry them to
+  // the MainActor adopter with the handle; reading them again there returns an
+  // empty thread-local result and falsely looks like an identity mismatch.
+  let result = seyal_bridge_last_recovery_result()
+  return .opened(RuntimeRecoveryOpenedHandle(
+    handle: handle,
+    runtimeIDLow: result.runtime_id_low,
+    runtimeIDHigh: result.runtime_id_high,
+    executionIDLow: result.execution_id_low,
+    executionIDHigh: result.execution_id_high,
+    attachmentIDLow: result.attachment_id_low,
+    attachmentIDHigh: result.attachment_id_high
+  ))
+}
+
+/// SPEC-004 §18 New shell. Rust owns the budget and always creates a new
+/// execution. This never lists and attaches an existing survivor.
+func openCreatedExecutionHandle() -> RuntimeRecoveryAttemptOutcome {
+  let handle = seyal_bridge_open_created_execution()
+  guard handle != 0 else {
+    let result = seyal_bridge_last_recovery_result()
+    let classified = seyal_bridge_classify_open_result(result.failure_class, result.retryable)
+    switch classified {
     case UInt32(SEYAL_APP_RECOVERY_ENDPOINT_MISSING.rawValue):
       return .endpointMissing
     case UInt32(SEYAL_APP_RECOVERY_CONTROLLER_BUSY.rawValue):
@@ -69,10 +114,6 @@ func openRuntimeRecoveryHandle(
       return .blocked
     }
   }
-  // `LAST_RECOVERY_RESULT` is executor-local in the Rust bridge. Capture the
-  // accepted attachment identities on this lifecycle queue and carry them to
-  // the MainActor adopter with the handle; reading them again there returns an
-  // empty thread-local result and falsely looks like an identity mismatch.
   let result = seyal_bridge_last_recovery_result()
   return .opened(RuntimeRecoveryOpenedHandle(
     handle: handle,

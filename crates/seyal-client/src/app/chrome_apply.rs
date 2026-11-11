@@ -1,28 +1,60 @@
 //! Shell tab/pane and chrome inspector apply paths.
 
-use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use super::*;
-use crate::chrome::{
-    AgentId, AttentionId, ChromeAction, ChromeError, InspectorMode, LeftPanelMode,
-};
-use crate::composer::ComposerError;
+use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
 use crate::navigation::ResourceAddress;
-use crate::palette::PaletteError;
 use crate::pane_layout::{self, SplitPosition};
 use crate::presentation::{PresentationAction, PresentationIdentity};
 use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
-    pub(crate) fn apply_shell(&mut self, action: ShellAction) -> Result<(), ShellError> {
-        let result = self.shell.apply(action);
-        if result.is_ok() {
-            self.drain_shell_effects();
+    pub(super) fn select_terminal_tab(
+        &mut self,
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+    ) -> Result<(), AppError> {
+        self.shell
+            .apply(ShellAction::SelectTerminalTab { pane, terminal_tab })
+            .map_err(|_| AppError::UnknownPane)?;
+        let execution = self
+            .shell
+            .terminal_execution(pane, terminal_tab)
+            .map_err(|_| AppError::UnknownPane)?;
+        if execution.is_some() {
+            let _ = self
+                .provisioning
+                .select_terminal_binding(pane, terminal_tab);
         }
-        result
+        if let Some(authority) = self.terminal_authorities.get(&terminal_tab).copied()
+            && Some(authority.execution) == execution
+        {
+            self.pane_authorities.insert(pane, authority);
+        } else {
+            self.pane_authorities.remove(&pane);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(raw) = self.terminal_client_raws.get(&terminal_tab).copied() {
+            self.pane_client_raws.insert(pane, raw);
+        } else {
+            self.pane_client_raws.remove(&pane);
+        }
+        if self.shell.snapshot().focused_pane == pane {
+            self.activate_focused_pane_authority();
+        }
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
     }
-    pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        self.close_pane_with_disposition(id)
+
+    pub(super) fn close_pane(
+        &mut self,
+        id: PaneId,
+        containment_generation: u64,
+    ) -> Result<(), AppError> {
+        self.close_pane_with_disposition(id, containment_generation)
     }
 
     pub(super) fn set_left_panel(&mut self, mode: LeftPanelMode) -> Result<(), AppError> {
@@ -126,12 +158,95 @@ impl ApplicationRoot {
     }
 
     pub(super) fn select_workspace(&mut self, id: WorkspaceId) -> Result<(), AppError> {
+        // ADR-018 §3.3a: ActivateWorkspace raise vs create. Only the create path
+        // must begin #994 provisioning for the new empty terminal tab.
+        let created = !self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .any(|window| window.workspace == id);
         self.shell
             .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         self.drain_shell_effects();
+        if created && let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+            if let Ok(window) = self.shell.product_window_id() {
+                let _ = self.shell.apply(crate::shell::ShellAction::CloseWindow {
+                    id: window,
+                    containment_generation: self.shell.containment_generation(),
+                });
+                self.drain_shell_effects();
+            }
+            return Err(error);
+        }
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn create_workspace(&mut self, root_path: String) -> Result<(), AppError> {
+        if root_path.trim().is_empty() {
+            return Err(AppError::InvalidPayload);
+        }
+        let id = self.mint_workspace_id()?;
+        self.shell
+            .create_workspace(id, root_path, self.shell.containment_generation())
+            .map_err(|error| match error {
+                crate::shell::ShellError::InvalidWorkspaceRoot => AppError::InvalidPayload,
+                crate::shell::ShellError::DuplicateWorkspace => AppError::UnknownChromeWorkspace,
+                _ => AppError::UnknownChromeWorkspace,
+            })?;
+        self.drain_shell_effects();
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn set_workspace_root(
+        &mut self,
+        id: WorkspaceId,
+        root_path: String,
+    ) -> Result<(), AppError> {
+        self.shell
+            .set_workspace_root(id, root_path)
+            .map_err(|error| match error {
+                crate::shell::ShellError::InvalidWorkspaceRoot => AppError::InvalidPayload,
+                _ => AppError::UnknownChromeWorkspace,
+            })?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn mint_workspace_id(&mut self) -> Result<WorkspaceId, AppError> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        self.with_wire_client_mut(|client| client.mint_workspace_blocking(deadline))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn mint_workspace_id(&mut self) -> Result<WorkspaceId, AppError> {
+        Err(AppError::NoLiveClient)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn create_workspace_with_minted_id_for_test(
+        &mut self,
+        id: WorkspaceId,
+        root_path: String,
+    ) -> Result<(), AppError> {
+        self.shell
+            .create_workspace(id, root_path, self.shell.containment_generation())
+            .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.drain_shell_effects();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -180,6 +295,19 @@ impl ApplicationRoot {
     /// target clears the active input route without deleting sibling bindings.
     pub(super) fn activate_focused_pane_authority(&mut self) {
         let focused = self.shell.snapshot().focused_pane;
+        let stored_mode = self.shell.resting_presentation_mode(focused);
+        // Restore the unbound Pane's mode before its first Controller bind.
+        self.explicit_flow = stored_mode == Some(crate::presentation::PresentationMode::Flow);
+        self.recompute_resting();
+        if self.pane_recovery.expectations.contains_key(&focused) {
+            self.authority = None;
+            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+            self.sync_composer_presentation();
+            self.output_utf8.clear();
+            #[cfg(target_os = "macos")]
+            self.clear_focused_display_handle_if_owned();
+            return;
+        }
         let Some(authority) = self.pane_authorities.get(&focused).copied() else {
             self.authority = None;
             let _ = self.presentation.apply(PresentationAction::ClearIdentity);
@@ -206,17 +334,8 @@ impl ApplicationRoot {
             .presentation
             .apply(PresentationAction::BindIdentity(identity));
         self.authority = Some(authority);
-        let stored_mode = self
-            .shell
-            .snapshot()
-            .windows
-            .iter()
-            .flat_map(|window| &window.tabs)
-            .flat_map(|tab| &tab.panes)
-            .find(|pane| pane.id == focused)
-            .map(|pane| pane.presentation_mode);
-        self.explicit_raw = stored_mode == Some(crate::presentation::PresentationMode::Raw);
-        self.recompute_resting();
+        // A live bind replaces any prior shell-exit latch on this Pane (#1379).
+        self.clear_execution_ended_for_pane(focused);
         let alternate = self.alternate_screen_for_pane(focused);
         let _ = self.derive_presentation(alternate);
         self.sync_composer_presentation();
@@ -261,9 +380,11 @@ impl ApplicationRoot {
         }
     }
 
-    /// Active Tab's Split dividers (#928), pre-order.
+    /// Active Tab's Split dividers (#928), pre-order. Empty while zoomed so
+    /// the host does not keep overlay-vs-divider policy of its own.
     pub fn pane_dividers(&self) -> Vec<pane_layout::PaneDivider> {
-        pane_layout::dividers(&self.shell.snapshot().tree)
+        let shell = self.shell.snapshot();
+        pane_layout::dividers_for_host(&shell.tree, shell.zoomed)
     }
 
     /// Resize the Split whose divider `pane` leads (#928). The host sends the
@@ -316,10 +437,9 @@ impl ApplicationRoot {
             .map_err(chrome_error)
     }
     pub(super) fn select_window(&mut self, id: WindowId) -> Result<(), AppError> {
-        let containment_generation = self.shell.snapshot().containment_generation;
         self.apply_shell(ShellAction::SelectWindow {
             id,
-            containment_generation,
+            containment_generation: self.shell.containment_generation(),
         })
         .map_err(|_| AppError::UnknownWindow)?;
         let _ = self
@@ -332,10 +452,9 @@ impl ApplicationRoot {
         &mut self,
         direction: crate::shell::CycleDirection,
     ) -> Result<(), AppError> {
-        let containment_generation = self.shell.snapshot().containment_generation;
         self.apply_shell(ShellAction::CycleWindow {
             direction,
-            containment_generation,
+            containment_generation: self.shell.containment_generation(),
         })
         .map_err(|_| AppError::UnknownWindow)?;
         let _ = self
@@ -363,6 +482,18 @@ impl ApplicationRoot {
             ShellError::WindowCreationUnavailable => AppError::WindowCreationUnavailable,
             _ => AppError::UnknownChromeWorkspace,
         })?;
+        self.drain_shell_effects();
+        if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+            if let Ok(window) = self.shell.product_window_id() {
+                let _ = self.apply_shell(ShellAction::CloseWindow {
+                    id: window,
+                    containment_generation: self.shell.containment_generation(),
+                });
+            }
+            return Err(error);
+        }
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -373,6 +504,7 @@ impl ApplicationRoot {
         &mut self,
         window: WindowId,
         event: WindowNativeEvent,
+        occluded: bool,
     ) -> Result<(), AppError> {
         if !self
             .shell
@@ -383,15 +515,44 @@ impl ApplicationRoot {
         {
             return Err(AppError::UnknownWindow);
         }
-        // Preserve the native event for host observability.
-        self.last_window_event = Some((window, event));
-        if event == WindowNativeEvent::ActivationFailed {
-            return Err(AppError::WindowActivationFailed);
-        }
-        if event == WindowNativeEvent::BecameKey {
-            self.apply_shell(ShellAction::ObserveWindowBecameKey { id: window })
+        match event {
+            WindowNativeEvent::BecameKey => {
+                // ADR-018 §1.3: native key activation is an input to Rust-owned
+                // product selection and its single application-scoped focus
+                // history. The native realization is already key, so this action
+                // commits the identity-validated selection without echoing an
+                // OrderFrontMakeKey effect back to AppKit.
+                self.apply_shell(ShellAction::NativeWindowBecameKey {
+                    id: window,
+                    containment_generation: self.shell.containment_generation(),
+                })
                 .map_err(|_| AppError::UnknownWindow)?;
+                let _ = self
+                    .chrome
+                    .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+            }
+            WindowNativeEvent::Miniaturized => {
+                self.shell
+                    .set_window_miniaturized(window, true)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            WindowNativeEvent::Deminiaturized => {
+                self.shell
+                    .set_window_miniaturized(window, false)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            WindowNativeEvent::ActivationFailed => {
+                self.last_window_event = Some((window, event));
+                return Err(AppError::WindowActivationFailed);
+            }
+            WindowNativeEvent::OcclusionChanged => {
+                self.shell
+                    .set_window_occluded(window, occluded)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            _ => {}
         }
+        self.last_window_event = Some((window, event));
         Ok(())
     }
 
@@ -401,48 +562,59 @@ impl ApplicationRoot {
     }
 }
 
-pub fn chrome_error(error: ChromeError) -> AppError {
-    match error {
-        ChromeError::UnknownAgent => AppError::UnknownAgent,
-        ChromeError::UnknownAttention => AppError::UnknownAttention,
-        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
-        ChromeError::UnknownTab => AppError::UnknownChromeTab,
-        ChromeError::UnknownBlock => AppError::UnknownBlock,
-    }
-}
-
-pub fn close_tab_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
-        _ => AppError::UnknownChromeTab,
-    }
-}
-
-pub fn close_pane_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
-        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
-        _ => AppError::UnknownPane,
-    }
-}
-
-pub fn palette_error(error: PaletteError) -> AppError {
-    match error {
-        PaletteError::NotOpen => AppError::PaletteNotOpen,
-        PaletteError::NoSelection => AppError::PaletteNoSelection,
-    }
-}
-
-pub fn composer_error(error: ComposerError) -> AppError {
-    match error {
-        ComposerError::UnknownPane => AppError::UnknownPane,
-        ComposerError::EmptyDraft | ComposerError::SubmitDisabled => {
-            AppError::ComposerSubmitDisabled
+#[cfg(target_os = "macos")]
+impl ApplicationRoot {
+    pub(super) fn sync_attachment_delivery(&mut self) -> bool {
+        use crate::shell::PresentationTier;
+        let snap = self.shell.snapshot();
+        let mut hidden = std::collections::HashMap::new();
+        for window in &snap.windows {
+            for tab in &window.tabs {
+                for pane in &tab.panes {
+                    hidden.insert(
+                        pane.id,
+                        matches!(
+                            pane.presentation_tier,
+                            PresentationTier::Hidden | PresentationTier::Unpresented
+                        ),
+                    );
+                }
+            }
         }
-        ComposerError::StaleRequest => AppError::StaleComposerRequest,
-        ComposerError::StaleEpoch => AppError::StaleComposerEpoch,
-        ComposerError::HistoryUnavailable => AppError::ComposerHistoryUnavailable,
-        ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
-        ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
+        let handles: Vec<_> = self
+            .pane_client_raws
+            .iter()
+            .map(|(pane, raw)| (*pane, *raw))
+            .collect();
+        let mut all_admitted = true;
+        for (pane, handle) in handles {
+            let suspend = hidden.get(&pane).copied().unwrap_or(true);
+            match crate::ffi::with_client_mut(handle, |client| {
+                client.set_delivery_suspended(suspend)
+            }) {
+                Some(Ok(())) => {}
+                Some(Err(_)) | None => all_admitted = false,
+            }
+        }
+        if let Some(client) = self.wire_client.as_mut() {
+            let execution = client.execution_id();
+            let suspend = snap
+                .windows
+                .iter()
+                .flat_map(|window| window.tabs.iter())
+                .flat_map(|tab| tab.panes.iter())
+                .find(|pane| pane.execution == Some(execution))
+                .map(|pane| {
+                    matches!(
+                        pane.presentation_tier,
+                        PresentationTier::Hidden | PresentationTier::Unpresented
+                    )
+                })
+                .unwrap_or(true);
+            if client.set_delivery_suspended(suspend).is_err() {
+                all_admitted = false;
+            }
+        }
+        all_admitted
     }
 }

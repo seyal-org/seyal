@@ -61,6 +61,8 @@ impl Runtime {
 
     pub(super) fn process_deadlines(&mut self) -> Result<(), RuntimeError> {
         let now = Instant::now();
+        #[cfg(target_os = "macos")]
+        self.expire_session_bootstraps(now)?;
 
         let probe_due = self
             .entries

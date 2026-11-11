@@ -10,12 +10,68 @@ extension ProductChromeHostView {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue), reserved: 1)
     }
 
+    /// Thin host confirm for ADR-028 leave offer. Rust owns create/jump; No is dismiss-only.
+    func presentLeaveOfferIfNeeded() {
+        let offer = seyal_app_leave_offer(pane.appHandle)
+        guard offer.kind != UInt16(SEYAL_APP_LEAVE_OFFER_NONE.rawValue) else {
+            presentedLeaveOfferPath = nil
+            return
+        }
+        let path = productChromeCopyUTF8(offer.path, UInt32(offer.path_len)) ?? ""
+        guard !path.isEmpty, presentedLeaveOfferPath != path else { return }
+        presentedLeaveOfferPath = path
+        let isJump = offer.kind == UInt16(SEYAL_APP_LEAVE_OFFER_JUMP.rawValue)
+        let alert = NSAlert()
+        alert.messageText = isJump ? "Open existing workspace?" : "Create workspace?"
+        alert.informativeText = isJump
+            ? "Current directory left this workspace root.\nJump to the workspace for:\n\(path)"
+            : "Current directory left this workspace root.\nCreate a workspace for:\n\(path)"
+        alert.addButton(withTitle: "Yes")
+        alert.addButton(withTitle: "No")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            applyChromeKind(UInt16(SEYAL_APP_ACTION_CONFIRM_LEAVE_OFFER.rawValue), reserved: 0)
+        } else {
+            applyChromeKind(UInt16(SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER.rawValue), reserved: 0)
+        }
+        presentedLeaveOfferPath = nil
+        reconcileChrome()
+    }
+
+    /// Thin host picker for CreateWorkspace (ADR-028). Path is the only host input;
+    /// Rust owns minting, shell recording, and left-rail projection.
+    @objc func createWorkspace() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Create Workspace"
+        panel.message = "Choose a folder to bind as the workspace root."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        applyPayload(
+            UInt16(SEYAL_APP_ACTION_CREATE_WORKSPACE.rawValue),
+            text: url.path
+        )
+        routeFocus()
+    }
+
     @objc func selectWorkspace(_ sender: NSButton) {
         applyIdentity(UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue), button: sender)
     }
 
     @objc func selectTab(_ sender: NSButton) {
         applyIdentity(UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue), button: sender)
+    }
+
+    @objc func selectLeftTerminalTab(_ sender: NSButton) {
+        guard let tagged = sender as? IdentityButton else { return }
+        _ = focusPaneForPaneAction(paneLo: tagged.paneLo, paneHi: tagged.paneHi)
+        selectTerminalTab(
+            paneLo: tagged.paneLo,
+            paneHi: tagged.paneHi,
+            terminalLo: tagged.idLo,
+            terminalHi: tagged.idHi
+        )
     }
 
     @objc func focusPane(_ sender: NSButton) {
@@ -35,8 +91,108 @@ extension ProductChromeHostView {
         routeFocus()
     }
 
+    @discardableResult
+    func focusPaneForPaneAction(paneLo: UInt64, paneHi: UInt64) -> Bool {
+        let current = seyal_app_shell(pane.appHandle)
+        if current.focused_pane_lo == paneLo && current.focused_pane_hi == paneHi {
+            return true
+        }
+        focusPaneRegion(lo: paneLo, hi: paneHi)
+        let shell = seyal_app_shell(pane.appHandle)
+        return shell.focused_pane_lo == paneLo && shell.focused_pane_hi == paneHi
+    }
+
     @objc func createTab() {
+        // ADR-015: always forward CreateTab. New shell after exit is a separate
+        // typed recovery action (`seyal-new-shell`); Swift must not reinterpret
+        // "+" / menu New Tab as replacement bootstrap (#1379).
         applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
+    }
+
+    @objc func createTerminal() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_NEW_TERMINAL.rawValue), reserved: 0)
+    }
+
+    func selectTerminalTab(paneLo: UInt64, paneHi: UInt64, terminalLo: UInt64, terminalHi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SELECT_TERMINAL_TAB.rawValue)
+        action.fence_pane_lo = paneLo
+        action.fence_pane_hi = paneHi
+        action.target_execution_lo = terminalLo
+        action.target_execution_hi = terminalHi
+        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
+        reconcileChrome()
+        routeFocus()
+    }
+
+    func closeTerminalTab(paneLo: UInt64, paneHi: UInt64, terminalLo: UInt64, terminalHi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_TERMINAL_TAB.rawValue)
+        action.fence_pane_lo = paneLo
+        action.fence_pane_hi = paneHi
+        action.target_execution_lo = terminalLo
+        action.target_execution_hi = terminalHi
+        action.target_generation = seyal_app_shell(pane.appHandle).containment_generation
+        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
+        // Bound close only begins terminate; tab removal happens after
+        // Finalized. Immediate reconcile alone leaves a zombie strip tab
+        // until a later select (#1402).
+        schedulePostTerminalCloseReconcile()
+    }
+
+    /// Close Terminal finishes after Lifecycle::Finalized; frames stop so
+    /// onFrameChanged never rebuilds the Pane tab strip or drains DestroyWindow
+    /// effects. Must call `pane.onProductChanged` (MultiWindow wraps it to
+    /// applyPendingEffects + syncDestroyAgainstSnapshot), not reconcile alone.
+    func schedulePostTerminalCloseReconcile() {
+        let refresh: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.pane.onProductChanged?()
+            self.routeFocus()
+        }
+        refresh()
+        // Bound terminate can finalize after the first second; keep refreshing
+        // until Rust has collapsed the empty sole Pane / Window (#1402).
+        for delay in [0.05, 0.15, 0.4, 1.0, 2.0, 3.5, 5.0] as [TimeInterval] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: refresh)
+        }
+    }
+
+    /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
+    /// WorkspaceCommand. Rust re-validates against the current route context.
+    @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {
+        guard let commandId = sender.representedObject as? UInt16 else { return }
+        let ordinal = commandId == KeybindingShortcutRealization.windowSelectOrdinal
+            ? UInt8(sender.tag)
+            : 0
+        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, ordinal, 0)
+        if code == 0 {
+            // This callback also lets the owning window host realize native
+            // effects (including a Rust-owned window close) produced by the
+            // command. Calling only reconcileChrome leaves the AppKit window
+            // map stale until some later frame happens to arrive.
+            if commandId == KeybindingShortcutRealization.terminalCloseFocused {
+                schedulePostTerminalCloseReconcile()
+            } else {
+                pane.onProductChanged?()
+                routeFocus()
+            }
+        } else {
+            NSApp.presentError(
+                NSError(
+                    domain: "Seyal.WorkspaceCommand",
+                    code: Int(code),
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Seyal could not perform “\(sender.title)” (code \(code)). Try again."
+                    ]
+                )
+            )
+        }
     }
 
     @objc func closeActiveTab(_ sender: NSButton) {
@@ -45,14 +201,28 @@ extension ProductChromeHostView {
 
     @objc func splitFocusedRight() {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 0)
+        // Split keeps Flow eligibility; reconcile alone leaves the pre-split
+        // composer first responder (often inside hidden liveContent) (#1464).
+        routeFocus()
     }
 
     @objc func splitFocusedDown() {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 1)
+        routeFocus()
     }
 
-    @objc func closeFocusedPane(_ sender: NSButton) {
-        applyIdentity(UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue), button: sender)
+    func closePane(paneLo: UInt64, paneHi: UInt64) {
+        guard focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+        action.target_execution_lo = paneLo
+        action.target_execution_hi = paneHi
+        action.target_generation = seyal_app_shell(pane.appHandle).containment_generation
+        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
+        reconcileChrome()
+        routeFocus()
     }
 
     @objc func openAttention(_ sender: NSButton) {
@@ -81,6 +251,11 @@ extension ProductChromeHostView {
         action.kind = kind
         action.target_execution_lo = tagged.idLo
         action.target_execution_hi = tagged.idHi
+        if kind == UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue)
+            || kind == UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+        {
+            action.target_generation = tagged.containmentGeneration
+        }
         _ = seyal_app_apply(pane.appHandle, &action)
         reconcileChrome()
     }
@@ -125,31 +300,201 @@ extension ProductChromeHostView {
     func configureChromeButtons() {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
+        createWorkspaceButton.bezelStyle = .inline
+        createWorkspaceButton.isBordered = false
+        createWorkspaceButton.title = ""
+        createWorkspaceButton.image = NSImage(
+            systemSymbolName: "folder.badge.plus",
+            accessibilityDescription: "Create Workspace"
+        )
+        createWorkspaceButton.imagePosition = .imageOnly
+        createWorkspaceButton.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        createWorkspaceButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        createWorkspaceButton.setAccessibilityIdentifier("seyal-create-workspace")
+        createWorkspaceButton.setAccessibilityLabel("Create Workspace")
+        createWorkspaceButton.toolTip = "Create Workspace"
+        createWorkspaceButton.target = self
+        createWorkspaceButton.action = #selector(createWorkspace)
+        newTabButton.title = ""
+        newTabButton.image = NSImage(
+            systemSymbolName: "plus.square",
+            accessibilityDescription: "New Tab"
+        )
+        newTabButton.imagePosition = .imageOnly
         newTabButton.setAccessibilityIdentifier("seyal-new-tab")
+        newTabButton.setAccessibilityLabel("New Tab")
+        newTabButton.toolTip = "New Tab"
         newTabButton.target = self
         newTabButton.action = #selector(createTab)
+        closeTabButton.title = ""
+        closeTabButton.image = NSImage(
+            systemSymbolName: "xmark.square",
+            accessibilityDescription: "Close Tab"
+        )
+        closeTabButton.imagePosition = .imageOnly
         closeTabButton.setAccessibilityIdentifier("seyal-close-tab")
+        closeTabButton.setAccessibilityLabel("Close Tab")
+        closeTabButton.toolTip = "Close Tab"
         closeTabButton.target = self
         closeTabButton.action = #selector(closeActiveTab(_:))
-        splitRightButton.setAccessibilityIdentifier("seyal-split-right")
-        splitRightButton.target = self
-        splitRightButton.action = #selector(splitFocusedRight)
-        splitDownButton.setAccessibilityIdentifier("seyal-split-down")
-        splitDownButton.target = self
-        splitDownButton.action = #selector(splitFocusedDown)
-        closePaneButton.setAccessibilityIdentifier("seyal-close-pane")
-        closePaneButton.target = self
-        closePaneButton.action = #selector(closeFocusedPane(_:))
+    }
+
+    /// Project outer layout Tab identities without a competing terminal strip.
+    func appendWorkspaceLayoutsIfNeeded(shell: SeyalAppShell) {
+        // Workspace Tabs are layout containers, not terminal sessions.
+        // Keep them reachable by pointer as compact C04 navigation rows
+        // without adding a competing terminal-looking top strip.
+        if shell.tab_count > 0 {
+            appendLeftSection(
+                title: "LAYOUTS",
+                identifier: "seyal-layouts-heading",
+                topGap: true
+            ) {
+                for index in 0..<Int(shell.tab_count) {
+                    let row = seyal_app_shell_row(
+                        pane.appHandle,
+                        UInt16(SEYAL_APP_ROW_TAB),
+                        UInt32(index)
+                    )
+                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Layout \(index + 1)"
+                    leftItems.addArrangedSubview(
+                        contextRow(
+                            primary: title,
+                            secondary: nil,
+                            identifier: "seyal-layout-\(index)",
+                            selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                            action: #selector(selectTab(_:)),
+                            kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
+                            idLo: row.id_lo,
+                            idHi: row.id_hi
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /// Bound for left Tabs rows without growing `SeyalAppShell` ABI size.
+    func leftTerminalTabRowCount(shell: SeyalAppShell) -> Int {
+        var count = 0
+        for index in 0..<Int(shell.pane_count) {
+            let paneRow = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
+            count += Int(seyal_app_pane_terminal_tab_count(pane.appHandle, paneRow.id_lo, paneRow.id_hi))
+        }
+        return count
+    }
+
+    func paneIdFromTerminalTabRow(_ row: SeyalAppRow) -> (UInt64, UInt64) {
+        guard row.address_len >= 16 else { return (0, 0) }
+        let bytes = withUnsafeBytes(of: row.address_bytes) { Array($0.prefix(16)) }
+        var lo: UInt64 = 0
+        var hi: UInt64 = 0
+        withUnsafeMutableBytes(of: &lo) { dest in
+            dest.copyBytes(from: bytes[0..<8])
+        }
+        withUnsafeMutableBytes(of: &hi) { dest in
+            dest.copyBytes(from: bytes[8..<16])
+        }
+        return (UInt64(littleEndian: lo), UInt64(littleEndian: hi))
+    }
+
+    func configureCloseButtons(shell: SeyalAppShell) {
+        closeTabButton.idLo = shell.active_tab_lo
+        closeTabButton.idHi = shell.active_tab_hi
+        closeTabButton.containmentGeneration = shell.containment_generation
+    }
+
+    /// PT5: name ids only. Rust owns zoom/layout; stale ids fail closed.
+    func zoomPane(lo: UInt64, hi: UInt64) {
+        applyPaneTreeKind(UInt16(SEYAL_APP_ACTION_ZOOM_PANE.rawValue), lo: lo, hi: hi)
+    }
+
+    func unzoomPane() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_UNZOOM.rawValue), reserved: 0)
+    }
+
+    func swapPanes(aLo: UInt64, aHi: UInt64, bLo: UInt64, bHi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SWAP_PANES.rawValue)
+        action.target_execution_lo = aLo
+        action.target_execution_hi = aHi
+        action.target_attachment_lo = bLo
+        action.target_attachment_hi = bHi
+        _ = seyal_app_apply(pane.appHandle, &action)
+        reconcileChrome()
+    }
+
+    func movePaneBeside(paneLo: UInt64, paneHi: UInt64, neighborLo: UInt64, neighborHi: UInt64, side: UInt32) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_MOVE_PANE_BESIDE.rawValue)
+        action.target_execution_lo = paneLo
+        action.target_execution_hi = paneHi
+        action.target_attachment_lo = neighborLo
+        action.target_attachment_hi = neighborHi
+        action.reserved = side
+        _ = seyal_app_apply(pane.appHandle, &action)
+        reconcileChrome()
+    }
+
+    func focusDirection(_ reserved: UInt32) {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_FOCUS_DIRECTION.rawValue), reserved: reserved)
+    }
+
+    func equalizeFocused() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_EQUALIZE_FOCUSED.rawValue), reserved: 0)
+    }
+
+    func equalizeTab() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_EQUALIZE_TAB.rawValue), reserved: 0)
+    }
+
+    private func applyPaneTreeKind(_ kind: UInt16, lo: UInt64, hi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = kind
+        action.target_execution_lo = lo
+        action.target_execution_hi = hi
+        _ = seyal_app_apply(pane.appHandle, &action)
+        reconcileChrome()
     }
 
     func styleSwitcher(_ button: NSButton, identifier: String, action: Selector) {
         button.setButtonType(.toggle)
         button.bezelStyle = .inline
         button.isBordered = false
-        button.font = .systemFont(ofSize: 11, weight: .semibold)
+        button.font = .systemFont(ofSize: 12, weight: .semibold)
         button.setAccessibilityIdentifier(identifier)
         button.target = self
         button.action = action
+    }
+
+    /// Active mode is semibold label; idle mode is regular secondary.
+    func applyLeftModeSwitcher(leftPanel: UInt16) {
+        let workspacesOn = leftPanel == 0
+        workspacesButton.state = workspacesOn ? .on : .off
+        tabsButton.state = workspacesOn ? .off : .on
+        styleModeLabel(workspacesButton, title: "Workspaces", active: workspacesOn)
+        styleModeLabel(tabsButton, title: "Tabs", active: !workspacesOn)
+    }
+
+    private func styleModeLabel(_ button: NSButton, title: String, active: Bool) {
+        let font = NSFont.systemFont(ofSize: 12, weight: active ? .semibold : .regular)
+        let color: NSColor = active ? .labelColor : .secondaryLabelColor
+        button.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+            ]
+        )
+        // XCUI reads accessibilityLabel; attributedTitle alone often surfaces empty.
+        button.setAccessibilityLabel(title)
+        button.title = title
     }
 
     func borderlessButton(title: String, action: Selector) -> NSButton {
@@ -185,9 +530,172 @@ extension ProductChromeHostView {
         return button
     }
 
+    /// C04 dense context row matching mockup anatomy:
+    /// `[dot] primary` / secondary on the next line; selected fill + 3px accent.
+    func contextRow(
+        primary: String,
+        secondary: String?,
+        identifier: String,
+        selected: Bool,
+        action: Selector,
+        kind: UInt16,
+        idLo: UInt64,
+        idHi: UInt64,
+        paneLo: UInt64 = 0,
+        paneHi: UInt64 = 0
+    ) -> NSView {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.wantsLayer = true
+        // NSTextField intrinsic width must not shrink the row or pin it trailing.
+        row.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        row.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        if selected {
+            row.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            let accent = NSView()
+            accent.translatesAutoresizingMaskIntoConstraints = false
+            accent.wantsLayer = true
+            accent.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+            accent.setAccessibilityElement(false)
+            row.addSubview(accent)
+            NSLayoutConstraint.activate([
+                accent.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+                accent.topAnchor.constraint(equalTo: row.topAnchor),
+                accent.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+                accent.widthAnchor.constraint(equalToConstant: 3),
+            ])
+        }
+
+        // Navigation identities have no generic "healthy/running" state.
+        // A green dot on every Workspace/Tab fabricated connection status.
+        // Use a neutral type glyph; real attention belongs to Rust flags.
+        let symbol: String
+        switch kind {
+        case UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue):
+            symbol = "square.stack.3d.up"
+        case UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue):
+            symbol = "rectangle.on.rectangle"
+        default:
+            symbol = "terminal"
+        }
+        let glyph = NSImageView()
+        glyph.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        glyph.imageScaling = .scaleProportionallyDown
+        glyph.contentTintColor = selected ? .labelColor : .tertiaryLabelColor
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        glyph.setAccessibilityElement(false)
+
+        let primaryLabel = NSTextField(labelWithString: primary)
+        primaryLabel.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .medium)
+        primaryLabel.lineBreakMode = .byTruncatingTail
+        primaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        primaryLabel.setAccessibilityElement(false)
+        primaryLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        primaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let secondaryLabel = NSTextField(labelWithString: secondary ?? "")
+        secondaryLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        secondaryLabel.textColor = .secondaryLabelColor
+        secondaryLabel.tag = 2
+        secondaryLabel.lineBreakMode = .byTruncatingMiddle
+        secondaryLabel.isHidden = secondary == nil || secondary?.isEmpty == true
+        secondaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        secondaryLabel.setAccessibilityElement(false)
+        secondaryLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        secondaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let hit = IdentityButton(title: "", target: self, action: action)
+        hit.idLo = idLo
+        hit.idHi = idHi
+        hit.paneLo = paneLo
+        hit.paneHi = paneHi
+        hit.kind = kind
+        hit.bezelStyle = .inline
+        hit.isBordered = false
+        hit.imagePosition = .noImage
+        hit.setAccessibilityIdentifier(identifier)
+        hit.setAccessibilityTitle(primary)
+        hit.setAccessibilityLabel(
+            [primary, secondary].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+        )
+        hit.state = selected ? .on : .off
+        hit.translatesAutoresizingMaskIntoConstraints = false
+        hit.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        hit.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        row.addSubview(glyph)
+        row.addSubview(primaryLabel)
+        row.addSubview(secondaryLabel)
+        row.addSubview(hit)
+
+        let hasSecondary = !(secondary?.isEmpty ?? true)
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: hasSecondary ? 46 : 36),
+            glyph.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            glyph.centerYAnchor.constraint(
+                equalTo: hasSecondary ? primaryLabel.centerYAnchor : row.centerYAnchor
+            ),
+            glyph.widthAnchor.constraint(equalToConstant: 13),
+            glyph.heightAnchor.constraint(equalToConstant: 13),
+            primaryLabel.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: 8),
+            primaryLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            primaryLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: hasSecondary ? 8 : 10),
+            secondaryLabel.leadingAnchor.constraint(equalTo: primaryLabel.leadingAnchor),
+            secondaryLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            secondaryLabel.topAnchor.constraint(equalTo: primaryLabel.bottomAnchor, constant: 2),
+            hit.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            hit.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            hit.topAnchor.constraint(equalTo: row.topAnchor),
+            hit.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        return row
+    }
+
     func expose(_ view: NSView, identifier: String) {
         view.setAccessibilityElement(true)
         view.setAccessibilityRole(.group)
         view.setAccessibilityIdentifier(identifier)
+    }
+
+    /// Host GPU follows Rust-authored tier; never invents Hidden/Visible.
+    func applyPresentationTierFromSnapshot() {
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        let shell = seyal_app_shell(pane.appHandle)
+        var matched = false
+        for windowIndex in 0..<Int(shell.window_count) {
+            let window = seyal_app_window(pane.appHandle, UInt32(windowIndex))
+            for tabIndex in 0..<Int(window.tab_count) {
+                let tab = seyal_app_tab(pane.appHandle, UInt32(windowIndex), UInt32(tabIndex))
+                for paneIndex in 0..<Int(tab.pane_count) {
+                    let leaf = seyal_app_pane_leaf(
+                        pane.appHandle,
+                        UInt32(windowIndex),
+                        UInt32(tabIndex),
+                        UInt32(paneIndex)
+                    )
+                    if leaf.pane_lo == snapshot.pane_lo, leaf.pane_hi == snapshot.pane_hi {
+                        pane.inputSurface.applyProductPresentationTier(leaf.presentation_tier)
+                        matched = true
+                    }
+                }
+            }
+        }
+        if !matched {
+            pane.inputSurface.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_UNPRESENTED))
+        }
+    }
+}
+
+extension ProductChromeHostView: NSMenuItemValidation {
+    /// R6.4.2: enabled state comes only from the Rust shortcut projection.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard let commandId = menuItem.representedObject as? UInt16 else {
+            return true
+        }
+        return KeybindingShortcutRealization.isEnabled(
+            appHandle: pane.appHandle,
+            commandId: commandId,
+            composerFocused: false
+        )
     }
 }

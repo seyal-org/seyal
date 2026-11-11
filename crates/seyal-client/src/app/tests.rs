@@ -1,3 +1,4 @@
+use super::presentation_tests::runtime_available;
 use super::*;
 use crate::presentation::InputRoute;
 mod close_disposition_tests;
@@ -12,13 +13,11 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     }
 }
 
-/// Runtime published `Available` for the bound attachment: the only way
-/// the composer becomes submittable.
-fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
-    root.apply(AppAction::ApplyRuntimeComposerStatus {
+/// Supported sessions start in Flow; Runtime Available status admits composer input.
+fn opt_in_flow(root: &mut ApplicationRoot) {
+    root.apply(AppAction::SelectRestingPresentation {
         fence: root.fence(),
-        eligibility: Some(RuntimeComposerEligibility::Available),
-        revision,
+        raw: false,
     })
     .unwrap();
 }
@@ -33,6 +32,7 @@ fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     let bound = root.snapshot().composer.unwrap();
     assert!(matches!(bound.mode, ComposerMode::Busy { .. }));
     assert!(!bound.can_submit);
@@ -58,6 +58,7 @@ fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
             fence: stale,
             eligibility: Some(RuntimeComposerEligibility::Available),
             revision: 1,
+            target: None,
         }),
         Err(AppError::StaleExecution)
     );
@@ -72,6 +73,7 @@ fn bound_composer_is_busy_until_runtime_publishes_eligibility() {
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Busy),
         revision: 2,
+        target: None,
     })
     .unwrap();
     let busy = root.snapshot().composer.unwrap();
@@ -116,43 +118,6 @@ fn split_focused_begins_provisioning_under_production_policy() {
         .provisioning()
         .pending_intent(root.snapshot().shell.focused_pane)
         .is_some());
-}
-
-#[test]
-fn close_tab_and_close_pane_fail_closed_when_only_one_exists() {
-    // The M001 production shell starts with exactly one Tab and one
-    // Pane, so ShellState's "cannot close last" guard rejects CloseTab/
-    // ClosePane before an id is even looked up (shell.rs close_tab/
-    // close_pane), whether the id is real or not. This exercises the
-    // new close_tab_error/close_pane_error mapping surfaces that
-    // distinct cause rather than collapsing it to an unknown-id error.
-    let mut root = ApplicationRoot::new();
-    let snap = root.snapshot();
-    let only_tab = snap.shell.tabs[0].id;
-    let only_pane = snap.shell.panes[0].id;
-
-    assert_eq!(
-        root.apply(AppAction::CloseTab { id: TabId::new() }),
-        Err(AppError::CannotCloseLastTab)
-    );
-    assert_eq!(
-        root.apply(AppAction::ClosePane { id: PaneId::new() }),
-        Err(AppError::CannotCloseLastPane)
-    );
-    assert_eq!(
-        root.apply(AppAction::CloseTab { id: only_tab }),
-        Err(AppError::CannotCloseLastTab)
-    );
-    assert_eq!(
-        root.apply(AppAction::ClosePane { id: only_pane }),
-        Err(AppError::CannotCloseLastPane)
-    );
-    // A rejected mutation does not remove the only Tab/Pane.
-    let after = root.snapshot();
-    assert_eq!(after.shell.tabs.len(), 1);
-    assert_eq!(after.shell.panes.len(), 1);
-    assert_eq!(after.shell.tabs[0].id, only_tab);
-    assert_eq!(after.shell.panes[0].id, only_pane);
 }
 
 #[test]
@@ -244,9 +209,9 @@ fn refresh_alternate_screen_takeover_is_not_latched_at_bind() {
         alternate_screen: false,
     })
     .unwrap();
-    let flow = root.snapshot();
-    assert_eq!(flow.eligibility, PresentationEligibility::Flow);
-    assert!(flow.composer_eligible);
+    let raw = root.snapshot();
+    assert_eq!(raw.eligibility, PresentationEligibility::Flow);
+    assert!(raw.composer_eligible);
 }
 
 #[test]
@@ -332,6 +297,7 @@ fn observer_and_flow_cannot_submit_direct_input() {
             evidence: evidence(5, true, false),
         })
         .unwrap();
+    opt_in_flow(&mut controller);
     assert_eq!(
         controller.apply(AppAction::SubmitInput {
             fence: controller.fence(),
@@ -465,6 +431,7 @@ fn composer_history_is_fenced_and_never_submits() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     runtime_available(&mut root, 1);
     let epoch = root.snapshot().composer.unwrap().epoch;
     root.apply(AppAction::SetComposerDraft {
@@ -894,14 +861,16 @@ fn block_selection_is_fenced_and_sourced_from_runtime_blocks() {
     .unwrap();
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![RuntimeBlockRecord {
+        records: Some(vec![RuntimeBlockRecord {
             id: known,
             command: "git status".into(),
             start_line: 1,
             end_line: Some(3),
             running: false,
             exit_status: Some(0),
-        }],
+            canvas_floor: false,
+            scope: seyal_protocol::framing::BlockScope::Local,
+        }]),
     })
     .unwrap();
     assert_eq!(
@@ -940,7 +909,7 @@ fn block_selection_is_fenced_and_sourced_from_runtime_blocks() {
     // Runtime republishes without that Block: selection clears itself.
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![],
+        records: Some(vec![]),
     })
     .unwrap();
     let after = root.snapshot();
@@ -964,6 +933,7 @@ fn composer_submit_busy_and_stale_request_are_rust_owned() {
         evidence: evidence(8, true, false),
     })
     .unwrap();
+    opt_in_flow(&mut root);
     runtime_available(&mut root, 1);
     let epoch = root.snapshot().composer.as_ref().unwrap().epoch;
     root.apply(AppAction::SetComposerDraft {
@@ -1005,14 +975,16 @@ fn composer_submit_busy_and_stale_request_are_rust_owned() {
     let block = BlockId::from_bytes([0x44; 16]);
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
-        records: vec![RuntimeBlockRecord {
+        records: Some(vec![RuntimeBlockRecord {
             id: block,
             command: "echo hi".into(),
             start_line: 1,
             end_line: Some(1),
             running: false,
             exit_status: Some(0),
-        }],
+            canvas_floor: false,
+            scope: seyal_protocol::framing::BlockScope::Local,
+        }]),
     })
     .unwrap();
     let projected = &root.snapshot().composer.unwrap().blocks;

@@ -133,7 +133,7 @@ fn round_trip_windows(n: usize) {
         );
         if window.flags & 1 != 0 {
             seen_active = true;
-            assert_eq!(expected_window.id, expected.active_window);
+            assert_eq!(Some(expected_window.id), expected.active_window);
         }
         if wi == 1 {
             assert_ne!(window.flags & 2, 0, "attention flag");
@@ -474,6 +474,7 @@ fn per_leaf_presentation_mode_round_trips_for_inactive_leaves_and_windows() {
     let expected = shell.snapshot();
     install_shell(handle, shell);
 
+    // Wire: Flow=0, Raw=1, Tui=2. New panes default to Flow (#1426).
     for (window, pane, mode) in [(0, 0, 0), (0, 1, 1), (1, 0, 2)] {
         let record = seyal_app_pane_leaf(handle, window, 0, pane);
         assert_eq!(record.version, APP_ABI_VERSION);
@@ -608,7 +609,7 @@ fn navigate_to_other_window_tab_emits_window_activation() {
         },
     })
     .expect("navigate");
-    assert_eq!(root.snapshot().shell.active_window, other_window);
+    assert_eq!(root.snapshot().shell.active_window, Some(other_window));
     assert_eq!(
         root.snapshot().pending_effects,
         [crate::app::NativeEffect::WindowActivation {

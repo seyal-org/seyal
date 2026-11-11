@@ -1,0 +1,373 @@
+//! Public application actions accepted by the portable product-state root.
+
+use super::*;
+use seyal_core::TerminalTabId;
+
+/// Runtime-published target facts used to fence an explicit direct-input
+/// transition. These are read-only projections; Runtime remains the input
+/// admission authority.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeComposerTarget {
+    pub block_id: u64,
+    pub target_generation: u64,
+    pub revision: u64,
+    pub target_class: u8,
+    pub mode: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AppAction {
+    Focus {
+        fence: AppFence,
+    },
+    Bind {
+        fence: AppFence,
+        evidence: BindingEvidence,
+    },
+    Refresh {
+        fence: AppFence,
+        alternate_screen: bool,
+    },
+    SubmitInput {
+        fence: AppFence,
+        text: String,
+    },
+    Quit,
+    AckEffect,
+    BeginRecovery {
+        now: Duration,
+    },
+    CompleteRecovery {
+        generation: u64,
+        outcome: AttemptOutcome,
+        now: Duration,
+        launch: Option<LaunchResult>,
+    },
+    FireScheduledRecovery {
+        generation: u64,
+        now: Duration,
+    },
+    AckRecoveryEffect,
+    CancelRecovery,
+    /// Host presentation progress after connect (`RestoringInteraction` / `Usable`).
+    AdvanceRecoveryStage {
+        stage: RecoveryStage,
+    },
+    /// Begin a continuity-identity commit attempt (pins retained across episodes).
+    BeginReconstructionAttempt,
+    /// Commit Runtime/execution continuity and a fresh attachment. Rust is the
+    /// sole fencing authority (ADR-015 / #1065).
+    CommitReconstruction {
+        runtime: ContinuityIdentity,
+        execution: ContinuityIdentity,
+        attachment: ContinuityIdentity,
+        controller_authority_committed: bool,
+        authoritative_snapshot_committed: bool,
+    },
+    /// Mark reconstruction disconnected after the host drops the live client.
+    DisconnectReconstruction,
+    /// Drop continuity pins so a fresh ExecutionId (New shell after exit) can
+    /// commit. Same-execution reconnect must keep using DisconnectReconstruction.
+    ClearReconstructionContinuity,
+    /// Explicit New shell after an ended Pane (SPEC-004 §18 Create+Bind).
+    /// `None` prepares that Pane. `Some` binds the created ExecutionId onto it,
+    /// never onto a focused sibling.
+    CreateReplacementExecution {
+        execution: Option<ExecutionId>,
+        attachment: Option<AttachmentId>,
+        pty_generation: u64,
+    },
+    SetComposerDraft {
+        fence: AppFence,
+        text: String,
+        composer_epoch: u64,
+    },
+    SubmitComposer {
+        fence: AppFence,
+        composer_epoch: u64,
+    },
+    ApplyComposerResult {
+        fence: AppFence,
+        request_id: u64,
+        accepted: bool,
+    },
+    ApplyRuntimeBlocks {
+        fence: AppFence,
+        /// `None` means the active display client is unavailable. Retain the
+        /// last projected Flow Block history instead of wiping it (#1379/#1171).
+        records: Option<Vec<RuntimeBlockRecord>>,
+    },
+    /// Relay the attached client's Runtime-published composer eligibility
+    /// (ADR-009 invariant 7). `None` clears it when the transport is lost.
+    ApplyRuntimeComposerStatus {
+        fence: AppFence,
+        eligibility: Option<RuntimeComposerEligibility>,
+        revision: u64,
+        target: Option<RuntimeComposerTarget>,
+    },
+    /// User intent to enter direct input for the exact foreground program
+    /// Runtime currently associates with a Running Block.
+    InteractWithRunningBlock {
+        fence: AppFence,
+        block_id: u64,
+        target_generation: u64,
+        target_revision: u64,
+    },
+    /// User choice of the non-TUI resting presentation (#867, #1438).
+    /// `raw == true` selects grid-first Raw (clears Flow opt-in). `raw == false`
+    /// opts into Flow when integration allows. Shell-integration status alone
+    /// must not flip resting Raw → Flow while Flow is quarantined.
+    SelectRestingPresentation {
+        fence: AppFence,
+        raw: bool,
+    },
+    SetLeftPanel {
+        mode: LeftPanelMode,
+    },
+    SetInspectorMode {
+        mode: InspectorMode,
+    },
+    SelectAgent {
+        fence: AppFence,
+        id: AgentId,
+    },
+    OpenAttention {
+        fence: AppFence,
+        id: AttentionId,
+    },
+    ReplaceChrome {
+        fence: AppFence,
+        agents: Vec<crate::chrome::AgentRecord>,
+        attention: Vec<crate::chrome::AttentionItem>,
+    },
+    SelectWorkspace {
+        id: WorkspaceId,
+    },
+    /// ADR-028: create a Workspace with an explicit root; Runtime mints the id.
+    CreateWorkspace {
+        root_path: String,
+    },
+    /// ADR-028: bind or update root on an existing Workspace.
+    SetWorkspaceRoot {
+        id: WorkspaceId,
+        root_path: String,
+    },
+    /// ADR-028: trusted foreground cwd observation (never OSC 7).
+    ObserveTrustedForegroundCwd {
+        path: String,
+    },
+    /// ADR-028: Yes on leave offer → create or jump.
+    ConfirmLeaveOffer,
+    /// ADR-028: No on leave offer → dismiss; navigation-only.
+    DismissLeaveOffer,
+    SelectTab {
+        id: TabId,
+    },
+    CreateTab,
+    NewTerminal,
+    SelectTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+    },
+    CloseTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        containment_generation: u64,
+    },
+    SelectWindow {
+        id: WindowId,
+    },
+    CycleWindow {
+        direction: crate::shell::CycleDirection,
+    },
+    CreateWindow,
+    ReportWindowEvent {
+        window: WindowId,
+        event: WindowNativeEvent,
+        /// Packed from FFI reserved bit 8 for OcclusionChanged.
+        occluded: bool,
+    },
+    CloseWindow {
+        id: WindowId,
+        containment_generation: u64,
+    },
+    CloseTab {
+        id: TabId,
+        containment_generation: u64,
+    },
+    TerminateExecution {
+        fence: AppFence,
+    },
+    /// ADR-018 §3.3: adopt a live-unpresented execution with Runtime evidence.
+    Adopt {
+        fence: AppFence,
+        evidence: BindingEvidence,
+    },
+    /// Test/Runtime sync of the live-unpresented catalog.
+    #[cfg(test)]
+    SyncLiveUnpresented {
+        entries: Vec<(ExecutionId, WorkspaceId)>,
+    },
+    /// Record one live-unpresented execution for Runtime/integration fixtures
+    /// that construct Unpresented directly (not a host FFI kind).
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    /// Explicit terminate of a live-unpresented execution (ADR-018 §3.3).
+    /// Distinct from [`AppAction::TerminateExecution`] (P4 fenced Controller dispose).
+    TerminateUnpresented {
+        execution: ExecutionId,
+    },
+    SplitFocused {
+        axis: SplitAxis,
+    },
+    ClosePane {
+        id: PaneId,
+        containment_generation: u64,
+    },
+    FocusPane {
+        id: PaneId,
+    },
+    /// Tab-scoped zoom overlay; does not destroy other leaves (PT1 / PT5).
+    ZoomPane {
+        id: PaneId,
+    },
+    Unzoom,
+    SwapPanes {
+        a: PaneId,
+        b: PaneId,
+    },
+    MovePaneBeside {
+        pane: PaneId,
+        neighbor: PaneId,
+        side: crate::shell::MoveSide,
+    },
+    FocusDirection {
+        direction: crate::shell::FocusDirection,
+    },
+    EqualizeFocused,
+    EqualizeTab,
+    /// Drag the divider that `pane` leads to a pointer position (#928).
+    MoveSplitDivider {
+        pane: PaneId,
+        position: SplitPosition,
+    },
+    SetShellVisibility {
+        left: bool,
+        inspector: bool,
+        tab_strip: bool,
+    },
+    OpenComposerHistory {
+        fence: AppFence,
+    },
+    SetComposerHistoryFilter {
+        fence: AppFence,
+        query: String,
+    },
+    MoveComposerHistorySelection {
+        fence: AppFence,
+        delta: i32,
+    },
+    SelectComposerHistory {
+        fence: AppFence,
+        composer_epoch: u64,
+    },
+    CloseComposerHistory {
+        fence: AppFence,
+    },
+    /// Global keyboard-first command palette (#932). Rows/selection are
+    /// derived fresh from Shell/Chrome; no command is ever fabricated.
+    OpenPalette {
+        fence: AppFence,
+    },
+    SetPaletteQuery {
+        fence: AppFence,
+        query: String,
+    },
+    MovePaletteSelection {
+        fence: AppFence,
+        delta: i32,
+    },
+    /// Run the selected palette row. When `address` is `Some`, Navigate that
+    /// host-echoed address (SPEC-022 R7.2). When `None`, run the frozen
+    /// selected verb/chrome command. Never re-resolves by ordinal.
+    RunPalette {
+        fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    /// Atomic Navigate(address) commit (SPEC-022 §4).
+    Navigate {
+        fence: AppFence,
+        address: ResourceAddress,
+    },
+    /// Focus-history Back (SPEC-022 §6 / N3). `observed` must match cursor.
+    HistoryBack {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
+    /// Focus-history Forward (SPEC-022 §6 / N3). `observed` must match cursor.
+    HistoryForward {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
+    ClosePalette {
+        fence: AppFence,
+    },
+    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+    OpenGoto {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoScope {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    CycleGotoScope {
+        fence: AppFence,
+    },
+    SetGotoQuery {
+        fence: AppFence,
+        query: String,
+    },
+    MoveGotoSelection {
+        fence: AppFence,
+        delta: i32,
+    },
+    /// Run the selected goto row by stored/host-echoed address.
+    RunGoto {
+        fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    CloseGoto {
+        fence: AppFence,
+    },
+    /// Bind the inspector to one Block of the focused Pane (#935).
+    SelectBlock {
+        fence: AppFence,
+        id: BlockId,
+    },
+    ClearBlockSelection {
+        fence: AppFence,
+    },
+}
+
+/// Typed native window inputs (ADR-018 §2.3). `BecameKey` commits the native
+/// activation as Rust-owned product selection; other events remain disposable
+/// presentation input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum WindowNativeEvent {
+    BecameKey = 0,
+    ResignedKey = 1,
+    BecameMain = 2,
+    ResignedMain = 3,
+    OcclusionChanged = 4,
+    Miniaturized = 5,
+    Deminiaturized = 6,
+    EnteredFullscreen = 7,
+    ExitedFullscreen = 8,
+    ScreenOrScaleChanged = 9,
+    /// Host exhausted bounded WindowActivation retries (SPEC-022 R5.4).
+    ActivationFailed = 10,
+}

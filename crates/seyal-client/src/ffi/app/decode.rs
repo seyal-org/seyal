@@ -2,24 +2,27 @@
 
 use std::{slice, str, time::Duration};
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
-use seyal_protocol::framing::{CommandBlock, CommandBlockState};
+use seyal_core::{
+    AttachmentId, BlockId, ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId,
+};
+use seyal_protocol::framing::{CommandBlock, CommandBlockState, COMMAND_BLOCK_FLAG_CANVAS_FLOOR};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
-use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
+use crate::composer::RuntimeBlockRecord;
 use crate::ffi::with_active_client;
 use crate::navigation::{decode_resource_address, ResourceAddress};
 use crate::pane_layout::SplitPosition;
 use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
-use crate::shell::SplitAxis;
+use crate::shell::{FocusDirection, MoveSide, SplitAxis};
 
 use super::{
     id16, optional_id, SeyalAppAction, FLAG_ALTERNATE_SCREEN, FLAG_CONTROLLER, FLAG_HAS_ATTACHMENT,
     FLAG_HAS_EXECUTION, FLAG_TARGET_CONTROLLER,
 };
 
-fn runtime_blocks_from_active_client() -> Vec<RuntimeBlockRecord> {
+/// Active-client BlockTimeline; `None` on disconnect so wipe ≠ empty (#1379).
+fn runtime_blocks_from_active_client() -> Option<Vec<RuntimeBlockRecord>> {
     with_active_client(|client| {
         client
             .block_timeline()
@@ -28,10 +31,9 @@ fn runtime_blocks_from_active_client() -> Vec<RuntimeBlockRecord> {
             .map(runtime_block_from_command)
             .collect()
     })
-    .unwrap_or_default()
 }
 
-pub(super) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockRecord {
+pub(crate) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockRecord {
     let mut bytes = [0u8; 16];
     bytes[..8].copy_from_slice(&record.id.to_le_bytes());
     RuntimeBlockRecord {
@@ -44,6 +46,8 @@ pub(super) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockR
             CommandBlockState::Running => None,
             CommandBlockState::Completed { exit_status } => exit_status,
         },
+        canvas_floor: record.flags & COMMAND_BLOCK_FLAG_CANVAS_FLOOR != 0,
+        scope: record.scope,
     }
 }
 
@@ -79,7 +83,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                     action.target_attachment_hi,
                 )?),
                 controller: action.flags & FLAG_TARGET_CONTROLLER != 0,
-                pty_generation: action.target_pty_generation,
+                pty_generation: action.target_generation,
                 alternate_screen: action.flags & FLAG_ALTERNATE_SCREEN != 0,
             },
         }),
@@ -94,27 +98,27 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         4 => Ok(AppAction::Quit),
         5 => Ok(AppAction::AckEffect),
         6 => Ok(AppAction::BeginRecovery {
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
         }),
         7 => Ok(AppAction::CompleteRecovery {
             generation: action.target_execution_lo,
             outcome: decode_outcome(action.reserved, action.target_attachment_lo)?,
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
             launch: decode_launch(action.reserved),
         }),
         8 => Ok(AppAction::FireScheduledRecovery {
             generation: action.target_execution_lo,
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
         }),
         9 => Ok(AppAction::AckRecoveryEffect),
         10 => Ok(AppAction::SetComposerDraft {
             fence,
             text: read_payload(action.payload, action.payload_len)?,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         11 => Ok(AppAction::SubmitComposer {
             fence,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         12 => Ok(AppAction::ApplyComposerResult {
             fence,
@@ -183,6 +187,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         25 => Ok(AppAction::SplitFocused {
             axis: if action.reserved == 1 {
@@ -196,6 +201,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         40 => Ok(AppAction::OpenComposerHistory { fence }),
         41 => Ok(AppAction::SetComposerHistoryFilter {
@@ -208,7 +214,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         }),
         43 => Ok(AppAction::SelectComposerHistory {
             fence,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         44 => Ok(AppAction::CloseComposerHistory { fence }),
         45 => Ok(AppAction::SelectBlock {
@@ -233,17 +239,8 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             address: decode_optional_address(action.payload, action.payload_len)?,
         }),
         51 => Ok(AppAction::ClosePalette { fence }),
-        52 => Ok(AppAction::ApplyRuntimeComposerStatus {
-            fence,
-            eligibility: match action.reserved {
-                0 => None,
-                1 => Some(RuntimeComposerEligibility::Available),
-                2 => Some(RuntimeComposerEligibility::Busy),
-                3 => Some(RuntimeComposerEligibility::Unsupported),
-                _ => return Err(-6),
-            },
-            revision: action.target_execution_lo,
-        }),
+        52 => super::pane_composer::decode_runtime_composer_status(action, fence),
+        86 => super::pane_composer::decode_interact_with_running_block(action, fence),
         53 => Ok(AppAction::CancelRecovery),
         54 => Ok(AppAction::AdvanceRecoveryStage {
             stage: match action.reserved & 0xffff {
@@ -313,10 +310,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 })
             }
         }
-        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
-        // as little-endian u64; empty payload is invalid. Numbers 63/64 leave
-        // 61/62 for N4 OpenGoto/SetGotoScope. Error codes 51/52 follow
-        // ActionUnavailable (50).
+        // Focus-history Back/Forward (SPEC-022 §6 / N3).
         63 => {
             if action.reserved != 0 {
                 return Err(-6);
@@ -335,7 +329,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 observed: decode_focus_seq(action.payload, action.payload_len)?,
             })
         }
-        // W4a window host intents (ADR-018 §2.2 / §2.3), following N3.
+        // W4a window host intents (ADR-018 §2.2 / §2.3).
         65 => Ok(AppAction::SelectWindow {
             id: WindowId::from_bytes(id16(
                 action.target_execution_lo,
@@ -350,13 +344,149 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             },
         }),
         67 => Ok(AppAction::CreateWindow),
-        68 => Ok(AppAction::ReportWindowEvent {
-            window: WindowId::from_bytes(id16(
+        68 => {
+            const OCCLUSION_HIDDEN: u32 = 0x100;
+            const WINDOW_EVENT_MASK: u32 = 0xff;
+            if action.reserved & !(WINDOW_EVENT_MASK | OCCLUSION_HIDDEN) != 0 {
+                return Err(-6);
+            }
+            let event = decode_window_event(action.reserved & WINDOW_EVENT_MASK)?;
+            let occluded = action.reserved & OCCLUSION_HIDDEN != 0;
+            if occluded && event != crate::app::WindowNativeEvent::OcclusionChanged {
+                return Err(-6);
+            }
+            Ok(AppAction::ReportWindowEvent {
+                window: WindowId::from_bytes(id16(
+                    action.target_execution_lo,
+                    action.target_execution_hi,
+                )?),
+                event,
+                occluded,
+            })
+        }
+        // PT5 pane-tree verbs. Numbers follow the window host actions.
+        69 => Ok(AppAction::ZoomPane {
+            id: PaneId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
-            event: decode_window_event(action.reserved)?,
         }),
+        70 => Ok(AppAction::Unzoom),
+        71 => Ok(AppAction::SwapPanes {
+            a: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            b: PaneId::from_bytes(id16(
+                action.target_attachment_lo,
+                action.target_attachment_hi,
+            )?),
+        }),
+        72 => Ok(AppAction::MovePaneBeside {
+            pane: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            neighbor: PaneId::from_bytes(id16(
+                action.target_attachment_lo,
+                action.target_attachment_hi,
+            )?),
+            side: decode_move_side(action.reserved)?,
+        }),
+        73 => Ok(AppAction::FocusDirection {
+            direction: decode_focus_direction(action.reserved)?,
+        }),
+        74 => Ok(AppAction::EqualizeFocused),
+        75 => Ok(AppAction::EqualizeTab),
+        76 => Ok(AppAction::CloseWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            containment_generation: action.target_generation,
+        }),
+        77 => Ok(AppAction::NewTerminal),
+        78 => Ok(AppAction::SelectTerminalTab {
+            pane: fence.pane,
+            terminal_tab: TerminalTabId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        79 => Ok(AppAction::CloseTerminalTab {
+            pane: fence.pane,
+            terminal_tab: TerminalTabId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            containment_generation: action.target_generation,
+        }),
+        // ADR-028: CreateWorkspace — payload is UTF-8 root path.
+        81 => Ok(AppAction::CreateWorkspace {
+            root_path: read_payload(action.payload, action.payload_len)?,
+        }),
+        // ADR-028: SetWorkspaceRoot — target = WorkspaceId, payload = root path.
+        82 => Ok(AppAction::SetWorkspaceRoot {
+            id: WorkspaceId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            root_path: read_payload(action.payload, action.payload_len)?,
+        }),
+        // ADR-028: trusted cwd observation — payload UTF-8 path (never OSC 7).
+        83 => Ok(AppAction::ObserveTrustedForegroundCwd {
+            path: read_payload(action.payload, action.payload_len)?,
+        }),
+        84 => Ok(AppAction::ConfirmLeaveOffer),
+        85 => Ok(AppAction::DismissLeaveOffer),
+        // New shell: no `reserved` overload. Absent execution prepares the
+        // ended Pane; present target_* binds that exact created ExecutionId.
+        80 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            if action.flags & FLAG_HAS_EXECUTION == 0 {
+                return Ok(AppAction::CreateReplacementExecution {
+                    execution: None,
+                    attachment: None,
+                    pty_generation: 0,
+                });
+            }
+            if action.flags & FLAG_HAS_ATTACHMENT == 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::CreateReplacementExecution {
+                execution: Some(ExecutionId::from_bytes(id16(
+                    action.target_execution_lo,
+                    action.target_execution_hi,
+                )?)),
+                attachment: Some(AttachmentId::from_bytes(id16(
+                    action.target_attachment_lo,
+                    action.target_attachment_hi,
+                )?)),
+                pty_generation: action.target_generation,
+            })
+        }
+        _ => Err(-6),
+    }
+}
+
+fn decode_move_side(reserved: u32) -> Result<MoveSide, i32> {
+    match reserved {
+        0 => Ok(MoveSide::Left),
+        1 => Ok(MoveSide::Right),
+        2 => Ok(MoveSide::Above),
+        3 => Ok(MoveSide::Below),
+        _ => Err(-6),
+    }
+}
+
+fn decode_focus_direction(reserved: u32) -> Result<FocusDirection, i32> {
+    match reserved {
+        0 => Ok(FocusDirection::Left),
+        1 => Ok(FocusDirection::Right),
+        2 => Ok(FocusDirection::Up),
+        3 => Ok(FocusDirection::Down),
         _ => Err(-6),
     }
 }
@@ -576,7 +706,7 @@ mod reconstruction_facts_tests {
             target_execution_hi: execution.high,
             target_attachment_lo: attachment.low,
             target_attachment_hi: attachment.high,
-            target_pty_generation: 0,
+            target_generation: 0,
             payload: std::ptr::null(),
             payload_len: 0,
             reserved,

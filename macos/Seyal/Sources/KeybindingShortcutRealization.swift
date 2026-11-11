@@ -10,11 +10,19 @@ enum KeybindingShortcutRealization {
     static let tabSelectNext: UInt16 = 5
     static let paneSplitRight: UInt16 = 7
     static let paneSplitDown: UInt16 = 8
+    /// SPEC-024 / #1438: `presentation.set_flow` (explicit Flow latch; Raw is default resting).
+    static let presentationSetFlow: UInt16 = 12
     static let presentationToggleRaw: UInt16 = 15
     static let presentationToggleTui: UInt16 = 16
     static let gotoOpen: UInt16 = 21
-    static let chromeToggleLeftPanel: UInt16 = 22
-    static let chromeToggleInspector: UInt16 = 23
+    static let appCloseFocused: UInt16 = 37
+    static let windowNew: UInt16 = 38
+    static let windowClose: UInt16 = 39
+    static let windowCycleNext: UInt16 = 40
+    static let windowCyclePrevious: UInt16 = 41
+    static let windowSelectOrdinal: UInt16 = 42
+    static let terminalCreate: UInt16 = 43
+    static let terminalCloseFocused: UInt16 = 44
 
     static func item(commandId: UInt16) -> SeyalAppShortcutItem? {
         let count = seyal_app_shortcut_count()
@@ -59,11 +67,14 @@ enum KeybindingShortcutRealization {
         switch commandId {
         case commandPaletteOpen: return "Command Palette"
         case tabCreate: return "New Tab"
+        case terminalCreate: return "New Terminal"
+        case terminalCloseFocused: return "Close Terminal"
         case tabCloseFocused: return "Close Tab"
         case tabSelectPrevious: return "Previous Tab"
         case tabSelectNext: return "Next Tab"
         case paneSplitRight: return "Split Right"
         case paneSplitDown: return "Split Down"
+        case presentationSetFlow: return "Flow"
         case presentationToggleRaw: return "Toggle Raw"
         case presentationToggleTui: return "Toggle TUI"
         case gotoOpen: return "Go to…"
@@ -71,18 +82,13 @@ enum KeybindingShortcutRealization {
         }
     }
 
-    /// Menu validation: R5.6.2 live title from Rust product state (an empty
-    /// result keeps the cold title) and the R6.4.2 enabled bit.
-    static func validate(_ menuItem: NSMenuItem, commandId: UInt16, appHandle: UInt64) -> Bool {
-        let live = seyal_app_shortcut_title(appHandle, commandId, 0)
-        if let title = copyUTF8(live.title, live.title_len) {
-            menuItem.title = title
-        }
-        return isEnabled(appHandle: appHandle, commandId: commandId, composerFocused: false)
-    }
-
-    static func isEnabled(appHandle: UInt64, commandId: UInt16, composerFocused: Bool) -> Bool {
-        seyal_app_shortcut_enabled(appHandle, commandId, 0, composerFocused ? 1 : 0) != 0
+    static func isEnabled(
+        appHandle: UInt64,
+        commandId: UInt16,
+        ordinal: UInt8 = 0,
+        composerFocused: Bool
+    ) -> Bool {
+        seyal_app_shortcut_enabled(appHandle, commandId, ordinal, composerFocused ? 1 : 0) != 0
     }
 
     private static func modifierMask(_ bits: UInt8) -> NSEvent.ModifierFlags {

@@ -17,11 +17,15 @@ pub(crate) const SNAP_CONTROLLER: u16 = 2;
 pub(crate) const SNAP_FROZEN: u16 = 4;
 pub(crate) const SNAP_HAS_EXECUTION: u16 = 8;
 pub(crate) const SNAP_HAS_ATTACHMENT: u16 = 16;
+/// Flow + Running(b) Block-scoped DirectInput (ADR-009 #1466 / #1468).
+pub(crate) const SNAP_BLOCK_SCOPED_DIRECT_INPUT: u16 = 32;
 pub(crate) const ROW_SELECTED: u16 = 1;
 /// Block-row `flags`: low bits are the presentation state (1..3); bit 3 marks
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
 pub(crate) const BLOCK_STATE_MASK: u16 = 7;
 pub(crate) const BLOCK_SELECTED: u16 = 8;
+/// Session-scoped Block. Hosts may indent; they do not choose product copy.
+pub(crate) const BLOCK_SESSION: u16 = 16;
 
 pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnapshot {
     let pane = snap.pane.to_bytes();
@@ -48,6 +52,9 @@ pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnap
     }
     if snap.attachment.is_some() {
         flags |= SNAP_HAS_ATTACHMENT;
+    }
+    if snap.block_scoped_direct_input {
+        flags |= SNAP_BLOCK_SCOPED_DIRECT_INPUT;
     }
     SeyalAppSnapshot {
         version: APP_ABI_VERSION,
@@ -121,27 +128,38 @@ pub(super) fn split_id(bytes: [u8; 16]) -> (u64, u64) {
     )
 }
 
-struct RowDraft<'a> {
-    kind: u16,
-    index: u32,
-    id: [u8; 16],
-    flags: u16,
-    title: &'a str,
-    detail: &'a str,
-    address: Option<crate::navigation::ResourceAddress>,
+pub(super) struct RowDraft<'a> {
+    pub(super) kind: u16,
+    pub(super) index: u32,
+    pub(super) id: [u8; 16],
+    pub(super) flags: u16,
+    pub(super) title: &'a str,
+    pub(super) detail: &'a str,
+    pub(super) address: Option<crate::navigation::ResourceAddress>,
+    /// Opaque 16-byte fence payload (PaneId for TERMINAL_TAB rows). Mutually
+    /// exclusive with `address` ResourceAddress encoding.
+    pub(super) raw_address: Option<[u8; 16]>,
 }
 
-fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: RowDraft<'_>) {
+pub(super) fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: RowDraft<'_>) {
     let title_off = push_text(text, draft.title);
     let detail_off = push_text(text, draft.detail);
     let (id_lo, id_hi) = split_id(draft.id);
-    let (address_version, address_kind, address_bytes, address_len) = match draft.address {
-        Some(address) => {
-            let (version, kind, bytes, len) = crate::navigation::encode_resource_address(address);
-            (version, kind, bytes, len)
-        }
-        None => (0, 0, [0; 48], 0),
-    };
+    let (address_version, address_kind, address_bytes, address_len) =
+        match (draft.address, draft.raw_address) {
+            (Some(address), None) => {
+                let (version, kind, bytes, len) =
+                    crate::navigation::encode_resource_address(address);
+                (version, kind, bytes, len)
+            }
+            (None, Some(raw)) => {
+                let mut bytes = [0u8; 48];
+                bytes[..16].copy_from_slice(&raw);
+                (0, 0, bytes, 16)
+            }
+            (None, None) => (0, 0, [0; 48], 0),
+            (Some(_), Some(_)) => (0, 0, [0; 48], 0),
+        };
     rows.push(SeyalAppRow {
         kind: draft.kind,
         flags: draft.flags,
@@ -179,6 +197,7 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 title: &workspace.name,
                 detail: workspace.detail.as_deref().unwrap_or(""),
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -196,6 +215,7 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 title: &tab.title,
                 detail: &pane_count,
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -212,6 +232,61 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 title: &pane.title,
                 detail: "",
                 address: None,
+                raw_address: None,
+            },
+        );
+    }
+    // Flat active-Workspace TerminalTab navigation map for left C03 Tabs (#1412).
+    struct LeftTerminalTabRow {
+        title: String,
+        detail: String,
+        terminal_id: [u8; 16],
+        pane_id: [u8; 16],
+        selected: bool,
+    }
+    let multi_pane = snap.shell.panes.len() > 1;
+    let titles: Vec<LeftTerminalTabRow> = snap
+        .shell
+        .panes
+        .iter()
+        .flat_map(|pane| {
+            let pane_id = pane.id.to_bytes();
+            let pane_title = pane.title.clone();
+            let focused = pane.id == snap.shell.focused_pane;
+            pane.terminal_tabs
+                .iter()
+                .enumerate()
+                .map(move |(term_index, terminal)| {
+                    let selected = focused && pane.selected_terminal_tab == Some(terminal.id);
+                    let title = format!("Terminal {}", term_index + 1);
+                    let detail = if multi_pane {
+                        pane_title.clone()
+                    } else {
+                        String::new()
+                    };
+                    LeftTerminalTabRow {
+                        title,
+                        detail,
+                        terminal_id: terminal.id.to_bytes(),
+                        pane_id,
+                        selected,
+                    }
+                })
+        })
+        .collect();
+    for (terminal_index, row) in titles.iter().enumerate() {
+        push_row(
+            &mut state.shell_rows,
+            &mut state.shell_text,
+            RowDraft {
+                kind: 3,
+                index: terminal_index as u32,
+                id: row.terminal_id,
+                flags: u16::from(row.selected),
+                title: &row.title,
+                detail: &row.detail,
+                address: None,
+                raw_address: Some(row.pane_id),
             },
         );
     }
@@ -249,6 +324,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 title: &title,
                 detail: &row.value,
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -268,6 +344,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 title: agent.id.as_str(),
                 detail: &agent.name,
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -283,6 +360,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 title: item.id.as_str(),
                 detail: &item.title,
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -308,6 +386,9 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
         if selected == Some(block.id) {
             flags |= BLOCK_SELECTED;
         }
+        if block.scope == seyal_protocol::framing::BlockScope::Session {
+            flags |= BLOCK_SESSION;
+        }
         push_row(
             &mut state.block_rows,
             &mut state.block_text,
@@ -319,6 +400,7 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
                 title: &block.command,
                 detail: block.state.transcript_status(),
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -353,6 +435,7 @@ pub(super) fn encode_history_rows(state: &mut AppHandle) {
                 title: command,
                 detail: "",
                 address: None,
+                raw_address: None,
             },
         );
     }
@@ -375,13 +458,14 @@ pub(super) fn encode_palette_rows(state: &mut AppHandle) {
                 title: &row.label,
                 detail: row.category,
                 address: row.address,
+                raw_address: None,
             },
         );
     }
     relocate_row_pointers(&mut state.palette_rows, state.palette_text.as_ptr());
 }
 
-fn relocate_row_pointers(rows: &mut [SeyalAppRow], base: *const u8) {
+pub(super) fn relocate_row_pointers(rows: &mut [SeyalAppRow], base: *const u8) {
     for row in rows {
         let title_off = row.title as usize;
         let detail_off = row.detail as usize;

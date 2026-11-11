@@ -15,7 +15,7 @@ extension RustDisplayBridge {
       onStatusChanged()
       return admission
     }
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -40,7 +40,7 @@ extension RustDisplayBridge {
     endCol: UInt16 = 0,
     endRow: UInt16 = 0
   ) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -51,7 +51,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitHostSearch(_ needle: String, forward: Bool) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -72,7 +72,7 @@ extension RustDisplayBridge {
   }
 
   func copiedText() -> String? {
-    guard selectClient() else { return nil }
+    guard selectPresentedClient() else { return nil }
     let copied = seyal_bridge_copied_text()
     guard copied.len > 0, let utf8 = copied.utf8 else { return nil }
     let buffer = UnsafeBufferPointer(start: utf8, count: Int(copied.len))
@@ -81,13 +81,13 @@ extension RustDisplayBridge {
 
   @discardableResult
   func consumeCopiedText() -> Int32 {
-    guard selectClient() else { return -1 }
+    guard selectPresentedClient() else { return -1 }
     return seyal_bridge_copied_text_consume()
   }
 
   @discardableResult
   func submitComposerCommand(_ text: String) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -109,7 +109,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitKey(kind: UInt16, scalar: UInt32) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -117,13 +117,13 @@ extension RustDisplayBridge {
   }
 
   func supportsKeyV2() -> Bool {
-    guard isConnected, selectClient() else { return false }
+    guard isConnected, selectPresentedClient() else { return false }
     return seyal_bridge_supports_key_v2() != 0
   }
 
   @discardableResult
   func submitKeyV2(kind: UInt16, modifiers: UInt16, value: UInt32, event: UInt8, shiftedASCII: UInt32, actionID: UInt32) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -166,7 +166,7 @@ extension RustDisplayBridge {
     row: UInt16,
     actionID: UInt32
   ) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -180,29 +180,31 @@ extension RustDisplayBridge {
     horizontalInsets: Double,
     verticalInsets: Double,
     cellWidth: Double,
-    cellHeight: Double,
-    meaningfulLayoutEpoch: Bool
+    cellHeight: Double
   ) -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
-    return finishMutation(
-      seyal_bridge_propose_geometry(
-        viewportWidth,
-        viewportHeight,
-        horizontalInsets,
-        verticalInsets,
-        cellWidth,
-        cellHeight,
-        meaningfulLayoutEpoch ? 1 : 0
-      )
+    // A rejected or not-yet-writable resize is not socket loss. `finishMutation`
+    // would stop this Controller, and a layout pass on every bounds change then
+    // drops the live session before Flow eligibility or a second Pane can attach.
+    let result = seyal_bridge_propose_geometry(
+      viewportWidth,
+      viewportHeight,
+      horizontalInsets,
+      verticalInsets,
+      cellWidth,
+      cellHeight
     )
+    synchronizeWriteReadinessSource()
+    onStatusChanged()
+    return result
   }
 
   @discardableResult
   func retryResize() -> Int32 {
-    guard isConnected, selectClient() else {
+    guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
@@ -210,12 +212,12 @@ extension RustDisplayBridge {
   }
 
   func inputFailureCode() -> Int32 {
-    guard isConnected, selectClient() else { return 4 }
+    guard isConnected, selectPresentedClient() else { return 4 }
     return seyal_bridge_input_failure()
   }
 
   func resizeFailureCode() -> Int32 {
-    guard isConnected, selectClient() else { return 201 }
+    guard isConnected, selectPresentedClient() else { return 201 }
     return seyal_bridge_resize_failure()
   }
 
@@ -223,17 +225,55 @@ extension RustDisplayBridge {
     synchronizeWriteReadinessSource()
     onStatusChanged()
     if result == -18 {
+      // A mutation conflict is retryable. Polling the unconsumed frame owns
+      // connection teardown; never stop the whole window from a sibling write.
       onError(result)
-      stop(reconnect: true)
-    } else if result == -3 || result == -10 {
+    } else if Self.isTerminalPollResult(result) {
       onError(result)
       stop()
     }
     return result
   }
 
+  /// Finish work addressed to one Controller without treating a sibling's
+  /// error as a failure of this bridge's primary connection. Multipane hosts
+  /// share the bridge, while readiness and history work are handle-addressed.
+  /// The target Controller's own read source owns loss detection and recovery;
+  /// only errors for `clientHandle` may stop this bridge (#1426).
+  @discardableResult
+  func finishAddressedMutation(_ result: Int32, forDisplayHandle handle: UInt64) -> Int32 {
+    guard result != 0 else {
+      // A successful mutation can still leave control frames queued after a
+      // nonblocking write. Arm this Controller's auxiliary write source now;
+      // otherwise a history request for a quiet sibling can wait forever for
+      // a read event that cannot arrive until the request is flushed.
+      synchronizeWriteReadinessSource()
+      return result
+    }
+    guard handle == clientHandle else {
+      guard Self.isTerminalPollResult(result) else {
+        onStatusChanged()
+        return result
+      }
+      if let source = auxiliaryWriteSources.removeValue(forKey: handle) {
+        // Stop a level-triggered writable error loop, including a handle
+        // removed between readiness and flush (reported as -1). The same
+        // Controller's read source owns loss detection; this primary Pane's
+        // error callback must not receive a sibling's failure.
+        source.cancel()
+      }
+      onStatusChanged()
+      return result
+    }
+    return finishMutation(result)
+  }
+
   func drainReadyDisplayWork() {
-    guard isConnected, selectClient() else { return }
+    guard isConnected else { return }
+    guard selectClient() else {
+      _ = handlePrimaryRegistryRemovalIfNeeded()
+      return
+    }
     defer {
       synchronizeWriteReadinessSource()
       onStatusChanged()
@@ -243,9 +283,43 @@ extension RustDisplayBridge {
     // prevents one high-volume terminal from monopolizing the AppKit queue;
     // unread socket data will immediately retrigger this dispatch source.
     for _ in 0..<8 {
+      // Presentation/history reads select the focused terminal below. Keep
+      // readiness polling pinned to this bridge's original Controller.
+      let polledHandle = clientHandle
+      guard selectClient() else {
+        _ = handlePrimaryRegistryRemovalIfNeeded()
+        return
+      }
       let result = seyal_bridge_poll()
+      if result < 0, !Self.pollResultClosesConnection(result) {
+        onError(result)
+        return
+      }
+      // Shell exit (-6): Lifecycle Finalized arrives after the final display /
+      // history frames in the same poll. Publish those history ranges and the
+      // Block timeline while the client is still registered (unregister waits
+      // for stop — #1379 clear→exit). Other losses unregister inside poll;
+      // APPLY_RUNTIME_BLOCKS with no client retains the composer timeline.
+      if result < 0 {
+        // This readiness source polled clientHandle even when another pane was
+        // focused. Drain its completed history before a shell-exit disconnect;
+        // focused-display lookup would strand or misroute the response (#1426).
+        publishHistoryRanges(forDisplayHandle: polledHandle)
+        _ = selectPresentedClient()
+        onTimeline()
+        // Rebuild may have issued fresh history requests for settled Blocks;
+        // one more addressed publish picks up buffered responses on the polled
+        // Controller without reading a sibling's same-numbered Block.
+        publishHistoryRanges(forDisplayHandle: polledHandle)
+        onError(result)
+        stop(reconnect: result == -18)
+        return
+      }
       runtimeBlockMetadata = currentBlockMetadata()
-      publishHistoryRanges()
+      // Publish this poll source before selecting the focused presentation
+      // client. Pane-local Block ids are only meaningful on their Controller.
+      publishHistoryRanges(forDisplayHandle: polledHandle)
+      _ = selectPresentedClient()
       publishComposerResult()
       publishComposerStatus()
       if let text = copiedText() {
@@ -259,38 +333,32 @@ extension RustDisplayBridge {
       }
       if result == 1 {
         publishCurrentFrame()
+        // The primary read source is this bridge's own Controller. Auxiliary
+        // sources skip that handle, so an unfocused Pane that still owns it
+        // would otherwise keep the AX grid from host creation.
+        onRegistryHandlePolled?(clientHandle)
         armAuxiliaryReadSources()
         armProvisioningWakeupSource()
         continue
       }
-      if result == 0 {
-        armAuxiliaryReadSources()
-        armProvisioningWakeupSource()
-        return
-      }
-
-      onError(result)
-      stop(reconnect: result == -18)
+      // result == 0: drained.
+      armAuxiliaryReadSources()
+      armProvisioningWakeupSource()
       return
     }
   }
 
   func synchronizeWriteReadinessSource() {
-    guard isConnected else {
+    if !isConnected || clientHandle == 0 {
       writeSource?.cancel()
       writeSource = nil
-      for source in auxiliaryWriteSources.values {
-        source.cancel()
-      }
-      auxiliaryWriteSources.removeAll()
-      return
+    } else {
+      synchronizeWriteSource(
+        handle: clientHandle,
+        fileDescriptor: socketFileDescriptor,
+        existing: &writeSource
+      )
     }
-
-    synchronizeWriteSource(
-      handle: clientHandle,
-      fileDescriptor: socketFileDescriptor,
-      existing: &writeSource
-    )
 
     var live = Set<UInt64>()
     var cursor: UInt64 = 0
@@ -303,9 +371,8 @@ extension RustDisplayBridge {
       let fd = seyal_bridge_socket_fd_for(handle)
       let wants = seyal_bridge_wants_write_for(handle)
       if wants < 0 {
-        onError(wants)
-        stop()
-        return
+        finishAddressedMutation(wants, forDisplayHandle: handle)
+        continue
       }
       if wants != 1 || fd < 0 {
         if let source = auxiliaryWriteSources.removeValue(forKey: handle) {
@@ -317,11 +384,10 @@ extension RustDisplayBridge {
       let source = DispatchSource.makeWriteSource(fileDescriptor: fd, queue: .main)
       source.setEventHandler { [weak self] in
         seyalRunAsMainActorFromMainQueue {
-          guard let self, self.isConnected else { return }
+          guard let self, self.auxiliaryWriteSources[handle] != nil else { return }
           let result = seyal_bridge_flush_writable_for(handle)
           guard result == 0 else {
-            self.onError(result)
-            self.stop(reconnect: result == -18)
+            self.finishAddressedMutation(result, forDisplayHandle: handle)
             return
           }
           self.synchronizeWriteReadinessSource()
@@ -368,8 +434,7 @@ extension RustDisplayBridge {
         guard let self, self.isConnected else { return }
         let result = seyal_bridge_flush_writable_for(handle)
         guard result == 0 else {
-          self.onError(result)
-          self.stop(reconnect: result == -18)
+          self.finishMutation(result)
           return
         }
         self.synchronizeWriteReadinessSource()

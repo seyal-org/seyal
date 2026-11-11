@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 /// Headed #824 workload evidence on the ADR-015 thin host.
@@ -26,10 +27,226 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "824-high-volume")
     }
 
+    func testLocalPythonDoesNotShowSSHSetupPromptAndBlockStaysBottomDocked() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "python3 -q")
+
+        let pythonBlock = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "python3 -q")
+        ).firstMatch
+        XCTAssertTrue(pythonBlock.waitForExistence(timeout: 12), "Python must stay in its running Block")
+
+        let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
+        XCTAssertFalse(
+            setupTitle.waitForExistence(timeout: 2),
+            "a non-SSH Candidate must not interrupt a Python REPL with a setup banner"
+        )
+
+        let blocksScroll = app.scrollViews["seyal-blocks-scroll"].firstMatch
+        XCTAssertTrue(blocksScroll.exists)
+        // Warp-like DirectInput: Busy dock retracts so the Running Block is the
+        // only typing surface (no second composer place).
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 2),
+            "DirectInput must hide the Busy composer dock while the REPL owns keys"
+        )
+        XCTAssertLessThanOrEqual(
+            blocksScroll.frame.maxY - pythonBlock.frame.maxY,
+            96,
+            "the active Python Block must stay docked at the live end of the transcript"
+        )
+        // ADR-009 #1466 DirectInput: no Interact→Raw for ordinary local REPLs.
+        XCTAssertFalse(
+            app.buttons["seyal-running-program-interact"].waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for local python"
+        )
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        let directRoute = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directRoute], timeout: 5),
+            .completed,
+            "Flow DirectInput must expose the terminal AX text route without Raw"
+        )
+        let pythonBody = pythonBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        XCTAssertTrue(pythonBody.waitForExistence(timeout: 5))
+        pythonBody.click()
+        let pythonMarker = "seyal-m003-python-repl-input"
+        app.typeText("print('\(pythonMarker)'); raise SystemExit")
+        app.typeKey("\r", modifierFlags: [])
+        let pythonOutput = expectation(
+            for: NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                pythonMarker,
+                pythonMarker
+            ),
+            evaluatedWith: pythonBody,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [pythonOutput], timeout: 8),
+            .completed,
+            "keyboard input must reach the local Python REPL via Block-scoped DirectInput"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer dock returns after Python exits")
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 5),
+            .completed,
+            "composer must leave DirectInput after Python exits"
+        )
+        attachScreenshot(app, name: "m003-local-python-bottom-dock")
+    }
+
+    func testNodeREPLDoesNotShowUnsolicitedSessionSetupBanner() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/node") else {
+            throw XCTSkip("Node.js is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "/opt/homebrew/bin/node")
+
+        let nodeBlock = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "/opt/homebrew/bin/node")
+        ).firstMatch
+        XCTAssertTrue(nodeBlock.waitForExistence(timeout: 12), "Node must run in its actual local PTY Block")
+        let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
+        XCTAssertFalse(
+            setupTitle.waitForExistence(timeout: 2),
+            "a non-SSH Node Candidate must not pop a session setup prompt"
+        )
+        XCTAssertFalse(
+            app.buttons["seyal-running-program-interact"].waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for local node"
+        )
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        XCTAssertEqual(
+            terminal.elementType,
+            .textView,
+            "Flow DirectInput must expose the terminal AX text route without Raw"
+        )
+        let nodeBody = nodeBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        XCTAssertTrue(nodeBody.waitForExistence(timeout: 5))
+        nodeBody.click()
+        let nodeMarker = "seyal-m003-node-repl-input"
+        app.typeText("console.log('\(nodeMarker)'); process.exit(0)")
+        app.typeKey("\r", modifierFlags: [])
+        let nodeOutput = expectation(
+            for: NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                nodeMarker,
+                nodeMarker
+            ),
+            evaluatedWith: nodeBody,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [nodeOutput], timeout: 8),
+            .completed,
+            "keyboard input must reach the local Node REPL via Block-scoped DirectInput"
+        )
+        // Warp-like: after the REPL exits, the Flow composer dock owns keys again
+        // without requiring a click back into the dock.
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer editor returns after Node exits")
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 5),
+            .completed,
+            "composer must leave Busy/DirectInput after Node exits"
+        )
+        let handoffMarker = "seyal-m003-composer-handoff"
+        app.typeText("echo \(handoffMarker)")
+        let draft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", handoffMarker),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [draft], timeout: 5),
+            .completed,
+            "composer must reclaim keyboard focus after Node exits (Warp-like handoff)"
+        )
+        attachScreenshot(app, name: "m003-node-no-session-banner")
+        app.terminate()
+    }
+
+    /// #1379: completed Flow Blocks must paint output bodies, not titles-only
+    /// chrome with an empty white Metal clip.
+    func testCompletedFlowBlockKeepsPaintedOutputBody() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "printf 'seyal-1379-body-paint\\n'")
+        waitBriefly(1.0)
+        assertFlowBlocksOrFail(in: app)
+        let body = app.descendants(matching: .any)["seyal-block-0-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 5), "completed Block must expose a body region")
+        assertBlockCardFillsTranscript(app, index: 0)
+        XCTAssertGreaterThan(
+            body.firstMatch.frame.height,
+            8,
+            "completed Block body must reserve Metal output height, not titles-only chrome"
+        )
+        attachScreenshot(app, name: "1379-flow-block-body-paint")
+    }
+
     func testPrimaryShellExitIsReportedAndKeepsFlowHistoryVisible() {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        submitComposerCommand(app, "printf 'seyal-1171-exit-before\\n'; exit 7")
+        // Establish a completed Block before exit. A single `printf…; exit`
+        // can race OSC-133 `C` against primary-child death and leave zero
+        // Block cards even when retain-on-disconnect is correct (#1379/#1171).
+        submitComposerCommand(app, "printf 'seyal-1171-exit-before\\n'")
+        let historyBlock = app.descendants(matching: .any)["seyal-block-0"]
+        XCTAssertTrue(
+            historyBlock.waitForExistence(timeout: 8),
+            "pre-exit Flow command must publish a Block card"
+        )
+        let beforeExit = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "seyal-1171-exit-before"),
+            evaluatedWith: historyBlock.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [beforeExit], timeout: 5),
+            .completed,
+            "pre-exit Block must show the completed command label"
+        )
+        submitComposerCommand(app, "printf 'seyal-1171-exit-second\\n'")
+        let secondBlock = app.descendants(matching: .any)["seyal-block-1"]
+        let secondVisible = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "seyal-1171-exit-second"),
+            evaluatedWith: secondBlock.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [secondVisible], timeout: 8),
+            .completed,
+            "a second completed Block must stay a separate card before exit"
+        )
+
+        submitComposerCommand(app, "exit 7")
 
         let recovery = app.descendants(matching: .any)["seyal-recovery"]
         let ended = expectation(
@@ -44,14 +261,263 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         )
         let composer = app.descendants(matching: .any)["seyal-composer"]
         XCTAssertFalse(composer.firstMatch.isHittable, "an ended shell must not accept Flow commands")
+        // #1379: an empty `seyal-blocks` container is still hittable — require the
+        // command Block that ran before exit, not merely the transcript host.
         XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-blocks"].firstMatch.isHittable,
-            "completed Flow history must remain visible after the shell exits"
+            historyBlock.waitForExistence(timeout: 5),
+            "completed Flow history must keep at least one Block card after shell exit"
         )
-        let terminal = app.descendants(matching: .any)["terminal-input"]
-        XCTAssertTrue((terminal.value as? String ?? "").contains("execution=none"))
+        let exitCommandVisible = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "seyal-1171-exit-before"),
+            evaluatedWith: historyBlock.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [exitCommandVisible], timeout: 5),
+            .completed,
+            "Flow Block content from before exit must remain visible; empty chrome is not enough"
+        )
+        let body = app.descendants(matching: .any)["seyal-block-0-body"]
+        let bodyText = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1171-exit-before",
+                "seyal-1171-exit-before"
+            ),
+            evaluatedWith: body.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [bodyText], timeout: 8),
+            .completed,
+            "completed Block body must keep the pre-exit transcript, not an empty title card; value=\(body.firstMatch.value ?? "nil") label=\(body.firstMatch.label)"
+        )
+        XCTAssertGreaterThan(
+            body.firstMatch.frame.height,
+            8,
+            "completed Block body must reserve Metal output height after shell exit"
+        )
+        let secondBody = app.descendants(matching: .any)["seyal-block-1-body"]
+        let secondBodyText = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1171-exit-second",
+                "seyal-1171-exit-second"
+            ),
+            evaluatedWith: secondBody.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [secondBodyText], timeout: 8),
+            .completed,
+            "each completed Block body must keep its own transcript after exit"
+        )
+        assertBlockCardFillsTranscript(app, index: 0)
+        assertBlockCardFillsTranscript(app, index: 1)
+        assertFlowPaintCleanAfterExit(app)
         XCTAssertEqual(app.state, .runningForeground)
         attachScreenshot(app, name: "1171-primary-shell-exit")
+    }
+
+    /// #1379 P0: clear → command → exit must keep Block bodies painted.
+    /// AX body text alone is false-green when Metal still draws the last
+    /// viewport over the cards; require flow-paint=ok from the Metal surface.
+    func testClearThenExitKeepsPaintedBlockBodies() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "printf 'seyal-1379-before-clear\\n'")
+        let before = app.descendants(matching: .any)["seyal-block-0"]
+        XCTAssertTrue(before.waitForExistence(timeout: 8))
+        // Wait for history AX on the body before clear — card title alone can
+        // match the printf argument while Metal/history is still empty (#1379).
+        waitForBlockBodyText(app, index: 0, text: "seyal-1379-before-clear", timeout: 8)
+        submitComposerCommand(app, "clear")
+        waitBriefly(0.8)
+        // Live canvas must drop pre-clear clutter (Warp-like clear). Timeline
+        // still retains it for shell-exit review below. Visible index 0 is the
+        // clear Block (or empty), never the pre-clear printf body.
+        let liveBefore = app.descendants(matching: .any)["seyal-block-0-body"].firstMatch
+        if liveBefore.exists {
+            let value = (liveBefore.value as? String) ?? liveBefore.label
+            XCTAssertFalse(
+                value.contains("seyal-1379-before-clear"),
+                "clear must remove pre-clear Blocks from the live Flow canvas"
+            )
+        }
+        submitComposerCommand(app, "printf 'seyal-1379-after-clear\\n'")
+        // Fully clean clear: clear Block is hidden; after-clear is visible index 0.
+        waitForBlockBodyText(app, index: 0, text: "seyal-1379-after-clear", timeout: 8)
+        submitComposerCommand(app, "exit 7")
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        let ended = expectation(
+            for: NSPredicate(format: "value CONTAINS 'shell exited'"),
+            evaluatedWith: recovery,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 15), .completed)
+
+        // Shell-exit reveals the full retained transcript.
+        let beforeBody = app.descendants(matching: .any)["seyal-block-0-body"]
+        let beforeText = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1379-before-clear",
+                "seyal-1379-before-clear"
+            ),
+            evaluatedWith: beforeBody.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [beforeText], timeout: 8),
+            .completed,
+            "pre-clear body AX must return after clear→exit (retained history)"
+        )
+        let afterBody = app.descendants(matching: .any)["seyal-block-2-body"]
+        let afterText = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1379-after-clear",
+                "seyal-1379-after-clear"
+            ),
+            evaluatedWith: afterBody.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [afterText], timeout: 8),
+            .completed,
+            "post-clear body AX must remain after clear→exit"
+        )
+        XCTAssertGreaterThan(beforeBody.firstMatch.frame.height, 8)
+        XCTAssertGreaterThan(afterBody.firstMatch.frame.height, 8)
+        assertBlockCardFillsTranscript(app, index: 0)
+        assertBlockCardFillsTranscript(app, index: 2)
+        // before-clear + after-clear must each paint; collapse onto one card fails.
+        assertFlowPaintCleanAfterExit(
+            app,
+            minimumPaintedRegions: 2,
+            inkBodyIndices: [0, 2]
+        )
+        attachScreenshot(app, name: "1379-clear-then-exit-paint")
+    }
+
+    /// #1379 Gate 1: repeat clear→exit→New shell ten times in one headed
+    /// session. Cold-launch XCUI flake must not mask the paint regression.
+    ///
+    /// Opt-in only. Default `make test` / `native-macos-smoke` skips this
+    /// (~6–7 min) so the 35-minute smoke job can finish `make bench`. CI
+    /// regression stays on `testClearThenExitKeepsPaintedBlockBodies`.
+    ///
+    /// Enable with either:
+    /// - `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test` (`test-macos-ui.sh`
+    ///   exports `TEST_RUNNER_…` into xcodebuild's environment), or
+    /// - `env TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 xcodebuild …`
+    ///   (must be an env var, not a CLI build setting; xcodebuild strips the
+    ///   prefix before the runner sees `SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1`).
+    /// A bare `SEYAL_UI_TEST_…=1` on raw xcodebuild silently skips and still
+    /// reports suite PASS.
+    func testClearThenExitPaintStableAcrossTenCycles() throws {
+        // Runner sees the name with TEST_RUNNER_ already stripped.
+        guard ProcessInfo.processInfo.environment["SEYAL_UI_TEST_CLEAR_EXIT_STRESS"] == "1"
+        else {
+            throw XCTSkip(
+                "enable Gate 1 10-cycle clear→exit stress via SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 make ui-test (or env TEST_RUNNER_SEYAL_UI_TEST_CLEAR_EXIT_STRESS=1 xcodebuild …); default make test keeps the single-cycle paint case"
+            )
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        for cycle in 1...10 {
+            let beforeToken = "seyal-1379-c\(cycle)-before"
+            let afterToken = "seyal-1379-c\(cycle)-after"
+            submitComposerCommand(app, "printf '\(beforeToken)\\n'")
+            waitForBlockBodyText(app, index: 0, text: beforeToken, timeout: 8)
+            submitComposerCommand(app, "clear")
+            waitBriefly(0.8)
+            submitComposerCommand(app, "printf '\(afterToken)\\n'")
+            // Fully clean clear: after-clear is the first visible card.
+            waitForBlockBodyText(app, index: 0, text: afterToken, timeout: 8)
+            submitComposerCommand(app, "exit 7")
+            let recovery = app.descendants(matching: .any)["seyal-recovery"]
+            let ended = expectation(
+                for: NSPredicate(format: "value CONTAINS 'shell exited'"),
+                evaluatedWith: recovery,
+                handler: nil
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [ended], timeout: 15),
+                .completed,
+                "cycle \(cycle): shell exit recovery missing"
+            )
+            assertFlowPaintCleanAfterExit(
+                app,
+                minimumPaintedRegions: 2,
+                inkBodyIndices: [0, 2]
+            )
+            let newShell = app.descendants(matching: .any)["seyal-new-shell"].firstMatch
+            XCTAssertTrue(
+                newShell.waitForExistence(timeout: 5),
+                "cycle \(cycle): New shell must be offered after exit"
+            )
+            newShell.click()
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let usable = expectation(
+                for: NSPredicate(format: "value == 'available'"),
+                evaluatedWith: composer,
+                handler: nil
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [usable], timeout: 8),
+                .completed,
+                "cycle \(cycle): New shell stayed \(composer.value ?? "nil")"
+            )
+        }
+        attachScreenshot(app, name: "1379-clear-then-exit-10x")
+    }
+
+    /// #1379: New shell after exit must become a usable Flow composer. The
+    /// ended shell's admission must not leave "Waiting for prompt..." up
+    /// while the new PTY is already at a prompt.
+    func testNewShellAfterExitBecomesUsable() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "exit 0")
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        let ended = expectation(
+            for: NSPredicate(format: "value CONTAINS 'shell exited'"),
+            evaluatedWith: recovery,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 15), .completed)
+        let newShell = app.descendants(matching: .any)["seyal-new-shell"].firstMatch
+        XCTAssertTrue(newShell.waitForExistence(timeout: 5), "New shell must be offered after exit")
+        newShell.click()
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let usable = expectation(
+            for: NSPredicate(format: "value == 'available'"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        // Click→available is ~1–2s on this host; 8s rejects a 15–25s hang
+        // without masking it as a soft wait (#1379 P1).
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [usable], timeout: 8),
+            .completed,
+            "New shell composer stayed \(composer.value ?? "nil"); prompt wait must not persist"
+        )
+        submitComposerCommand(app, "printf 'seyal-1379-new-shell\\n'")
+        let body = app.descendants(matching: .any)["seyal-block-0-body"]
+        let painted = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "seyal-1379-new-shell",
+                "seyal-1379-new-shell"
+            ),
+            evaluatedWith: body.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [painted], timeout: 8), .completed)
+        assertBlockCardFillsTranscript(app, index: 0)
+        XCTAssertEqual(composer.value as? String, "available")
+        attachScreenshot(app, name: "1379-new-shell")
     }
 
     func testUnicodeComposerSubmitAndResizeStayOnFlowBlocks() throws {
@@ -77,6 +543,94 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         }
         assertFlowBlocksOrFail(in: app)
         attachScreenshot(app, name: "824-altscreen-return")
+    }
+
+    func testRealLessSessionTakesOverAndReturnsToFlow() throws {
+        let lessPath = "/usr/bin/less"
+        guard FileManager.default.isExecutableFile(atPath: lessPath) else {
+            throw XCTSkip("less is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer {
+            if app.state == .runningForeground, !composer.isHittable {
+                if terminal.isHittable { terminal.click() }
+                app.typeText("q")
+            }
+        }
+
+        submitComposerCommand(app, "\(lessPath) /etc/hosts")
+        let enteredTUI = expectation(
+            for: NSPredicate(format: "isHittable == false"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [enteredTUI], timeout: 12), .completed,
+            "real less must take over the pane instead of leaving the Flow composer active"
+        )
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.click()
+        app.typeText("q")
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 12), .completed,
+            "q in the actual less TUI must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-less-flow-return")
+    }
+
+    func testRealTopSessionReturnsToFlow() throws {
+        let topPath = "/usr/bin/top"
+        guard FileManager.default.isExecutableFile(atPath: topPath) else {
+            throw XCTSkip("top is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer {
+            if app.state == .runningForeground,
+               !composer.isHittable || app.buttons["seyal-running-program-interact"].exists
+            {
+                let interact = app.buttons["seyal-running-program-interact"]
+                if interact.isHittable { interact.click() }
+                if terminal.isHittable { terminal.click() }
+                app.typeText("q")
+            }
+        }
+
+        submitComposerCommand(app, "\(topPath) -o cpu")
+        let interact = app.buttons["seyal-running-program-interact"]
+        let startDeadline = Date().addingTimeInterval(12)
+        while Date() < startDeadline, composer.isHittable, !interact.exists {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(
+            !composer.isHittable || interact.exists,
+            "top must either enter its requested TUI or remain available through its running Block"
+        )
+        if composer.isHittable {
+            XCTAssertTrue(interact.isHittable, "Flow keeps its composer while top does not enter alternate screen")
+            interact.click()
+        }
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.click()
+        app.typeText("q")
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 12), .completed,
+            "q in the actual top TUI must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-top-flow-return")
     }
 
     func testGuiRelaunchReconnectsWithoutKillingExecution() throws {
@@ -124,15 +678,16 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             .completed,
             "composer never became available; value=\(composer.value ?? "nil")"
         )
+        app.activate()
         composer.firstMatch.click()
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        // Prefer a single typeText with newline — separate typeKey("\r") often
+        // times out synthesizing during long headed Gate 1 loops.
         if editor.waitForExistence(timeout: 2), editor.firstMatch.isHittable {
             editor.firstMatch.click()
-            editor.firstMatch.typeText(command)
-            editor.firstMatch.typeKey("\r", modifierFlags: [])
+            editor.firstMatch.typeText(command + "\n")
         } else {
-            composer.firstMatch.typeText(command)
-            app.typeKey("\r", modifierFlags: [])
+            composer.firstMatch.typeText(command + "\n")
         }
         let cleared = expectation(
             for: NSPredicate(format: "value == nil OR value == ''"),
@@ -144,12 +699,22 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        // Headed sequential XCUI can leave the next launch BackgroundSuspended when
+        // the IDE steals focus; activate before PTY attach or hittable chrome fails.
+        app.activate()
         let terminal = app.descendants(matching: .any)["terminal-input"]
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
+        if app.state != .runningForeground {
+            app.activate()
+        }
+        XCTAssertEqual(
+            app.state,
+            .runningForeground,
+            "Seyal.app left foreground while waiting for PTY attach (state=\(app.state.rawValue))"
+        )
         XCTAssertEqual(
             result,
             .completed,
@@ -158,7 +723,142 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         assertFlowBlocksOrFail(in: app)
     }
 
+    private func assertBlockCardFillsTranscript(_ app: XCUIApplication, index: Int) {
+        let blocks = app.descendants(matching: .any)["seyal-blocks"].firstMatch
+        let card = app.descendants(matching: .any)["seyal-block-\(index)"].firstMatch
+        XCTAssertTrue(blocks.exists, "seyal-blocks missing")
+        XCTAssertTrue(card.exists, "seyal-block-\(index) missing")
+        XCTAssertGreaterThan(
+            card.frame.width,
+            blocks.frame.width * 0.85,
+            "Flow Block cards must span the transcript, not shrink to the command string"
+        )
+        XCTAssertLessThan(
+            abs(card.frame.minX - blocks.frame.minX),
+            24,
+            "Flow Block cards must start with the transcript, not hug the trailing edge"
+        )
+    }
+
+    /// Metal reports flow-paint=ok only when Flow draws history inside Block
+    /// clips without a leftover live-grid / out-of-clip overlay. AX body text
+    /// can stay correct while the screen is blank or later Block output is
+    /// collapsed onto an earlier card; require painted history instances,
+    /// multiple painted regions, and distinct clips (#1379 false-green guard).
+    private func assertFlowPaintCleanAfterExit(
+        _ app: XCUIApplication,
+        minimumPaintedRegions: Int = 1,
+        inkBodyIndices: [Int] = [0]
+    ) {
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.exists, "terminal surface missing for flow-paint probe")
+        let clean = expectation(
+            for: NSPredicate(format: "value CONTAINS 'flow-paint=ok'"),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [clean], timeout: 5),
+            .completed,
+            "Metal Flow paint must stay clean after exit; AX=\(terminal.value ?? "nil") (flow-paint=leak means viewport overlay survived)"
+        )
+        let painted = expectation(
+            for: NSPredicate(format: "value MATCHES %@", ".*history-instances=[1-9][0-9]*.*"),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [painted], timeout: 5),
+            .completed,
+            "retained Flow Blocks must paint history glyphs after exit; AX=\(terminal.value ?? "nil") (history-instances=0 with AX body text is false-green)"
+        )
+        let regions = expectation(
+            for: NSPredicate(
+                format: "value MATCHES %@",
+                ".*history-regions-painted=([\(minimumPaintedRegions)-9]|[1-9][0-9]+).*"
+            ),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [regions], timeout: 5),
+            .completed,
+            "need ≥\(minimumPaintedRegions) painted history regions; AX=\(terminal.value ?? "nil")"
+        )
+        let clips = expectation(
+            for: NSPredicate(format: "value CONTAINS 'history-clips=ok'"),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [clips], timeout: 5),
+            .completed,
+            "history Block clips must stay distinct; AX=\(terminal.value ?? "nil") (history-clips=collapse is clear→exit mispaint)"
+        )
+        assertBlockBodyFramesHaveInk(app, indices: inkBodyIndices)
+    }
+
+    /// Per-element screenshot ink probe. Uses `body.screenshot()` so sampling
+    /// cannot pick up card titles / chrome from a full-screen `app.screenshot`
+    /// coordinate mis-map (#1379 Opus false-green).
+    private func assertBlockBodyFramesHaveInk(_ app: XCUIApplication, indices: [Int]) {
+        _ = app
+        for index in indices {
+            let body = app.descendants(matching: .any)["seyal-block-\(index)-body"].firstMatch
+            XCTAssertTrue(
+                body.waitForExistence(timeout: 2),
+                "seyal-block-\(index)-body missing for ink probe"
+            )
+            let frame = body.frame
+            XCTAssertGreaterThan(frame.width, 4, "seyal-block-\(index)-body frame too narrow")
+            XCTAssertGreaterThan(frame.height, 4, "seyal-block-\(index)-body frame too short")
+            let shot = body.screenshot()
+            let image = shot.image
+            var proposed = CGRect(origin: .zero, size: image.size)
+            guard let cgImage = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil),
+                  let data = cgImage.dataProvider?.data,
+                  let ptr = CFDataGetBytePtr(data)
+            else {
+                XCTFail("seyal-block-\(index)-body screenshot has no pixels")
+                continue
+            }
+            let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 1)
+            let bytesPerRow = cgImage.bytesPerRow
+            var ink = 0
+            var samples = 0
+            let step = max(min(cgImage.width, cgImage.height) / 16, 1)
+            var y = 0
+            while y < cgImage.height {
+                var x = 0
+                while x < cgImage.width {
+                    let offset = y * bytesPerRow + x * bytesPerPixel
+                    let r = Int(ptr[offset])
+                    let g = Int(ptr[offset + min(1, bytesPerPixel - 1)])
+                    let b = Int(ptr[offset + min(2, bytesPerPixel - 1)])
+                    samples += 1
+                    // Flow body canvas is near-white; glyph ink is darker.
+                    if (r + g + b) < 650 {
+                        ink += 1
+                    }
+                    x += step
+                }
+                y += step
+            }
+            XCTAssertGreaterThan(
+                samples,
+                8,
+                "seyal-block-\(index)-body ink probe under-sampled (\(samples))"
+            )
+            XCTAssertGreaterThan(
+                ink,
+                0,
+                "seyal-block-\(index)-body has AX text but no painted ink in body screenshot (false-green)"
+            )
+        }
+    }
+
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
+        app.ensureFlowBlocksPresentation(timeout: timeout)
         let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
@@ -189,6 +889,30 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
     private func waitBriefly(_ seconds: TimeInterval) {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    private func waitForBlockBodyText(
+        _ app: XCUIApplication,
+        index: Int,
+        text: String,
+        timeout: TimeInterval
+    ) {
+        let body = app.descendants(matching: .any)["seyal-block-\(index)-body"].firstMatch
+        XCTAssertTrue(body.waitForExistence(timeout: timeout), "seyal-block-\(index)-body missing")
+        let painted = expectation(
+            for: NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                text,
+                text
+            ),
+            evaluatedWith: body,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [painted], timeout: timeout),
+            .completed,
+            "seyal-block-\(index)-body must show \(text) before continuing (card title alone is false-green)"
+        )
     }
 
     private func attachScreenshot(_ app: XCUIApplication, name: String) {

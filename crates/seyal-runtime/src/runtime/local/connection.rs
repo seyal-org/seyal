@@ -70,19 +70,28 @@ impl Runtime {
 
     pub(super) fn close_local_connection(&mut self, token: u64) {
         self.drop_pending_creates_for_connection(token);
-        let (reactor_token, attachment) = {
+        let (reactor_token, attachments) = {
             let Some(state) = self.local_ipc.as_mut() else {
                 return;
             };
+            let extras = state.attachments.attachments_on_connection(token);
             state.server.close(token);
-            state.pending_resync_set.remove(&token);
+            state
+                .pending_resync_set
+                .retain(|(pending_token, _)| *pending_token != token);
             let Some(meta) = state.connections.remove(&token) else {
                 return;
             };
             state.reactor_connections.remove(&meta.reactor_token);
-            (meta.reactor_token, meta.attachment)
+            let mut ids = extras;
+            if let Some(primary) = meta.attachment
+                && !ids.contains(&primary)
+            {
+                ids.push(primary);
+            }
+            (meta.reactor_token, ids)
         };
-        if let Some(attachment_id) = attachment {
+        for attachment_id in attachments {
             self.release_local_attachment(attachment_id);
         }
         let _ = self.reactor.deregister(reactor_token);
@@ -116,6 +125,10 @@ impl Runtime {
             .local_ipc
             .as_ref()
             .and_then(|state| state.attachments.execution_of(attachment_id).ok());
+        let was_controller = self.local_ipc.as_ref().is_some_and(|state| {
+            state.attachments.role_of(attachment_id).ok()
+                == Some(seyal_protocol::framing::Role::Controller)
+        });
         if let Some(state) = self.local_ipc.as_mut() {
             let _ = state.attachments.detach(attachment_id);
         }
@@ -131,6 +144,15 @@ impl Runtime {
                 .is_none_or(|state| state.attachments.attachments_for_execution(execution_id) == 0);
             if no_viewers && let Some(state) = self.local_ipc.as_mut() {
                 state.published.remove(&execution_id);
+            }
+            if was_controller {
+                let still = self
+                    .local_ipc
+                    .as_ref()
+                    .is_some_and(|state| state.attachments.has_controller(execution_id));
+                if !still {
+                    let _ = self.abort_bootstrap_on_detach(execution_id);
+                }
             }
         }
     }

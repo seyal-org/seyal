@@ -66,7 +66,7 @@ fn seed_two_workspaces() -> ShellState {
         first,
         true,
         true,
-        false,
+        true,
     )
     .expect("fixture")
 }
@@ -178,16 +178,17 @@ fn spec025_3_close_focused_uses_sibling_first_successor() {
 }
 
 #[test]
-fn spec025_4_close_last_pane_rejects() {
+fn close_last_pane_removes_tab_and_window_hierarchically() {
     let mut shell = seed_two_workspaces();
     let only = shell.snapshot().focused_pane;
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane {
+    shell
+        .apply(ShellAction::ClosePane {
             id: only,
             containment_generation: shell.containment_generation(),
-        }),
-        Err(ShellError::CannotCloseLastPane)
-    );
+        })
+        .expect("last Pane closes hierarchically");
+    assert_eq!(shell.snapshot().windows.len(), 1);
+    assert!(shell.snapshot().active_window.is_some());
 }
 
 #[test]

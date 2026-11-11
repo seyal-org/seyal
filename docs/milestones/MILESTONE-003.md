@@ -193,7 +193,7 @@ Umbrellas **#674 / #675 / #676** remain **Open** and are never pickups. Live Git
 |---|---|---|
 | C2b enable `CreateTab` with live second Controller | #1175 | **Open** — @mahboobmonnamd; C1 + C2a already closed |
 | C3 enable pane splitting, one execution per leaf | #1217 | **Open** — @mahboobmonnamd |
-| Multiple live Metal surfaces per Tab | #936 | **Open** — unassigned; **Blocked** on #923 plus C3 through accepted ADR-017 |
+| Multiple live Metal surfaces per Tab | #936 | **Open** — Ready, @mahboobmonnamd; #923 / #994 / #1080 / #1238 have landed. Implementation is PR #1250. Not Blocked. |
 
 **Lane B — windows/tabs (ADR-018; user close gated on W6)**
 
@@ -369,6 +369,8 @@ The pane/tab execution provisioning seam is accepted under #994: [`../architectu
 The window/tab contract is #1000: [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md) (**Accepted** on merge of PR #1208). W1 is Closed. Remaining children are listed in §5.3. Do not merge user Tab/Window close before W6.
 
 The pane move/reparent/zoom/equalize/directional-focus contract is #1001: [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Accepted** on merge of PR #1208) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md). Focus-history retention and Resource Addressing are #1004 (ADR-019 / SPEC-022 **Accepted**). Remaining PT/N children are listed in §5.3.
+
+Pane-local terminal tabs are **Proposed, not implementation authority**, under #1381 / [`ADR-025`](../architecture/ADR-025-PANE-LOCAL-TERMINAL-TABS.md) and [`SPEC-031`](../specs/SPEC-031-M003-PANE-LOCAL-TERMINAL-TABS.md). They change the current one-execution-per-Pane model. Do not add terminal tabs to the existing Pane binding until ADR-025 and SPEC-031 are accepted and the session-inventory, provisioning, attachment-capacity, and implementation Issues are reconciled. Proposed lifecycle distinguishes explicit terminal-session termination from detach-only Pane/outer-Tab/Window close; durable layout/session metadata remains M004 under #832 / proposed ADR-023.
 
 ### 6.3 #923 — split-tree projection after #922
 

@@ -45,6 +45,16 @@ struct FlowPaintInspection: Equatable, Sendable {
     var liveGridSubmitted: Bool
     var fullGridBackgroundSubmitted: Bool
     var historyInstanceCount: Int
+    /// Painted glyph instances in live-tail Block buffers (running command).
+    /// Kept separate from history so clear→exit ink checks stay history-only.
+    var liveTailInstanceCount: Int
+    /// History Block buffers that still have at least one drawable glyph.
+    /// clear→exit false-green: total instances can be >0 while later cards
+    /// were culled to empty after a clip collapse (#1379).
+    var paintedHistoryRegionCount: Int
+    /// Distinct Block body clips — `collapse` when two history clips largely
+    /// overlap so later Block output paints over an earlier card.
+    var historyClipsDistinct: Bool
     var instancesOutsideClips: Int
     var opaquePixelsOutsideClips: Int
     var opaquePixelsInsideClips: Int
@@ -53,10 +63,15 @@ struct FlowPaintInspection: Equatable, Sendable {
         if mode != .flow {
             return true
         }
+        // A retained history buffer can outlive a narrowed Block after a pane
+        // split. Those source instances are intentionally left untouched; the
+        // encoder applies a per-region Metal scissor, so only pixels escaping
+        // that clip constitute visible leakage. Keep instancesOutsideClips as
+        // a geometry diagnostic instead of treating it as painted output.
         return !liveGridSubmitted
             && !fullGridBackgroundSubmitted
-            && instancesOutsideClips == 0
             && opaquePixelsOutsideClips == 0
+            && historyClipsDistinct
     }
 
     var accessibilityToken: String {

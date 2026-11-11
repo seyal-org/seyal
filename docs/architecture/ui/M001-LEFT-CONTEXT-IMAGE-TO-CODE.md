@@ -9,6 +9,28 @@
 
 > Note on visual authority: the checked-in `01-core terminal.png` is a historical reference. This doc describes implementable contracts and code-aligned component inventory, not a pixel-golden completion claim.
 
+## 0. Default chrome refinement — PR #1456
+
+**Status:** Proposed product-approved default for M003, superseding the
+historical always-visible left Workspaces/Tabs switcher and outer Workspace
+Tab top strip described below.
+
+- Default C03 shows **Workspaces**, **Layouts**, and backed **Agents**;
+  the layout rows navigate the active Workspace's outer Rust `TabId` entries,
+  including the sole initial layout.
+- Do not render a permanent left **Tabs** mode control. The existing terminal
+  inventory remains accessible on demand via the command palette; Workspaces
+  can restore the default view.
+- Every Pane retains one 30-point non-wrapping `TerminalTabId` strip, with
+  quiet labels, selected 2-point seam, focused-pane actions, and stable close
+  slots. Overflow must reveal the selected tab.
+- No second terminal-looking outer strip is permitted. The Workspaces header
+  offers **New Layout** (Rust `CreateTab`); each Pane offers **New Terminal**
+  (Rust `NewTerminal`).
+- Native rendered screenshots and interaction tests, not concept art, establish
+  visual/behavioral acceptance. All unchanged sections below remain design
+  background unless they conflict with this refined navigation decision.
+
 ## 1. Source-reference inventory (states)
 This spec targets the “Reference 01 — Core Terminal / full terminal view” left-pane states:
 - Left panel visible
@@ -68,9 +90,9 @@ Values below are implementation-aligned tokens currently used in the macOS shell
   - `activeWorkspaceID`
 - Agents list (current workspace only)
   - `activeWorkspace.agents`
-- Tab list (active workspace only)
-  - `activeWorkspace.tabs`
-  - `activeTabID`
+- Terminal-tab list (active workspace only; pane-local ADR-025 identities)
+  - Rust-projected `TerminalTab` rows for the active Workspace (grouped by Pane when helpful)
+  - focused `PaneId` + that Pane's selected `TerminalTabId`
 - Hide/collapse visibility
   - visibility toggle (`isLeftContextVisible` in the scaffold) must not affect focus/selection state.
 
@@ -78,23 +100,23 @@ Values below are implementation-aligned tokens currently used in the macOS shell
 **Purpose:** Dense, state-carrying list row for Workspace/Agent/Tab/Resource entities.
 
 **Runtime mapping:**
-- `primary` label: derived from row model (`Workspace.name`, `Agent.name`, `Tab.title`)
+- `primary` label: derived from row model (`Workspace.name`, `Agent.name`, `TerminalTab.title`)
 - `secondary` label:
   - Workspace row: `Workspace.detail` when helpful
   - Agent row: omitted in the left list variant
-  - Tab row: omitted in the left list variant
+  - Terminal-tab row: omitted in the left list variant (Pane grouping headers may carry a Pane label)
 - `trailing` meta:
   - Workspace row: tab count string (`1 tab` vs `N tabs`)
   - Agent row: `agent.state.rawValue`
-  - Tab row: pane count string (`1 pane` vs `N panes`)
+  - Terminal-tab row: optional compact status only when Rust projects it; do not invent pane-count as a substitute for terminal identity
 - `attention` + status color:
   - Workspace row: uses `workspace.attention` for warning coloration
   - Agent row: uses `agent.state` for the warning/severity cue
-  - Tab row: uses `tab.attention` for warning coloration
+  - Terminal-tab row: uses that terminal tab's attention when backed by real state
 - `emphasized`:
   - Workspace row emphasized if `workspace.id == activeWorkspaceID`
   - Agent row emphasized if `agent.id == selectedAgentID`
-  - Tab row emphasized if `tab.id == activeTabID`
+  - Terminal-tab row emphasized if it is the selected `TerminalTabId` of the focused Pane
 
 ### 4.3 C05 - Top Tab Strip
 **Purpose:** Workspace-scoped tab navigation.
@@ -106,8 +128,8 @@ Values below are implementation-aligned tokens currently used in the macOS shell
 - Close affordance:
   - Close control is hidden when there is only one tab (`tabs.count <= 1`)
 
-### 4.4 Shared identity rule (C03 Tabs list <-> C05 top strip)
-Selecting a Tab in either location updates the same active tab identity (`activeTabID`) and must not create a second tab model.
+### 4.4 Shared identity rule (C03 Tabs list <-> pane terminal strips)
+Selecting a terminal tab in the left Tabs list or on a Pane strip updates the same Rust-owned `TerminalTabId` selection (and focuses the owning Pane when needed). The host must not create a second terminal-tab model. Outer Seyal Workspace `TabId` remains a distinct layout-container identity.
 
 ## 5. Interactions, focus paths, keyboard & accessibility
 

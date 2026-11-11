@@ -8,28 +8,36 @@ final class ProductChromeHostView: NSView {
     /// Headed/component probe for cold visual snapshot. Identifier-encoded so
     /// VoiceOver does not hear a pipe-delimited token string as the chrome value.
     let coldVisualProbe = NSView()
-    let tabStrip = NSView()
-    let tabTitle = NSTextField(labelWithString: "Terminal")
-    /// Layout-chrome cluster (#922): apply to the active Tab/focused Pane,
-    /// never duplicated per-Pane (M001-CORE-TERMINAL-REFERENCE-SCREEN.md §4.3).
+    /// Outer Tab create/close stay with the left C03 mode row. Pane terminal
+    /// tabs stay pane-local in `PaneLayoutView` (do not add a second strip).
     let newTabButton = NSButton(title: "+", target: nil, action: nil)
-    let closeTabButton = IdentityButton(title: "Close Tab", target: nil, action: nil)
-    let splitRightButton = NSButton(title: "Split Right", target: nil, action: nil)
-    let splitDownButton = NSButton(title: "Split Down", target: nil, action: nil)
-    let closePaneButton = IdentityButton(title: "Close Pane", target: nil, action: nil)
+    let closeTabButton = IdentityButton(title: "×", target: nil, action: nil)
+    let leftModeRow = NSStackView()
     let left = NSView()
     let inspector = NSStackView()
     let attention = NSStackView()
     let transcript = NSScrollView()
     let blocks = NSStackView()
+    /// Leading filler so sparse Flow content hugs the bottom, just above the
+    /// composer, instead of top-packing with a dead zone below it (#1426
+    /// follow-up / Warp-like Block stacking). Height is driven explicitly by
+    /// `syncTranscriptDocumentSize`, never by NSStackView distribution.
+    let transcriptLeadingSpacer = NSView()
+    var transcriptLeadingSpacerHeight: NSLayoutConstraint!
+    var lastTranscriptViewportSize = CGSize.zero
+    var hasPendingTranscriptViewportSync = false
     let composer: ComposerBridgeView
+    let sessionBootstrap = SessionBootstrapBanner()
     /// Rust-owned history overlay (#933); internal for component tests.
     let historyOverlay: ComposerHistoryOverlayView
     /// Global command palette overlay (#932); internal for component tests.
     let commandPalette: CommandPaletteOverlayView
     let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
+    let createWorkspaceButton = NSButton(title: "+", target: nil, action: nil)
     let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
     let recoveryLabel = NSTextField(labelWithString: "")
+    /// #1379 Defect B: single clear recovery action after primary shell exit.
+    let newShellButton = NSButton(title: "New shell", target: nil, action: nil)
     let leftItems = NSStackView()
     let inspectorColumn = NSView()
     /// Rust-projected Pane regions (#923); the live surface sits in
@@ -38,11 +46,15 @@ final class ProductChromeHostView: NSView {
     var liveContent: NSView { centerColumn.liveContent }
     var recoveryTimer: Timer?
     var recoveryTimerGeneration: UInt64 = 0
+    var paneRecoveryTimer: Timer?
+    var paneRecoveryTimerPin: PaneRecoveryPin?
     /// Rust recovery generation whose PerformAttempt is open on the lifecycle
     /// queue or still completing on MainActor (adopt + CompleteRecovery).
     /// Held across adopt so frame → reconcile → `driveRecovery` cannot start a
     /// second open while PerformAttempt remains the pending Rust effect.
-    var recoveryAttemptInFlight: UInt64?
+    var recoveryAttemptInFlight: RecoveryAttemptIdentity?
+    /// ADR-028: avoid re-presenting the same leave-offer path until Rust clears it.
+    var presentedLeaveOfferPath: String?
     /// Blocking hello/attach runs here so the AppKit actor never becomes the
     /// lifecycle I/O executor.
     let recoveryLifecycleQueue = DispatchQueue(
@@ -62,7 +74,22 @@ final class ProductChromeHostView: NSView {
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
     var chromeNeedsReconcile = false
     var blockCards: [UInt64: CommandBlockView] = [:]
+    var composerDockConstraints: [NSLayoutConstraint] = []
+    var transcriptRelayBottomConstraint: NSLayoutConstraint?
+    let transcriptTopSpacer = NSView(frame: .zero)
+    var transcriptTopSpacerHeight: NSLayoutConstraint!
+    var relayTarget: (
+        blockID: UInt64,
+        generation: UInt64,
+        revision: UInt64,
+        targetClass: UInt8,
+        mode: UInt8
+    ) = (0, 0, 0, 0, 0)
+    var composerInlineBlockID: UInt64 = 0
     var transcriptFrameRevision: UInt64 = 0
+    /// Bounds zero-clip async republish so layout stalls cannot spin forever (#1379).
+    var blockOutputZeroClipRetries: Int = 0
+    static let blockOutputZeroClipRetryLimit = 8
     var paneFollowsTranscript: [NSLayoutConstraint] = []
     var paneFillsCenter: [NSLayoutConstraint] = []
     var centerLeadingHost: NSLayoutConstraint!
@@ -70,7 +97,6 @@ final class ProductChromeHostView: NSView {
     var centerTopHost: NSLayoutConstraint!
     var centerLeadingLeft: NSLayoutConstraint!
     var centerTrailingInspector: NSLayoutConstraint!
-    var centerTopTab: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         pane = ThinPaneHostView(frame: frameRect)
@@ -97,33 +123,44 @@ final class ProductChromeHostView: NSView {
         addSubview(coldVisualProbe)
 
         configureChromeButtons()
-        tabStrip.translatesAutoresizingMaskIntoConstraints = false
-        tabStrip.wantsLayer = true
-        tabStrip.setAccessibilityElement(true)
-        tabStrip.setAccessibilityRole(.group)
-        tabStrip.setAccessibilityIdentifier("seyal-tab-strip")
-        tabTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-        tabTitle.translatesAutoresizingMaskIntoConstraints = false
-        tabStrip.addSubview(tabTitle)
-        for button in [newTabButton, closeTabButton, splitRightButton, splitDownButton, closePaneButton] {
+        for button in [newTabButton, closeTabButton] {
             button.translatesAutoresizingMaskIntoConstraints = false
             button.bezelStyle = .inline
             button.isBordered = false
             button.font = .systemFont(ofSize: 11, weight: .regular)
-            tabStrip.addSubview(button)
+            button.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 22).isActive = true
         }
 
         left.translatesAutoresizingMaskIntoConstraints = false
         left.wantsLayer = true
+        leftModeRow.orientation = .horizontal
+        leftModeRow.alignment = .centerY
+        // Fit the full Workspace/Terminal mode switcher and backed actions in
+        // the 220 pt context rail without button compression or overlap.
+        leftModeRow.spacing = 4
+        leftModeRow.translatesAutoresizingMaskIntoConstraints = false
+        let modeSpacer = NSView()
+        modeSpacer.translatesAutoresizingMaskIntoConstraints = false
+        modeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        leftModeRow.addArrangedSubview(workspacesButton)
+        leftModeRow.addArrangedSubview(createWorkspaceButton)
+        // Pane tabs are visible in their own strips; advanced inventory
+        // remains available from the command palette, not a second toggle.
+        leftModeRow.addArrangedSubview(modeSpacer)
+        leftModeRow.addArrangedSubview(newTabButton)
+        leftModeRow.addArrangedSubview(closeTabButton)
         leftItems.orientation = .vertical
-        leftItems.alignment = .leading
+        leftItems.alignment = .width
+        leftItems.distribution = .fill
         leftItems.spacing = 2
         leftItems.translatesAutoresizingMaskIntoConstraints = false
-        left.addSubview(workspacesButton)
-        left.addSubview(tabsButton)
+        // Keep the inventory column at panel width so C04 rows cannot hug
+        // label intrinsic size and pin to the trailing seam (same trap as
+        // Flow card NSTextField intrinsic width).
+        leftItems.setHuggingPriority(.defaultHigh, for: .horizontal)
+        left.addSubview(leftModeRow)
         left.addSubview(leftItems)
-        workspacesButton.translatesAutoresizingMaskIntoConstraints = false
-        tabsButton.translatesAutoresizingMaskIntoConstraints = false
 
         inspector.orientation = .vertical
         inspector.alignment = .leading
@@ -139,6 +176,13 @@ final class ProductChromeHostView: NSView {
         recoveryLabel.setAccessibilityIdentifier("seyal-recovery")
         recoveryLabel.stringValue = "disconnected"
         recoveryLabel.translatesAutoresizingMaskIntoConstraints = false
+        newShellButton.translatesAutoresizingMaskIntoConstraints = false
+        newShellButton.bezelStyle = .rounded
+        newShellButton.font = .systemFont(ofSize: 13, weight: .medium)
+        newShellButton.setAccessibilityIdentifier("seyal-new-shell")
+        newShellButton.target = self
+        newShellButton.action = #selector(requestNewShellAfterExit)
+        newShellButton.isHidden = true
 
         inspectorColumn.translatesAutoresizingMaskIntoConstraints = false
         inspectorColumn.wantsLayer = true
@@ -150,7 +194,9 @@ final class ProductChromeHostView: NSView {
         blocks.spacing = 22
         blocks.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         blocks.translatesAutoresizingMaskIntoConstraints = false
+        setupTranscriptTopSpacer()
         expose(blocks, identifier: "seyal-blocks")
+        configureTranscriptLeadingSpacer()
         composer.setAccessibilityIdentifier("seyal-composer")
 
         let clip = TranscriptClipView()
@@ -176,14 +222,36 @@ final class ProductChromeHostView: NSView {
         // command headers remain AppKit while output glyphs composite on top.
         liveContent.addSubview(transcript)
         liveContent.addSubview(pane)
+        liveContent.addSubview(sessionBootstrap)
         liveContent.addSubview(composer)
+        liveContent.addSubview(newShellButton)
         liveContent.addSubview(historyOverlay)
         centerColumn.onFocusPane = { [weak self] lo, hi in
             self?.focusPaneRegion(lo: lo, hi: hi)
         }
+        centerColumn.onSelectTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
+            guard let self, self.focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+            self.selectTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
+        }
+        centerColumn.onCloseTerminalTab = { [weak self] paneLo, paneHi, terminalLo, terminalHi in
+            self?.closeTerminalTab(paneLo: paneLo, paneHi: paneHi, terminalLo: terminalLo, terminalHi: terminalHi)
+        }
+        centerColumn.onNewTerminal = { [weak self] paneLo, paneHi in
+            guard let self, self.focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+            self.createTerminal()
+        }
+        centerColumn.onSplitPane = { [weak self] paneLo, paneHi, direction in
+            guard let self, self.focusPaneForPaneAction(paneLo: paneLo, paneHi: paneHi) else { return }
+            switch direction {
+            case .right: self.splitFocusedRight()
+            case .down: self.splitFocusedDown()
+            }
+        }
+        centerColumn.onClosePane = { [weak self] paneLo, paneHi in
+            self?.closePane(paneLo: paneLo, paneHi: paneHi)
+        }
         centerColumn.appHandle = pane.appHandle
 
-        addSubview(tabStrip)
         addSubview(left)
         addSubview(centerColumn)
         addSubview(inspectorColumn)
@@ -194,6 +262,7 @@ final class ProductChromeHostView: NSView {
         // Topmost subview: the palette floats above every other region,
         // including the inspector, when Rust opens it.
         addSubview(commandPalette)
+        setupComposerDockConstraints()
         NSLayoutConstraint.activate([
             commandPalette.leadingAnchor.constraint(equalTo: leadingAnchor),
             commandPalette.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -210,6 +279,9 @@ final class ProductChromeHostView: NSView {
         pane.setContentHuggingPriority(.defaultLow, for: .vertical)
         pane.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         composer.setContentHuggingPriority(.required, for: .vertical)
+        // SessionBootstrapBanner owns its vertical hugging: required only while
+        // offered, fittingSizeCompression while collapsed so it cannot steal
+        // transcript/composer space or fight early liveContent height ≈ 1.
         transcript.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
         transcript.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
@@ -224,39 +296,22 @@ final class ProductChromeHostView: NSView {
             coldVisualProbe.leadingAnchor.constraint(equalTo: leadingAnchor),
             coldVisualProbe.topAnchor.constraint(equalTo: topAnchor),
 
-            tabStrip.leadingAnchor.constraint(equalTo: leadingAnchor),
-            tabStrip.trailingAnchor.constraint(equalTo: trailingAnchor),
-            tabStrip.topAnchor.constraint(equalTo: topAnchor),
-            tabStrip.heightAnchor.constraint(equalToConstant: 48),
-            tabTitle.leadingAnchor.constraint(equalTo: tabStrip.leadingAnchor, constant: 236),
-            tabTitle.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-
-            newTabButton.leadingAnchor.constraint(equalTo: tabTitle.trailingAnchor, constant: 12),
-            newTabButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            closeTabButton.leadingAnchor.constraint(equalTo: newTabButton.trailingAnchor, constant: 8),
-            closeTabButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            closePaneButton.trailingAnchor.constraint(equalTo: tabStrip.trailingAnchor, constant: -12),
-            closePaneButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            splitDownButton.trailingAnchor.constraint(equalTo: closePaneButton.leadingAnchor, constant: -8),
-            splitDownButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-            splitRightButton.trailingAnchor.constraint(equalTo: splitDownButton.leadingAnchor, constant: -8),
-            splitRightButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
-
             left.leadingAnchor.constraint(equalTo: leadingAnchor),
-            left.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
+            left.topAnchor.constraint(equalTo: topAnchor),
             left.bottomAnchor.constraint(equalTo: bottomAnchor),
             left.widthAnchor.constraint(equalToConstant: 220),
-            workspacesButton.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
-            workspacesButton.topAnchor.constraint(equalTo: left.topAnchor, constant: 10),
-            tabsButton.leadingAnchor.constraint(equalTo: workspacesButton.trailingAnchor, constant: 8),
-            tabsButton.centerYAnchor.constraint(equalTo: workspacesButton.centerYAnchor),
-            leftItems.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
-            leftItems.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -10),
-            leftItems.topAnchor.constraint(equalTo: workspacesButton.bottomAnchor, constant: 12),
-            leftItems.bottomAnchor.constraint(lessThanOrEqualTo: left.bottomAnchor, constant: -10),
+            leftModeRow.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 12),
+            leftModeRow.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -12),
+            leftModeRow.topAnchor.constraint(equalTo: left.topAnchor, constant: 12),
+            // Rows bleed to the panel seam so C04 selection fill is edge-to-edge;
+            // section labels keep the same 12 pt content inset via their own padding.
+            leftItems.leadingAnchor.constraint(equalTo: left.leadingAnchor),
+            leftItems.trailingAnchor.constraint(equalTo: left.trailingAnchor),
+            leftItems.topAnchor.constraint(equalTo: leftModeRow.bottomAnchor, constant: 14),
+            leftItems.bottomAnchor.constraint(lessThanOrEqualTo: left.bottomAnchor, constant: -12),
 
             inspectorColumn.trailingAnchor.constraint(equalTo: trailingAnchor),
-            inspectorColumn.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
+            inspectorColumn.topAnchor.constraint(equalTo: topAnchor),
             inspectorColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
             inspectorColumn.widthAnchor.constraint(equalToConstant: 248),
             inspector.leadingAnchor.constraint(equalTo: inspectorColumn.leadingAnchor, constant: 10),
@@ -272,13 +327,20 @@ final class ProductChromeHostView: NSView {
 
             centerColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
             transcript.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 20),
-            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20).yieldingToPaneRegion(),
+            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20),
             transcript.topAnchor.constraint(equalTo: liveContent.topAnchor, constant: 16),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
-            composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
-            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24).yieldingToPaneRegion(),
-            composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
-            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16).yieldingToPaneRegion(),
+            sessionBootstrap.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
+            sessionBootstrap.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
+            // When collapsed (height 0), this matches master: composer sits
+            // 12pt below transcript. When the banner is visible it grows in
+            // place without shifting Metal/PTY geometry for the idle path.
+            sessionBootstrap.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
+            composerDockConstraints[0], composerDockConstraints[1],
+            composerDockConstraints[2], composerDockConstraints[3],
+            newShellButton.centerXAnchor.constraint(equalTo: composer.centerXAnchor),
+            newShellButton.centerYAnchor.constraint(equalTo: composer.centerYAnchor),
+            newShellButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
             historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
@@ -286,6 +348,7 @@ final class ProductChromeHostView: NSView {
             blocks.leadingAnchor.constraint(equalTo: transcript.contentView.leadingAnchor),
             blocks.widthAnchor.constraint(equalTo: transcript.contentView.widthAnchor),
         ])
+        pinTranscriptToComposer()
         centerLeadingHost = centerColumn.leadingAnchor.constraint(equalTo: leadingAnchor)
         centerTrailingHost = centerColumn.trailingAnchor.constraint(equalTo: trailingAnchor)
         centerTopHost = centerColumn.topAnchor.constraint(equalTo: topAnchor)
@@ -293,7 +356,6 @@ final class ProductChromeHostView: NSView {
         centerTrailingInspector = centerColumn.trailingAnchor.constraint(
             equalTo: inspectorColumn.leadingAnchor
         )
-        centerTopTab = centerColumn.topAnchor.constraint(equalTo: tabStrip.bottomAnchor)
         paneFollowsTranscript = [
             pane.leadingAnchor.constraint(equalTo: transcript.leadingAnchor),
             pane.trailingAnchor.constraint(equalTo: transcript.trailingAnchor),
@@ -302,9 +364,9 @@ final class ProductChromeHostView: NSView {
         ]
         paneFillsCenter = [
             pane.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor),
-            pane.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor).yieldingToPaneRegion(),
+            pane.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor),
             pane.topAnchor.constraint(equalTo: liveContent.topAnchor),
-            pane.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor).yieldingToPaneRegion(),
+            pane.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor),
         ]
         NSLayoutConstraint.activate(paneFollowsTranscript)
         applyShellChrome(seyal_app_chrome(pane.appHandle))
@@ -321,15 +383,27 @@ final class ProductChromeHostView: NSView {
         composer.onFocusEligibilityChanged = { [weak self] in
             guard let self, self.composer.isFocusEligibleForRecovery else { return }
             self.pane.inputSurface.composerFocusEligibilityDidChange()
+            // Busy/DirectInput → Available (REPL exit): reclaim the dock like Warp.
+            self.routeFocus()
         }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
         }
+        // Product shortcuts (⌘D split, pane focus, …) mutate Rust then
+        // reconcile. Always re-route first responder: Flow→Flow split does
+        // not change eligibility, so reconcile alone leaves the hidden
+        // liveContent composer focused (#1464).
         composer.onCommandConsumed = { [weak self] in
             self?.reconcileChrome()
+            self?.routeFocus()
         }
         pane.inputSurface.onCommandConsumed = { [weak self] in
             self?.reconcileChrome()
+            self?.routeFocus()
+        }
+        centerColumn.onPaneCommandConsumed = { [weak self] in
+            self?.reconcileChrome()
+            self?.routeFocus()
         }
         composer.onHistoryOpened = { [weak self] in
             self?.reconcileChrome()
@@ -338,15 +412,15 @@ final class ProductChromeHostView: NSView {
             self?.reconcileChrome()
         }
         historyOverlay.onDismissed = { [weak self] in
-            self?.composer.focusEditor()
+            self?.routeFocus()
         }
-        pane.inputSurface.onTimelineChanged = { [weak self] in
-            self?.projectRuntimeBlocks()
-            self?.reconcileChrome()
-            self?.refreshRunningBlockOutput()
-        }
+        installTimelineChangeHandler()
         pane.inputSurface.onHistoryRangeChanged = { [weak self] range in
-            self?.applyHistoryRange(range)
+            guard let self else { return }
+            if self.pane.inputSurface.renderRawScrollbackHistoryIfNeeded(range) {
+                return
+            }
+            self.applyHistoryRange(range)
         }
         pane.inputSurface.onComposerResultChanged = { [weak self] result in
             let accepted = result.code == .accepted || result.code == .unsupported
@@ -356,10 +430,7 @@ final class ProductChromeHostView: NSView {
             }
             self?.reconcileChrome()
         }
-        pane.inputSurface.onComposerStatusChanged = { [weak self] status in
-            self?.relayComposerStatus(status)
-            self?.reconcileChrome()
-        }
+        installComposerStatusHandler()
         pane.onProductChanged = { [weak self] in
             self?.reconcileChrome()
             // Frame advances (and ViewportLineIds remaps) arrive here via
@@ -378,13 +449,6 @@ final class ProductChromeHostView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("ProductChromeHostView is programmatic")
-    }
-
-    @objc func transcriptDidScroll() {
-        if !isProgrammaticTranscriptScroll {
-            followingLiveEnd = isNearLiveEnd()
-        }
-        publishBlockOutputFrame()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -422,6 +486,12 @@ final class ProductChromeHostView: NSView {
     }
 
     func performChromeReconcile() {
+        // Focus, split, and attach reconcile while the primary PTY is idle.
+        // Arm a newly registered Controller fd and relay eligibility already
+        // cached for the focused attachment; composer mode stays Busy until
+        // that fact is applied.
+        pane.inputSurface.bridge?.armAuxiliaryReadSources()
+        pane.inputSurface.bridge?.publishComposerStatus()
         var snapshot = seyal_app_snapshot(pane.appHandle)
         let bound = (lo: snapshot.execution_lo, hi: snapshot.execution_hi)
         if snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION) != 0,
@@ -434,10 +504,14 @@ final class ProductChromeHostView: NSView {
         let eligibilityChanged = snapshot.eligibility != lastEligibility
         if snapshot.generation == lastSnapshotGeneration && !eligibilityChanged {
             composer.reconcile()
+            applyComposerPlacement()
+            sessionBootstrap.reconcile()
             historyOverlay.reconcile()
             commandPalette.reconcile()
             driveRecovery()
-            recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
+            let recoverySnap = seyal_app_snapshot(pane.appHandle)
+            recoveryLabel.stringValue = recoveryText(recoverySnap)
+            updateNewShellRecoveryAction()
             return
         }
         lastSnapshotGeneration = snapshot.generation
@@ -450,27 +524,38 @@ final class ProductChromeHostView: NSView {
         let chrome = seyal_app_chrome(pane.appHandle)
         applyShellChrome(chrome)
         let shell = seyal_app_shell(pane.appHandle)
-        workspacesButton.state = chrome.left_panel == 0 ? .on : .off
-        tabsButton.state = chrome.left_panel == 1 ? .on : .off
+        applyLeftModeSwitcher(leftPanel: chrome.left_panel)
+        createWorkspaceButton.isHidden = chrome.left_panel != 0
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
+        presentLeaveOfferIfNeeded()
         rebuildInspector(chrome)
-        rebuildTabStrip(shell: shell)
-        centerColumn.reconcile(paneCount: Int(shell.pane_count))
+        rebuildLayoutActions(shell: shell, leftPanel: chrome.left_panel)
+        reconcilePaneHosts(paneCount: Int(shell.pane_count))
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        if !direct {
+        if shell.pane_count > 1 {
+            // Every visible Pane, including the focused one, has its own
+            // durable presentation host. The legacy single-pane transcript
+            // must not publish a second AX copy of the focused Pane's Blocks.
+            clearLegacyTranscriptProjectionForMultipane()
+        } else if !direct {
             rebuildBlocks()
         }
         applyTranscriptPresentation(snapshot)
         composer.reconcile()
+        applyComposerPlacement()
+        sessionBootstrap.reconcile()
         historyOverlay.reconcile()
         commandPalette.reconcile()
         driveRecovery()
-        recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
+        let recoverySnap = seyal_app_snapshot(pane.appHandle)
+        recoveryLabel.stringValue = recoveryText(recoverySnap)
+        updateNewShellRecoveryAction()
         if eligibilityChanged {
             routeFocus()
         }
         applyTheme()
+        applyPresentationTierFromSnapshot()
     }
 
     /// Global keyboard-first command palette (#932): the menu action target.
@@ -479,17 +564,6 @@ final class ProductChromeHostView: NSView {
         commandPalette.requestOpen()
     }
 
-
-    /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
-    /// WorkspaceCommand. Rust re-validates against the current route context.
-    @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {
-        guard let commandId = sender.representedObject as? UInt16 else { return }
-        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, 0, 0)
-        if code == 0 {
-            reconcileChrome()
-            routeFocus()
-        }
-    }
 
     /// R6.2.1: route Command through Rust before AppKit menu key-equivalents.
     /// Matched / cross-context projected steals consume; §6.2 step 2c miss and
@@ -515,7 +589,10 @@ final class ProductChromeHostView: NSView {
             compositionActive: compositionActive
         ) {
         case .consumed:
-            reconcileChrome()
+            // Apply product changes as well as refreshing this Pane. Window
+            // commands enqueue native realization effects in Rust; a direct
+            // chrome refresh can leave the AppKit Window map stale.
+            pane.onProductChanged?()
             routeFocus()
             return true
         case .nativeCommand:
@@ -565,95 +642,319 @@ final class ProductChromeHostView: NSView {
         commandPalette.requestOpenGoto()
     }
 
+    /// Flow first-responder target: the focused multipane leaf composer when
+    /// pane hosts exist, otherwise the original single-pane composer (#1464).
+    var activeComposer: ComposerBridgeView {
+        let shell = seyal_app_shell(pane.appHandle)
+        if !centerColumn.secondaryHosts.isEmpty,
+           let host = centerColumn.presentationHost(
+               paneLo: shell.focused_pane_lo,
+               paneHi: shell.focused_pane_hi
+           ),
+           !host.composer.isHidden
+        {
+            return host.composer
+        }
+        if let owned = centerColumn.secondaryHosts.first(where: \.inputOwned),
+           !owned.composer.isHidden
+        {
+            return owned.composer
+        }
+        return composer
+    }
+
+    /// Focused Pane Metal surface for Flow DirectInput / Raw / TUI keys.
+    func focusedInputSurface() -> InteractiveMetalSurfaceView {
+        let shell = seyal_app_shell(pane.appHandle)
+        if !centerColumn.secondaryHosts.isEmpty,
+            let host = centerColumn.presentationHost(
+                paneLo: shell.focused_pane_lo,
+                paneHi: shell.focused_pane_hi
+            )
+        {
+            return host.surface
+        }
+        return pane.inputSurface
+    }
+
+    /// ADR-009 #1466: Flow + Block-scoped DirectInput owns keys on Metal, not
+    /// the Busy composer dock.
+    func snapshotPublishesBlockScopedDirectInput(_ snapshot: SeyalAppSnapshot) -> Bool {
+        snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+    }
+
+    /// Multipane: prefer the focused Pane's composer DirectInput flag / handle
+    /// target over the shared ApplicationRoot snapshot (sibling Available can
+    /// clear that shared target).
+    func focusedPanePublishesBlockScopedDirectInput(_ snapshot: SeyalAppSnapshot) -> Bool {
+        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+            return true
+        }
+        let shell = seyal_app_shell(pane.appHandle)
+        let paneComposer = seyal_app_composer_for_pane(
+            pane.appHandle,
+            shell.focused_pane_lo,
+            shell.focused_pane_hi
+        )
+        let eligibility = seyal_app_eligibility_for_pane(
+            pane.appHandle,
+            shell.focused_pane_lo,
+            shell.focused_pane_hi
+        )
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else { return false }
+        if let host = centerColumn.presentationHost(
+            paneLo: shell.focused_pane_lo,
+            paneHi: shell.focused_pane_hi
+        ), host.displayHandle != 0 {
+            return seyalPublishesBlockScopedDirectInput(
+                flags: paneComposer.flags,
+                target: seyal_bridge_composer_target_for_handle(host.displayHandle)
+            )
+        }
+        return seyalPublishesBlockScopedDirectInput(
+            flags: paneComposer.flags,
+            target: seyal_bridge_composer_target()
+        )
+    }
+
+    @discardableResult
+    func focusBlockScopedDirectInputSurface() -> Bool {
+        let surface = focusedInputSurface()
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        let direct = focusedPanePublishesBlockScopedDirectInput(snapshot)
+        surface.panePublishesBlockScopedDirectInput = direct
+        // Primary ApplicationRoot surface keeps its own bridge; secondary hosts
+        // borrow in focusBlockScopedDirectInputIfEligible before routeFocus.
+        surface.syncInputRoutePresentation()
+        return window?.makeFirstResponder(surface) ?? false
+    }
+
     func routeFocus() {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
         guard !commandPalette.isOpen else { return }
-        // Revoke Metal IME/AX before focusing the composer so Flow never keeps
-        // a competing terminal first responder (#866).
-        inputSurface.syncInputRoutePresentation()
+        // Sync Metal IME/AX with Rust eligibility before choosing a responder
+        // (#866 / #1468). DirectInput must keep Metal, not Busy composer.
         let snapshot = seyal_app_snapshot(pane.appHandle)
+        let direct = focusedPanePublishesBlockScopedDirectInput(snapshot)
+        // Primary ApplicationRoot surface only; secondary hosts publish via
+        // SecondaryLivePaneHost.focusBlockScopedDirectInputIfEligible.
+        pane.inputSurface.panePublishesBlockScopedDirectInput =
+            direct && focusedInputSurface() === pane.inputSurface
+        pane.inputSurface.syncInputRoutePresentation()
+        if direct {
+            _ = focusBlockScopedDirectInputSurface()
+            return
+        }
+        let shell = seyal_app_shell(pane.appHandle)
+        if !centerColumn.secondaryHosts.isEmpty {
+            let eligibility = seyal_app_eligibility_for_pane(
+                pane.appHandle,
+                shell.focused_pane_lo,
+                shell.focused_pane_hi
+            )
+            if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+                let paneComposer = seyal_app_composer_for_pane(
+                    pane.appHandle,
+                    shell.focused_pane_lo,
+                    shell.focused_pane_hi
+                )
+                if paneComposer.mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue) {
+                    activeComposer.focusEditor()
+                }
+                return
+            }
+        }
         let composerSnap = seyal_app_composer(pane.appHandle)
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
            composerSnap.mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
         {
-            composer.focusEditor()
+            // Multipane Flow has pane-owned editors above this hidden legacy
+            // liveContent. If its focused host is not ready, never direct
+            // keyboard input to the invisible root composer.
+            if centerColumn.secondaryHosts.isEmpty {
+                composer.focusEditor()
+            }
         } else if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {
-            window?.makeFirstResponder(pane.inputSurface)
+            window?.makeFirstResponder(focusedInputSurface())
         }
     }
 
-    func rebuildTabStrip(shell: SeyalAppShell) {
-        if shell.tab_count > 0 {
-            let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), 0)
-            tabTitle.stringValue = productChromeCopyUTF8(row.title, row.title_len) ?? "Terminal"
+    func rebuildLayoutActions(shell: SeyalAppShell, leftPanel: UInt16) {
+        // Workspaces mode: + creates an outer Workspace Tab. Tabs mode: + creates
+        // a pane-local TerminalTab on the focused Pane (#1412 / ADR-025 §2.8).
+        if leftPanel == 1 {
+            newTabButton.isHidden = false
+            newTabButton.action = #selector(createTerminal)
+            newTabButton.setAccessibilityLabel("New Terminal")
+            newTabButton.toolTip = "New Terminal"
+            closeTabButton.isHidden = true
+        } else {
+            newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
+            newTabButton.action = #selector(createTab)
+            newTabButton.setAccessibilityLabel("New Layout")
+            newTabButton.toolTip = "New Layout"
+            closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
         }
-        // Omit rather than disable (mirrors the command palette's own
-        // omission of "New Tab"/"Split" when the M001 shell policy
-        // disallows them; see build_commands).
-        newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
-        splitRightButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) == 0
-        splitDownButton.isHidden = splitRightButton.isHidden
-        closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
-        closeTabButton.idLo = shell.active_tab_lo
-        closeTabButton.idHi = shell.active_tab_hi
-        closePaneButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) == 0
-        closePaneButton.idLo = shell.focused_pane_lo
-        closePaneButton.idHi = shell.focused_pane_hi
+        configureCloseButtons(shell: shell)
     }
 
     func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {
         leftItems.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if leftPanel == 0 {
-            for index in 0..<Int(shell.workspace_count) {
-                let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_WORKSPACE), UInt32(index))
-                leftItems.addArrangedSubview(
-                    rowButton(
-                        title: productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace",
-                        detail: productChromeCopyUTF8(row.detail, row.detail_len),
-                        identifier: "seyal-workspace-\(index)",
-                        selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                        action: #selector(selectWorkspace(_:)),
-                        kind: UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue),
-                        idLo: row.id_lo,
-                        idHi: row.id_hi
+            appendLeftSection(
+                title: "WORKSPACES",
+                identifier: "seyal-workspaces-heading",
+                topGap: false
+            ) {
+                for index in 0..<Int(shell.workspace_count) {
+                    let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_WORKSPACE), UInt32(index))
+                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace"
+                    let path = productChromeCopyUTF8(row.detail, row.detail_len)
+                    let selected = row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0
+                    // C04 secondary: helpful path; on the active Workspace also
+                    // keep outer Tab count when a root is bound (#1413 + #1412).
+                    let pathSecondary = Self.helpfulWorkspaceDetail(title: title, detail: path)
+                    let tabSecondary = selected
+                        ? "\(shell.tab_count) tab\(shell.tab_count == 1 ? "" : "s")"
+                        : nil
+                    let secondary: String?
+                    if let pathSecondary, let tabSecondary {
+                        secondary = "\(pathSecondary) · \(tabSecondary)"
+                    } else {
+                        secondary = pathSecondary ?? tabSecondary
+                    }
+                    leftItems.addArrangedSubview(
+                        contextRow(
+                            primary: title,
+                            secondary: secondary,
+                            identifier: "seyal-workspace-\(index)",
+                            selected: selected,
+                            action: #selector(selectWorkspace(_:)),
+                            kind: UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue),
+                            idLo: row.id_lo,
+                            idHi: row.id_hi
+                        )
                     )
-                )
+                }
+            }
+            appendWorkspaceLayoutsIfNeeded(shell: shell)
+            let chrome = seyal_app_chrome(pane.appHandle)
+            if chrome.agent_count > 0 {
+                appendLeftSection(
+                    title: "AGENTS",
+                    identifier: "seyal-agents-heading",
+                    topGap: true
+                ) {
+                    for index in 0..<Int(chrome.agent_count) {
+                        let row = seyal_app_chrome_row(
+                            pane.appHandle,
+                            UInt16(SEYAL_APP_ROW_AGENT),
+                            UInt32(index)
+                        )
+                        let identity = productChromeCopyUTF8(row.title, row.title_len) ?? ""
+                        let name = productChromeCopyUTF8(row.detail, row.detail_len) ?? identity
+                        let button = borderlessButton(title: name, action: #selector(selectAgent(_:)))
+                        button.identifier = NSUserInterfaceItemIdentifier(identity)
+                        button.setAccessibilityIdentifier("seyal-agent-\(index)")
+                        leftItems.addArrangedSubview(button)
+                    }
+                }
             }
         } else {
-            for index in 0..<Int(shell.tab_count) {
-                let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), UInt32(index))
-                leftItems.addArrangedSubview(
-                    rowButton(
-                        title: productChromeCopyUTF8(row.title, row.title_len) ?? "Tab",
-                        detail: productChromeCopyUTF8(row.detail, row.detail_len),
-                        identifier: "seyal-tab-\(index)",
-                        selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                        action: #selector(selectTab(_:)),
-                        kind: UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue),
-                        idLo: row.id_lo,
-                        idHi: row.id_hi
+            // Pane-local TerminalTab navigation map (Rust-authored titles/order).
+            appendLeftSection(
+                title: "TABS",
+                identifier: "seyal-tabs-heading",
+                topGap: false
+            ) {
+                let terminalCount = leftTerminalTabRowCount(shell: shell)
+                for index in 0..<terminalCount {
+                    let row = seyal_app_shell_row(
+                        pane.appHandle,
+                        UInt16(SEYAL_APP_ROW_TERMINAL_TAB),
+                        UInt32(index)
                     )
-                )
+                    guard row.title_len > 0 || row.id_lo != 0 || row.id_hi != 0 else { break }
+                    let (paneLo, paneHi) = paneIdFromTerminalTabRow(row)
+                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Terminal"
+                    let detail = productChromeCopyUTF8(row.detail, row.detail_len)
+                    leftItems.addArrangedSubview(
+                        contextRow(
+                            primary: title,
+                            secondary: Self.helpfulWorkspaceDetail(title: title, detail: detail),
+                            identifier: "seyal-terminal-tab-left-\(index)",
+                            selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                            action: #selector(selectLeftTerminalTab(_:)),
+                            kind: UInt16(SEYAL_APP_ACTION_SELECT_TERMINAL_TAB.rawValue),
+                            idLo: row.id_lo,
+                            idHi: row.id_hi,
+                            paneLo: paneLo,
+                            paneHi: paneHi
+                        )
+                    )
+                }
             }
         }
-        for index in 0..<Int(shell.pane_count) {
-            let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
-            leftItems.addArrangedSubview(
-                rowButton(
-                    title: productChromeCopyUTF8(row.title, row.title_len) ?? "Pane",
-                    detail: nil,
-                    identifier: "seyal-pane-\(index)",
-                    selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                    action: #selector(focusPane(_:)),
-                    kind: UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue),
-                    idLo: row.id_lo,
-                    idHi: row.id_hi
-                )
-            )
+        // Pane focus stays pane-local. C03 must not dump a Pane tree into the left rail.
+    }
+
+    /// C04 secondary path only when it adds information beyond the primary name.
+    static func helpfulWorkspaceDetail(title: String, detail: String?) -> String? {
+        guard let detail else { return nil }
+        let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.caseInsensitiveCompare(title) == .orderedSame {
+            return nil
         }
+        return trimmed
+    }
+
+    func appendLeftSection(
+        title: String,
+        identifier: String,
+        topGap: Bool,
+        populate: () -> Void
+    ) {
+        if topGap {
+            leftItems.addArrangedSubview(leftSectionSpacer(height: 14))
+        }
+        leftItems.addArrangedSubview(sectionHeader(title, identifier: identifier))
+        leftItems.setCustomSpacing(8, after: leftItems.arrangedSubviews.last!)
+        populate()
+    }
+
+    func leftSectionSpacer(height: CGFloat) -> NSView {
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.heightAnchor.constraint(equalToConstant: height).isActive = true
+        spacer.setContentHuggingPriority(.required, for: .vertical)
+        return spacer
+    }
+
+    func sectionHeader(_ title: String, identifier: String) -> NSView {
+        let wrap = NSView()
+        wrap.translatesAutoresizingMaskIntoConstraints = false
+        wrap.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let header = NSTextField(labelWithString: title)
+        header.font = .systemFont(ofSize: 10, weight: .semibold)
+        header.textColor = .secondaryLabelColor
+        header.tag = 2
+        header.setAccessibilityIdentifier(identifier)
+        header.setAccessibilityElement(true)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        header.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        wrap.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: wrap.leadingAnchor, constant: 12),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: wrap.trailingAnchor, constant: -12),
+            header.topAnchor.constraint(equalTo: wrap.topAnchor),
+            header.bottomAnchor.constraint(equalTo: wrap.bottomAnchor),
+        ])
+        return wrap
     }
 
     func rebuildInspector(_ chrome: SeyalAppChrome) {
@@ -696,20 +997,16 @@ final class ProductChromeHostView: NSView {
     func applyShellChrome(_ chrome: SeyalAppChrome) {
         let leftOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_LEFT_VISIBLE) != 0
         let inspectorOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE) != 0
-        let tabOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_TAB_STRIP_VISIBLE) != 0
         left.isHidden = !leftOn
         left.setAccessibilityElement(leftOn)
         inspectorColumn.isHidden = !inspectorOn
         inspectorColumn.setAccessibilityElement(inspectorOn)
         inspector.setAccessibilityElement(inspectorOn)
-        tabStrip.isHidden = !tabOn
-        tabStrip.setAccessibilityElement(tabOn)
         centerLeadingHost.isActive = !leftOn
         centerLeadingLeft.isActive = leftOn
         centerTrailingHost.isActive = !inspectorOn
         centerTrailingInspector.isActive = inspectorOn
-        centerTopHost.isActive = !tabOn
-        centerTopTab.isActive = tabOn
+        centerTopHost.isActive = true
     }
 
     func applyTheme() {
@@ -723,17 +1020,14 @@ final class ProductChromeHostView: NSView {
         if theme.usesFrostedUtilityMaterial {
             left.layer?.backgroundColor = NSColor.clear.cgColor
             inspectorColumn.layer?.backgroundColor = NSColor.clear.cgColor
-            tabStrip.layer?.backgroundColor = NSColor.clear.cgColor
         } else {
             left.layer?.backgroundColor = theme.utility.cgColor
             inspectorColumn.layer?.backgroundColor = theme.utility.cgColor
-            tabStrip.layer?.backgroundColor = theme.container.cgColor
         }
         centerColumn.layer?.backgroundColor = theme.canvas.cgColor
         centerColumn.apply(theme: theme)
         transcript.backgroundColor = .clear
         left.layer?.borderWidth = 0
-        tabTitle.font = .systemFont(ofSize: theme.uiFontSize, weight: .semibold)
         recoveryLabel.font = .systemFont(ofSize: max(theme.uiFontSize - 1, 10), weight: .regular)
         blocks.edgeInsets = NSEdgeInsets(
             top: theme.terminalPadding,
@@ -743,10 +1037,14 @@ final class ProductChromeHostView: NSView {
         )
         updateColdVisualProbe(theme)
         composer.apply(theme: theme)
+        sessionBootstrap.apply(theme: theme)
         historyOverlay.apply(theme: theme)
         commandPalette.apply(theme: theme)
         for view in blocks.arrangedSubviews {
             (view as? CommandBlockView)?.apply(theme: theme)
+        }
+        for host in centerColumn.secondaryHosts {
+            host.apply(theme: theme)
         }
     }
 
@@ -762,15 +1060,5 @@ final class ProductChromeHostView: NSView {
         coldVisualProbe.setAccessibilityLabel(
             "Cold-start visual configuration: \(appearanceToken) appearance, UI font \(Int(theme.uiFontSize)), terminal font \(Int(theme.terminalFontSize)), window padding \(Int(theme.windowPadding)), terminal padding \(Int(theme.terminalPadding)), \(materialToken) utility material"
         )
-    }
-}
-
-extension ProductChromeHostView: NSMenuItemValidation {
-    /// R6.4.2 / R5.6.2: enabled state and the live title come only from Rust.
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        guard let commandId = menuItem.representedObject as? UInt16 else {
-            return true
-        }
-        return KeybindingShortcutRealization.validate(menuItem, commandId: commandId, appHandle: pane.appHandle)
     }
 }

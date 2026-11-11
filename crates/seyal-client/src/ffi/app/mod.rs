@@ -1,13 +1,14 @@
-//! Versioned one-Pane application-root C ABI.
-//!
-//! C entry points stay here; decode/encode/pane_region/visual siblings keep each
+//! Versioned one-Pane application-root C ABI. Focused siblings keep each
 //! responsibility reviewable without changing published symbols.
 
 mod block_projection;
 mod decode;
 mod encode;
 mod error_code;
+mod leave_offer_ffi;
 mod loss;
+mod pane_composer;
+pub mod pane_recovery;
 mod pane_region;
 mod shortcut;
 mod visual;
@@ -23,6 +24,7 @@ mod tests;
 use std::{cell::RefCell, collections::HashMap, ptr};
 
 use crate::app::{ApplicationRoot, APP_ABI_VERSION};
+use crate::app_policy::{process_app_policy, should_confirm_quit};
 use crate::chrome::{InspectorMode, LeftPanelMode};
 use crate::composer::{
     ComposerMode, BLOCK_PROMPT, COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL,
@@ -35,12 +37,14 @@ use super::allocate_handle;
 use decode::decode_action;
 use encode::{
     chrome_visibility_flags, encode_accessibility, encode_block_rows, encode_chrome_rows,
-    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot,
+    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
 };
 
 pub use block_projection::seyal_app_block_projection;
-pub(crate) use loss::note_application_roots_client_loss;
-pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
+pub use leave_offer_ffi::seyal_app_leave_offer;
+pub(crate) use loss::{note_application_roots_client_loss, note_application_roots_execution_ended};
+pub use pane_composer::*;
+pub use pane_region::*;
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
     seyal_app_shortcut_enabled, seyal_app_shortcut_item, seyal_app_shortcut_title,
@@ -86,7 +90,7 @@ pub struct SeyalAppAction {
     pub target_execution_hi: u64,
     pub target_attachment_lo: u64,
     pub target_attachment_hi: u64,
-    pub target_pty_generation: u64,
+    pub target_generation: u64,
     pub payload: *const u8,
     pub payload_len: u32,
     pub reserved: u32,
@@ -161,6 +165,11 @@ pub struct SeyalAppComposer {
     pub draft_utf8: *const u8,
     pub draft_utf8_len: u32,
     pub block_count: u32,
+    /// Flow canvas floor after `clear` (ED2). Zero means show every Block.
+    /// Hosts hide cards with id below this floor while the shell is live;
+    /// shell-exit clears the floor so retained history is reviewable (#1379).
+    pub canvas_floor_block_id_lo: u64,
+    pub canvas_floor_block_id_hi: u64,
 }
 
 /// Pane composer history overlay (#933). `query_utf8` is borrowed until the
@@ -281,11 +290,15 @@ pub(super) struct AppHandle {
     pub(super) root: ApplicationRoot,
     output: Vec<u8>,
     composer_draft: Vec<u8>,
+    /// Scratch for `seyal_app_composer_for_pane` so focused draft encode stays
+    /// stable while a secondary host reads its own Pane composer.
+    pane_composer_draft: Vec<u8>,
     ax_nodes: Vec<SeyalAppAxNode>,
     ax_text: Vec<u8>,
     shell_text: Vec<u8>,
     chrome_text: Vec<u8>,
     block_text: Vec<u8>,
+    pane_block_text: Vec<u8>,
     history_query: Vec<u8>,
     history_text: Vec<u8>,
     palette_query: Vec<u8>,
@@ -294,8 +307,10 @@ pub(super) struct AppHandle {
     shell_rows: Vec<SeyalAppRow>,
     chrome_rows: Vec<SeyalAppRow>,
     block_rows: Vec<SeyalAppRow>,
+    pane_block_rows: Vec<SeyalAppRow>,
     history_rows: Vec<SeyalAppRow>,
     palette_rows: Vec<SeyalAppRow>,
+    leave_offer_path: Vec<u8>,
     pub(super) window_scratch: window::WindowEncodeScratch,
 }
 
@@ -369,6 +384,24 @@ pub extern "C" fn seyal_app_option_as_alt(handle: u64) -> u8 {
     })
 }
 
+/// ADR-018 §4.0: whether headed Quit must show the native confirm alert.
+/// Combines cold `app.warn_before_quit` with live shell window/tab counts.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_should_confirm_quit(handle: u64) -> u8 {
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return 0;
+        };
+        let snap = state.root.snapshot().shell;
+        u8::from(should_confirm_quit(
+            process_app_policy().warn_before_quit,
+            snap.windows.len() as u16,
+            snap.tabs.len() as u16,
+        ))
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_create() -> u64 {
     let handle = allocate_handle();
@@ -379,11 +412,13 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 root: ApplicationRoot::new(),
                 output: Vec::new(),
                 composer_draft: Vec::new(),
+                pane_composer_draft: Vec::new(),
                 ax_nodes: Vec::new(),
                 ax_text: Vec::new(),
                 shell_text: Vec::new(),
                 chrome_text: Vec::new(),
                 block_text: Vec::new(),
+                pane_block_text: Vec::new(),
                 history_query: Vec::new(),
                 history_text: Vec::new(),
                 palette_query: Vec::new(),
@@ -392,8 +427,10 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 shell_rows: Vec::new(),
                 chrome_rows: Vec::new(),
                 block_rows: Vec::new(),
+                pane_block_rows: Vec::new(),
                 history_rows: Vec::new(),
                 palette_rows: Vec::new(),
+                leave_offer_path: Vec::new(),
                 window_scratch: window::WindowEncodeScratch::new(),
             },
         );
@@ -547,21 +584,15 @@ pub unsafe extern "C" fn seyal_app_apply(handle: u64, action: *const SeyalAppAct
         let Some(state) = apps.get_mut(&handle) else {
             return -1;
         };
-        match state.root.apply(decoded) {
-            Ok(()) => {
-                if let Some((fence, execution)) = bind_adopt {
-                    let live = crate::ffi::active_handle();
-                    // Only the Controller for this Bind's ExecutionId — never a
-                    // leftover ACTIVE_HANDLE from another XCTest / pane.
-                    let matches = live != 0
-                        && crate::ffi::with_client(live, |client| client.execution_id())
-                            == Some(execution);
-                    if matches {
-                        let _ = state.root.adopt_bridge_handle(fence, live);
-                    }
-                }
-                0
-            }
+        let applied = state.root.apply(decoded);
+        let refresh = matches!(applied, Ok(()) | Err(crate::app::AppError::AlreadyBound));
+        let refreshed = refresh
+            && bind_adopt.is_some_and(|(fence, execution)| {
+                super::session::adopt_focused_bridge(&mut state.root, fence, execution)
+            });
+        match applied {
+            Ok(()) => 0,
+            Err(crate::app::AppError::AlreadyBound) if refreshed => 0,
             Err(_) => -4,
         }
     })
@@ -621,6 +652,8 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
                 draft_utf8: ptr::null(),
                 draft_utf8_len: 0,
                 block_count: 0,
+                canvas_floor_block_id_lo: 0,
+                canvas_floor_block_id_hi: 0,
             };
         };
         let snap = state.root.snapshot();
@@ -635,6 +668,8 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
                 draft_utf8: ptr::null(),
                 draft_utf8_len: 0,
                 block_count: 0,
+                canvas_floor_block_id_lo: 0,
+                canvas_floor_block_id_hi: 0,
             };
         };
         state.composer_draft = composer.draft.as_bytes().to_vec();
@@ -645,6 +680,13 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
         if composer.allows_direct_terminal {
             flags |= 2;
         }
+        if composer.block_scoped_direct_input {
+            flags |= 4;
+        }
+        let (floor_lo, floor_hi) = match composer.canvas_floor {
+            Some(id) => split_id(id.to_bytes()),
+            None => (0, 0),
+        };
         SeyalAppComposer {
             version: APP_ABI_VERSION,
             size: size_of::<SeyalAppComposer>() as u16,
@@ -652,6 +694,7 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
                 ComposerMode::Hidden => 0,
                 ComposerMode::Available => 1,
                 ComposerMode::Busy { .. } => 2,
+                ComposerMode::Relay => 3,
             },
             flags,
             epoch: composer.epoch,
@@ -663,6 +706,8 @@ pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
             },
             draft_utf8_len: state.composer_draft.len() as u32,
             block_count: composer.blocks.len() as u32,
+            canvas_floor_block_id_lo: floor_lo,
+            canvas_floor_block_id_hi: floor_hi,
         }
     })
 }

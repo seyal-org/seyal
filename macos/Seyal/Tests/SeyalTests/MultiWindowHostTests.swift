@@ -37,6 +37,60 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_shell(handle).window_count, 3)
     }
 
+    func testQuitConfirmCancelLeavesHostRunning() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_windows_only(host.appHandle, 2), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 1)
+        host.quitConfirmationHandlerForTests = { false }
+        XCTAssertEqual(host.applicationShouldTerminate(), .terminateCancel)
+        XCTAssertEqual(host.orderedKeys.count, 2)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 0)
+    }
+
+    func testQuitConfirmContinueRunsBoundedDetach() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, 2), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 1)
+        host.quitConfirmationHandlerForTests = { true }
+        let replies = QuitReplyCounter()
+        host.quitTerminateReplyHandlerForTests = { replies.increment() }
+        let reply = host.applicationShouldTerminate()
+        XCTAssertEqual(reply, .terminateLater)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(replies.count, 1)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+    }
+
+    func testWarnBeforeQuitFalseSkipsConfirm() {
+        let config = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-warn-before-quit-\(UUID().uuidString).toml")
+        try? "[app]\nwarn_before_quit = false\n".write(to: config, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: config) }
+        XCTAssertEqual(reloadUiConfigForMultiWindowTests(path: config.path), 0)
+
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, 3), 0)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(seyal_app_should_confirm_quit(host.appHandle), 0)
+        var confirmCalled = false
+        host.quitConfirmationHandlerForTests = {
+            confirmCalled = true
+            return true
+        }
+        let replies = QuitReplyCounter()
+        host.quitTerminateReplyHandlerForTests = { replies.increment() }
+        let reply = host.applicationShouldTerminate()
+        XCTAssertEqual(reply, .terminateLater)
+        XCTAssertFalse(confirmCalled)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(replies.count, 1)
+    }
+
     func testQuitWithThreeWindowsAndAttachmentsRepliesOnce() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
@@ -127,6 +181,19 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(replies, 1)
     }
 
+    func testMultiWindowHostPreservesProductFrameRefreshHook() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        let before = host.liveHost.transcriptFrameRevision
+
+        // No Rust snapshot change: the multi-window reconciliation returns
+        // early, so only ProductChromeHostView's original frame hook advances
+        // the projected PRIMARY_CLIP revision.
+        host.liveHost.pane.onProductChanged?()
+
+        XCTAssertGreaterThan(host.liveHost.transcriptFrameRevision, before)
+    }
+
     func testBootstrapRealizesOneWindowWithTabbingDisallowed() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
@@ -141,9 +208,10 @@ final class MultiWindowHostTests: XCTestCase {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
-        createExtraWindows(on: host, count: 2)
+        host.createWindow(nil)
+        host.createWindow(nil)
         let snapshotOrder = host.snapshotOrderedWindowKeys()
-        XCTAssertEqual(snapshotOrder.count, 1)
+        XCTAssertEqual(snapshotOrder.count, 3)
         XCTAssertEqual(host.orderedKeys, snapshotOrder)
         let source = try! String(
             contentsOf: URL(fileURLWithPath: #filePath)
@@ -164,8 +232,8 @@ final class MultiWindowHostTests: XCTestCase {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
-        createExtraWindows(on: host, count: 1)
-        XCTAssertEqual(host.orderedKeys.count, 1)
+        host.createWindow(nil)
+        XCTAssertEqual(host.orderedKeys.count, 2)
         // Destroy-realization: quit cleanup applies destroy for every WindowId.
         host.performQuitCleanup()
         XCTAssertTrue(host.orderedKeys.isEmpty)
@@ -224,34 +292,66 @@ final class MultiWindowHostTests: XCTestCase {
     }
 
     func testMenuKeyEquivalentsNotKeyDown() {
-        let source = try! String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/AppDelegate.swift"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(source.contains("projectedItem("))
-        XCTAssertTrue(source.contains("KeybindingShortcutRealization.tabCreate"))
-        XCTAssertTrue(source.contains("keyEquivalent: \"n\""))
-        XCTAssertTrue(source.contains("newWindow.keyEquivalentModifierMask = [.command, .shift]"))
-        for command in [
-            "paneSplitRight", "paneSplitDown", "presentationToggleRaw",
-            "presentationToggleTui", "gotoOpen", "tabSelectPrevious", "tabSelectNext"
-        ] {
-            XCTAssertTrue(source.contains("KeybindingShortcutRealization.\(command)"))
-        }
-        XCTAssertTrue(source.contains("[.command, .option]"))
-        XCTAssertFalse(source.contains("keyDown"))
-    }
-
-    func testQuitReplyRuleAfterRejectedExtraWindows() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
-        createExtraWindows(on: host, count: 2)
-        XCTAssertEqual(host.orderedKeys.count, 1)
+
+        let menu = AppDelegate.makeMainMenu(targeting: host)
+        let fileMenu = menu.items.first { $0.submenu?.title == "File" }?.submenu
+        let viewMenu = menu.items.first { $0.submenu?.title == "View" }?.submenu
+        let windowMenu = menu.items.first { $0.submenu?.title == "Window" }?.submenu
+        let projectedItems = [fileMenu, viewMenu, windowMenu]
+            .compactMap { $0 }
+            .flatMap(\.items)
+            .filter {
+                $0.representedObject is UInt16
+                    && ($0.representedObject as? UInt16) != KeybindingShortcutRealization.windowSelectOrdinal
+            }
+
+        XCTAssertEqual(projectedItems.count, 15)
+        XCTAssertEqual(projectedItems.filter { $0.title == "New Terminal" }.count, 1)
+        XCTAssertEqual(
+            Set(projectedItems.compactMap { $0.representedObject as? UInt16 }),
+            Set((0..<seyal_app_shortcut_count()).compactMap { index in
+                let row = seyal_app_shortcut_item(index)
+                return row.size == 0 ? nil : row.command_id
+            })
+        )
+        XCTAssertEqual(projectedItems.filter { $0.title == "New Tab" }.count, 1)
+        XCTAssertEqual(
+            windowMenu?.items.filter {
+                $0.representedObject as? UInt16 == KeybindingShortcutRealization.windowSelectOrdinal
+            }.count,
+            9
+        )
+        XCTAssertTrue(projectedItems.contains { $0.title == "Split Right" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Split Down" })
+        XCTAssertFalse(projectedItems.contains { $0.title == "Toggle Raw" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Toggle TUI" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Go to…" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Previous Tab" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Next Tab" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Close Tab" })
+        XCTAssertTrue(projectedItems.allSatisfy { $0.target === host.liveHost })
+        XCTAssertTrue(projectedItems.allSatisfy {
+            $0.action == #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:))
+        })
+
+        // #1395: ⌘W closes the focused Pane terminal, not AppCloseFocused (37).
+        let close = projectedItems.first {
+            $0.representedObject as? UInt16 == KeybindingShortcutRealization.terminalCloseFocused
+        }
+        XCTAssertEqual(close?.keyEquivalent, "w")
+        XCTAssertTrue(close?.keyEquivalentModifierMask.contains(.command) == true)
+    }
+
+    func testQuitReplyRuleAfterExtraWindows() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        host.createWindow(nil)
+        host.createWindow(nil)
+        XCTAssertEqual(host.orderedKeys.count, 3)
         var replies = 0
         let result = host.quitCoordinatorForTests.beginTerminateLater(
             forwardRequestQuit: { host.forwardRequestQuit() },
@@ -267,6 +367,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testApplicationShouldTerminateAfterLastWindowClosedIsFalse() {
         let delegate = AppDelegate()
+        // ADR-018 §3.3a: zero-Window stays running for Dock/⌘⇧N re-entry.
         XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
     }
 
@@ -331,7 +432,8 @@ final class MultiWindowHostTests: XCTestCase {
 
         XCTAssertEqual(requests, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
         XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 53)
+        XCTAssertEqual(host.lastActivationFailureReportForTests?.result, -4)
+        XCTAssertEqual(host.lastActivationFailureReportForTests?.error, 53)
         XCTAssertEqual(targetWasKeyAfterRequest, false)
         XCTAssertTrue(NSApp.keyWindow === keyWindowBefore)
         XCTAssertTrue(host.liveHost.window === sourceWindow)
@@ -383,18 +485,175 @@ final class MultiWindowHostTests: XCTestCase {
         host.activationCompletionForTests = nil
     }
 
-    func testCreateWindowRejectedDoesNotMoveLiveHost() {
+    func testCreateWindowAdmissionIsOn() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
         let beforeCount = seyal_app_shell(host.appHandle).window_count
-        let liveWindow = host.liveHost.window
-        XCTAssertNotNil(liveWindow)
         host.createWindow(nil)
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 55, "WindowCreationUnavailable")
-        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
-        XCTAssertTrue(host.liveHost.window === liveWindow)
-        XCTAssertEqual(host.orderedKeys.count, Int(beforeCount))
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount + 1)
+        XCTAssertEqual(host.orderedKeys.count, Int(beforeCount + 1))
+    }
+
+    func testWindowShouldCloseForwardsCloseWindowAndDestroysViaEffect() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        guard let key = host.orderedKeys.first, let window = host.realizedWindowForTests(key) else {
+            return XCTFail("expected bootstrap window")
+        }
+        XCTAssertFalse(window.isReleasedWhenClosed)
+        XCTAssertFalse(host.windowShouldClose(window))
+        XCTAssertTrue(NSApp.windows.contains { $0 === window })
+        XCTAssertNotEqual(window.windowNumber, -1)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        assertWindowRealizationDestroyed(window)
+    }
+
+    func testProjectedCloseCommandDrainsRustWindowDestroyEffect() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        guard let key = host.orderedKeys.first,
+              let window = host.realizedWindowForTests(key)
+        else {
+            return XCTFail("expected bootstrap window")
+        }
+
+        let item = NSMenuItem()
+        item.representedObject = KeybindingShortcutRealization.appCloseFocused
+        host.liveHost.invokeProjectedWorkspaceCommand(item)
+
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        XCTAssertNil(host.realizedWindowForTests(key))
+        assertWindowRealizationDestroyed(window)
+    }
+
+    func testNativeKeyActivationUpdatesRustTargetBeforeHierarchicalClose() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        guard let first = host.orderedKeys.first,
+              let firstWindow = host.realizedWindowForTests(first)
+        else {
+            return XCTFail("expected bootstrap window")
+        }
+        let firstPane = seyal_app_shell(host.appHandle)
+
+        host.createWindow(nil)
+        guard let second = host.orderedKeys.last,
+              let secondWindow = host.realizedWindowForTests(second)
+        else {
+            return XCTFail("expected second window")
+        }
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).active_window_lo, second.lo)
+
+        firstWindow.makeKeyAndOrderFront(nil)
+        let firstActivated = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                MainActor.assumeIsolated {
+                    let shell = seyal_app_shell(host.appHandle)
+                    return shell.active_window_lo == first.lo
+                        && shell.active_window_hi == first.hi
+                        && shell.focused_pane_lo == firstPane.focused_pane_lo
+                        && shell.focused_pane_hi == firstPane.focused_pane_hi
+                }
+            },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [firstActivated], timeout: 2), .completed)
+
+        let closeItem = NSMenuItem()
+        closeItem.representedObject = KeybindingShortcutRealization.appCloseFocused
+        host.liveHost.invokeProjectedWorkspaceCommand(closeItem)
+
+        XCTAssertNil(host.realizedWindowForTests(first), "⌘W closes the Rust-focused first Window")
+        XCTAssertNotNil(host.realizedWindowForTests(second), "the formerly active second Window survives")
+        let afterClose = seyal_app_shell(host.appHandle)
+        XCTAssertEqual(afterClose.window_count, 1)
+        XCTAssertEqual(afterClose.active_window_lo, second.lo)
+        XCTAssertEqual(afterClose.active_window_hi, second.hi)
+        XCTAssertNotEqual(secondWindow.windowNumber, -1)
+    }
+
+    func testLastWindowCloseLeavesZeroWindowsWithoutQuitting() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        guard let key = host.orderedKeys.first else {
+            return XCTFail("expected bootstrap window")
+        }
+        host.forwardCloseWindow(key)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        // Closing the last window must not quit; Dock/⌘⇧N re-enter (§3.3a).
+        let delegate = AppDelegate()
+        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+    }
+
+    func testZeroWindowReentryViaNewWindowAndDockReopen() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        guard let key = host.orderedKeys.first else {
+            return XCTFail("expected bootstrap window")
+        }
+        host.forwardCloseWindow(key)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        host.createWindow(nil)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
+        XCTAssertEqual(host.orderedKeys.count, 1)
+        guard let again = host.orderedKeys.first else {
+            return XCTFail("expected re-created window")
+        }
+        host.forwardCloseWindow(again)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        let delegate = AppDelegate(host: host)
+        XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false))
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
+        XCTAssertEqual(host.orderedKeys.count, 1)
+
+        // Even if AppKit still reports a visible/ghost window, Rust zero-Window
+        // must create on Dock reopen (#1402).
+        host.forwardCloseWindow(host.orderedKeys[0])
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: true))
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
+        XCTAssertEqual(host.orderedKeys.count, 1)
+        XCTAssertNotNil(host.liveHost.window, "Dock re-entry must reinstall the live host")
+    }
+
+    func testHierarchicalCloseMenuForwardsClosePane() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        host.hierarchicalClose(nil)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+    }
+
+    private func assertWindowRealizationDestroyed(
+        _ window: NSWindow,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let closed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                MainActor.assumeIsolated {
+                    !window.isVisible && !NSApp.windows.contains { $0 === window }
+                }
+            },
+            object: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [closed], timeout: 2),
+            .completed,
+            "Rust destroy must order the NSWindow out and drop it from NSApp.windows",
+            file: file,
+            line: line
+        )
     }
 
     private func seededQuitHost(windows: UInt32) -> MultiWindowHostController {
@@ -402,23 +661,6 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_test_seed_windows_only(host.appHandle, windows), 0)
         host.applyPendingEffectsAndReconcile()
         return host
-    }
-
-    private func createExtraWindows(on host: MultiWindowHostController, count: Int) {
-        for _ in 0..<count {
-            let beforeCount = seyal_app_shell(host.appHandle).window_count
-            let liveWindow = host.liveHost.window
-            var action = SeyalAppAction()
-            action.version = UInt16(SEYAL_APP_ABI_VERSION)
-            action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-            action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
-            XCTAssertEqual(seyal_app_apply(host.appHandle, &action), -4)
-            XCTAssertEqual(seyal_app_last_error(host.appHandle), 55, "WindowCreationUnavailable")
-            host.applyPendingEffectsAndReconcile()
-            XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
-            XCTAssertTrue(host.liveHost.window === liveWindow)
-            XCTAssertEqual(host.orderedKeys.count, Int(beforeCount))
-        }
     }
 
     @discardableResult

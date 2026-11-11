@@ -3,7 +3,10 @@ use seyal_protocol::pass8::{encode_block_state_frame, CAP_BLOCK_METADATA};
 use crate::{
     display,
     local_ipc::{
-        attachment::MAX_LIVE_ATTACHMENTS,
+        attachment::{
+            MAX_ATTACHMENTS_PER_CONNECTION, MAX_ATTACHMENTS_PER_CONNECTION_LEGACY,
+            MAX_LIVE_ATTACHMENTS,
+        },
         connection::ConnectionState as LocalIpcConnState,
         framing::{
             self, Attach as WireAttach, Attached as WireAttached, ErrorCode, ExecutionList,
@@ -42,8 +45,20 @@ impl Runtime {
             self.handle_create_execution_request(token, payload);
             return;
         }
+        if kind == MessageType::MintWorkspaceRequest {
+            self.handle_mint_workspace_request(token, payload);
+            return;
+        }
         if kind == MessageType::TerminateExecutionRequest {
             self.handle_terminate_execution_request(token, payload);
+            return;
+        }
+        if kind == MessageType::SuspendDelivery {
+            self.handle_suspend_delivery(token, payload);
+            return;
+        }
+        if kind == MessageType::ResumeDelivery {
+            self.handle_resume_delivery(token, payload);
             return;
         }
         if kind == MessageType::ViewportLineIds {
@@ -59,8 +74,19 @@ impl Runtime {
                     | MessageType::ResizeRequest
                     | MessageType::ComposerCommand
                     | MessageType::HistoryRangeRequest
+                    | MessageType::SessionConsent
             );
-        if !pass7_attached && current_state.validate_incoming(kind).is_err() {
+        let delivery_control_attach = current_state == LocalIpcConnState::Attached
+            && kind == MessageType::Attach
+            && self.local_ipc.as_ref().is_some_and(|state| {
+                state.connections.get(&token).is_some_and(|meta| {
+                    meta.client_capabilities & framing::CAP_ATTACHMENT_DELIVERY_CONTROL != 0
+                })
+            });
+        if !pass7_attached
+            && !delivery_control_attach
+            && current_state.validate_incoming(kind).is_err()
+        {
             if kind == MessageType::TerminalKeyV2 {
                 // SPEC-006 §21.5: unnegotiated / pre-attachment type-29 is
                 // connection-fatal after at most one bounded generic error.
@@ -83,6 +109,7 @@ impl Runtime {
             MessageType::TerminalKey => self.handle_terminal_key(token, payload),
             MessageType::TerminalKeyV2 => self.handle_terminal_key_v2(token, payload),
             MessageType::ComposerCommand => self.handle_composer_command(token, payload),
+            MessageType::SessionConsent => self.handle_session_consent(token, payload),
             MessageType::HistoryRangeRequest => self.handle_history_range_request(token, payload),
             MessageType::Resize => self.handle_resize(token, payload),
             MessageType::ResizeRequest => self.handle_resize_request(token, payload),
@@ -113,8 +140,12 @@ impl Runtime {
                 | framing::CAP_GRAPHEME_DISPLAY
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_EXECUTION_PROVISIONING
-                | framing::CAP_VIEWPORT_LINE_IDS)
+                | framing::CAP_VIEWPORT_LINE_IDS
+                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL
+                | framing::CAP_SESSION_BOOTSTRAP)
             != 0
+            || (hello.client_capabilities & framing::CAP_SESSION_BOOTSTRAP != 0
+                && hello.client_capabilities & CAP_COMMAND_BLOCKS == 0)
         {
             self.send_error(
                 token,
@@ -134,7 +165,9 @@ impl Runtime {
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
                 | CAP_EXECUTION_PROVISIONING
-                | framing::CAP_VIEWPORT_LINE_IDS,
+                | framing::CAP_VIEWPORT_LINE_IDS
+                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL
+                | framing::CAP_SESSION_BOOTSTRAP,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };
@@ -220,11 +253,28 @@ impl Runtime {
             return;
         }
         if state
-            .connections
-            .get(&token)
-            .and_then(|meta| meta.attachment)
-            .is_some()
+            .attachments
+            .has_execution_on_connection(token, attach.execution_id)
         {
+            self.send_error(token, ErrorCode::InvalidState, MessageType::Attach as u16);
+            return;
+        }
+        let delivery_control = state.connections.get(&token).is_some_and(|meta| {
+            meta.client_capabilities & framing::CAP_ATTACHMENT_DELIVERY_CONTROL != 0
+        });
+        let on_connection = state.attachments.attachments_on_connection(token).len();
+        let per_connection_max = if delivery_control {
+            MAX_ATTACHMENTS_PER_CONNECTION
+        } else {
+            MAX_ATTACHMENTS_PER_CONNECTION_LEGACY
+        };
+        if on_connection >= per_connection_max {
+            self.send_error(token, ErrorCode::InvalidState, MessageType::Attach as u16);
+            return;
+        }
+        if !delivery_control && !state.attachments.delivering_on_connection(token).is_empty() {
+            // Legacy presentation has no attachment envelope and remains
+            // limited to one live attachment per connection.
             self.send_error(token, ErrorCode::InvalidState, MessageType::Attach as u16);
             return;
         }
@@ -263,12 +313,48 @@ impl Runtime {
             current_generation: snapshot.source_damage_generation,
         };
         let attached_frame = framing::encode_frame(MessageType::Attached, &attached.encode());
+        let block_frame = match (delivery_control, block_frame) {
+            (true, Some(frame)) => {
+                match framing::envelope_presentation_frame(&frame, attachment_id, 0) {
+                    Ok(frame) => Some(frame),
+                    Err(_) => {
+                        self.close_local_connection(token);
+                        return;
+                    }
+                }
+            }
+            (_, frame) => frame,
+        };
+        let snapshot_batch = match self.envelope_display_batch_for_attachment(
+            token,
+            attachment_id,
+            0,
+            snapshot_batch,
+        ) {
+            Ok(batch) => batch,
+            Err(()) => {
+                self.send_error(
+                    token,
+                    ErrorCode::DisplayUnavailable,
+                    MessageType::DisplaySnapshot as u16,
+                );
+                return;
+            }
+        };
         let admitted = self.local_ipc.as_mut().is_some_and(|state| {
-            if state
-                .server
-                .enqueue_attach_transaction(token, attached_frame, snapshot_batch)
-                .is_err()
-            {
+            let result = if delivery_control {
+                state.server.enqueue_attachment_attach_transaction(
+                    token,
+                    attachment_id,
+                    attached_frame,
+                    snapshot_batch,
+                )
+            } else {
+                state
+                    .server
+                    .enqueue_attach_transaction(token, attached_frame, snapshot_batch)
+            };
+            if result.is_err() {
                 return false;
             }
             block_frame.is_none_or(|frame| state.server.enqueue_after_display(token, frame).is_ok())
@@ -277,12 +363,6 @@ impl Runtime {
             self.close_local_connection(token);
             return;
         }
-        self.maybe_send_viewport_line_ids(
-            token,
-            attach.execution_id,
-            snapshot.source_damage_generation,
-            snapshot.rows,
-        );
         if !self.sync_local_writable(token) {
             return;
         }
@@ -322,7 +402,15 @@ impl Runtime {
         if let Some(entry) = self.entries.get_mut(&attach.execution_id) {
             entry.attachments.insert(attachment_id);
         }
+        self.maybe_send_viewport_line_ids(
+            token,
+            attachment_id,
+            attach.execution_id,
+            snapshot.source_damage_generation,
+            snapshot.rows,
+        );
         self.publish_block_timeline(attach.execution_id);
+        self.consider_session_candidate(attach.execution_id);
         if self.local_connection_supports_command_blocks(token) {
             self.send_composer_status(
                 token,
@@ -342,6 +430,9 @@ impl Runtime {
             );
             return;
         };
+        let was_controller = self.local_ipc.as_ref().is_some_and(|state| {
+            state.attachments.role_of(detach.attachment_id).ok() == Some(Role::Controller)
+        });
         let execution_id = match self.local_ipc.as_ref().map(|state| {
             state
                 .attachments
@@ -364,17 +455,39 @@ impl Runtime {
             return;
         }
         if let Some(state) = self.local_ipc.as_mut() {
-            state.pending_resync_set.remove(&token);
-            if let Some(meta) = state.connections.get_mut(&token) {
-                meta.attachment = None;
+            state
+                .server
+                .remove_attachment_presentation(token, detach.attachment_id);
+            state
+                .pending_resync_set
+                .remove(&(token, detach.attachment_id));
+            let remaining = state.attachments.attachments_on_connection(token);
+            if let Some(meta) = state.connections.get_mut(&token)
+                && meta.attachment == Some(detach.attachment_id)
+            {
+                meta.attachment = remaining.first().copied();
             }
-            state.server.set_state(token, LocalIpcConnState::Ready);
+            if remaining.is_empty() {
+                state
+                    .pending_resync_set
+                    .remove(&(token, detach.attachment_id));
+                state.server.set_state(token, LocalIpcConnState::Ready);
+            }
             if state.attachments.attachments_for_execution(execution_id) == 0 {
                 state.published.remove(&execution_id);
             }
         }
         if let Some(entry) = self.entries.get_mut(&execution_id) {
             entry.attachments.remove(&detach.attachment_id);
+        }
+        if was_controller {
+            let still = self
+                .local_ipc
+                .as_ref()
+                .is_some_and(|state| state.attachments.has_controller(execution_id));
+            if !still {
+                let _ = self.abort_bootstrap_on_detach(execution_id);
+            }
         }
         let response = framing::Detached {
             attachment_id: detach.attachment_id,

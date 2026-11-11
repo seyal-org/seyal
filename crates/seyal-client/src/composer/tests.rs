@@ -181,6 +181,8 @@ fn running(id: BlockId, command: &str, start: u64) -> RuntimeBlockRecord {
         end_line: None,
         running: true,
         exit_status: None,
+        canvas_floor: false,
+        scope: seyal_protocol::framing::BlockScope::Local,
     }
 }
 
@@ -192,6 +194,8 @@ fn completed(id: BlockId, command: &str, start: u64, end: u64) -> RuntimeBlockRe
         end_line: Some(end),
         running: false,
         exit_status: Some(0),
+        canvas_floor: false,
+        scope: seyal_protocol::framing::BlockScope::Local,
     }
 }
 
@@ -558,6 +562,8 @@ fn failed_runtime_exit_projects_failed_without_completing_siblings() {
                     end_line: Some(1),
                     running: false,
                     exit_status: Some(1),
+                    canvas_floor: false,
+                    scope: seyal_protocol::framing::BlockScope::Local,
                 },
                 running(running_id, "sleep 10", 2),
             ],
@@ -566,6 +572,44 @@ fn failed_runtime_exit_projects_failed_without_completing_siblings() {
     let snap = state.snapshot(pane).unwrap();
     assert_eq!(snap.blocks[0].state, BlockPresentationState::Failed);
     assert_eq!(snap.blocks[1].state, BlockPresentationState::Running);
+}
+
+#[test]
+fn clear_canvas_floor_hides_until_shell_exit_reveals_history() {
+    let pane = pane();
+    let mut state = ComposerState::new();
+    ready(&mut state, pane);
+    let before = block(1);
+    let clear = block(2);
+    state
+        .apply(ComposerAction::ApplyRuntimeBlocks {
+            pane,
+            records: vec![
+                completed(before, "printf before", 10, 11),
+                RuntimeBlockRecord {
+                    id: clear,
+                    command: "clear".into(),
+                    start_line: 40,
+                    end_line: Some(41),
+                    running: false,
+                    exit_status: Some(0),
+                    canvas_floor: true,
+                    scope: seyal_protocol::framing::BlockScope::Local,
+                },
+            ],
+        })
+        .unwrap();
+    let live = state.snapshot(pane).unwrap();
+    assert_eq!(live.canvas_floor, Some(clear));
+    assert_eq!(live.blocks.len(), 2, "timeline keeps pre-clear Blocks");
+    state
+        .apply(ComposerAction::SetExecutionEnded { pane, ended: true })
+        .unwrap();
+    let ended = state.snapshot(pane).unwrap();
+    assert_eq!(
+        ended.canvas_floor, None,
+        "shell-exit reveals the full retained transcript"
+    );
 }
 
 #[test]
@@ -584,6 +628,8 @@ fn completed_without_exit_status_projects_unknown_never_zero_or_failed() {
                 end_line: Some(12),
                 running: false,
                 exit_status: None,
+                canvas_floor: false,
+                scope: seyal_protocol::framing::BlockScope::Local,
             }],
         })
         .unwrap();
@@ -853,4 +899,46 @@ fn submit_while_overlay_open_closes_it_and_keeps_history_writer_runtime_only() {
     let snap = state.snapshot(pane).unwrap();
     assert!(snap.history.is_none());
     assert_eq!(snap.history_count, 1, "pending submit is not history yet");
+}
+
+#[test]
+fn relay_submit_is_editable_and_does_not_enter_history() {
+    let pane = pane();
+    let mut state = ComposerState::new();
+    state.apply(ComposerAction::EnsurePane { pane }).unwrap();
+    eligible(&mut state, pane, RuntimeComposerEligibility::Relay, 1);
+    let epoch = state.snapshot(pane).unwrap().epoch;
+    state
+        .apply(ComposerAction::SetDraft {
+            pane,
+            text: "yes".into(),
+            epoch,
+        })
+        .unwrap();
+    let snap = state.snapshot(pane).unwrap();
+    assert_eq!(snap.mode, ComposerMode::Relay);
+    assert!(snap.can_submit);
+    assert_eq!(
+        snap.mode.editor_placeholder(),
+        "Relay to running program (plaintext)..."
+    );
+    assert_eq!(
+        state.apply(ComposerAction::OpenHistory { pane }),
+        Err(ComposerError::HistoryUnavailable)
+    );
+    let request_id = state
+        .apply(ComposerAction::Submit { pane, epoch })
+        .unwrap()
+        .unwrap();
+    state
+        .apply(ComposerAction::ApplyResult {
+            pane,
+            request_id,
+            accepted: true,
+        })
+        .unwrap();
+    let after = state.snapshot(pane).unwrap();
+    assert_eq!(after.history_count, 0);
+    assert!(after.draft.is_empty());
+    assert_eq!(after.mode, ComposerMode::Relay);
 }

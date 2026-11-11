@@ -27,6 +27,7 @@ extension InteractiveMetalSurfaceView {
             && capabilityLossDropsHeldKeyReleaseSelfTest()
             && RustDisplayBridge.pasteAdmissionSelfTest()
             && xtermButtonSelfTest()
+            && RawScrollbackViewportSelfTests.runAll()
     }
 
     static func controlNormalizationSelfTest() -> Bool {
@@ -61,8 +62,23 @@ extension InteractiveMetalSurfaceView {
         else {
             return false
         }
+        guard
+            TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: control, charactersIgnoringModifiers: "q") == 0x51
+        else { return false }
+        // C0 delivery (U+0003 / U+0004) must still map to ControlAscii letters.
         return TerminalNativeKeyClassifier.controlASCII(
-            modifierFlags: control, charactersIgnoringModifiers: "q") == 0x51
+            modifierFlags: control,
+            charactersIgnoringModifiers: "\u{3}",
+            characters: nil
+        ) == 0x43
+            && TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: [],
+                charactersIgnoringModifiers: nil,
+                characters: "\u{4}"
+            ) == 0x44
+            && TerminalNativeKeyClassifier.controlLetterFromC0(
+                charactersIgnoringModifiers: "\u{4}", characters: nil) == 0x44
     }
 
     static func compositionUTF16SelfTest() -> Bool {
@@ -254,8 +270,10 @@ extension InteractiveMetalSurfaceView {
             && TerminalNativeKeyClassifier.semanticKey(
                 specialKey: .backTab, charactersIgnoringModifiers: nil, modifierFlags: [.shift])
                 == nil
+            // AppKit `.delete` is Mac Backspace (0x7f); forward delete is `.deleteForward`.
             && TerminalNativeKeyClassifier.semanticKey(
-                specialKey: .delete, charactersIgnoringModifiers: nil, modifierFlags: []) == nil
+                specialKey: .delete, charactersIgnoringModifiers: nil, modifierFlags: [])
+                == .backspace
             && TerminalNativeKeyClassifier.v2(
                 keyCode: 36, specialKey: .enter, charactersIgnoringModifiers: nil, characters: nil,
                 modifierFlags: [], optionAsAlt: false)?.kind == 1
@@ -274,6 +292,14 @@ extension InteractiveMetalSurfaceView {
                 keyCode: 51, specialKey: .backspace, charactersIgnoringModifiers: nil,
                 characters: nil, modifierFlags: [.control], optionAsAlt: false
             ).map { $0.kind == 3 && $0.modifiers == 4 } == true
+            && TerminalNativeKeyClassifier.v2(
+                keyCode: 51, specialKey: .delete, charactersIgnoringModifiers: "\u{7f}",
+                characters: "\u{7f}", modifierFlags: [], optionAsAlt: false
+            )?.kind == 3
+            && TerminalNativeKeyClassifier.v2(
+                keyCode: 117, specialKey: .deleteForward, charactersIgnoringModifiers: nil,
+                characters: nil, modifierFlags: [], optionAsAlt: false
+            )?.kind == 12
             && InteractiveMetalSurfaceView.v2ActionIDBeforeExhaustion(1) == 1
             && InteractiveMetalSurfaceView.v2ActionIDBeforeExhaustion(0) == nil
             && InteractiveMetalSurfaceView.v2ActionIDBeforeExhaustion(.max) == nil

@@ -1,4 +1,4 @@
-//! W4a: extra window creation stays off until close exists (ADR-018 §3.3a).
+//! W4b: production admits extra window creation once headed close exists.
 
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
@@ -54,12 +54,31 @@ fn occupied_and_empty() -> (ShellState, WorkspaceId) {
 }
 
 #[test]
-fn production_default_rejects_extra_window_without_mutation() {
+fn production_default_admits_extra_window() {
     let mut shell = ShellState::m001_local("local");
-    assert!(!shell.allows_window_creation());
+    assert!(shell.allows_window_creation());
+    assert!(shell.allows_tab_creation());
+    assert!(shell.allows_pane_splitting());
+    let generation = shell.containment_generation();
+    shell
+        .apply(ShellAction::CreateWindow {
+            workspace: WorkspaceId::m001_default(),
+            containment_generation: generation,
+        })
+        .expect("W4b admits CreateWindow");
+    assert_eq!(shell.snapshot().windows.len(), 2);
+    assert!(shell
+        .take_effects()
+        .iter()
+        .any(|effect| matches!(effect, ShellNativeEffect::RealizeWindow { .. })));
+}
+
+#[test]
+fn occupied_workspace_rejects_create_when_admission_is_off() {
+    let mut shell = ShellState::m001_local("local");
+    shell.set_allows_window_creation_for_test(false);
     let generation = shell.containment_generation();
     let windows = shell.snapshot().windows.len();
-    assert_eq!(windows, 1);
     assert_eq!(
         shell.apply(ShellAction::CreateWindow {
             workspace: WorkspaceId::m001_default(),
@@ -68,16 +87,11 @@ fn production_default_rejects_extra_window_without_mutation() {
         Err(ShellError::WindowCreationUnavailable)
     );
     assert_eq!(
-        shell.last_error(),
-        Some(ShellError::WindowCreationUnavailable)
-    );
-    assert_eq!(
         shell.last_error().expect("error").error_number(),
-        21,
+        23,
         "shell snapshot error number"
     );
     assert_eq!(shell.snapshot().windows.len(), windows);
-    assert_eq!(shell.containment_generation(), generation);
     assert!(shell.take_effects().is_empty());
 }
 
