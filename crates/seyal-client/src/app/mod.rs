@@ -7,50 +7,81 @@
 //! the native composer editor; this crate owns draft/submit/Block projection.
 
 mod accessibility;
+mod action_types;
+mod apply;
 mod chrome_apply;
+mod close_apply;
 mod composer_apply;
+mod errors;
 mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
+mod leave_offer;
+mod leave_offer_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
+#[cfg(target_os = "macos")]
+mod live_history_apply;
 mod native_effect;
 mod palette_apply;
 mod pane_projection;
 mod pane_recovery;
+mod pane_tree_apply;
 mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
+mod terminal_termination;
+mod unpresented_apply;
 
 #[cfg(target_os = "macos")]
 pub(crate) use pane_recovery::PaneRecoveryTarget;
 
 use accessibility::accessibility_nodes;
+use errors::{
+    chrome_error, close_pane_error, close_tab_error, close_window_error, composer_error,
+    palette_error,
+};
 
-pub use native_effect::NativeEffect;
+pub use action_types::{AppAction, RuntimeComposerTarget, WindowNativeEvent};
+pub use leave_offer::{LeaveOffer, LeaveOfferKind};
+pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
 #[cfg(test)]
 mod focus_history_tests;
 #[cfg(test)]
 mod keybinding_apply_tests;
+#[cfg(test)]
+mod leave_offer_apply_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod pane_provisioning_tests;
 #[cfg(test)]
 mod presentation_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod quit_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod tab_provisioning_tests;
 #[cfg(test)]
+mod terminal_tabs_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unpresented_tests;
+#[cfg(test)]
+mod w7_adversarial_tests;
+#[cfg(test)]
+mod workspace_create_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{
+    AttachmentId, BlockId, ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId,
+};
 
 use crate::app::pane_recovery::PaneRecoveryQueue;
 use crate::chrome::{
@@ -72,7 +103,7 @@ use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
 };
-use crate::shell::{ShellAction, ShellSnapshot, ShellState, SplitAxis};
+use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
 use crate::local::LocalDisplayClient;
@@ -136,12 +167,26 @@ pub enum AppError {
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
-    /// Unknown WindowId for select/cycle/report (W4a). ABI 54.
-    UnknownWindow,
-    /// Extra Window create rejected until close exists (W4a). ABI 55.
-    WindowCreationUnavailable,
     /// Native WindowActivation failed after bounded retry. ABI 53.
     WindowActivationFailed,
+    /// Unknown WindowId for select/cycle/report/close. ABI 54.
+    UnknownWindow,
+    /// New Window rejected because admission is disabled. ABI 55.
+    WindowCreationUnavailable,
+    /// `Unzoom` while the active Tab has no zoom overlay. ABI 56.
+    NotZoomed,
+    /// Swap/move target is the same leaf or not a same-Tab leaf. ABI 57.
+    InvalidMoveTarget,
+    /// SPEC-024 §5.1 / SPEC-025 §5.7: no geometric neighbor in that direction. ABI 58.
+    NoDirectionalNeighbor,
+    /// Structural pane action carried a stale ADR-018 `containment_generation`. ABI 59.
+    StaleContainment,
+    /// Adopt naming an execution owned by a different Workspace (ADR-017). ABI 60.
+    CrossWorkspaceAdopt,
+    /// Adopt/terminate of an id that is not live-unpresented in this session. ABI 61.
+    ExecutionNotUnpresented,
+    /// Attachment delivery suspend/resume failed. ABI 62.
+    DeliveryControlFailed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,266 +213,6 @@ pub struct BindingEvidence {
     pub controller: bool,
     pub pty_generation: u64,
     pub alternate_screen: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AppAction {
-    Focus {
-        fence: AppFence,
-    },
-    Bind {
-        fence: AppFence,
-        evidence: BindingEvidence,
-    },
-    Refresh {
-        fence: AppFence,
-        alternate_screen: bool,
-    },
-    SubmitInput {
-        fence: AppFence,
-        text: String,
-    },
-    Quit,
-    AckEffect,
-    BeginRecovery {
-        now: Duration,
-    },
-    CompleteRecovery {
-        generation: u64,
-        outcome: AttemptOutcome,
-        now: Duration,
-        launch: Option<LaunchResult>,
-    },
-    FireScheduledRecovery {
-        generation: u64,
-        now: Duration,
-    },
-    AckRecoveryEffect,
-    CancelRecovery,
-    /// Host presentation progress after connect (`RestoringInteraction` / `Usable`).
-    AdvanceRecoveryStage {
-        stage: RecoveryStage,
-    },
-    /// Begin a continuity-identity commit attempt (pins retained across episodes).
-    BeginReconstructionAttempt,
-    /// Commit Runtime/execution continuity and a fresh attachment. Rust is the
-    /// sole fencing authority (ADR-015 / #1065).
-    CommitReconstruction {
-        runtime: ContinuityIdentity,
-        execution: ContinuityIdentity,
-        attachment: ContinuityIdentity,
-        controller_authority_committed: bool,
-        authoritative_snapshot_committed: bool,
-    },
-    /// Mark reconstruction disconnected after the host drops the live client.
-    DisconnectReconstruction,
-    SetComposerDraft {
-        fence: AppFence,
-        text: String,
-        composer_epoch: u64,
-    },
-    SubmitComposer {
-        fence: AppFence,
-        composer_epoch: u64,
-    },
-    ApplyComposerResult {
-        fence: AppFence,
-        request_id: u64,
-        accepted: bool,
-    },
-    ApplyRuntimeBlocks {
-        fence: AppFence,
-        records: Vec<RuntimeBlockRecord>,
-    },
-    /// Relay the attached client's Runtime-published composer eligibility
-    /// (ADR-009 invariant 7). `None` clears it when the transport is lost.
-    ApplyRuntimeComposerStatus {
-        fence: AppFence,
-        eligibility: Option<RuntimeComposerEligibility>,
-        revision: u64,
-    },
-    /// User choice of the non-TUI presentation (#867).
-    /// `raw` keeps Raw across TUI entry and exit. Clearing it follows
-    /// structured eligibility again.
-    SelectRestingPresentation {
-        fence: AppFence,
-        raw: bool,
-    },
-    SetLeftPanel {
-        mode: LeftPanelMode,
-    },
-    SetInspectorMode {
-        mode: InspectorMode,
-    },
-    SelectAgent {
-        fence: AppFence,
-        id: AgentId,
-    },
-    OpenAttention {
-        fence: AppFence,
-        id: AttentionId,
-    },
-    ReplaceChrome {
-        fence: AppFence,
-        agents: Vec<crate::chrome::AgentRecord>,
-        attention: Vec<crate::chrome::AttentionItem>,
-    },
-    SelectWorkspace {
-        id: WorkspaceId,
-    },
-    SelectTab {
-        id: TabId,
-    },
-    CreateTab,
-    CloseTab {
-        id: TabId,
-    },
-    TerminateExecution {
-        fence: AppFence,
-    },
-    SplitFocused {
-        axis: SplitAxis,
-    },
-    ClosePane {
-        id: PaneId,
-    },
-    FocusPane {
-        id: PaneId,
-    },
-    /// Drag the divider that `pane` leads to a pointer position (#928).
-    MoveSplitDivider {
-        pane: PaneId,
-        position: SplitPosition,
-    },
-    SetShellVisibility {
-        left: bool,
-        inspector: bool,
-        tab_strip: bool,
-    },
-    OpenComposerHistory {
-        fence: AppFence,
-    },
-    SetComposerHistoryFilter {
-        fence: AppFence,
-        query: String,
-    },
-    MoveComposerHistorySelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    SelectComposerHistory {
-        fence: AppFence,
-        composer_epoch: u64,
-    },
-    CloseComposerHistory {
-        fence: AppFence,
-    },
-    /// Global keyboard-first command palette (#932). Rows/selection are
-    /// derived fresh from Shell/Chrome; no command is ever fabricated.
-    OpenPalette {
-        fence: AppFence,
-    },
-    SetPaletteQuery {
-        fence: AppFence,
-        query: String,
-    },
-    MovePaletteSelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    /// Run the selected palette row. When `address` is `Some`, Navigate that
-    /// host-echoed address (SPEC-022 R7.2). When `None`, run the frozen
-    /// selected verb/chrome command. Never re-resolves by ordinal.
-    RunPalette {
-        fence: AppFence,
-        address: Option<ResourceAddress>,
-    },
-    /// Atomic Navigate(address) commit (SPEC-022 §4).
-    Navigate {
-        fence: AppFence,
-        address: ResourceAddress,
-    },
-    /// Focus-history Back (SPEC-022 §6 / N3). `observed` must match cursor.
-    HistoryBack {
-        fence: AppFence,
-        observed: FocusSeq,
-    },
-    /// Focus-history Forward (SPEC-022 §6 / N3). `observed` must match cursor.
-    HistoryForward {
-        fence: AppFence,
-        observed: FocusSeq,
-    },
-    ClosePalette {
-        fence: AppFence,
-    },
-    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
-    OpenGoto {
-        fence: AppFence,
-        scope: GotoScope,
-    },
-    SetGotoScope {
-        fence: AppFence,
-        scope: GotoScope,
-    },
-    CycleGotoScope {
-        fence: AppFence,
-    },
-    SetGotoQuery {
-        fence: AppFence,
-        query: String,
-    },
-    MoveGotoSelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    /// Run the selected goto row by stored/host-echoed address.
-    RunGoto {
-        fence: AppFence,
-        address: Option<ResourceAddress>,
-    },
-    CloseGoto {
-        fence: AppFence,
-    },
-    /// Bind the inspector to one Block of the focused Pane (#935).
-    SelectBlock {
-        fence: AppFence,
-        id: BlockId,
-    },
-    ClearBlockSelection {
-        fence: AppFence,
-    },
-    /// ADR-018 §2.2 window selection (W4a).
-    SelectWindow {
-        id: WindowId,
-    },
-    CycleWindow {
-        direction: crate::shell::CycleDirection,
-    },
-    /// Target-free New Window (ADR-018 §2.2 / §3.3a): Rust resolves Workspace.
-    CreateWindow,
-    /// Forwarded native window presentation input; host derives no product state.
-    ReportWindowEvent {
-        window: WindowId,
-        event: WindowNativeEvent,
-    },
-}
-
-/// Typed native window inputs (ADR-018 §2.3). Recorded; no product mutation in W4a.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u16)]
-pub enum WindowNativeEvent {
-    BecameKey = 0,
-    ResignedKey = 1,
-    BecameMain = 2,
-    ResignedMain = 3,
-    OcclusionChanged = 4,
-    Miniaturized = 5,
-    Deminiaturized = 6,
-    EnteredFullscreen = 7,
-    ExitedFullscreen = 8,
-    ScreenOrScaleChanged = 9,
-    /// Host exhausted bounded WindowActivation retries (SPEC-022 R5.4).
-    ActivationFailed = 10,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -462,6 +247,8 @@ pub struct AppSnapshot {
     pub presentation_epoch: u64,
     pub eligibility: PresentationEligibility,
     pub composer_eligible: bool,
+    /// Runtime published ADR-009 #1466 Block-scoped DirectInput while Flow.
+    pub block_scoped_direct_input: bool,
     pub frozen: bool,
     pub last_error: Option<AppError>,
     pub pending_effects: Vec<NativeEffect>,
@@ -498,6 +285,8 @@ pub struct ApplicationRoot {
     authority: Option<PaneAuthority>,
     /// Per-pane Controller authority after live create→attach→bind (#1175).
     pane_authorities: HashMap<PaneId, PaneAuthority>,
+    /// Controller evidence for every live terminal tab, including unselected tabs.
+    terminal_authorities: HashMap<TerminalTabId, PaneAuthority>,
     /// Portable provisioning/disposition authority (ADR-017 C1).
     provisioning: ProvisioningSession,
     /// Cold-path wire client for create/terminate (tests/harness). Production
@@ -528,11 +317,18 @@ pub struct ApplicationRoot {
     alternate_screen: bool,
     /// Flow or Raw used while alternate screen is off.
     resting: PresentationMode,
-    /// User asked for Raw until they ask to re-evaluate.
-    explicit_raw: bool,
+    /// Flow is the default for trusted supported shell sessions. The latch is
+    /// retained for Pane snapshots and recovery; unsupported integration still
+    /// forces the safe Raw fallback.
+    explicit_flow: bool,
     /// Runtime reported unsupported shell integration. SPEC-008 requires
     /// full-Pane Raw until a later status says otherwise.
     integration_unsupported: bool,
+    /// Latest Runtime foreground target for the bound Pane.
+    runtime_composer_target: Option<RuntimeComposerTarget>,
+    /// Temporary direct-input request. It is cleared by a fresh trusted prompt
+    /// or a changed Runtime target; it never changes the resting Flow choice.
+    interactive_raw_target: Option<(PaneId, ExecutionId, u64, u64)>,
     /// Create-admitting Controller connection (first pane / session create).
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
@@ -540,28 +336,49 @@ pub struct ApplicationRoot {
     /// Never duplicates [`Self::client_handle`].
     #[cfg(target_os = "macos")]
     extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Additional attached terminal sessions in the same or different Panes.
+    #[cfg(target_os = "macos")]
+    extra_terminal_clients: HashMap<TerminalTabId, crate::ffi::ClientRegistryHandle>,
+    /// Dispose-only Controller clients, keyed by synthetic owner and never
+    /// associated with a shell Pane or display handle.
+    #[cfg(target_os = "macos")]
+    dispose_clients: HashMap<crate::provisioning::ConnectionOwner, LocalDisplayClient>,
     /// Pane → registry raw for display/terminate (includes first pane).
     #[cfg(target_os = "macos")]
     pane_client_raws: HashMap<PaneId, u64>,
+    /// Exact display client for each terminal tab; Pane selects one for rendering.
+    #[cfg(target_os = "macos")]
+    terminal_client_raws: HashMap<TerminalTabId, u64>,
     /// Remaining injected live-attach failures before a real connect (C2b tests).
     #[cfg(target_os = "macos")]
     inject_live_attach_failures: u32,
     /// In-flight second-Controller connect (off the host poll thread).
     #[cfg(target_os = "macos")]
     pending_live_attach: Option<live_attach_apply::PendingLiveAttach>,
+    /// In-flight cold Runtime inventory request, separate from per-Pane attach.
+    #[cfg(target_os = "macos")]
+    pending_unpresented_inventory:
+        Option<std::sync::mpsc::Receiver<Result<Vec<ExecutionId>, crate::local::ClientError>>>,
     /// Created executions waiting for a free live-attach worker (ADR-017 §6.3).
     #[cfg(target_os = "macos")]
     queued_live_attaches: VecDeque<(crate::provisioning::ConnectionOwner, ExecutionId)>,
     /// Test gate: worker waits before `connect_execution_id`.
     #[cfg(target_os = "macos")]
     live_attach_gate: Option<std::sync::mpsc::Receiver<()>>,
-    /// Last forwarded window presentation event (not product state).
+    /// Last forwarded native window event; BecameKey also commits product selection.
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
     /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
     quit_deadline: Option<std::time::Instant>,
+    /// Ended Pane waiting for SPEC-004 §18 Create+Bind (New shell). Not focused-sibling.
+    replacement_bootstrap: Option<seyal_core::PaneId>,
+    /// Terminal display loss must keep Flow history paint. Set before the host
+    /// observes the poll error. Cleared only by process teardown.
+    flow_history_hold: bool,
     /// Extra live display attachments and probe peers owned through quit cleanup.
     #[cfg(target_os = "macos")]
     live_attachments: Vec<session::QuitProbeAttachment>,
+    /// ADR-028 leave-parent create/jump offer (trusted observe path only).
+    leave_offer: Option<LeaveOffer>,
 }
 
 impl Default for ApplicationRoot {
@@ -598,10 +415,8 @@ impl ApplicationRoot {
         for window in &snap.windows {
             pending_effects.push(NativeEffect::RealizeWindow { window: window.id });
         }
-        if !snap.windows.is_empty() {
-            pending_effects.push(NativeEffect::OrderFrontMakeKey {
-                window: snap.active_window,
-            });
+        if let Some(window) = snap.active_window {
+            pending_effects.push(NativeEffect::OrderFrontMakeKey { window });
         }
         let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
@@ -609,6 +424,7 @@ impl ApplicationRoot {
             shell,
             authority: None,
             pane_authorities: HashMap::new(),
+            terminal_authorities: HashMap::new(),
             provisioning: ProvisioningSession::new(),
             #[cfg(target_os = "macos")]
             wire_client: None,
@@ -630,26 +446,39 @@ impl ApplicationRoot {
             focus_history: FocusHistory::new(),
             alternate_screen: false,
             resting: PresentationMode::Flow,
-            explicit_raw: false,
+            explicit_flow: true,
             integration_unsupported: false,
+            runtime_composer_target: None,
+            interactive_raw_target: None,
             #[cfg(target_os = "macos")]
             client_handle: None,
             #[cfg(target_os = "macos")]
             extra_pane_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
+            extra_terminal_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            dispose_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pane_client_raws: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            terminal_client_raws: HashMap::new(),
             #[cfg(target_os = "macos")]
             inject_live_attach_failures: 0,
             #[cfg(target_os = "macos")]
             pending_live_attach: None,
             #[cfg(target_os = "macos")]
+            pending_unpresented_inventory: None,
+            #[cfg(target_os = "macos")]
             queued_live_attaches: VecDeque::new(),
             #[cfg(target_os = "macos")]
             live_attach_gate: None,
             last_window_event: None,
+            replacement_bootstrap: None,
+            flow_history_hold: false,
             quit_deadline: None,
             #[cfg(target_os = "macos")]
             live_attachments: Vec::new(),
+            leave_offer: None,
         }
     }
 
@@ -667,11 +496,11 @@ impl ApplicationRoot {
         self.live_attach_gate = Some(rx);
     }
 
-    /// Extra per-pane Controller registry entries (second+ tabs).
+    /// Additional Controller registry entries for panes or terminal tabs.
     #[doc(hidden)]
     #[cfg(target_os = "macos")]
-    pub fn extra_pane_client_count(&self) -> usize {
-        self.extra_pane_clients.len()
+    pub fn extra_controller_client_count(&self) -> usize {
+        self.extra_pane_clients.len() + self.extra_terminal_clients.len()
     }
 
     /// Queued `AttachController` work waiting for the in-flight worker.
@@ -685,7 +514,10 @@ impl ApplicationRoot {
     /// create/attach/terminate progress (not every Candidate-D frame).
     #[cfg(target_os = "macos")]
     pub(crate) fn needs_provisioning_drive(&self) -> bool {
-        if self.live_client_handle_for_test().is_none() && self.wire_client.is_none() {
+        if self.live_client_handle_for_test().is_none()
+            && self.wire_client.is_none()
+            && self.dispose_clients.is_empty()
+        {
             return false;
         }
         self.pending_live_attach.is_some()
@@ -747,6 +579,26 @@ impl ApplicationRoot {
         }
     }
 
+    /// Pane-addressed composer snapshot for visible non-focused Flow hosts
+    /// (#1424). Does not rebind fence authority.
+    pub fn composer_for_pane(&self, pane: PaneId) -> Option<ComposerSnapshot> {
+        self.composer.snapshot(pane).ok()
+    }
+
+    /// Whether `pane` is present in the shell tree (execution may still be None).
+    pub fn pane_known(&self, pane: PaneId) -> bool {
+        self.shell.pane_execution(pane).is_ok()
+    }
+
+    /// Bound execution for a known Pane, if any.
+    pub fn pane_execution_id(&self, pane: PaneId) -> Option<ExecutionId> {
+        self.shell.pane_execution(pane).ok().flatten()
+    }
+
+    pub fn focused_pane_id(&self) -> PaneId {
+        self.shell.snapshot().focused_pane
+    }
+
     pub fn snapshot(&self) -> AppSnapshot {
         let shell = self.shell.snapshot();
         let composer = self.composer.snapshot(shell.focused_pane).ok();
@@ -774,6 +626,7 @@ impl ApplicationRoot {
             presentation_epoch: self.presentation.snapshot().epoch,
             eligibility,
             composer_eligible,
+            block_scoped_direct_input: self.block_scoped_direct_input_eligible(),
             frozen: self.frozen,
             last_error: self.last_error,
             pending_effects: self.pending_effects.clone(),
@@ -794,204 +647,6 @@ impl ApplicationRoot {
             palette,
             goto,
             focus_history_seq: self.focus_history.cursor_seq(),
-        }
-    }
-
-    pub fn apply(&mut self, action: AppAction) -> Result<(), AppError> {
-        if self.frozen
-            && !matches!(
-                action,
-                AppAction::AckEffect
-                    | AppAction::AckRecoveryEffect
-                    | AppAction::CancelRecovery
-                    | AppAction::DisconnectReconstruction
-                    | AppAction::Quit
-            )
-        {
-            return self.fail(AppError::Frozen);
-        }
-        let result = match action {
-            AppAction::Focus { fence } => self.focus(fence),
-            AppAction::Bind { fence, evidence } => self.bind(fence, evidence),
-            AppAction::Refresh {
-                fence,
-                alternate_screen,
-            } => self.refresh(fence, alternate_screen),
-            AppAction::SubmitInput { fence, text } => self.submit_input(fence, &text),
-            AppAction::Quit => self.quit(),
-            AppAction::AckEffect => self.ack_effect(),
-            AppAction::BeginRecovery { now } => self.begin_recovery(now),
-            AppAction::CompleteRecovery {
-                generation,
-                outcome,
-                now,
-                launch,
-            } => self.complete_recovery(generation, outcome, now, launch),
-            AppAction::FireScheduledRecovery { generation, now } => {
-                self.fire_scheduled_recovery(generation, now)
-            }
-            AppAction::AckRecoveryEffect => self.ack_recovery_effect(),
-            AppAction::CancelRecovery => self.cancel_recovery(),
-            AppAction::AdvanceRecoveryStage { stage } => self.advance_recovery_stage(stage),
-            AppAction::BeginReconstructionAttempt => self.begin_reconstruction_attempt(),
-            AppAction::CommitReconstruction {
-                runtime,
-                execution,
-                attachment,
-                controller_authority_committed,
-                authoritative_snapshot_committed,
-            } => self.commit_reconstruction(
-                runtime,
-                execution,
-                attachment,
-                controller_authority_committed,
-                authoritative_snapshot_committed,
-            ),
-            AppAction::DisconnectReconstruction => self.disconnect_reconstruction(),
-            AppAction::SetComposerDraft {
-                fence,
-                text,
-                composer_epoch,
-            } => self.set_composer_draft(fence, text, composer_epoch),
-            AppAction::SubmitComposer {
-                fence,
-                composer_epoch,
-            } => self.submit_composer(fence, composer_epoch),
-            AppAction::ApplyComposerResult {
-                fence,
-                request_id,
-                accepted,
-            } => self.apply_composer_result(fence, request_id, accepted),
-            AppAction::ApplyRuntimeBlocks { fence, records } => {
-                self.apply_runtime_blocks(fence, records)
-            }
-            AppAction::ApplyRuntimeComposerStatus {
-                fence,
-                eligibility,
-                revision,
-            } => self.apply_runtime_composer_status(fence, eligibility, revision),
-            AppAction::SelectRestingPresentation { fence, raw } => {
-                self.select_resting_presentation(fence, raw)
-            }
-            AppAction::OpenComposerHistory { fence } => {
-                self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
-            }
-            AppAction::SetComposerHistoryFilter { fence, query } => self.composer_history(
-                fence,
-                ComposerAction::SetHistoryFilter {
-                    pane: fence.pane,
-                    query,
-                },
-            ),
-            AppAction::MoveComposerHistorySelection { fence, delta } => self.composer_history(
-                fence,
-                ComposerAction::MoveHistorySelection {
-                    pane: fence.pane,
-                    delta,
-                },
-            ),
-            AppAction::SelectComposerHistory {
-                fence,
-                composer_epoch,
-            } => self.composer_history(
-                fence,
-                ComposerAction::SelectHistory {
-                    pane: fence.pane,
-                    epoch: composer_epoch,
-                },
-            ),
-            AppAction::CloseComposerHistory { fence } => {
-                self.composer_history(fence, ComposerAction::CloseHistory { pane: fence.pane })
-            }
-            AppAction::SetLeftPanel { mode } => self.set_left_panel(mode),
-            AppAction::SetInspectorMode { mode } => self.set_inspector_mode(mode),
-            AppAction::SelectAgent { fence, id } => self.select_agent(fence, id),
-            AppAction::OpenAttention { fence, id } => self.open_attention(fence, id),
-            AppAction::ReplaceChrome {
-                fence,
-                agents,
-                attention,
-            } => self.replace_chrome(fence, agents, attention),
-            AppAction::SelectBlock { fence, id } => self.select_block(fence, id),
-            AppAction::ClearBlockSelection { fence } => {
-                self.require_fence(fence)?;
-                let shell = self.shell.snapshot();
-                self.chrome
-                    .apply(ChromeAction::ClearBlockSelection, &shell)
-                    .map(|_| ())
-                    .map_err(chrome_error)
-            }
-            AppAction::SelectWorkspace { id } => self.select_workspace(id),
-            AppAction::SelectTab { id } => self.select_tab(id),
-            AppAction::CreateTab => {
-                // R6.4.1: menu/key-equivalent New Tab cannot bypass the palette modal.
-                if self.palette.is_open() {
-                    self.require_workspace_command_for_menu(
-                        crate::keybinding::WorkspaceCommandId::TabCreate,
-                    )?;
-                }
-                self.create_tab()
-            }
-            AppAction::CloseTab { id } => self.close_tab(id),
-            AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
-            AppAction::SplitFocused { axis } => self.split_focused(axis),
-            AppAction::ClosePane { id } => self.close_pane(id),
-            AppAction::FocusPane { id } => self.focus_pane(id),
-            AppAction::MoveSplitDivider { pane, position } => {
-                self.move_split_divider(pane, position)
-            }
-            AppAction::SetShellVisibility {
-                left,
-                inspector,
-                tab_strip,
-            } => self.set_shell_visibility(left, inspector, tab_strip),
-            AppAction::OpenPalette { fence } => {
-                if self.palette.is_open() {
-                    self.require_workspace_command_for_menu(
-                        crate::keybinding::WorkspaceCommandId::CommandPaletteOpen,
-                    )?;
-                }
-                self.open_palette(fence)
-            }
-            AppAction::SetPaletteQuery { fence, query } => self.set_palette_query(fence, query),
-            AppAction::MovePaletteSelection { fence, delta } => {
-                self.move_palette_selection(fence, delta)
-            }
-            AppAction::RunPalette { fence, address } => self.run_palette(fence, address),
-            AppAction::Navigate { fence, address } => {
-                self.require_fence(fence)?;
-                self.navigate_address(address)
-            }
-            AppAction::HistoryBack { fence, observed } => {
-                self.require_fence(fence)?;
-                self.history_back(observed)
-            }
-            AppAction::HistoryForward { fence, observed } => {
-                self.require_fence(fence)?;
-                self.history_forward(observed)
-            }
-            AppAction::ClosePalette { fence } => self.close_palette(fence),
-            AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
-            AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
-            AppAction::CycleGotoScope { fence } => self.cycle_goto_scope(fence),
-            AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
-            AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
-            AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
-            AppAction::CloseGoto { fence } => self.close_goto(fence),
-            AppAction::SelectWindow { id } => self.select_window(id),
-            AppAction::CycleWindow { direction } => self.cycle_window(direction),
-            AppAction::CreateWindow => self.create_window(),
-            AppAction::ReportWindowEvent { window, event } => {
-                self.report_window_event(window, event)
-            }
-        };
-        match result {
-            Ok(()) => {
-                self.last_error = None;
-                self.snapshot_generation = self.snapshot_generation.saturating_add(1);
-                Ok(())
-            }
-            Err(error) => self.fail(error),
         }
     }
 
@@ -1034,7 +689,3 @@ impl ApplicationRoot {
         Err(error)
     }
 }
-
-pub(super) use chrome_apply::{
-    chrome_error, close_pane_error, close_tab_error, composer_error, palette_error,
-};

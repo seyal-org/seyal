@@ -421,26 +421,40 @@ fn controller_terminate_requests_then_finalizes_via_lifecycle_only() {
         TerminateExecutionResultCode::TerminationRequested
     );
     assert_eq!(result.detail_code, 0);
-    assert_eq!(
-        h.runtime.lookup(created.execution_id).unwrap().lifecycle,
-        ExecutionLifecycle::TerminatingGraceful
-    );
+    // A fast child may already have finalized before the response is read.
+    // The accepted result is the boundary; final Lifecycle is checked below.
+    // Allow TerminatingGraceful and DrainingAfterPrimaryExit when still present.
+    if let Some(record) = h.runtime.lookup(created.execution_id) {
+        assert!(
+            matches!(
+                record.lifecycle,
+                ExecutionLifecycle::TerminatingGraceful
+                    | ExecutionLifecycle::DrainingAfterPrimaryExit
+            ),
+            "unexpected lifecycle after accepted terminate: {:?}",
+            record.lifecycle
+        );
+    }
 
     let progress_deadline = Instant::now() + Duration::from_secs(3);
     let mut saw_progress = false;
     while Instant::now() < progress_deadline {
         h.pump();
-        let generation = h
-            .runtime
-            .execution(streamer)
-            .unwrap()
-            .terminal()
-            .damage_generation();
+        let Some(execution) = h.runtime.execution(streamer) else {
+            // Unrelated streamer must remain registered; None is a real
+            // failure but avoid panicking mid-poll under CI load.
+            continue;
+        };
+        let generation = execution.terminal().damage_generation();
         if generation > gen_before {
             saw_progress = true;
             break;
         }
     }
+    assert!(
+        h.runtime.execution(streamer).is_some(),
+        "unrelated streamer execution must remain registered during terminate"
+    );
     assert!(
         saw_progress,
         "unrelated execution output must keep progressing"
@@ -626,7 +640,26 @@ fn section_18_5_outcome_table_duplicate_draining_and_post_release() {
         .create_execution(
             CommandSpec::new("/usr/bin/perl").args([
                 "-e",
-                r#"my $pid = fork(); die unless defined $pid; if ($pid == 0) { $SIG{HUP}="IGNORE"; $SIG{TERM}="IGNORE"; sleep 30; exit 0; } select(undef,undef,undef,1.0); exit 0;"#,
+                r#"
+                    pipe(my $ready_r, my $ready_w) or die;
+                    my $pid = fork();
+                    die unless defined $pid;
+                    if ($pid == 0) {
+                        close $ready_r;
+                        $SIG{HUP} = "IGNORE";
+                        $SIG{TERM} = "IGNORE";
+                        $| = 1;
+                        print "drain-child-ready\n";
+                        syswrite($ready_w, "ready\n") == 6 or die;
+                        close $ready_w;
+                        sleep 30;
+                        exit 0;
+                    }
+                    close $ready_w;
+                    <$ready_r> // die;
+                    select(undef, undef, undef, 1.0);
+                    exit 0;
+                "#,
             ]),
             WindowSize::cells(80, 24).expect("size"),
         )
@@ -636,6 +669,7 @@ fn section_18_5_outcome_table_duplicate_draining_and_post_release() {
         h.runtime.lookup(draining).unwrap().lifecycle,
         ExecutionLifecycle::Running
     );
+    h.wait_row_contains(draining, "drain-child-ready");
     std::thread::sleep(Duration::from_millis(1200));
     assert_eq!(
         h.runtime.lookup(draining).unwrap().lifecycle,

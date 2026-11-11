@@ -56,7 +56,7 @@ These capabilities were accepted/refined during Seyal architecture and product r
 
 ## Historical RILL feature catalog reconciliation
 
-The original RILL competitive catalog contains **216** inventory rows. All 216 are accounted for below. This table preserves useful product discovery while recalculating status against **current Seyal**, not legacy completion state.
+The original RILL competitive catalog contains **216** inventory rows. All 216 are accounted for below. This table preserves useful product discovery while recalculating status against **current Seyal**, not legacy completion state. F-088a is an additional ID under #1384 and is Accepted direction under Accepted ADR-026. It is not one of those 216 rows, and it does not change F-088's Rejected disposition. The #1396 Accepted restatement of F-088 / F-088a is on the rows below.
 
 ### 5.1 — Hierarchy, dashboards and navigation
 
@@ -157,7 +157,8 @@ The original RILL competitive catalog contains **216** inventory rows. All 216 a
 | F-085 | Rich input overlay for CLI agents | Accepted direction | Rich composer may submit to CLI agents only when input ownership is known and safe. |
 | F-086 | Right-click menus | Accepted direction | Context menus for pane/tab/Block/agent actions. |
 | F-087 | Keyboard copy mode | Accepted direction | Keyboard copy/navigation mode over retained terminal history. |
-| F-088 | Warpify / in-band remote cmds | Rejected | No vendor helper that silently injects commands into SSH/subshell PTYs. |
+| F-088 | Silent remote install / durable modify / blind typed inject | Rejected | No vendor helper or Seyal path may silently install a persistent remote companion, edit remote rc/dotfiles, write durable remote files, change persistent remote shell settings, or **blind-type setup into an unproven live reader**. Session-only non-durable bootstrap that satisfies ADR-026 2026-10-31 Decision items 3–5 (including the auto-arm delivery gate) is **not** this Rejected row — see F-088a. |
+| F-088a | Session-only remote shell bootstrap for Blocks | Accepted direction | **Accepted under ADR-026 #1396 amend:** withdraw Enable Blocks as the headed SSH gate; auto-arm Allowed only when delivery does not type into an unproven live reader (spawn-time / remote-command class); consent reserved for install/modify (#1385 companion) and for typed-into-live-reader delivery; after trust, always session Blocks; Block-scoped line input into a Running session Block is primary for line-oriented interactive work; alternate-screen → TUI; Relay/Raw after bootstrap failure remain degraded. `SessionTrusted` never substitutes for `LocalTrusted`. Persistent companion is #1385 (reserved ADR-027). F-088 stays Rejected. Not yet shipped. |
 | F-089 | Prompt chips vs PS1 | Accepted direction | Optional cwd/git/dev-tool context chips as host chrome; never replace/break PS1. |
 | F-252 | Up/Down history recall | Accepted direction | Up/Down history recall in composer, prefix-aware; raw mode leaves keys to PTY. |
 | F-253 | Ctrl+R history search | Accepted direction | Ctrl+R fuzzy history/search list with keyboard/mouse selection; raw mode leaves Ctrl+R to PTY. |

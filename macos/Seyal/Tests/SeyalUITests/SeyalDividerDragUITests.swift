@@ -88,10 +88,18 @@ final class SeyalDividerDragUITests: XCTestCase {
         let focused = (0..<count).filter { element(app, "seyal-pane-region-\($0)").value as? String == "focused" }
         XCTAssertEqual(focused.count, 1, "exactly one focused region")
         guard let index = focused.first else { return }
+        let region = element(app, "seyal-pane-region-\(index)").frame
+        let host = element(app, "seyal-pane-presentation-host")
+        if host.waitForExistence(timeout: 4) {
+            XCTAssertTrue(
+                region.insetBy(dx: -1, dy: -1).contains(host.frame),
+                "presentation host must sit inside the focused region \(region)"
+            )
+            return
+        }
         let terminals = app.descendants(matching: .any).matching(identifier: "terminal-input")
         let one = expectation(for: NSPredicate(format: "count == 1"), evaluatedWith: terminals, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [one], timeout: 12), .completed, "exactly one live terminal surface")
-        let region = element(app, "seyal-pane-region-\(index)").frame
         XCTAssertTrue(
             region.insetBy(dx: -1, dy: -1).contains(terminals.firstMatch.frame),
             "live surface must sit inside the focused region \(region)"
@@ -100,6 +108,14 @@ final class SeyalDividerDragUITests: XCTestCase {
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        let presentation = element(app, "seyal-pane-presentation-host")
+        if presentation.waitForExistence(timeout: 2) {
+            // Raw resting is cold default (#1445); latch Flow before requiring composer.
+            app.ensureFlowBlocksPresentation(timeout: timeout)
+            XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: timeout))
+            XCTAssertEqual(app.state, .runningForeground)
+            return
+        }
         let terminal = app.descendants(matching: .any)["terminal-input"]
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
@@ -107,5 +123,6 @@ final class SeyalDividerDragUITests: XCTestCase {
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
         XCTAssertEqual(result, .completed, "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")")
+        app.ensureFlowBlocksPresentation(timeout: timeout)
     }
 }

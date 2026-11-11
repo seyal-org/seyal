@@ -20,6 +20,13 @@ pub struct Diagnostics {
     pub grapheme_store_capacity_fallback_count: u64,
 }
 
+/// Remote shell named by an ADR-026 readiness marker (`z` or `b`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionShellKind {
+    Zsh,
+    Bash,
+}
+
 /// Bounded shell-integration metadata emitted by the canonical VT parser.
 /// Terminal cells and arbitrary OSC payloads are never exposed through this
 /// interface. Correlation of tokens to workspace/Block lifecycle is owned by
@@ -45,6 +52,13 @@ pub enum ShellIntegrationEvent {
         token: ShellIntegrationToken,
         exit_status: i32,
         line: LineId,
+    },
+    /// OSC `133;R;<K>;<z|b>`. Fourth marker shape (ADR-026 §6.4). It does not
+    /// grant trust; Runtime accepts it only while the session overlay is Armed
+    /// and `<K>` is the current challenge.
+    Readiness {
+        token: ShellIntegrationToken,
+        shell: SessionShellKind,
     },
 }
 

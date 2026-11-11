@@ -1,5 +1,11 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Development queue
+    url: https://github.com/seyal-org/seyal/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22%20no%3Aassignee
+    about: Ready issues you can implement. They are labeled help wanted and have no assignee.
+  - name: Refinement queue
+    url: https://github.com/seyal-org/seyal/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22needs-refinement%22%20no%3Aassignee
+    about: Issues you can refine. One pass publishes them to development or marks them blocked on a specific issue.
   - name: Security vulnerability
     url: https://github.com/mahboobmonnamd/seyal/security/advisories/new
     about: Do not disclose exploitable vulnerabilities, secrets, credentials, or customer data in a normal Issue. Use GitHub's private security advisory flow.

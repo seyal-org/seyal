@@ -1,7 +1,7 @@
 //! ApplicationRoot create/close/terminate coordination with portable provisioning
 //! and the existing LocalDisplayClient create/terminate wire helpers.
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, WorkspaceId};
 use seyal_protocol::framing::ErrorCode;
 #[cfg(target_os = "macos")]
 use seyal_protocol::local_ipc::framing::{
@@ -11,7 +11,7 @@ use seyal_protocol::local_ipc::framing::{
 
 #[cfg(all(test, target_os = "macos"))]
 use super::BindingEvidence;
-use super::{close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot};
+use super::{AppError, AppFence, ApplicationRoot};
 use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
 #[cfg(target_os = "macos")]
@@ -22,6 +22,61 @@ use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure
 use crate::shell::{ShellAction, SplitAxis};
 
 impl ApplicationRoot {
+    pub(super) fn new_terminal(&mut self) -> Result<(), AppError> {
+        let pane = self.shell.snapshot().focused_pane;
+        self.shell
+            .apply(ShellAction::NewTerminalTab {
+                pane,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(|_| AppError::TabCreationUnavailable)?;
+        let terminal_tab = self
+            .shell
+            .selected_terminal_tab(pane)
+            .map_err(|_| AppError::UnknownPane)?
+            .ok_or(AppError::UnboundUnauthorized)?;
+        // Selecting the unbound new terminal immediately fences the previous
+        // tab's input route; its live process and retained attachment stay in
+        // the per-terminal maps until this tab becomes usable again.
+        self.select_terminal_tab(pane, terminal_tab)?;
+        self.seed_provisioning_request_floor_from_wire();
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        let effect = match self
+            .provisioning
+            .begin_terminal_intent(pane, terminal_tab, None)
+        {
+            Ok(effect) => effect,
+            Err(failure) => {
+                let _ = self.shell.apply(ShellAction::CloseTerminalTab {
+                    pane,
+                    terminal_tab,
+                    containment_generation: self.shell.containment_generation(),
+                });
+                self.provisioning.note_rejected_without_retry(pane, failure);
+                return Err(provisioning_app_error(failure));
+            }
+        };
+        if let Err(error) = self.dispatch_wire_effects(
+            vec![effect],
+            WireDispatchContext {
+                workspace_id: self.wire_workspace_id(),
+                launch_profile: 0,
+            },
+        ) {
+            let _ = self.shell.apply(ShellAction::CloseTerminalTab {
+                pane,
+                terminal_tab,
+                containment_generation: self.shell.containment_generation(),
+            });
+            return Err(error);
+        }
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        self.activate_focused_pane_authority();
+        Ok(())
+    }
+
     /// Install the cold-path [`LocalDisplayClient`] used to admit create/terminate
     /// frames. Flushes any queued `SendCreate` / `SendTerminate` effects.
     #[cfg(target_os = "macos")]
@@ -40,27 +95,39 @@ impl ApplicationRoot {
         self.wire_client.as_mut()
     }
 
-    /// Create a Tab whose terminal leaf begins one C1 provisioning intent and
-    /// admits the resulting type-36 create on the wire client (same request id).
-    pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
-        self.shell
-            .apply_product_create_tab()
-            .map_err(|_| AppError::TabCreationUnavailable)?;
+    /// Begin #994 provisioning for the focused Pane's selected terminal when it
+    /// is still unbound. Used by CreateTab / CreateWindow / zero-window Dock
+    /// create (ADR-018 §3.3a). No-ops when already bound or no selected terminal.
+    /// Does not adopt Unpresented executions.
+    pub(super) fn begin_provisioning_for_focused_unbound_terminal(
+        &mut self,
+    ) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
-        let tab = snap.active_tab;
-        // SPEC-004 §18.2 / ADR-017 §5.2: M003 create admits only workspace_id 0.
-        let workspace_id = 0u128;
+        let Some(terminal_tab) = self
+            .shell
+            .selected_terminal_tab(pane)
+            .map_err(|_| AppError::UnknownPane)?
+        else {
+            return Ok(());
+        };
+        if self
+            .shell
+            .terminal_execution(pane, terminal_tab)
+            .map_err(|_| AppError::UnknownPane)?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let workspace_id = self.wire_workspace_id();
         self.seed_provisioning_request_floor_from_wire();
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
-        let effect = match self.provisioning.begin_intent(pane, None) {
+        let effect = match self
+            .provisioning
+            .begin_terminal_intent(pane, terminal_tab, None)
+        {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.shell.apply(ShellAction::CloseTab {
-                    id: tab,
-                    containment_generation: self.shell.containment_generation(),
-                });
-                let _ = self.shell.take_removed_tab_panes();
                 self.provisioning.note_rejected_without_retry(pane, failure);
                 return Err(provisioning_app_error(failure));
             }
@@ -72,11 +139,6 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.shell.apply(ShellAction::CloseTab {
-                id: tab,
-                containment_generation: self.shell.containment_generation(),
-            });
-            let _ = self.shell.take_removed_tab_panes();
             if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
                 let _ = self.provisioning.apply_create_result(
                     intent.owner,
@@ -84,6 +146,26 @@ impl ApplicationRoot {
                     CreateOutcome::Failed(ErrorCode::InvalidState),
                 );
             }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Create a Tab whose terminal leaf begins one C1 provisioning intent and
+    /// admits the resulting type-36 create on the wire client (same request id).
+    pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
+        self.shell
+            .apply_product_create_tab()
+            .map_err(|_| AppError::TabCreationUnavailable)?;
+        self.drain_shell_effects();
+        let snap = self.shell.snapshot();
+        let tab = snap.active_tab;
+        if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+            let _ = self.shell.apply(ShellAction::CloseTab {
+                id: tab,
+                containment_generation: self.shell.containment_generation(),
+            });
+            let _ = self.shell.take_removed_tab_panes();
             return Err(error);
         }
         let _ = self
@@ -95,8 +177,7 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Split the focused terminal leaf and begin one C1 provisioning intent for
-    /// the new terminal leaf (ADR-017 §4.4 / C3). Sibling bindings are untouched.
+    /// Split the focused leaf and start its C1 provisioning intent (ADR-017 §4.4 / C3).
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
         self.shell
             .apply(ShellAction::SplitFocused {
@@ -106,11 +187,19 @@ impl ApplicationRoot {
             .map_err(|_| AppError::PaneSplitUnavailable)?;
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
-        // SPEC-004 §18.2 / ADR-017 §5.2: M003 create admits only workspace_id 0.
-        let workspace_id = 0u128;
+        let terminal_tab = self
+            .shell
+            .selected_terminal_tab(pane)
+            .map_err(|_| AppError::UnknownPane)?
+            .ok_or(AppError::UnboundUnauthorized)?;
+        // ADR-028 §2.5: 0 = default Workspace; nonzero must be Runtime-admitted.
+        let workspace_id = self.wire_workspace_id();
         self.seed_provisioning_request_floor_from_wire();
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
-        let effect = match self.provisioning.begin_intent(pane, None) {
+        let effect = match self
+            .provisioning
+            .begin_terminal_intent(pane, terminal_tab, None)
+        {
             Ok(effect) => effect,
             Err(failure) => {
                 self.rollback_failed_split(pane);
@@ -135,6 +224,7 @@ impl ApplicationRoot {
             }
             return Err(error);
         }
+        self.select_split_tab_flow_resting_mode(pane);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -160,99 +250,6 @@ impl ApplicationRoot {
             // successor in this same rollback transition.
             self.record_destroyed_pane_focus(pane, true);
         }
-    }
-
-    /// Remove a Tab's chrome. Bound panes detach only; executions stay live
-    /// and enumerable. Outstanding create intents are marked dead for §6.3.
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        let focus_before = self.shell.focus_checkpoint();
-        let was_active = focus_before.active_tab == id;
-        self.shell
-            .apply(ShellAction::CloseTab {
-                id,
-                containment_generation: self.shell.containment_generation(),
-            })
-            .map_err(close_tab_error)?;
-        let removed = self.shell.take_removed_tab_panes();
-        let mut effects = Vec::new();
-        for pane in removed {
-            let pane_effects = self.provisioning.on_bound_pane_closed(pane);
-            debug_assert!(
-                !pane_effects
-                    .iter()
-                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                "removing a tab must not terminate a bound execution"
-            );
-            effects.extend(pane_effects);
-            self.clear_authority_for_pane(pane);
-        }
-        let _ = self.dispatch_wire_effects(
-            effects,
-            WireDispatchContext {
-                workspace_id: 0,
-                launch_profile: 0,
-            },
-        );
-        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a): one call on the
-        // product close path — surfaces do not scan history themselves.
-        self.record_destroyed_tab_focus(id, was_active);
-        if was_active {
-            self.activate_focused_pane_authority();
-        }
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
-    /// Close a Pane. A previously bound execution is released as an
-    /// unreferenced live record (ADR-017 §6.1 detach-only); it is never
-    /// terminated as a side effect of presentation close.
-    pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
-        let focus_before = self.shell.focus_checkpoint();
-        let was_focused = focus_before.focused_pane == id;
-        self.shell
-            .apply(ShellAction::ClosePane {
-                id,
-                containment_generation: self.shell.containment_generation(),
-            })
-            .map_err(close_pane_error)?;
-        if let Some((pane, execution)) = self.shell.take_released_execution() {
-            let effects = self.provisioning.on_bound_pane_closed(pane);
-            debug_assert!(
-                self.provisioning.is_unreferenced(execution),
-                "bound close must retain an unreferenced live record"
-            );
-            debug_assert!(
-                !effects
-                    .iter()
-                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                "closing a pane must not terminate a bound execution"
-            );
-            self.clear_authority_for_pane(pane);
-            let _ = self.dispatch_wire_effects(
-                effects,
-                WireDispatchContext {
-                    workspace_id: 0,
-                    launch_profile: 0,
-                },
-            );
-        } else {
-            // Outstanding create for this pane: keep the request until the
-            // result arrives, then §6.3 disposition.
-            self.provisioning.mark_intent_dead(id);
-        }
-        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a).
-        self.record_destroyed_pane_focus(id, was_focused);
-        if was_focused {
-            // Closing an unbound in-flight leaf changes focus too. Restore any
-            // retained authority for the shell-selected successor immediately.
-            self.activate_focused_pane_authority();
-        }
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
     }
 
     /// Explicit terminate of the fenced Controller execution (P4). Distinct
@@ -288,8 +285,7 @@ impl ApplicationRoot {
         // even if attach forgot to seed (bootstrap create used connection id 1).
         self.seed_provisioning_request_floor_from_wire();
         let effects = self
-            .provisioning
-            .begin_explicit_terminate(bound.pane, bound.attachment)
+            .begin_bound_terminate(bound.pane, bound.execution, bound.attachment)
             .map_err(provisioning_app_error)?;
         debug_assert!(
             effects
@@ -304,7 +300,7 @@ impl ApplicationRoot {
         if let Err(error) = self.dispatch_wire_effects(
             effects,
             WireDispatchContext {
-                workspace_id: 0,
+                workspace_id: self.wire_workspace_id(),
                 launch_profile: 0,
             },
         ) {
@@ -354,7 +350,7 @@ impl ApplicationRoot {
         if let Err(error) = self.dispatch_wire_effects(
             effects,
             WireDispatchContext {
-                workspace_id: 0,
+                workspace_id: self.wire_workspace_id(),
                 launch_profile: 0,
             },
         ) {
@@ -401,6 +397,40 @@ impl ApplicationRoot {
                         .map_err(|_| AppError::AlreadyBound)?;
                     self.bind_pane_recovery(pane, execution);
                     let _ = self.provisioning.apply_bind_success(pane, execution);
+                    if let Ok(Some(terminal_tab)) = self.shell.selected_terminal_tab(pane) {
+                        self.provisioning.record_adopted_terminal_binding(
+                            pane,
+                            terminal_tab,
+                            execution,
+                        );
+                    }
+                    self.clear_execution_ended_for_pane(pane);
+                    bound = Some(execution);
+                }
+                ProvisioningEffect::BindTerminal {
+                    pane,
+                    terminal_tab,
+                    execution,
+                } => {
+                    self.shell
+                        .apply(ShellAction::BindTerminalExecution {
+                            pane,
+                            terminal_tab,
+                            execution,
+                        })
+                        .map_err(|_| AppError::AlreadyBound)?;
+                    self.bind_pane_recovery(pane, execution);
+                    let _ = self.provisioning.apply_terminal_bind_success(
+                        pane,
+                        terminal_tab,
+                        execution,
+                    );
+                    if self.shell.selected_terminal_tab(pane).ok().flatten() == Some(terminal_tab) {
+                        let _ = self
+                            .provisioning
+                            .select_terminal_binding(pane, terminal_tab);
+                    }
+                    self.clear_execution_ended_for_pane(pane);
                     bound = Some(execution);
                 }
                 other => {
@@ -410,7 +440,7 @@ impl ApplicationRoot {
                     self.dispatch_wire_effects(
                         vec![other],
                         WireDispatchContext {
-                            workspace_id: 0,
+                            workspace_id: self.wire_workspace_id(),
                             launch_profile: 0,
                         },
                     )?;
@@ -434,7 +464,7 @@ impl ApplicationRoot {
         self.dispatch_wire_effects(
             effects,
             WireDispatchContext {
-                workspace_id: 0,
+                workspace_id: self.wire_workspace_id(),
                 launch_profile: 0,
             },
         )
@@ -481,6 +511,14 @@ impl ApplicationRoot {
             return Ok(Some(()));
         };
         let pane = intent.pane;
+        let disposed_execution = match intent.phase {
+            crate::provisioning::IntentPhase::Disposing { execution, .. }
+            | crate::provisioning::IntentPhase::Created { execution }
+            | crate::provisioning::IntentPhase::Attaching { execution }
+            | crate::provisioning::IntentPhase::Attached { execution, .. }
+            | crate::provisioning::IntentPhase::Bound { execution } => Some(execution),
+            crate::provisioning::IntentPhase::AwaitingCreate => None,
+        };
         let outcome = match result.result_code {
             TerminateExecutionResultCode::TerminationRequested => {
                 TerminateOutcome::TerminationRequested
@@ -496,14 +534,31 @@ impl ApplicationRoot {
         for effect in effects {
             match effect {
                 ProvisioningEffect::Detach { .. } => {
-                    let _ = self.shell.release_execution(pane);
-                    self.clear_authority_for_pane(pane);
+                    if let (Some(pane), Some(terminal_tab)) = (pane, intent.terminal_tab) {
+                        if matches!(outcome, TerminateOutcome::TerminationRequested)
+                            && let Some(execution) = disposed_execution
+                        {
+                            self.finish_terminal_termination(pane, terminal_tab, execution);
+                        }
+                    } else if let Some(pane) = pane {
+                        let _ = self.shell.release_execution(pane);
+                        self.clear_authority_for_pane(pane);
+                    } else {
+                        #[cfg(target_os = "macos")]
+                        self.dispose_clients.remove(&intent.owner);
+                    }
+                    if matches!(outcome, TerminateOutcome::TerminationRequested)
+                        && let Some(execution) = disposed_execution
+                        && pane.is_none()
+                    {
+                        let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
+                    }
                 }
                 other => {
                     self.dispatch_wire_effects(
                         vec![other],
                         WireDispatchContext {
-                            workspace_id: 0,
+                            workspace_id: self.wire_workspace_id(),
                             launch_profile: 0,
                         },
                     )?;
@@ -518,8 +573,15 @@ impl ApplicationRoot {
 
     #[cfg(target_os = "macos")]
     fn take_wire_terminate_result(&mut self) -> Result<Option<TerminateExecutionResult>, AppError> {
-        if let Some(client) = self.wire_client.as_mut() {
-            return Ok(client.take_terminate_result());
+        if let Some(client) = self.wire_client.as_mut()
+            && let Some(result) = client.take_terminate_result()
+        {
+            return Ok(Some(result));
+        }
+        for client in self.dispose_clients.values_mut() {
+            if let Some(result) = client.take_terminate_result() {
+                return Ok(Some(result));
+            }
         }
         // Prefer the focused/authority pane client (may be a second Controller).
         if let Some(pane) = self.authority.map(|authority| authority.pane)
@@ -531,6 +593,13 @@ impl ApplicationRoot {
             return Ok(result);
         }
         for handle in self.pane_client_raws.values().copied() {
+            if let Some(Some(result)) =
+                crate::ffi::with_client_mut(handle, |client| client.take_terminate_result())
+            {
+                return Ok(Some(result));
+            }
+        }
+        for handle in self.terminal_client_raws.values().copied() {
             if let Some(Some(result)) =
                 crate::ffi::with_client_mut(handle, |client| client.take_terminate_result())
             {
@@ -581,13 +650,26 @@ impl ApplicationRoot {
         self.dispatch_wire_effects(
             pending,
             WireDispatchContext {
-                workspace_id: 0,
+                workspace_id: self.wire_workspace_id(),
                 launch_profile: 0,
             },
         )
     }
 
-    fn dispatch_wire_effects(
+    pub(crate) fn dispatch_provisioning_effects(
+        &mut self,
+        effects: Vec<ProvisioningEffect>,
+    ) -> Result<(), AppError> {
+        self.dispatch_wire_effects(
+            effects,
+            WireDispatchContext {
+                workspace_id: self.wire_workspace_id(),
+                launch_profile: 0,
+            },
+        )
+    }
+
+    pub(super) fn dispatch_wire_effects(
         &mut self,
         effects: Vec<ProvisioningEffect>,
         ctx: WireDispatchContext,
@@ -611,9 +693,9 @@ impl ApplicationRoot {
                     self.admit_terminate(effect, request_id, execution, attachment)?;
                 }
                 ProvisioningEffect::Detach { .. } => {
-                    // Detach-only (ADR-017 §6.1): never terminate. Observed so
-                    // tab/pane close cannot drop SendTerminate; the shared
-                    // LocalDisplayClient stays for other panes' create/terminate.
+                    // Detach-only (ADR-017 §6.1): never terminate. The Controller
+                    // lease is released in `release_presentation_controller`
+                    // before this dispatch; this arm must not become SendTerminate.
                 }
                 ProvisioningEffect::BindPane { pane, execution } => {
                     self.shell
@@ -621,6 +703,39 @@ impl ApplicationRoot {
                         .map_err(|_| AppError::AlreadyBound)?;
                     self.bind_pane_recovery(pane, execution);
                     let _ = self.provisioning.apply_bind_success(pane, execution);
+                    if let Ok(Some(terminal_tab)) = self.shell.selected_terminal_tab(pane) {
+                        self.provisioning.record_adopted_terminal_binding(
+                            pane,
+                            terminal_tab,
+                            execution,
+                        );
+                    }
+                    self.clear_execution_ended_for_pane(pane);
+                }
+                ProvisioningEffect::BindTerminal {
+                    pane,
+                    terminal_tab,
+                    execution,
+                } => {
+                    self.shell
+                        .apply(ShellAction::BindTerminalExecution {
+                            pane,
+                            terminal_tab,
+                            execution,
+                        })
+                        .map_err(|_| AppError::AlreadyBound)?;
+                    self.bind_pane_recovery(pane, execution);
+                    let _ = self.provisioning.apply_terminal_bind_success(
+                        pane,
+                        terminal_tab,
+                        execution,
+                    );
+                    if self.shell.selected_terminal_tab(pane).ok().flatten() == Some(terminal_tab) {
+                        let _ = self
+                            .provisioning
+                            .select_terminal_binding(pane, terminal_tab);
+                    }
+                    self.clear_execution_ended_for_pane(pane);
                 }
                 ProvisioningEffect::AttachController { owner, execution } => {
                     #[cfg(target_os = "macos")]
@@ -718,6 +833,13 @@ impl ApplicationRoot {
         execution: ExecutionId,
         attachment: AttachmentId,
     ) -> Result<(), AppError> {
+        if let ProvisioningEffect::SendTerminate { owner, .. } = effect
+            && let Some(client) = self.dispose_clients.get_mut(&owner)
+        {
+            return client
+                .submit_terminate_execution_with_id(request_id, execution, attachment)
+                .map_err(client_error);
+        }
         if !self.has_wire_client() {
             let _ = effect;
             return Err(AppError::NoLiveClient);
@@ -750,6 +872,17 @@ impl ApplicationRoot {
         attachment: AttachmentId,
     ) -> Option<u64> {
         if let Some(raw) = self
+            .terminal_authorities
+            .iter()
+            .find_map(|(terminal, authority)| {
+                (authority.execution == execution && authority.attachment == attachment)
+                    .then(|| self.terminal_client_raws.get(terminal).copied())
+                    .flatten()
+            })
+        {
+            return Some(raw);
+        }
+        if let Some(raw) = self
             .pane_authorities
             .values()
             .find(|authority| {
@@ -759,12 +892,16 @@ impl ApplicationRoot {
         {
             return Some(raw);
         }
-        self.pane_client_raws.values().copied().find(|raw| {
-            crate::ffi::with_client(*raw, |client| {
-                client.execution_id() == execution && client.attachment_id() == attachment
+        self.terminal_client_raws
+            .values()
+            .chain(self.pane_client_raws.values())
+            .copied()
+            .find(|raw| {
+                crate::ffi::with_client(*raw, |client| {
+                    client.execution_id() == execution && client.attachment_id() == attachment
+                })
+                .unwrap_or(false)
             })
-            .unwrap_or(false)
-        })
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -780,7 +917,7 @@ impl ApplicationRoot {
     }
 
     #[cfg(target_os = "macos")]
-    fn with_wire_client_mut<R>(
+    pub(super) fn with_wire_client_mut<R>(
         &mut self,
         op: impl FnOnce(&mut LocalDisplayClient) -> Result<R, ClientError>,
     ) -> Result<R, AppError> {
@@ -805,9 +942,21 @@ impl ApplicationRoot {
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-struct WireDispatchContext {
-    workspace_id: u128,
-    launch_profile: u16,
+pub(super) struct WireDispatchContext {
+    pub(super) workspace_id: u128,
+    pub(super) launch_profile: u16,
+}
+
+impl ApplicationRoot {
+    /// Wire `workspace_id`: sentinel 0 for the Runtime default Workspace.
+    pub(super) fn wire_workspace_id(&self) -> u128 {
+        let id = self.shell.active_workspace_id();
+        if id == WorkspaceId::m001_default() {
+            0
+        } else {
+            id.to_u128()
+        }
+    }
 }
 
 fn provisioning_app_error(failure: ProvisioningFailure) -> AppError {

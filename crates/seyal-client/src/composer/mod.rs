@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use seyal_core::{BlockId, PaneId};
+use seyal_protocol::framing::BlockScope;
 
 use crate::presentation::{InputRoute, PresentationMode};
 
@@ -23,7 +24,11 @@ pub use history::{HistoryOverlaySnapshot, HISTORY_CAPACITY, HISTORY_VISIBLE_ROWS
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ComposerMode {
     Available,
-    Busy { process: String },
+    Busy {
+        process: String,
+    },
+    /// Plaintext line to the foreground program. Not a new Block.
+    Relay,
     Hidden,
 }
 
@@ -38,6 +43,10 @@ pub enum RuntimeComposerEligibility {
     Available,
     Busy,
     Unsupported,
+    /// Type 45 `Relay`. Type 23 stays `Busy` for legacy clients.
+    Relay,
+    /// Type 45 `DirectInput` (#1466). Submit closed; Flow Block-scoped keys.
+    DirectInput,
 }
 
 /// Why a [`ComposerAction`] was rejected. The previous state is unchanged
@@ -108,6 +117,7 @@ impl ComposerMode {
             // program), so nothing can be promised beyond waiting for it.
             Self::Busy { process } if process.is_empty() => "Waiting for prompt...",
             Self::Busy { .. } => "Command running...",
+            Self::Relay => "Relay to running program (plaintext)...",
             Self::Available | Self::Hidden => "Type a command...",
         }
     }
@@ -135,6 +145,10 @@ pub struct RuntimeBlockRecord {
     pub end_line: Option<u64>,
     pub running: bool,
     pub exit_status: Option<i32>,
+    /// Runtime marked this Block as the Flow canvas floor after `clear` (ED2).
+    pub canvas_floor: bool,
+    /// Timeline scope. Session Blocks are nested under a local host Block.
+    pub scope: BlockScope,
 }
 
 impl RuntimeBlockRecord {
@@ -159,6 +173,7 @@ pub struct BlockProjection {
     pub end_line: Option<u64>,
     /// Runtime-published exit status; `None` while running or unknown.
     pub exit_status: Option<i32>,
+    pub scope: BlockScope,
 }
 
 /// Typed host → Rust command. One action is one coarse transition.
@@ -207,6 +222,12 @@ pub enum ComposerAction {
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
     },
+    /// A replacement execution must not inherit the ended shell's admission
+    /// or a composer-status revision. A new attachment's revision starts over;
+    /// treating it as stale leaves the composer Waiting for prompt.
+    ResetAdmission {
+        pane: PaneId,
+    },
     /// Open the history overlay above this Pane's composer. Requires
     /// [`ComposerMode::Available`] and at least one recorded entry.
     OpenHistory {
@@ -237,11 +258,25 @@ pub struct ComposerSnapshot {
     pub pane: PaneId,
     pub draft: String,
     pub mode: ComposerMode,
+    /// This Pane's own presentation family (Flow/Raw/Tui), independent of
+    /// `mode`. `mode == Hidden` only says this Pane currently has no input
+    /// authority (unfocused, busy, or a pending request); it is not evidence
+    /// that the Pane itself is Raw/TUI. #1433: callers that infer Raw/TUI
+    /// eligibility for a non-focused Hidden Pane must consult this field
+    /// first so a Flow-capable sibling never flips to Raw on focus loss.
+    pub presentation_mode: PresentationMode,
     pub can_submit: bool,
     pub pending_request_id: Option<u64>,
     pub epoch: u64,
     pub allows_direct_terminal: bool,
+    /// Type 45 DirectInput on this Pane's composer eligibility (#1466/#1468).
+    /// Independent of focus: multipane hosts retract the Busy dock from this
+    /// bit so a sibling Available cannot resurrect "Type a command…".
+    pub block_scoped_direct_input: bool,
     pub blocks: Vec<BlockProjection>,
+    /// Active Flow canvas starts at this Block after `clear`. `None` while the
+    /// session has not cleared, and while shell-exit reveals full history.
+    pub canvas_floor: Option<BlockId>,
     pub last_error: Option<ComposerError>,
     /// Number of retained history entries; hosts enable recall only when > 0.
     pub history_count: usize,
@@ -253,6 +288,8 @@ pub struct ComposerSnapshot {
 struct PaneComposer {
     draft: String,
     pending_request_id: Option<u64>,
+    /// The in-flight submit was Relay, so an accept must not enter history.
+    pending_is_relay: bool,
     next_request_id: u64,
     epoch: u64,
     busy_process: Option<String>,
@@ -263,6 +300,9 @@ struct PaneComposer {
     presentation_mode: PresentationMode,
     input_route: InputRoute,
     blocks: Vec<BlockProjection>,
+    /// Retained after ED2/`clear`; cleared on admission reset. Hosts hide
+    /// earlier Blocks from the live canvas while the shell is still up.
+    canvas_floor: Option<BlockId>,
     history: PaneHistory,
     overlay: Option<HistoryOverlay>,
 }
@@ -272,6 +312,7 @@ impl PaneComposer {
         Self {
             draft: String::new(),
             pending_request_id: None,
+            pending_is_relay: false,
             next_request_id: 1,
             epoch: 1,
             busy_process: None,
@@ -280,6 +321,7 @@ impl PaneComposer {
             presentation_mode: PresentationMode::Flow,
             input_route: InputRoute::Composer,
             blocks: Vec::new(),
+            canvas_floor: None,
             history: PaneHistory::default(),
             overlay: None,
         }
@@ -343,11 +385,13 @@ impl PaneComposer {
         match self.runtime_eligibility.map(|(eligibility, _)| eligibility) {
             // Unsupported shells keep the raw admission path (out of scope
             // for prompt gating), so the composer stays usable as before.
+            Some(RuntimeComposerEligibility::Relay) => ComposerMode::Relay,
             Some(RuntimeComposerEligibility::Available)
             | Some(RuntimeComposerEligibility::Unsupported) => ComposerMode::Available,
-            // Runtime has not proved a trusted prompt for this attachment:
-            // fail closed rather than let Return silently receive `Busy`.
-            Some(RuntimeComposerEligibility::Busy) | None => ComposerMode::Busy {
+            // No trusted prompt (or DirectInput): fail closed for Submit.
+            Some(RuntimeComposerEligibility::Busy)
+            | Some(RuntimeComposerEligibility::DirectInput)
+            | None => ComposerMode::Busy {
                 process: self.running_command().unwrap_or_default(),
             },
         }
@@ -364,7 +408,8 @@ impl PaneComposer {
     }
 
     fn can_submit(&self) -> bool {
-        matches!(self.mode(), ComposerMode::Available) && !self.draft.is_empty()
+        matches!(self.mode(), ComposerMode::Available | ComposerMode::Relay)
+            && !self.draft.is_empty()
     }
 
     fn allocate_request_id(&mut self) -> u64 {
@@ -388,6 +433,7 @@ impl PaneComposer {
                 start_line: record.start_line,
                 end_line: record.end_line,
                 exit_status: record.exit_status,
+                scope: record.scope,
             })
             .collect()
     }
@@ -428,6 +474,7 @@ impl ComposerState {
                     return self.fail(ComposerError::SubmitDisabled);
                 }
                 let request_id = composer.allocate_request_id();
+                composer.pending_is_relay = matches!(composer.mode(), ComposerMode::Relay);
                 composer.pending_request_id = Some(request_id);
                 composer.overlay = None;
                 composer.bump_epoch();
@@ -444,7 +491,10 @@ impl ComposerState {
                 }
                 composer.pending_request_id = None;
                 if accepted {
-                    composer.history.record(&composer.draft);
+                    if !composer.pending_is_relay {
+                        composer.history.record(&composer.draft);
+                    }
+                    composer.pending_is_relay = false;
                     composer.draft.clear();
                 }
                 composer.bump_epoch();
@@ -484,6 +534,16 @@ impl ComposerState {
             }
             ComposerAction::ApplyRuntimeBlocks { pane, records } => {
                 let composer = self.pane_mut(pane);
+                let flagged = records
+                    .iter()
+                    .find(|record| record.canvas_floor)
+                    .map(|record| record.id);
+                composer.canvas_floor = match flagged {
+                    Some(id) => Some(id),
+                    None => composer
+                        .canvas_floor
+                        .filter(|id| records.iter().any(|record| record.id == *id)),
+                };
                 composer.blocks = composer.project_blocks(pane, &records);
                 Ok(None)
             }
@@ -503,6 +563,22 @@ impl ComposerState {
                 }
                 if composer.runtime_eligibility != next {
                     composer.runtime_eligibility = next;
+                    composer.bump_epoch();
+                    composer.close_overlay_if_unavailable();
+                }
+                Ok(None)
+            }
+            ComposerAction::ResetAdmission { pane } => {
+                let composer = self.pane_mut(pane);
+                let dirty = composer.pending_request_id.is_some()
+                    || composer.busy_process.is_some()
+                    || composer.runtime_eligibility.is_some()
+                    || composer.canvas_floor.is_some();
+                composer.pending_request_id = None;
+                composer.busy_process = None;
+                composer.runtime_eligibility = None;
+                composer.canvas_floor = None;
+                if dirty {
                     composer.bump_epoch();
                     composer.close_overlay_if_unavailable();
                 }
@@ -572,15 +648,39 @@ impl ComposerState {
             pane,
             draft: composer.draft.clone(),
             mode: composer.mode(),
+            presentation_mode: composer.presentation_mode,
             can_submit: composer.can_submit(),
             pending_request_id: composer.pending_request_id,
             epoch: composer.epoch,
             allows_direct_terminal: composer.input_route == InputRoute::DirectTerminal,
+            block_scoped_direct_input: matches!(
+                composer
+                    .runtime_eligibility
+                    .map(|(eligibility, _)| eligibility),
+                Some(RuntimeComposerEligibility::DirectInput)
+            ),
             blocks: composer.blocks.clone(),
+            // Shell-exit reveals the full retained transcript for review.
+            canvas_floor: if composer.execution_ended {
+                None
+            } else {
+                composer.canvas_floor
+            },
             last_error: self.last_error,
             history_count: composer.history.len(),
             history: composer.overlay_snapshot(),
         })
+    }
+
+    /// Sticky per-pane shell-exit latch (#1379 Defect B). Absent panes have not ended.
+    pub fn execution_ended(&self, pane: PaneId) -> bool {
+        self.panes
+            .get(&pane)
+            .is_some_and(|composer| composer.execution_ended)
+    }
+
+    pub fn any_execution_ended(&self) -> bool {
+        self.panes.values().any(|composer| composer.execution_ended)
     }
 
     fn pane_mut(&mut self, pane: PaneId) -> &mut PaneComposer {
@@ -602,3 +702,6 @@ impl ComposerState {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod presentation_tests;

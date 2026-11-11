@@ -2,6 +2,17 @@
 
 Thank you for helping improve Seyal. This repository contains the open-source Seyal terminal workspace foundation.
 
+## Finding work
+
+Use these two lists. The full open-issue list mixes historical evidence and work that already has an owner, so it is not the queue. The same lists are posted on [#1367](https://github.com/seyal-org/seyal/issues/1367).
+
+- [Development](https://github.com/seyal-org/seyal/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22%20no%3Aassignee) — issues labeled `help wanted`. They are Ready and unassigned. Claim one and implement it.
+- [Refinement](https://github.com/seyal-org/seyal/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22needs-refinement%22%20no%3Aassignee) — issues labeled `needs-refinement`. They are unassigned. One pass writes the plan, then moves the issue onto the development list, or marks it `blocked` on a specific issue.
+
+When GitHub will not let you assign yourself, comment `Owner: @your-login` and start. If another person already owns the issue, pick a different one.
+
+Issues labeled `blocked` are waiting on a named issue, pull request, or unaccepted ADR. Issues labeled `historical-evidence` are not current work.
+
 ## Before you start
 
 1. Read [GOVERNANCE.md](GOVERNANCE.md) and [AGENTS.md](AGENTS.md).

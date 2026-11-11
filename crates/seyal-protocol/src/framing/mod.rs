@@ -8,32 +8,36 @@ mod envelope;
 mod execution;
 mod message;
 mod payload;
+mod presentation;
 
 #[cfg(test)]
 mod tests;
 
 pub use crate::pass7::{
-    BlockTimeline, CommandBlock, CommandBlockState, ComposerCommandRef, ComposerEligibility,
-    ComposerResult, ComposerResultCode, ComposerStatus, HistoryCell, HistoryRangeRequest,
-    HistoryRangeSnapshot, HistoryRangeStatus, HistoryRow, HistorySourceCell, ResizeRequest,
-    ResizeResult, ResizeResultCode, TerminalKey, TerminalKeyKind, TerminalKeyModifiers,
-    TerminalKeyV2, TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers, ViewportLineIds,
-    CAP_CORRELATED_RESIZE, CAP_EXTENDED_TERMINAL_KEY, CAP_SEMANTIC_TERMINAL_KEY,
+    BlockScope, BlockTimeline, BlockTrust, CommandBlock, CommandBlockState, ComposerCommandRef,
+    ComposerEligibility, ComposerResult, ComposerResultCode, ComposerStatus, ComposerTarget,
+    ComposerTargetMode, ComposerTargetReason, HistoryCell, HistoryRangeRequest,
+    HistoryRangeSnapshot, HistoryRangeStatus, HistoryRow, HistorySourceCell, InputTargetClass,
+    ResizeRequest, ResizeResult, ResizeResultCode, SessionConsent, SessionConsentDecision,
+    SessionOffer, SessionOverlayWire, SessionStatus, TerminalKey, TerminalKeyKind,
+    TerminalKeyModifiers, TerminalKeyV2, TerminalKeyV2Event, TerminalKeyV2Kind,
+    TerminalKeyV2Modifiers, ViewportLineIds, CAP_CORRELATED_RESIZE, CAP_EXTENDED_TERMINAL_KEY,
+    CAP_SEMANTIC_TERMINAL_KEY, CAP_SESSION_BOOTSTRAP, COMMAND_BLOCK_FLAG_CANVAS_FLOOR,
     HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG, HISTORY_CELL_WIDTH_MASK,
     HISTORY_CELL_WIDTH_SHIFT, MAX_HISTORY_GRAPHEME_BYTES, MAX_HISTORY_RANGE_BYTES,
     MAX_HISTORY_RANGE_CELLS, MAX_HISTORY_RANGE_LINES, MAX_HISTORY_SIDECAR_BYTES,
 };
 
 pub use envelope::{
-    ErrorCode, FrameHeader, FramingError, CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS,
-    CAP_GRAPHEME_DISPLAY, CAP_OBSERVER, CAP_VIEWPORT_LINE_IDS, HEADER_LEN, MAGIC, MAJOR,
-    MAX_EXECUTION_LIST_ENTRIES, MAX_FRAME_PAYLOAD, MAX_INPUT_BYTES, MINOR,
+    ErrorCode, FrameHeader, FramingError, CAP_ATTACHMENT_DELIVERY_CONTROL, CAP_BINARY_DISPLAY,
+    CAP_COMMAND_BLOCKS, CAP_GRAPHEME_DISPLAY, CAP_OBSERVER, CAP_VIEWPORT_LINE_IDS, HEADER_LEN,
+    MAGIC, MAJOR, MAX_EXECUTION_LIST_ENTRIES, MAX_FRAME_PAYLOAD, MAX_INPUT_BYTES, MINOR,
 };
 
 pub use execution::{
-    CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode,
-    TerminateExecutionRequest, TerminateExecutionResult, TerminateExecutionResultCode,
-    CAP_EXECUTION_PROVISIONING,
+    CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode, MintWorkspaceRequest,
+    MintWorkspaceResult, MintWorkspaceResultCode, TerminateExecutionRequest,
+    TerminateExecutionResult, TerminateExecutionResultCode, CAP_EXECUTION_PROVISIONING,
 };
 
 pub use message::{decode_message, encode_frame, Message, MessageType};
@@ -42,4 +46,9 @@ pub use payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList,
     ExecutionListEntry, HostSearch, HostSelection, HostSelectionAction, InputRef, Lifecycle,
     LifecycleMessage, Resize, Resync, Role, ServerHello, TerminalMouse, TerminalMouseKind,
+};
+
+pub use presentation::{
+    decode_presentation_envelope, envelope_presentation_frame, PresentationEnvelope,
+    ResumeDelivery, SuspendDelivery,
 };

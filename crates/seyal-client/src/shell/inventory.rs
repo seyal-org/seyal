@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, TerminalTabId, WorkspaceId};
 
 use super::workspace::Workspace;
 
@@ -50,6 +50,7 @@ pub struct PaneNavItem {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionNavItem {
+    pub terminal_tab: TerminalTabId,
     pub execution: ExecutionId,
     pub workspace: WorkspaceId,
     pub workspace_name: String,
@@ -108,21 +109,25 @@ pub(super) fn build(
                     id: pane.id,
                     title: pane.title.clone(),
                     focused: focused_here,
-                    execution: pane.execution,
+                    execution: pane.execution(),
                 });
-                if let Some(execution) = pane.execution
-                    && seen_executions.insert(execution)
-                {
-                    sessions.push(SessionNavItem {
-                        execution,
-                        workspace: workspace.id,
-                        workspace_name: workspace.name.clone(),
-                        tab: tab.id,
-                        tab_title: tab.title.clone(),
-                        pane: pane.id,
-                        pane_title: pane.title.clone(),
-                        focused: focused_here,
-                    });
+                for terminal in &pane.terminal_tabs {
+                    if let Some(execution) = terminal.execution
+                        && seen_executions.insert(execution)
+                    {
+                        sessions.push(SessionNavItem {
+                            terminal_tab: terminal.id,
+                            execution,
+                            workspace: workspace.id,
+                            workspace_name: workspace.name.clone(),
+                            tab: tab.id,
+                            tab_title: tab.title.clone(),
+                            pane: pane.id,
+                            pane_title: pane.title.clone(),
+                            focused: focused_here
+                                && pane.selected_terminal_tab == Some(terminal.id),
+                        });
+                    }
                 }
             }
         }

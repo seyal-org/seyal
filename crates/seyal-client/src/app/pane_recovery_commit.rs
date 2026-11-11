@@ -113,7 +113,7 @@ impl ApplicationRoot {
                     .apply(crate::presentation::PresentationAction::Transition {
                         mode: desired_mode,
                         identity,
-                        explicit: self.explicit_raw
+                        explicit: self.explicit_flow
                             && desired_mode == crate::presentation::PresentationMode::Raw,
                         epoch: current.epoch,
                     })
@@ -138,6 +138,15 @@ impl ApplicationRoot {
         self.pane_client_raws.insert(pane, handle);
         if self.pane_recovery.primary_pane == Some(pane) && self.client_handle.is_none() {
             self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+        } else if let Some(terminal_tab) = self.shell.selected_terminal_tab(pane).ok().flatten() {
+            // Split-created Panes are provisioned through their TerminalTab
+            // intent. Preserve that owner mapping after attachment recovery so
+            // later tab selection, Pane loss, and exact-handle routing continue
+            // to identify the recovered Controller.
+            self.extra_terminal_clients
+                .insert(terminal_tab, crate::ffi::ClientRegistryHandle::new(handle));
+            self.terminal_client_raws.insert(terminal_tab, handle);
+            self.terminal_authorities.insert(terminal_tab, authority);
         } else {
             self.extra_pane_clients
                 .insert(pane, crate::ffi::ClientRegistryHandle::new(handle));

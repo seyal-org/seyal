@@ -1,22 +1,44 @@
 import Foundation
 
 struct ComposerStatusRelayTracker {
-  private var lastKey: (revision: UInt64, attachmentLow: UInt64, attachmentHigh: UInt64)?
+  private struct Key: Equatable {
+    let revision: UInt64
+    let attachmentLow: UInt64
+    let attachmentHigh: UInt64
+    let targetBlockID: UInt64
+    let targetGeneration: UInt64
+    let targetRevision: UInt64
+    let targetClass: UInt8
+    let targetMode: UInt8
+  }
+
+  private var lastKey: Key?
 
   mutating func shouldRelay(
     revision: UInt64,
     attachmentIDLow: UInt64,
-    attachmentIDHigh: UInt64
+    attachmentIDHigh: UInt64,
+    targetBlockID: UInt64 = 0,
+    targetGeneration: UInt64 = 0,
+    targetRevision: UInt64 = 0,
+    targetClass: UInt8 = 0,
+    targetMode: UInt8 = 0
   ) -> Bool {
     guard revision != 0 else { return false }
-    if let previous = lastKey,
-      previous.revision == revision,
-      previous.attachmentLow == attachmentIDLow,
-      previous.attachmentHigh == attachmentIDHigh
-    {
+    let key = Key(
+      revision: revision,
+      attachmentLow: attachmentIDLow,
+      attachmentHigh: attachmentIDHigh,
+      targetBlockID: targetBlockID,
+      targetGeneration: targetGeneration,
+      targetRevision: targetRevision,
+      targetClass: targetClass,
+      targetMode: targetMode
+    )
+    if lastKey == key {
       return false
     }
-    lastKey = (revision, attachmentIDLow, attachmentIDHigh)
+    lastKey = key
     return true
   }
 
@@ -35,8 +57,11 @@ struct ComposerStatusRelayTracker {
 @MainActor
 extension RustDisplayBridge {
   func currentFrame() -> SeyalPreparedFrame? {
-    guard isConnected, selectClient() else { return nil }
-    let frame = seyal_bridge_frame()
+    guard isConnected, clientHandle != 0 else { return nil }
+    // Geometry and keys already follow the focused Pane. The prepared frame
+    // must too, without seyal_bridge_select moving this bridge's readiness fd.
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    let frame = seyal_bridge_frame_for(handle)
     guard frame.cells != nil, frame.cell_count > 0 else { return nil }
     return frame
   }
@@ -56,7 +81,7 @@ extension RustDisplayBridge {
   /// Minimal read-only Pass 8 presentation seam. The rich command transcript
   /// remains the independent Pass 7.1 timeline above.
   func currentBlockMetadata() -> RuntimeBlockMetadata? {
-    guard isConnected, selectClient() else { return nil }
+    guard isConnected, selectPresentedClient() else { return nil }
     let value = seyal_bridge_execution_block_metadata()
     guard value.revision > 0,
       value.start_line_id > 0,
@@ -72,7 +97,7 @@ extension RustDisplayBridge {
   }
 
   func currentTimeline() -> [NativeBlockRecord] {
-    guard isConnected, selectClient() else { return [] }
+    guard isConnected, selectPresentedClient() else { return [] }
     let count = Int(seyal_bridge_block_count())
     return (0..<count).compactMap { index in
       let record = seyal_bridge_block_record(UInt32(index))
@@ -96,6 +121,18 @@ extension RustDisplayBridge {
     }
   }
 
+  /// Re-projects Runtime-owned command history when the focused Pane switches
+  /// terminal tabs. The composer transcript is pane-projected, so selection
+  /// must refresh it even when the newly selected Runtime's revision happens
+  /// to equal the previous terminal's revision.
+  func refreshPresentedTerminalTimeline() {
+    guard isConnected, selectPresentedClient() else { return }
+    runtimeBlockMetadata = currentBlockMetadata()
+    lastTimelineRevision = seyal_bridge_block_timeline_revision()
+    onTimeline()
+    _ = selectClient()
+  }
+
   func nextComposerRequestID() -> UInt64 {
     guard isConnected, selectClient() else { return 0 }
     return seyal_bridge_next_composer_request_id()
@@ -105,20 +142,44 @@ extension RustDisplayBridge {
   /// attachment. Rust owns the status meaning and revision; the host only
   /// scopes deduplication to the attachment that produced it.
   func publishComposerStatus() {
-    guard isConnected, selectClient() else { return }
+    guard isConnected, selectPresentedClient() else { return }
     let status = seyal_bridge_composer_status()
+    let target = seyal_bridge_composer_target()
     let shouldRelay = composerStatusRelayTracker.shouldRelay(
       revision: status.revision,
       attachmentIDLow: status.attachment_id_low,
-      attachmentIDHigh: status.attachment_id_high
+      attachmentIDHigh: status.attachment_id_high,
+      targetBlockID: target.block_id,
+      targetGeneration: target.target_generation,
+      targetRevision: target.revision,
+      targetClass: target.target_class,
+      targetMode: target.mode
     )
     guard shouldRelay else { return }
     let accepted = onComposerStatus(
-      NativeComposerStatus(eligibility: status.eligibility, revision: status.revision)
+      NativeComposerStatus(
+        eligibility: status.eligibility,
+        revision: status.revision,
+        targetBlockID: target.block_id,
+        targetGeneration: target.target_generation,
+        targetRevision: target.revision,
+        targetClass: target.target_class,
+        targetMode: target.mode
+      )
     )
     if !accepted {
       composerStatusRelayTracker.abandonClaim()
     }
+  }
+
+  /// Multipane FOCUS_PANE: drop dedup and re-apply the newly focused
+  /// Controller's composer status. A sibling Available can clear the shared
+  /// ApplicationRoot target; without this, a quiet DirectInput REPL never
+  /// republishes and Metal keys die until the next status revision.
+  func republishFocusedComposerStatus() {
+    guard isConnected, windowFocusedDisplayHandle != 0 else { return }
+    composerStatusRelayTracker.abandonClaim()
+    publishComposerStatus()
   }
 
   /// Transport lost: the relayed fact no longer describes a live attachment.
@@ -128,7 +189,7 @@ extension RustDisplayBridge {
   }
 
   func publishComposerResult() {
-    guard isConnected, selectClient() else { return }
+    guard isConnected, selectPresentedClient() else { return }
     let result = seyal_bridge_composer_result()
     guard result.request_id != 0,
       result.request_id != lastComposerResultRequestID

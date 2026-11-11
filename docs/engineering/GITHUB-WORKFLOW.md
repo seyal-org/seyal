@@ -21,9 +21,15 @@ Only work explicitly marked **Ready** is eligible for implementation pickup.
 
 A GitHub Project with these states is the preferred long-term control plane. While the repository remains under a personal account or the Project is not configured, the explicit `## State` field in each Issue is the approved temporary source of workflow status. Keep it current; do not infer readiness from an open Issue alone.
 
+Contributor queues are labels, so they stay visible without a Project board:
+
+- Development: label `help wanted`, no assignee. These issues are Ready.
+- Refinement: label `needs-refinement`, no assignee.
+- Waiting: label `blocked`, with the blocking issue named in the body.
+
 Recommended Project views once enabled:
 
-- Ready queue: `Status = Ready`, grouped by milestone/parent.
+- Ready queue: `Status = Ready`, grouped by milestone/parent. The same issues carry `help wanted` while unassigned.
 - Active: In Progress + In Review + Validation.
 - Blocked: Status = Blocked with dependency fields visible.
 - M001: filtered to the M001 milestone/parent hierarchy.
@@ -59,7 +65,9 @@ Keep labels orthogonal to native type. Recommended small set:
 
 ### Special state/risk
 
-`blocked`, `needs-spec`, `needs-adr`, `performance-sensitive`, `security-sensitive`, `breaking-change`
+`help wanted`, `needs-refinement`, `blocked`, `needs-spec`, `needs-adr`, `performance-sensitive`, `security-sensitive`, `breaking-change`
+
+`help wanted` and `needs-refinement` are the contributor queues defined in `ISSUE-PROTOCOL.md`. `blocked` means a named dependency is still open.
 
 Use `type:architecture`, `type:performance`, `type:security`, or `type:spike` only where native types do not express the distinction. Avoid duplicating Feature/Bug/Task as labels after organization Issue Types are available.
 

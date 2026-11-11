@@ -348,6 +348,8 @@ pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
         WorkspaceCommandId::CommandPaletteClose => BindingContext::PALETTE,
         WorkspaceCommandId::CommandPaletteOpen
         | WorkspaceCommandId::TabCreate
+        | WorkspaceCommandId::TerminalCreate
+        | WorkspaceCommandId::TerminalCloseFocused
         | WorkspaceCommandId::TabCloseFocused
         | WorkspaceCommandId::TabSelectPrevious
         | WorkspaceCommandId::TabSelectNext
@@ -357,6 +359,21 @@ pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
         | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::PaneFocusLeft
+        | WorkspaceCommandId::PaneFocusRight
+        | WorkspaceCommandId::PaneFocusUp
+        | WorkspaceCommandId::PaneFocusDown
+        | WorkspaceCommandId::PaneZoomToggle
+        | WorkspaceCommandId::PaneSwapLeft
+        | WorkspaceCommandId::PaneSwapRight
+        | WorkspaceCommandId::PaneSwapUp
+        | WorkspaceCommandId::PaneSwapDown
+        | WorkspaceCommandId::PaneMoveLeft
+        | WorkspaceCommandId::PaneMoveRight
+        | WorkspaceCommandId::PaneMoveUp
+        | WorkspaceCommandId::PaneMoveDown
+        | WorkspaceCommandId::PaneEqualizeFocused
+        | WorkspaceCommandId::PaneEqualizeTab
         | WorkspaceCommandId::PresentationSetFlow
         | WorkspaceCommandId::PresentationSetRaw
         | WorkspaceCommandId::PresentationSetTui
@@ -366,7 +383,13 @@ pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
         | WorkspaceCommandId::AppQuit
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
-        | WorkspaceCommandId::GotoOpen => BindingContext::APP,
+        | WorkspaceCommandId::GotoOpen
+        | WorkspaceCommandId::AppCloseFocused
+        | WorkspaceCommandId::WindowNew
+        | WorkspaceCommandId::WindowClose
+        | WorkspaceCommandId::WindowCycleNext
+        | WorkspaceCommandId::WindowCyclePrevious
+        | WorkspaceCommandId::WindowSelectOrdinal => BindingContext::APP,
     }
 }
 

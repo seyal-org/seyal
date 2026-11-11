@@ -312,3 +312,26 @@ AB-1.9 production path: no host, `StartAgentRun` → `Failed`, no mint. After th
 - **§9** (IPC is not authorization): preserved. Host advertisement is not a grant; `adapter.execute` is an additional scope on an authenticated principal.
 
 No ADR is created, amended, reopened or superseded.
+
+## 15. SPEC-030 supervised task transport reconciliation (Proposed via PR #1340)
+
+Candidate extension under [#1327](https://github.com/seyal-org/seyal/issues/1327); §§1–14 and existing launch authority remain Accepted and unchanged. §15 remains **Proposed after PR #1340 merges**. Acceptance requires Accepted ADR-024 and the subsequent independently approved, user-authorized non-author merge of the spec-only normative-profile acceptance change in SPEC-030 §11. #1327 normative completion and #1330/#1331 Ready remain blocked until those gates pass. Reuse one `StandaloneProcessHost`, one `ExecutionHost` seam and the SPEC-026 lifecycle.
+
+```text
+InputTransport = ObservationOnly | OneShotStdin | FramedBidirectionalStdio
+
+Host.start(run, binding_generation, frozen_manifest_launch)
+  -> supervised HostHandle / spawn evidence (NOT task delivery)
+Host.deliver(handle, authorized RunInputPackage, mode)
+  -> nonblocking admission to bounded writer (NOT completion)
+Host.observe(handle) -> bounded output + delivery + liveness observations
+Host.signal_cancel(handle) / Host.reap(handle) -> exact child/process-group evidence
+```
+
+- `ObservationOnly` is the default for all older manifests and never qualifies to execute newly submitted user tasks. The backend alone chooses the transport/profile from the enabled generation-frozen manifest; the client never provides raw spawn args, env, cwd or stdin bytes outside typed task admission.
+- One-shot: transmit the entire already-frozen, bounded request through a backpressured writer, handle EINTR/short writes/EPIPE, close stdin after success; record `NotSent`, `PartiallySent`, `WrittenAndClosed`, or `DeliveryUnknown` with fenced run identity. **The actual first-byte send consumes the single SPEC-015 §8 backend-owned serialized privacy handoff fence**; preflight/queue admission alone is insufficient. A revoke ordered first prevents transport. If handoff wins, persist effect-possible evidence and reconcile/cancel on later revocation; no detached stale send-token, no blocking child I/O under the backend-domain mutex. This fence authorizes only provider prompt handoff; any shell/network/tool effect independently performed by the external CLI is outside the ADR-014 Action boundary (SPEC-016 §19) and can never be labelled Seyal-authorized or `BackendEnforced`. Such routes are ineligible when policy requires Seyal-controlled effect authorization. Written-and-closed is not proof of agent acceptance, nor is exit status 0 alone proof of structured task success.
+- Framed duplex: the host transports bounded byte frames with concurrent read/write fairness, length/deadline limits, bounded queued bytes, cancel/reap and no infinite retries. **#1334 alone** owns ACP JSON-RPC request IDs, protocol version/capability negotiation, semantic frame/state validation and permission handling; the host never duplicates this logic.
+- Child stderr is sanitized, separately bounded diagnostic evidence; stdout is not approval truth. On opaque/malformed vendor output, record observation/parse failure rather than invent successful progress/outcome. Never persist raw auth/config details.
+- Retain `env_clear` and resolve narrowly approved manifest environment variables through the backend, including same-user CLI config dirs only with reviewed evidence; no wholesale inherited env or token scraping. Do not inject unsafe bypass flags into Codex/Claude.
+- No synchronous I/O, waiting, JSON parsing, terminal interaction or blocking process-group signaling under the IntegrationService mutex. The SPEC-015 privacy serialization critical section spans only the mandatory final eligibility/irreversible-handoff boundary; remaining backpressured I/O is off-lock and generation-fenced. Bounded shutdown/cancellation includes blocked stdin, output floods, permission wait, client detach, daemon exit and descendants. Reap is based on OS child handle, never recycled PID or presentation loss.
+- A child that may have started is effect-ambiguous after communication loss: SPEC-026 §9.7 requires **reconciliation on the existing Attempt and AgentRun**, never automatic re-dispatch or creation of a replacement Attempt. SPEC-026 §9.6 permits **same-Attempt fallback** (`Dispatching -> Prepared`) only with typed proof the original dispatch was **NotSent / not started and no effect could have occurred**. A **fresh retry** under SPEC-026 §9.3 may create a **new Attempt with an explicit frozen input snapshot** only after the previous Attempt has been closed with evidence/disposition. Output disconnect, partial send, or lost child observation is not proof of not-started.

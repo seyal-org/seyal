@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426; Blocks-default for supported shells accepted 2026-11-06 under #1426; **Accepted** Block-scoped direct-input amendment under #1466 (product-owner acceptance 2026-11-08; normative on merge of architecture-only PR #1469)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426); Blocks-default 2026-11-06 (#1426); Block-scoped direct-input Accepted 2026-11-08 (#1466 / PR #1469)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1227,4 +1227,432 @@ pre-V2 key allowlist succeeds at step 4.
   aligned to this chain in a follow-up specification PR, removing the
   "must not request bit 8 and bit 9 in the same ClientHello" restriction.
 - #1043 implements the client chain and its tests.
+
+## 2026-10-29 amendment — orthogonal composer input target (ADR-026, #1384)
+
+**Status:** Accepted on merge of this acceptance PR by a non-author maintainer under #1384. This cross-link is normative: read the listed accepted text through ADR-026. It does not rewrite the normative invariants, mechanism text, or required-seam list above. The #1041 prompt-anchor section stays Proposed. An author or agent comment is not acceptance.
+
+ADR-026 owns the behavior. This section exists so ADR-009 is read through that Accepted ADR.
+
+Read the following accepted text through ADR-026 rather than by editing it here:
+
+- **Composer eligibility (invariant 7).** The sentence "Composer eligibility (invariant 7) holds exactly when the state is `AtPrompt`, the presentation is Flow, and the canonical state is on the primary screen" is derived from the ADR-026 §3.2 input target, not from local integration state alone. A `TrustedShell(session)` target makes the composer `Submit`. A `ForegroundProgram(b)` target may offer labeled `Relay`. Block lifecycle `Running` does not by itself decide either mode. While the session overlay is `Armed` or `Delivering`, every direct-input route, including Raw, is held.
+- **Rejected alternative A.** Alternative A in this ADR ("Keep one coarse Block and write composer text to the shell") stays rejected as an unscoped raw-shell proxy. ADR-026 relay is not that alternative. It is a labeled line contract, creates no guessed Blocks, and never enters composer history, persisted or synced drafts, agent context or telemetry.
+- **#968 typed-input rule.** "Hook installation is never presented to ZLE as typed input, is never redrawn, and never enters shell history" remains the local spawn rule. The one exception, only after explicit consent, is ADR-026's one-time secret-free stager. The payload written after echo is already off is not a typed command line and carries the session secret without putting it on screen. Seyal does not mutate remote history options. The stager line itself may still be stored by the remote shell's existing history.
+- **Marker shapes.** Local mechanism 3 stays three fixed shapes (`A`, `C`, `D`). ADR-026 readiness is a fourth marker shape, accepted only while the session overlay is `Armed` and only when it carries the current one-time challenge. It is not an `A`, `C` or `D`. It does not create a Block or grant trust.
+- **Mechanism 5 (nested interactive shells).** The rule that nested interactive shells (`zsh`, `ssh`) "run inside the outer command's Running Block … emit no trusted marker" is amended for the **consented** case only. A session scope may become session-trusted with its own secret and run the mechanism-5 machine. The parser's accepted-secret set holds the execution nonce **plus at most one session secret**. `SessionTrusted` is presentation-only and never substitutes for `LocalTrusted` in a security, approval, agent or audit decision. Decline, unsupported bootstrap, and depth two stay on the no-trusted-marker reading. A `Candidate` requires the session overlay to be `None`, `Declined` or `Failed`; arming while `Trusted(_)` is forbidden.
+- **Mechanism 2 (per-execution secret).** The local secret remains the per-execution nonce delivered over an inherited descriptor, never the environment. "The secret" that trusts an `A`/`C`/`D` marker is an accepted secret for a scope: the execution nonce or the active session secret. A marker is trusted only against the scope whose secret it carries. Readiness uses the separate one-time challenge, not the session secret.
+- **Alternate screen.** Alternate-screen rules apply per scope (ADR-026 §7.2). A session alternate-screen program is still full TUI takeover of the Pane.
+
+### Seams (allocated; not yet implemented)
+
+These ADR-026 seams are recorded here by reference only. They are not inserted into the accepted "Required implementation seams" list above. They are allocated by Accepted ADR-026 and are not yet implemented until an implementation Issue is Ready:
+
+- session overlay on a host Block (ADR-026 F4);
+- at most one session secret beside the execution nonce;
+- target-generation fence (ADR-026 §3.2);
+- session-scoped Blocks (`scope` / `trust` on `BlockTimeline`).
+
+## 2026-11-01 accepted amendment — Raw is system-selected, not user-selectable (#1404)
+
+**Status:** **Superseded** for resting-presentation / Raw-selection product
+policy by the 2026-11-04 grid-first amendment under #1438. Retained as
+historical record of the 2026-11-01 decision (Accepted via PR #1405 / status
+PR #1415). Do not implement new work from this section. Single-authority,
+mutual-exclusion, and “no Raw viewport under Flow” invariants from earlier
+accepted ADR-009 text remain in force and are restated by #1438.
+
+### Problem
+
+The accepted contract allows a user to select Raw explicitly and return to Flow
+from the command palette. The product direction is that normal command work
+should remain in Flow/Blocks and that users should not switch a supported Pane
+to a conventional Raw presentation manually. This does not remove the safety
+fallback: a Pane still needs a usable direct-terminal presentation when trusted
+Flow eligibility is absent or arbitrary character-level input is required.
+
+### Accepted decision
+
+Keep `Flow | Raw | TUI` as mutually exclusive presentations, but make Raw
+system-selected only:
+
+- A newly created Pane starts in Flow, as it already does under the accepted
+  pane-creation contract.
+- Rust selects Raw when current trusted Flow eligibility cannot be established,
+  shell integration is unsupported/quarantined, or direct-terminal semantics
+  are required. Raw remains a full-Pane, fully usable direct-terminal fallback
+  over the same execution and canonical terminal state.
+- Remove user-facing actions that explicitly select or toggle Raw, including
+  the “Use Raw Terminal” and “Return to Flow” palette choices, the
+  `presentation.set_raw` / `presentation.toggle_raw` workspace commands, and
+  their default binding. Existing custom bindings to removed commands must be
+  rejected with an actionable configuration diagnostic; they must not silently
+  become another command or route.
+- A user request to enter Flow may take effect only when Rust can prove current
+  Flow eligibility under the existing execution/attachment/presentation fence.
+  It cannot override an automatic Raw fallback. When eligibility later becomes
+  valid, Rust may return the Pane to Flow through the existing fenced
+  presentation transition; it does not wait for a user command.
+- TUI remains a full-Pane takeover on canonical alternate-screen state. On TUI
+  exit, Rust re-evaluates current eligibility and restores Flow or automatic
+  Raw without recreating the execution.
+
+The automatic Raw renderer, direct-terminal input, IME, mouse, focus,
+accessibility and resize behavior remain governed by the accepted Raw/TUI
+contracts. There is no Raw viewport or input route beneath Flow.
+
+### Consequences
+
+- Users cannot force a conventional terminal view for debugging while a Pane is
+  safely eligible for Flow. Diagnostic workflows must use existing logs,
+  inspections or a separately accepted diagnostic action that does not create a
+  second input owner.
+- Unsupported shells and interactive programs continue to work through
+  automatic Raw; they do not gain guessed Blocks or composer eligibility.
+- Returning from automatic Raw is based on fresh Rust-owned eligibility. A
+  manual “Return to Flow” action cannot override unsupported or stale state.
+- Keybinding configuration changes: the default Raw toggle and Raw command
+  identifiers cease to be supported. Compatibility behavior for legacy
+  configuration and any per-Pane explicit-Raw latch must be settled before
+  acceptance; removed commands must never fail open to direct input or Flow.
+- #867 / PR #1286 currently include explicit Raw selection in their scope and
+  evidence. They require explicit reconciliation after this proposal is
+  accepted and are not changed by this proposal.
+
+### Alternatives considered
+
+- **Keep explicit Raw selection.** Rejected for the requested product direction;
+  it permits a supported Flow Pane to leave its Blocks/composer presentation
+  by user choice.
+- **Remove Raw entirely.** Rejected: unsupported shells and programs requiring
+  direct character-level input would lose a safe usable presentation, or would
+  require a separate replacement interaction contract.
+- **Keep Raw only as an automatic fallback, retaining TUI.** Accepted: it
+  preserves existing terminal safety and compatibility while removing the
+  manual presentation choice.
+
+### Required implementation evidence
+
+- Confirm all manual Raw entry points and custom-keybinding paths are covered,
+  and define legacy-config and old Pane-state behavior precisely.
+- Prove unsupported-shell and failure/quarantine states still select a usable
+  Raw direct-input route, with no composer admission or hidden Flow input.
+- Prove TUI entry/exit still returns to current Flow eligibility or Raw
+  fallback over the same `ExecutionId`, PTY and `TerminalState`.
+- Review route fencing, IME, accessibility, resize and security behavior for
+  manual-action removal; preserve the existing direct-terminal acceptance for
+  Raw/TUI.
+
+### Follow-up for implementation
+
+Update SPEC-008 and SPEC-024, and update SPEC-006 only where needed to clarify
+that direct-terminal input remains available in automatic Raw/TUI. Update the
+User Guide. Reconcile #867 / PR #1286 without expanding or changing their
+in-review state silently. The owning implementation Issue must be Ready, and
+the required evidence above must be attached to its implementation PR.
+
+> **Supersession note (2026-11-04):** The follow-up above targeted #1406 under
+> the Flow-primary / system-selected-Raw policy. That implementation direction
+> is blocked. See the grid-first amendment below and Architecture Issue #1438.
+
+## 2026-11-04 accepted amendment — Grid-first resting presentation (#1438)
+
+**Status:** Accepted by the product owner on 2026-11-04 after headed evidence
+that Flow, Raw, and TUI each failed basic interactive use, and after
+independent Sol/Opus decision review. Normative on merge of the
+architecture-only PR under #1438. This amendment **supersedes** the
+resting-presentation and Raw-selection product policy of the 2026-11-01
+#1404 amendment. It does **not** supersede earlier accepted ADR-009
+invariants: one `TerminalExecution` / PTY / VT / `TerminalState` authority;
+mutually exclusive Flow | Raw | TUI; no Raw viewport or input route under
+Flow; Metal as the production macOS renderer; Rust-owned portable
+presentation policy (ADR-015).
+
+### Problem
+
+After months of Flow-primary investment, headed multipane use still fails
+basic terminal work: Flow blanks on scroll and loses split-pane content;
+Block cards can show a command with an empty body; the composer can stick on
+“Waiting for prompt…”. Explicit Raw entry via menu/⌘↩ fails to latch resting
+Raw, so the next shell-integration composer-status update recomputes resting
+as Flow and snaps the Pane back to Blocks without usable output. TUI return
+depends on the same resting restore. Shipping Flow as the default while the
+canonical grid path is unreliable leaves no working product surface.
+
+The #1404 direction (remove user Raw; keep Flow default; auto-return to Flow
+when eligibility appears) deepens that failure mode. Basic interactive
+reliability must become the resting contract; Flow/Blocks remain the
+structured product direction but only after a headed reliability gate.
+
+### Accepted decision
+
+Keep `Flow | Raw | TUI` as mutually exclusive presentations over the same
+execution. Change the **resting** policy to **grid-first**:
+
+1. **Default resting presentation is Raw.** A newly created Pane, and cold
+   start of a Pane without an explicit Flow choice, presents the full-Pane
+   primary Metal grid with direct-terminal input. Shell integration may still
+   be injected and may still populate `BlockTimeline`; integration status
+   alone must not change the visible resting presentation away from Raw while
+   Flow is quarantined.
+2. **Flow is explicit opt-in and quarantined as default.** Enter Flow only
+   through an explicit user command (palette / workspace command) when Rust
+   can prove current Flow eligibility under the existing
+   execution/attachment/presentation fence. While quarantined, Rust must not
+   automatically promote Raw → Flow because composer eligibility, a trusted
+   prompt, or shell-integration status became Available.
+3. **One Rust selection path.** Menu, keybinding, palette, and restore must
+   share one resting-selection apply path that updates both the presentation
+   snapshot and the durable resting latch (today’s `explicit_raw` /
+   per-Pane resting choice). A second writer that changes mode without the
+   latch is a merge-blocking defect.
+4. **TUI remains alternate-screen takeover only.** It is not a resting
+   choice. On TUI exit, restore that Pane’s stored resting presentation (Raw
+   by default; Flow only if explicitly chosen and still eligible). Do not
+   invent a user-selected resting TUI.
+5. **Unsupported / quarantined integration still forces Raw** when Flow cannot
+   be proven safe, including when the user previously opted into Flow.
+6. **No Raw viewport under Flow.** Entering Flow yields/hides the full-Pane
+   Raw interaction surface exactly as today.
+7. **Flow promotion gate.** Flow may become the default resting presentation
+   again only after a separate accepted readiness record proves headed
+   multipane reliability: command output bodies, long scrollback without
+   blank frames, split/focus/reconnect retention, vim/less/htop enter/exit,
+   live-tail/empty-body cases, and an agreed latency/CPU/RSS budget versus
+   Raw. Until that gate passes, Flow remains opt-in.
+8. **Block decorations on the Raw grid** (gutter/separators/exit/copy/agent
+   attach as read-only overlays over `BlockTimeline`) are an allowed future
+   direction and require their own Issue/ADR slice before production; they
+   are not authorized by this amendment alone.
+
+### Consequences
+
+- Cold-start and new-Pane UX is a conventional full-Pane terminal until Flow
+  is explicitly chosen or later re-promoted.
+- #1406 (remove manual Raw; keep Flow default) is superseded and must not
+  merge under the #1404 direction.
+- Keybinding/palette Raw commands remain meaningful: they select resting Raw
+  (or toggle resting Raw ↔ Flow where a toggle remains) and must latch
+  resting state. Auto-snap from Raw to Flow on shell status is forbidden
+  under quarantine.
+- Per-Pane resting presentation (#1435) remains required so focus changes
+  cannot rewrite another Pane’s resting choice through a global latch.
+- Agent-native Block metadata continues to accumulate under Raw; Flow is not
+  required for Timeline existence.
+- CI green without headed Raw/TUI checklist evidence is insufficient to claim
+  presentation readiness.
+
+### Alternatives considered
+
+- **Keep Flow primary; fix Blocks first.** Rejected: current headed failures
+  span multiple Flow subsystems; not a reliable this-quarter default.
+- **Raw default with automatic promotion to Flow when integration is
+  trusted.** Rejected: same class of bug as today’s Raw→Flow snap-back;
+  integration proof ≠ render reliability.
+- **Delete Flow immediately.** Rejected: quarantine with an explicit
+  promotion gate and later kill-date review is cheaper and reversible.
+- **Always-grid with Block chrome never replacing the grid.** Deferred as a
+  follow-on design; may graduate after Raw default lands and decorations are
+  specified.
+
+### Required implementation evidence
+
+- Architecture-only merge of this amendment under #1438 before any production
+  presentation default change.
+- Subsequent Ready implementation Issue(s) must prove:
+  - single resting-selection path for menu/keybinding/palette/restore;
+  - new Pane / cold start defaults to Raw;
+  - no automatic Raw→Flow on composer-status / trusted-prompt alone while
+    Flow is quarantined;
+  - TUI exit restores stored resting mode;
+  - headed Raw checklist (prompt, `ls`, long scrollback, split, resize,
+    vim/less/htop, Ctrl-C, detach/reattach) as release evidence for that
+    implementation PR.
+- SPEC-008 / SPEC-024 (and SPEC-006 only if needed) and the User Guide must
+  be updated in the implementation track after this ADR is normative.
+- Reconcile #1406, #867 / PR #1286, and #1435 explicitly; do not silently
+  redefine their Done criteria.
+
+### Follow-up for implementation
+
+1. Land this architecture-only PR under #1438.
+2. Open/Ready an implementation Issue for Raw default + single selection path
+   + no auto Flow promotion (production code + tests + headed evidence).
+3. Keep #1435 (per-pane presentation) on the critical path before multipane
+   resting choices can be correct under focus changes.
+4. Only after the headed Raw gate is green, schedule Flow reliability work
+   against the promotion gate—not as the cold-start default.
+
+## 2026-11-05 amendment — Flow for split-created Panes (#1426)
+
+**Status:** Accepted by the product owner on 2026-11-05 as a narrow
+multipane usability correction. This amendment changes only split creation;
+it does not change Raw as the cold-start or new-Tab default and does not waive
+the broader Flow promotion gate above.
+
+When a user creates a split Pane, the new leaf selects Flow once its own
+trusted execution establishes current Flow eligibility. If that execution is
+unsupported or untrusted, it remains Raw. This applies regardless of whether
+the source Pane is resting in Raw, Flow, or TUI. Existing Panes retain their
+own selected resting mode; focus changes never promote or demote them. The new
+leaf retains its Flow selection while another Pane owns focus, and its Blocks
+continue to project from its own execution and history Controller.
+
+This is a deliberately bounded exception to #1438's explicit-Flow selection
+rule for an existing Raw Pane: split creation is an explicit user action that
+requests an additional structured Pane. It does not permit status-driven
+Raw-to-Flow transitions on already existing Panes.
+
+## Proposed 2026-11-05 amendment — tab-wide Blocks after split (#1454)
+
+**Status:** Proposed in the combined multipane implementation PR. The product
+owner has explicitly accepted the behavior for this change; it becomes
+normative when that PR merges. This amendment supersedes the new-leaf-only
+selection above for successful split actions.
+
+After a successful explicit split, every trusted, Flow-capable Pane in the
+affected Tab, including the source Pane and any other existing Raw Pane,
+selects Flow as its resting presentation. The split is the user's explicit
+opt-in for that Tab. Cold-start and new-Tab defaults remain governed by the
+existing policy. A different Tab retains its own resting choices.
+
+Each Pane continues to render only its own execution and BlockTimeline. A
+focus change changes input focus only: it cannot blank, copy, move, or swap
+another Pane's command body, live output, scroll position, or controller. A
+failed split leaves existing choices unchanged. One Pane's attach/recovery
+failure does not pause a healthy sibling.
+
+An active alternate-screen application remains full-Pane TUI through the
+split. The split stores Flow as that Pane's resting mode without replacing the
+live TUI; TUI exit restores Flow. Unsupported or untrusted shell integration
+retains the existing safe fallback until structured Block boundaries can be
+proven. No Raw viewport is exposed underneath or beside a Flow Pane.
+
+The ADR proposal and production change travel together in one PR. Required
+evidence is a headed packaged-app test with a 2×2 grid, multiple terminal tabs
+in each Pane, unique Pane tokens, numbered concurrent output, and at least ten
+focus changes. It must verify every output line and Block body in its owning
+Pane, preserve scroll state, exercise one-Pane failure/recovery while healthy
+siblings continue, and confirm TUI remains intact until exit. No new PTY, VT,
+process, copied-output, or Swift presentation authority is introduced.
+
+## 2026-11-06 amendment — Blocks as the default supported-shell presentation (#1426)
+
+**Status:** Accepted by the product owner on 2026-11-06 for the combined
+multipane PR #1448. This amendment supersedes #1438's Raw cold-start and
+new-Tab default for trusted, Flow-capable shell sessions. It retains the
+tab-wide split behavior above and the safe fallback for unsupported or
+untrusted integration.
+
+A newly started trusted, Flow-capable, non-TUI shell session presents Flow
+and its Block transcript/composer by default. Users do not need to split the
+Pane or manually leave a Raw terminal view to get Blocks. The full-Pane Raw
+viewport is not shown during normal supported shell operation and is never
+placed underneath or beside Flow. Supported-shell menus, palette commands,
+and built-in shortcuts do not offer a Raw presentation. A full-screen
+alternate-screen application such as nvim takes over its Pane as TUI; when it
+exits, that Pane restores Flow.
+
+Unsupported or untrusted shell integration retains the existing safe fallback
+until structured Block boundaries can be proven. This default change does not
+authorize guessed command boundaries, weaken trust checks, or change the
+single-ExecutionId/PTY/VT/TerminalState authority. Each Pane and terminal tab
+continues to own its own Blocks, live output, history, composer state, and
+scroll position; focus changes route input only.
+
+Required evidence for the combined implementation PR includes a fresh-session
+Blocks-first assertion; the existing four-Pane, two-axis, multi-terminal-tab
+numbered-stream load test with at least ten focus changes; complete per-Pane
+output and no cross-pane copies; scroll retention; and full-screen TUI
+takeover/return. A green unit or hosted run does not replace headed packaged
+app evidence.
+
+## 2026-11-08 accepted amendment — Block-scoped direct input for Running REPLs (#1466)
+
+**Status:** Accepted by the product owner on 2026-11-08 in chat (explicit
+“i accept the ADR”). Normative on merge of architecture-only PR #1469 under
+#1466. An author or agent comment alone is not acceptance; the product owner’s
+explicit acceptance plus merge of this PR is the acceptance record. This
+amendment does **not** authorize production Rust/Swift inside this PR;
+implementation proceeds under Ready Issues #1467 / #1468 after merge.
+
+### Problem
+
+On a trusted Flow Pane, submitting `node` or `python` creates a Running Block
+whose live output already paints inside that Block (ADR-009 live-tail). The
+composer becomes Busy. Character-level interaction today requires leaving Flow
+for a full-Pane direct-terminal route (Interact / Raw-class path shipped under
+#1461). Warp keeps the same class of REPL interactive **inside** the Running
+Block without a whole-Pane Raw takeover (`docs/evidence/m003-warp-local-repl-inline-forensic.md`).
+
+ADR-026 Decision item 7 already deferred “in-Block key forwarding” as a
+separate amendment. Bottom-composer Relay is line-oriented and is **not** Warp
+parity. Forcing Interact→Raw for ordinary local REPLs fights the Blocks-first
+supported-shell direction (#1426) and makes Raw feel like a broken mode switch
+rather than a rare fallback.
+
+### Accepted decision
+
+When presentation is Flow, the canonical screen is primary, the attachment is
+Controller, and the innermost integration state is `Running(b)` with a known
+Block `b`:
+
+1. **Block-scoped direct-input focus target.** The Running Block’s live region
+   may own character-level terminal input (keys, IME commits that encode
+   input, paste, and mouse reports that encode input) routed to the same PTY
+   under the existing direct-input fence. This is **not** composer Submit and
+   **not** the ADR-026 Relay line contract.
+2. **Flow chrome remains.** Prior completed Blocks stay visible; terminal
+   pixels remain clipped to Block regions; empty canvas does not expose a
+   second Raw viewport. This is still Flow presentation, not full-Pane Raw.
+3. **Composer Submit stays ineligible** while that Block runs. The dock may
+   show Busy / running guidance; it must not admit shell commands to a
+   TrustedShell target that is not AtPrompt.
+4. **TUI unchanged.** Alternate-screen programs take full-Pane TUI; on exit,
+   restore the Pane’s resting Flow (supported shell) or safe Raw fallback.
+5. **Raw remains a fallback, not the REPL success path.** Unsupported /
+   untrusted integration, quarantine, and cases outside this contract keep a
+   usable full-Pane direct-terminal path. Do **not** delete Raw. After this
+   amendment is implemented, ordinary local `node`/`python` must not require
+   Interact→Raw.
+6. **One authority.** No second PTY, VT, grid, or copied transcript. Blocks
+   remain metadata over the same `ExecutionId` / `TerminalState`.
+7. **Resting policy unchanged by this amendment.** #1426 Blocks-default for
+   supported shells and any remaining #1438 resting rules for unsupported
+   shells continue to own cold-start/resting selection. This amendment only
+   owns interaction while Flow is already the active presentation and a
+   primary-screen Block is Running.
+
+### Rejected alternatives
+
+- **Relay as Warp parity.** Rejected: line + CR in the bottom composer is not
+  in-Block character semantics.
+- **Keep Interact→Raw as the permanent REPL answer.** Rejected for product UX.
+- **Delete Raw.** Rejected: unsupported shells and out-of-contract cases need
+  a usable direct-terminal presentation.
+- **Per-expression language-REPL sub-Blocks.** Out of scope (Warp itself still
+  tracks this as a feature request).
+
+### Threat / adversarial rows (implementation must cover)
+
+- Local canonical-no-echo / password prompt while Running(b): fail closed to a
+  safe secret-entry path; do not echo secrets into Block chrome.
+- Paste / bracketed-paste / large paste while Block-scoped input is focused.
+- Interrupt (Ctrl-C) and EOF while Running; Block completion returns composer
+  Submit only on trusted AtPrompt.
+- Alternate-screen enter mid-REPL → TUI; no dual input owners.
+- Multipane: only the focused Pane’s Running Block receives keys.
+- Focus steal: composer draft must not submit when input target is
+  Block-scoped direct.
+
+### Required follow-up after acceptance
+
+1. Architecture-only merge of PR #1469 under #1466 (this section is Accepted).
+2. ADR-026 Decision item 7 points at this Accepted contract (companion edit in
+   this same architecture PR).
+3. Update SPEC-008 / SPEC-006 as needed on the implementation track; Ready
+   implementation Issues #1467 (Runtime eligibility) and #1468 (macOS
+   focus/IME routing).
+4. Withdraw Interact-as-required for local REPLs once those Issues are Done;
+   keep Interact/Raw only where this contract does not apply.
 

@@ -13,6 +13,7 @@
 //! - Raw/TUI and conflicting evidence fail closed.
 
 use crate::presentation::PresentationMode;
+use seyal_protocol::display::{DisplayCache, DisplayCell};
 
 /// Inclusive canonical history span for a completed Flow Block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +30,43 @@ pub struct PrimaryFrameClip {
     pub first_row: u16,
     /// Number of prepared-frame rows to draw (`0` is invalid / fail closed).
     pub row_count: u16,
+}
+
+/// Remove only a conservatively proven blank suffix from an already paired
+/// primary-frame clip. The committed display is disposable projection data;
+/// this never changes the authoritative VT state or crosses the caller's
+/// existing Block/exclusive-end bounds.
+pub fn trim_blank_suffix(clip: PrimaryFrameClip, display: &DisplayCache) -> PrimaryFrameClip {
+    let rows = usize::from(display.rows);
+    let columns = usize::from(display.columns);
+    let first = usize::from(clip.first_row);
+    let count = usize::from(clip.row_count);
+    if rows == 0
+        || columns == 0
+        || display.cells.len() != rows.saturating_mul(columns)
+        || count == 0
+        || first.saturating_add(count) > rows
+    {
+        return clip;
+    }
+
+    let cursor_row = usize::from(display.cursor_row);
+    let mut last = first + count - 1;
+    while last > first && last != cursor_row {
+        let row_start = last * columns;
+        let row_end = row_start + columns;
+        if !display.cells[row_start..row_end]
+            .iter()
+            .all(|cell| cell == &DisplayCell::blank())
+        {
+            break;
+        }
+        last -= 1;
+    }
+    PrimaryFrameClip {
+        row_count: u16::try_from(last - first + 1).unwrap_or(clip.row_count),
+        ..clip
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +88,17 @@ pub enum LiveTailProjection {
 /// absent, the clip is the entire paired viewport. Returns `None` only when
 /// the paired vector is empty, oversized, or contains a zero id.
 pub fn map_primary_clip(start_line: u64, viewport_line_ids: &[u64]) -> Option<(u16, u16)> {
+    map_primary_clip_until(start_line, viewport_line_ids, None)
+}
+
+/// Like [`map_primary_clip`], stopping before `exclusive_end_line` when that
+/// id is in the viewport. Used so a Running local host does not paint rows
+/// that belong to a following session Block.
+pub fn map_primary_clip_until(
+    start_line: u64,
+    viewport_line_ids: &[u64],
+    exclusive_end_line: Option<u64>,
+) -> Option<(u16, u16)> {
     if start_line == 0 || viewport_line_ids.is_empty() {
         return None;
     }
@@ -60,15 +109,31 @@ pub fn map_primary_clip(start_line: u64, viewport_line_ids: &[u64]) -> Option<(u
         return None;
     }
     // Exact id match only — LineIds are non-monotonic; do not infer from order.
-    let first_index = viewport_line_ids
-        .iter()
-        .position(|&id| id == start_line)
-        .unwrap_or(0);
-    let row_count = u16::try_from(viewport_line_ids.len() - first_index).ok()?;
+    let start_index = viewport_line_ids.iter().position(|&id| id == start_line);
+    let end_index = exclusive_end_line.and_then(|end| {
+        if end == 0 {
+            None
+        } else {
+            viewport_line_ids.iter().position(|&id| id == end)
+        }
+    });
+    let first = match (start_index, exclusive_end_line, end_index) {
+        (Some(index), _, _) => index,
+        (None, None, _) => 0,
+        // Host start has scrolled off, but the session Block's start is visible.
+        (None, Some(_), Some(_)) => 0,
+        // Viewport is past the session start. The host must not take those rows.
+        (None, Some(_), None) => return None,
+    };
+    let end = end_index.unwrap_or(viewport_line_ids.len());
+    if end <= first {
+        return None;
+    }
+    let row_count = u16::try_from(end - first).ok()?;
     if row_count == 0 {
         return None;
     }
-    Some((u16::try_from(first_index).ok()?, row_count))
+    Some((u16::try_from(first).ok()?, row_count))
 }
 
 /// Project one Block's Flow output path for the current presentation.
@@ -83,22 +148,50 @@ pub fn project_block_output(
     running: bool,
     viewport_line_ids: &[u64],
 ) -> LiveTailProjection {
+    project_block_output_until(mode, start_line, end_line, running, viewport_line_ids, None)
+}
+
+/// Project one Block, optionally ending its live or history range before
+/// `exclusive_end_line`.
+pub fn project_block_output_until(
+    mode: PresentationMode,
+    start_line: u64,
+    end_line: Option<u64>,
+    running: bool,
+    viewport_line_ids: &[u64],
+    exclusive_end_line: Option<u64>,
+) -> LiveTailProjection {
     if mode != PresentationMode::Flow || start_line == 0 {
         return LiveTailProjection::FailClosed;
     }
     match (running, end_line) {
-        (true, None) => match map_primary_clip(start_line, viewport_line_ids) {
-            Some((first_row, row_count)) => LiveTailProjection::PrimaryFrame(PrimaryFrameClip {
-                start_line,
-                first_row,
-                row_count,
-            }),
-            None => LiveTailProjection::FailClosed,
-        },
-        (false, Some(end)) if end >= start_line => LiveTailProjection::History(HistorySpan {
-            start_line,
-            end_line: end,
-        }),
+        (true, None) => {
+            match map_primary_clip_until(start_line, viewport_line_ids, exclusive_end_line) {
+                Some((first_row, row_count)) => {
+                    LiveTailProjection::PrimaryFrame(PrimaryFrameClip {
+                        start_line,
+                        first_row,
+                        row_count,
+                    })
+                }
+                None => LiveTailProjection::FailClosed,
+            }
+        }
+        (false, Some(end)) if end >= start_line => {
+            let end_line = match exclusive_end_line {
+                Some(exclusive_end) if exclusive_end > start_line => end.min(exclusive_end - 1),
+                Some(_) => return LiveTailProjection::FailClosed,
+                None => end,
+            };
+            if end_line < start_line {
+                LiveTailProjection::FailClosed
+            } else {
+                LiveTailProjection::History(HistorySpan {
+                    start_line,
+                    end_line,
+                })
+            }
+        }
         _ => LiveTailProjection::FailClosed,
     }
 }
@@ -106,6 +199,20 @@ pub fn project_block_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use seyal_protocol::display::{DisplayAttributes, DisplayColor};
+
+    fn display(rows: u16, columns: u16, cursor_row: u16) -> DisplayCache {
+        DisplayCache {
+            generation: 1,
+            rows,
+            columns,
+            cursor_row,
+            cursor_col: 0,
+            cursor_visible: true,
+            alternate_screen: false,
+            cells: vec![DisplayCell::blank(); usize::from(rows) * usize::from(columns)],
+        }
+    }
 
     #[test]
     fn running_clip_skips_preceding_viewport_rows() {
@@ -122,6 +229,79 @@ mod tests {
                 row_count: 3,
             })
         );
+    }
+
+    #[test]
+    fn trims_only_blank_suffix_after_cursor_without_shifting_block_rows() {
+        let mut display = display(6, 2, 1);
+        display.cells[2] = DisplayCell::lead_scalar(
+            '>',
+            1,
+            DisplayColor::Default,
+            DisplayColor::Default,
+            DisplayAttributes::default(),
+        );
+        let clip = PrimaryFrameClip {
+            start_line: 10,
+            first_row: 0,
+            row_count: 6,
+        };
+
+        assert_eq!(trim_blank_suffix(clip, &display).row_count, 2);
+    }
+
+    #[test]
+    fn preserves_spaces_and_styled_rows_inside_candidate_clip() {
+        let mut display = display(5, 2, 1);
+        display.cells[6] = DisplayCell::lead_scalar(
+            ' ',
+            1,
+            DisplayColor::Default,
+            DisplayColor::Default,
+            DisplayAttributes::default(),
+        );
+        display.cells[8].background = DisplayColor::Indexed(4);
+        let clip = PrimaryFrameClip {
+            start_line: 10,
+            first_row: 0,
+            row_count: 5,
+        };
+
+        assert_eq!(trim_blank_suffix(clip, &display).row_count, 5);
+    }
+
+    #[test]
+    fn retains_cursor_row_and_at_least_one_row_within_existing_clip() {
+        let mut display = display(5, 2, 3);
+        let clip = PrimaryFrameClip {
+            start_line: 10,
+            first_row: 1,
+            row_count: 4,
+        };
+        assert_eq!(trim_blank_suffix(clip, &display).row_count, 3);
+
+        display.cursor_row = 0;
+        assert_eq!(trim_blank_suffix(clip, &display).row_count, 1);
+    }
+
+    #[test]
+    fn malformed_or_out_of_bounds_display_never_trims_candidate_clip() {
+        let mut display = display(4, 2, 0);
+        display.cells.pop();
+        let clip = PrimaryFrameClip {
+            start_line: 10,
+            first_row: 2,
+            row_count: 2,
+        };
+        assert_eq!(trim_blank_suffix(clip, &display), clip);
+
+        display.cells = vec![DisplayCell::blank(); 8];
+        let out_of_bounds = PrimaryFrameClip {
+            first_row: 3,
+            row_count: 2,
+            ..clip
+        };
+        assert_eq!(trim_blank_suffix(out_of_bounds, &display), out_of_bounds);
     }
 
     #[test]
@@ -203,6 +383,39 @@ mod tests {
                 start_line: 20,
                 first_row: 0,
                 row_count: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn host_clip_stops_before_the_following_session_block() {
+        let ids = [10_u64, 11, 30, 31, 32];
+        let host =
+            project_block_output_until(PresentationMode::Flow, 10, None, true, &ids, Some(30));
+        let session = project_block_output(PresentationMode::Flow, 30, None, true, &ids);
+        let LiveTailProjection::PrimaryFrame(host_clip) = host else {
+            panic!("host should live-clip");
+        };
+        let LiveTailProjection::PrimaryFrame(session_clip) = session else {
+            panic!("session running should live-clip");
+        };
+        assert_eq!((host_clip.first_row, host_clip.row_count), (0, 2));
+        assert_eq!((session_clip.first_row, session_clip.row_count), (2, 3));
+        let host_lines = &ids[host_clip.first_row as usize..][..host_clip.row_count as usize];
+        let session_lines =
+            &ids[session_clip.first_row as usize..][..session_clip.row_count as usize];
+        assert!(host_lines.iter().all(|line| !session_lines.contains(line)));
+    }
+
+    #[test]
+    fn completed_ssh_host_history_stops_before_session_output() {
+        let host =
+            project_block_output_until(PresentationMode::Flow, 10, Some(80), false, &[], Some(30));
+        assert_eq!(
+            host,
+            LiveTailProjection::History(HistorySpan {
+                start_line: 10,
+                end_line: 29,
             })
         );
     }

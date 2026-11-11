@@ -19,6 +19,14 @@ use seyal_exec::{
     MouseEventKind, MouseReport, PasteError, VisualPos,
 };
 
+fn direct_input_error(error: &RuntimeError) -> ErrorCode {
+    if matches!(error, RuntimeError::InputHeld) {
+        ErrorCode::InvalidState
+    } else {
+        ErrorCode::Backpressure
+    }
+}
+
 use super::super::shell_integration::ComposerAdmission;
 use super::super::Runtime;
 
@@ -140,8 +148,8 @@ impl Runtime {
         };
         match self.input_ingress(execution_id) {
             Ok(ingress) => {
-                if ingress.try_submit(input.bytes.to_vec()).is_err() {
-                    self.send_error(token, ErrorCode::Backpressure, MessageType::Input as u16);
+                if let Err(error) = ingress.try_submit(input.bytes.to_vec()) {
+                    self.send_error(token, direct_input_error(&error), MessageType::Input as u16);
                 }
             }
             Err(_) => self.send_error(
@@ -209,8 +217,8 @@ impl Runtime {
         };
         match self.input_ingress(execution_id) {
             Ok(ingress) => {
-                if ingress.try_submit(wrapped).is_err() {
-                    self.send_error(token, ErrorCode::Backpressure, MessageType::Paste as u16);
+                if let Err(error) = ingress.try_submit(wrapped) {
+                    self.send_error(token, direct_input_error(&error), MessageType::Paste as u16);
                 }
             }
             Err(_) => self.send_error(
@@ -271,10 +279,10 @@ impl Runtime {
         let bytes = encode_terminal_key(key, modes);
         match self.input_ingress(execution_id) {
             Ok(ingress) => {
-                if ingress.try_submit(bytes).is_err() {
+                if let Err(error) = ingress.try_submit(bytes) {
                     self.send_error(
                         token,
-                        ErrorCode::Backpressure,
+                        direct_input_error(&error),
                         MessageType::TerminalKey as u16,
                     );
                 }
@@ -491,10 +499,10 @@ impl Runtime {
         };
         match self.input_ingress(execution_id) {
             Ok(ingress) => {
-                if ingress.try_submit(bytes).is_err() {
+                if let Err(error) = ingress.try_submit(bytes) {
                     self.send_error(
                         token,
-                        ErrorCode::Backpressure,
+                        direct_input_error(&error),
                         MessageType::TerminalMouse as u16,
                     );
                     return;
@@ -713,10 +721,10 @@ impl Runtime {
         if !bytes.is_empty() {
             match self.input_ingress(execution_id) {
                 Ok(ingress) => {
-                    if ingress.try_submit(bytes).is_err() {
+                    if let Err(error) = ingress.try_submit(bytes) {
                         self.send_error_detail(
                             token,
-                            ErrorCode::Backpressure,
+                            direct_input_error(&error),
                             MessageType::TerminalKeyV2 as u16,
                             key.action_id,
                         );
@@ -733,13 +741,32 @@ impl Runtime {
     }
 
     pub(super) fn handle_composer_command(&mut self, token: u64, payload: &[u8]) {
-        let Ok(request) = ComposerCommandRef::decode(payload) else {
-            self.send_error(
-                token,
-                ErrorCode::MalformedPayload,
-                MessageType::ComposerCommand as u16,
-            );
-            return;
+        let session_bootstrap = self.local_ipc.as_ref().is_some_and(|state| {
+            state
+                .connections
+                .get(&token)
+                .is_some_and(|meta| meta.client_capabilities & framing::CAP_SESSION_BOOTSTRAP != 0)
+        });
+        let (request, target_generation) = if session_bootstrap {
+            let Ok((request, generation)) = ComposerCommandRef::decode_fenced(payload) else {
+                self.send_error(
+                    token,
+                    ErrorCode::MalformedPayload,
+                    MessageType::ComposerCommand as u16,
+                );
+                return;
+            };
+            (request, Some(generation))
+        } else {
+            let Ok(request) = ComposerCommandRef::decode(payload) else {
+                self.send_error(
+                    token,
+                    ErrorCode::MalformedPayload,
+                    MessageType::ComposerCommand as u16,
+                );
+                return;
+            };
+            (request, None)
         };
         let supports_blocks = self
             .local_ipc
@@ -782,7 +809,16 @@ impl Runtime {
                 return;
             }
         };
-        match self.submit_composer_command(execution_id, request.command.to_owned()) {
+        let admission = if let Some(generation) = target_generation {
+            self.submit_composer_command_fenced(
+                execution_id,
+                request.command.to_owned(),
+                Some(generation),
+            )
+        } else {
+            self.submit_composer_command(execution_id, request.command.to_owned())
+        };
+        match admission {
             Ok(ComposerAdmission::Accepted(block_id)) => {
                 self.publish_block_timeline(execution_id);
                 let result = ComposerResult {
@@ -808,10 +844,22 @@ impl Runtime {
                     framing::encode_frame(MessageType::ComposerResult, &result.encode()),
                 );
             }
-            Ok(ComposerAdmission::Invalid) => {
+            Ok(ComposerAdmission::Invalid | ComposerAdmission::StaleTarget) => {
                 let result = ComposerResult {
                     attachment_id: request.attachment_id,
                     code: ComposerResultCode::Invalid,
+                    block_id: 0,
+                    request_id: request.request_id,
+                };
+                let _ = self.send_mandatory_frame(
+                    token,
+                    framing::encode_frame(MessageType::ComposerResult, &result.encode()),
+                );
+            }
+            Ok(ComposerAdmission::Relayed) => {
+                let result = ComposerResult {
+                    attachment_id: request.attachment_id,
+                    code: ComposerResultCode::Accepted,
                     block_id: 0,
                     request_id: request.request_id,
                 };

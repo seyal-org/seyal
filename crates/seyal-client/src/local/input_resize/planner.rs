@@ -32,6 +32,7 @@ pub(crate) enum OutboundKind {
     },
     Resync,
     ComposerCommand,
+    SessionConsent,
     HistoryRangeRequest,
     CreateExecution {
         request_id: u64,
@@ -39,6 +40,10 @@ pub(crate) enum OutboundKind {
     TerminateExecution {
         request_id: u64,
     },
+    MintWorkspace {
+        request_id: u64,
+    },
+    DeliveryControl,
 }
 
 #[derive(Debug)]
@@ -139,6 +144,16 @@ pub(crate) fn classify_server_error(
         && error.offending_message_type == MessageType::HistoryRangeRequest as u16
     {
         return Ok(None);
+    }
+    // A paste that passed local admission (MAX_INPUT_BYTES) but exceeds the
+    // terminal-level sanitize/encode ceiling (MAX_PASTE_BYTES, 16 bytes
+    // smaller) is a per-action refusal, not a broken transport. Surface it the
+    // same way local oversized-paste admission already does instead of tearing
+    // down the attachment (#1379 daily-driver paste correctness).
+    if error.error_code == ErrorCode::CapacityExceeded as u16
+        && error.offending_message_type == MessageType::Paste as u16
+    {
+        return Ok(Some(InputAdmissionFailure::CommitTooLarge));
     }
     // Expected host outcomes: no search match, yank with no/stale selection.
     // These must not tear down a healthy attachment.

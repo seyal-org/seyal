@@ -257,7 +257,7 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
         let (active_tab_lo, active_tab_hi) = split_id(window.active_tab.to_bytes());
         let title = push_text(&mut state.window_scratch.text, &window.title);
         let mut flags = 0u16;
-        if window.id == shell.active_window {
+        if Some(window.id) == shell.active_window {
             flags |= WINDOW_FLAG_PRODUCT_ACTIVE;
         }
         if window.attention {
@@ -383,20 +383,20 @@ fn relocate_window_pointers(state: &mut AppHandle) {
 }
 
 fn encode_effect(effect: NativeEffect) -> SeyalAppNativeEffect {
-    // kind 1 BoundedDetachThenTerminate: window_lo carries relative deadline_ms.
-    let (window_lo, window_hi) = match effect {
-        NativeEffect::BoundedDetachThenTerminate { deadline_ms } => (deadline_ms, 0),
-        other => match other.window() {
-            Some(window) => split_id(window.to_bytes()),
-            None => (0, 0),
-        },
+    let (window_lo, window_hi) = match effect.window() {
+        Some(window) => split_id(window.to_bytes()),
+        None => (0, 0),
     };
     SeyalAppNativeEffect {
         version: APP_ABI_VERSION,
         size: size_of::<SeyalAppNativeEffect>() as u16,
         kind: effect.kind_code() as u16,
         reserved: 0,
-        window_lo,
+        window_lo: if matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. }) {
+            effect.deadline_ms()
+        } else {
+            window_lo
+        },
         window_hi,
     }
 }
@@ -500,7 +500,10 @@ pub(super) fn fill_shell_header_from(
     let last_workspace = split_id(shell.last_active_workspace.to_bytes());
     let tab = split_id(shell.active_tab.to_bytes());
     let pane = split_id(shell.focused_pane.to_bytes());
-    let window = split_id(shell.active_window.to_bytes());
+    let window = match shell.active_window {
+        Some(id) => split_id(id.to_bytes()),
+        None => (0, 0),
+    };
     let mut flags = 0u16;
     if shell.allows_tab_creation {
         flags |= SHELL_FLAG_ALLOWS_TAB_CREATION;

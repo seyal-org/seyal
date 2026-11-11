@@ -66,14 +66,29 @@ fn resize_client() -> (LocalDisplayClient, UnixStream) {
             highest_v2_error_id: 0,
             last_admitted_mouse_action_id: 0,
             execution_provisioning_negotiated: false,
+            delivery_control_negotiated: false,
+            delivery_suspended: false,
+            resume_sequence: 0,
+            resume_fenced: false,
             next_provisioning_request_id: 1,
             harness_probe: true,
             pending_create_requests: std::collections::HashSet::new(),
             pending_terminate_requests: std::collections::HashSet::new(),
+            pending_mint_requests: std::collections::HashSet::new(),
             last_create_result: VecDeque::new(),
             last_terminate_result: None,
+            last_mint_result: None,
             viewport_line_ids: Vec::new(),
             viewport_line_ids_generation: 0,
+            session_bootstrap_negotiated: false,
+            composer_target: None,
+            target_generation: 0,
+            session_offer: None,
+            session_status: None,
+            pending_relay_requests: std::collections::HashSet::new(),
+            projected_eligibility: 0,
+            projected_wire_revision: 0,
+            composer_projection_revision: 0,
         },
         peer,
     )
@@ -438,6 +453,14 @@ fn runtime_input_backpressure_is_visible_without_fatal_disconnect() {
     assert_eq!(
         classify_server_error(ErrorMessage {
             error_code: ErrorCode::CapacityExceeded as u16,
+            offending_message_type: MessageType::Paste as u16,
+            detail_code: 0,
+        }),
+        Ok(Some(InputAdmissionFailure::CommitTooLarge))
+    );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::CapacityExceeded as u16,
             offending_message_type: MessageType::BlockTimeline as u16,
             detail_code: 0,
         }),
@@ -475,12 +498,13 @@ fn composer_result_quarantines_cross_attachment_and_unknown_requests() {
         request_id: 41,
     };
     assert!(super::super::validate_composer_result(
-        accepted, attachment, &pending
+        accepted, attachment, &pending, false
     ));
     assert!(!super::super::validate_composer_result(
         accepted,
         other_attachment,
-        &pending
+        &pending,
+        false
     ));
     assert!(!super::super::validate_composer_result(
         ComposerResult {
@@ -488,7 +512,8 @@ fn composer_result_quarantines_cross_attachment_and_unknown_requests() {
             ..accepted
         },
         attachment,
-        &pending
+        &pending,
+        false
     ));
 }
 
@@ -504,7 +529,19 @@ fn composer_result_requires_code_specific_block_identity() {
             request_id: 5,
         },
         attachment,
-        &pending
+        &pending,
+        false
+    ));
+    assert!(super::super::validate_composer_result(
+        ComposerResult {
+            attachment_id: attachment,
+            code: ComposerResultCode::Accepted,
+            block_id: 0,
+            request_id: 5,
+        },
+        attachment,
+        &pending,
+        true
     ));
     assert!(!super::super::validate_composer_result(
         ComposerResult {
@@ -514,7 +551,8 @@ fn composer_result_requires_code_specific_block_identity() {
             request_id: 5,
         },
         attachment,
-        &pending
+        &pending,
+        false
     ));
     assert!(super::super::validate_composer_result(
         ComposerResult {
@@ -524,6 +562,7 @@ fn composer_result_requires_code_specific_block_identity() {
             request_id: 5,
         },
         attachment,
-        &pending
+        &pending,
+        false
     ));
 }

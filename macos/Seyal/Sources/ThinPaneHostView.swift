@@ -8,6 +8,7 @@ final class ThinPaneHostView: NSView {
     let appHandle: UInt64
     var onProductChanged: (() -> Void)?
     private var lastBoundExecution = (low: UInt64(0), high: UInt64(0))
+    private var lastBoundAttachment = (low: UInt64(0), high: UInt64(0))
 
     override init(frame frameRect: NSRect) {
         appHandle = seyal_app_create()
@@ -39,7 +40,12 @@ final class ThinPaneHostView: NSView {
             self?.onProductChanged?()
         }
         inputSurface.onBridgeBecameUsable = { [weak self] in
-            self?.bindFromBridgeIfNeeded()
+            self?.bindFromBridgeIfNeeded(force: true)
+            self?.onProductChanged?()
+        }
+        inputSurface.onBridgeDisconnected = { [weak self] in
+            // Close Terminal Finalized stops frames; MultiWindow must still
+            // drain DestroyWindow and sync realizations (#1402).
             self?.onProductChanged?()
         }
     }
@@ -54,13 +60,20 @@ final class ThinPaneHostView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // Flow DirectInput click→focus is owned by CommandBlockView (card body
+        // forward). Metal must not claim the live-tail hit or XCUI / AppKit
+        // treat `seyal-block-*-body` as obscured (#1468).
         let hit = super.hitTest(point)
         // Flow paints terminal pixels over Block bodies. Metal returns nil from
         // hitTest, but this pane still sits above the transcript. Default
         // NSView hit-testing would then return `self` and swallow the click
         // so CommandBlockView never sees it. Fall through in Flow; keep the
         // surface in Raw/TUI where drawsLiveGrid is true.
-        if hit === self, !inputSurface.inspectRendererPresentation().drawsLiveGrid {
+        // Raw scrollback suppresses drawsLiveGrid but must remain hittable (#1442).
+        if hit === self,
+            !inputSurface.inspectRendererPresentation().drawsLiveGrid,
+            inputSurface.rawScrollOffset == 0
+        {
             return nil
         }
         return hit
@@ -68,7 +81,7 @@ final class ThinPaneHostView: NSView {
 
     func activateAfterWindowPresentation() {
         inputSurface.activateRuntimeAfterWindowPresentation()
-        bindFromBridgeIfNeeded()
+        bindFromBridgeIfNeeded(force: true)
         announceAccessibility()
     }
 
@@ -92,14 +105,21 @@ final class ThinPaneHostView: NSView {
         inputSurface.detachRuntimeConnectionForApplicationTermination()
     }
 
-    private func bindFromBridgeIfNeeded() {
+    private func bindFromBridgeIfNeeded(force: Bool = false) {
         guard inputSurface.terminalBridgeIsConnected else { return }
+        // Bind samples the client whose frame this window is showing.
+        guard let bridge = inputSurface.bridge, bridge.selectPresentedClient() else { return }
+        defer { _ = bridge.selectClient() }
         let executionLow = seyal_bridge_execution_id_low()
         let executionHigh = seyal_bridge_execution_id_high()
         let attachmentLow = seyal_bridge_attachment_id_low()
         let attachmentHigh = seyal_bridge_attachment_id_high()
         guard executionLow != 0 || executionHigh != 0 else { return }
-        if lastBoundExecution == (executionLow, executionHigh) { return }
+        let execution = (low: executionLow, high: executionHigh)
+        let attachment = (low: attachmentLow, high: attachmentHigh)
+        if !force, lastBoundExecution == execution, lastBoundAttachment == attachment {
+            return
+        }
 
         let snapshot = seyal_app_snapshot(appHandle)
         var action = SeyalAppAction()
@@ -117,9 +137,10 @@ final class ThinPaneHostView: NSView {
         action.target_execution_hi = executionHigh
         action.target_attachment_lo = attachmentLow
         action.target_attachment_hi = attachmentHigh
-        action.target_pty_generation = 1
+        action.target_generation = 1
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
-        lastBoundExecution = (executionLow, executionHigh)
+        lastBoundExecution = execution
+        lastBoundAttachment = attachment
         announceAccessibility()
     }
 

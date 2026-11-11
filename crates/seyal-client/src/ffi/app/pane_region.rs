@@ -17,6 +17,8 @@ const PANE_REGION_FOCUSED: u16 = 1;
 const PANE_REGION_LIVE: u16 = 2;
 const PANE_BINDING_HAS_EXECUTION: u16 = 1;
 const PANE_BINDING_HAS_DISPLAY: u16 = 2;
+const PANE_REGION_ZOOMED: u16 = 4;
+const PANE_REGION_OCCLUDED: u16 = 8;
 
 /// One leaf of the active Tab's PaneTree (#923), in `SeyalAppShell` pane
 /// order. Geometry is unit space, origin top-left; Rust owns it.
@@ -69,6 +71,12 @@ pub extern "C" fn seyal_app_pane_region(handle: u64, index: u32) -> SeyalAppPane
         }
         if region.live {
             flags |= PANE_REGION_LIVE;
+        }
+        if region.zoomed {
+            flags |= PANE_REGION_ZOOMED;
+        }
+        if region.occluded {
+            flags |= PANE_REGION_OCCLUDED;
         }
         SeyalAppPaneRegion {
             version: APP_ABI_VERSION,
@@ -144,6 +152,105 @@ pub struct SeyalAppPaneBinding {
     pub execution_lo: u64,
     pub execution_hi: u64,
     pub display_handle: u64,
+}
+
+/// Pane-local terminal tab identity and selected state. Pane and terminal IDs
+/// stay separate so the host cannot confuse selection with pane focus.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SeyalAppTerminalTab {
+    pub version: u16,
+    pub size: u16,
+    pub flags: u16,
+    pub reserved: u16,
+    pub terminal_lo: u64,
+    pub terminal_hi: u64,
+    pub execution_lo: u64,
+    pub execution_hi: u64,
+}
+
+impl SeyalAppTerminalTab {
+    const fn empty() -> Self {
+        Self {
+            version: APP_ABI_VERSION,
+            size: 0,
+            flags: 0,
+            reserved: 0,
+            terminal_lo: 0,
+            terminal_hi: 0,
+            execution_lo: 0,
+            execution_hi: 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_pane_terminal_tab_count(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+) -> u32 {
+    let pane = pane_from_words(pane_lo, pane_hi);
+    APPS.with(|apps| {
+        apps.borrow()
+            .get(&handle)
+            .and_then(|state| {
+                state
+                    .root
+                    .snapshot()
+                    .shell
+                    .panes
+                    .iter()
+                    .find(|row| row.id == pane)
+                    .map(|row| row.terminal_tabs.len() as u32)
+            })
+            .unwrap_or(0)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_pane_terminal_tab(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+    index: u32,
+) -> SeyalAppTerminalTab {
+    let pane_id = pane_from_words(pane_lo, pane_hi);
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return SeyalAppTerminalTab::empty();
+        };
+        let snapshot = state.root.snapshot();
+        let Some(pane) = snapshot.shell.panes.iter().find(|row| row.id == pane_id) else {
+            return SeyalAppTerminalTab::empty();
+        };
+        let Some(terminal) = pane.terminal_tabs.get(index as usize) else {
+            return SeyalAppTerminalTab::empty();
+        };
+        let (terminal_lo, terminal_hi) = split_id(terminal.id.to_bytes());
+        let execution = terminal
+            .execution
+            .unwrap_or(ExecutionId::from_bytes([0; 16]));
+        let (execution_lo, execution_hi) = split_id(execution.to_bytes());
+        SeyalAppTerminalTab {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppTerminalTab>() as u16,
+            flags: u16::from(pane.selected_terminal_tab == Some(terminal.id)),
+            reserved: 0,
+            terminal_lo,
+            terminal_hi,
+            execution_lo,
+            execution_hi,
+        }
+    })
+}
+
+fn pane_from_words(lo: u64, hi: u64) -> PaneId {
+    let mut bytes = [0; 16];
+    bytes[..8].copy_from_slice(&lo.to_le_bytes());
+    bytes[8..].copy_from_slice(&hi.to_le_bytes());
+    PaneId::from_bytes(bytes)
 }
 
 impl SeyalAppPaneBinding {
@@ -385,6 +492,82 @@ mod tests {
             1,
             "a stale PaneId cannot resolve to the current focused client"
         );
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn pt5_zoom_equalize_and_stale_verbs_round_trip_fail_closed() {
+        let handle = seyal_app_create();
+        let pane = seyal_app_shell_row(handle, 2, 0);
+        let mut zoom: SeyalAppAction = unsafe { std::mem::zeroed() };
+        zoom.version = APP_ABI_VERSION;
+        zoom.size = size_of::<SeyalAppAction>() as u16;
+        zoom.kind = 69;
+        zoom.target_execution_lo = pane.id_lo;
+        zoom.target_execution_hi = pane.id_hi;
+        assert_eq!(unsafe { seyal_app_apply(handle, &zoom) }, 0);
+        let region = seyal_app_pane_region(handle, 0);
+        assert_eq!(
+            region.flags,
+            PANE_REGION_FOCUSED | PANE_REGION_LIVE | PANE_REGION_ZOOMED
+        );
+
+        let mut stale = zoom;
+        stale.target_execution_lo = 1;
+        stale.target_execution_hi = 2;
+        assert_eq!(unsafe { seyal_app_apply(handle, &stale) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 1, "UnknownPane");
+        assert_eq!(
+            seyal_app_pane_region(handle, 0).flags,
+            PANE_REGION_FOCUSED | PANE_REGION_LIVE | PANE_REGION_ZOOMED,
+            "rejected zoom leaves overlay"
+        );
+
+        let mut equalize = zoom;
+        equalize.kind = 74;
+        assert_eq!(unsafe { seyal_app_apply(handle, &equalize) }, 0);
+        assert_eq!(
+            seyal_app_pane_region(handle, 0).flags,
+            PANE_REGION_FOCUSED | PANE_REGION_LIVE,
+            "equalize success clears zoom overlay"
+        );
+
+        zoom.target_execution_lo = pane.id_lo;
+        zoom.target_execution_hi = pane.id_hi;
+        assert_eq!(unsafe { seyal_app_apply(handle, &zoom) }, 0);
+        let mut unzoom = zoom;
+        unzoom.kind = 70;
+        assert_eq!(unsafe { seyal_app_apply(handle, &unzoom) }, 0);
+        assert_eq!(unsafe { seyal_app_apply(handle, &unzoom) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 56, "NotZoomed");
+
+        let mut swap = zoom;
+        swap.kind = 71;
+        swap.target_attachment_lo = 9;
+        swap.target_attachment_hi = 9;
+        assert_eq!(unsafe { seyal_app_apply(handle, &swap) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 1, "UnknownPane");
+
+        let mut mv = zoom;
+        mv.kind = 72;
+        mv.target_attachment_lo = pane.id_lo;
+        mv.target_attachment_hi = pane.id_hi;
+        mv.reserved = 1;
+        assert_eq!(unsafe { seyal_app_apply(handle, &mv) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 57, "InvalidMoveTarget");
+
+        let mut dir = zoom;
+        dir.kind = 73;
+        dir.reserved = 1;
+        assert_eq!(unsafe { seyal_app_apply(handle, &dir) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 58, "NoDirectionalNeighbor");
+        dir.reserved = 99;
+        assert_eq!(unsafe { seyal_app_apply(handle, &dir) }, -6);
+
+        let mut tab = zoom;
+        tab.kind = 75;
+        assert_eq!(unsafe { seyal_app_apply(handle, &tab) }, 0);
+
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

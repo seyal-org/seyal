@@ -9,16 +9,15 @@ AI_SDLC_DIR="${ROOT}/.sdlc/framework"
 # Reviewed/pinned developer-tool inputs. Update only through a normal Seyal PR.
 XCODEBUILD_MCP_VERSION="2.7.0"
 AI_SDLC_REPO="https://github.com/mahboobmonnamd/ai-sdlc.git"
-AI_SDLC_COMMIT="8d1cac09aef61bb3fb1431c35a114ef047aca12c"
+AI_SDLC_COMMIT="4b4c603b2fc51105119a7773119319e8902f48e6"
 AI_SDLC_SKILLS=(
   project-context
-  work-item-design
-  implementation-planning
-  development-readiness
-  implementation
+  create-issue
+  implement-issue
   verification
   pr-review
-  address-pr-review
+  process-review
+  pr-merge
 )
 
 info() { printf '[seyal bootstrap] %s\n' "$*"; }
@@ -58,10 +57,12 @@ ensure_ai_sdlc() {
       exit 1
     }
   done
-  [[ -f "${AI_SDLC_DIR}/tools/project_context.py" ]] || {
-    echo "pinned AI-SDLC revision is missing tools/project_context.py" >&2
-    exit 1
-  }
+  for required_tool in project_context.py work_claims.py workflow_claims.py; do
+    [[ -f "${AI_SDLC_DIR}/tools/${required_tool}" ]] || {
+      echo "pinned AI-SDLC revision is missing tools/${required_tool}" >&2
+      exit 1
+    }
+  done
 
   info "validating Seyal derived project context"
   python3 "${AI_SDLC_DIR}/tools/project_context.py" --root "${ROOT}" validate

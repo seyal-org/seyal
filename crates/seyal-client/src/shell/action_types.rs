@@ -1,6 +1,6 @@
 //! Typed host-to-Rust shell commands and their shared value types.
 
-use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use crate::pane_layout::SplitRatio;
 
@@ -27,6 +27,12 @@ pub enum ShellAction {
     /// Selection actions carry the snapshot generation for complete host action context,
     /// but acceptance is fenced only by live identity (ADR-018 §6).
     SelectWindow {
+        id: WindowId,
+        containment_generation: u64,
+    },
+    /// Native realization already became key; commit Rust selection and
+    /// focus history without ordering the same NSWindow again.
+    NativeWindowBecameKey {
         id: WindowId,
         containment_generation: u64,
     },
@@ -64,6 +70,10 @@ pub enum ShellAction {
     },
     MoveTabToNewWindow {
         tab: TabId,
+        containment_generation: u64,
+    },
+    CloseWindow {
+        id: WindowId,
         containment_generation: u64,
     },
     CloseTab {
@@ -117,6 +127,40 @@ pub enum ShellAction {
         containment_generation: u64,
     },
     BindExecution {
+        pane: PaneId,
+        execution: ExecutionId,
+    },
+    NewTerminalTab {
+        pane: PaneId,
+        containment_generation: u64,
+    },
+    SelectTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+    },
+    BindTerminalExecution {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        execution: ExecutionId,
+    },
+    UnbindTerminal(PaneId, TerminalTabId),
+    /// Finalize removal only after the exact execution's terminate result succeeds.
+    CloseTerminalTab {
+        pane: PaneId,
+        terminal_tab: TerminalTabId,
+        containment_generation: u64,
+    },
+    /// Record a live execution with no Pane binding (tests / Runtime sync).
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    /// Drop a previously recorded live-unpresented entry after Runtime retirement.
+    ForgetUnpresented {
+        execution: ExecutionId,
+    },
+    /// Rebind a live-unpresented execution into a Pane leaf.
+    AdoptExecution {
         pane: PaneId,
         execution: ExecutionId,
     },

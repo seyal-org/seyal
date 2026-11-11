@@ -426,11 +426,58 @@ impl SeyalComposerStatus {
     }
 }
 
+/// Read-only target for positioning the one native editor beside a live Relay
+/// Block. Zero mode means no negotiated foreground Block target.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct SeyalComposerTarget {
+    pub block_id: u64,
+    pub target_generation: u64,
+    pub revision: u64,
+    pub mode: u8,
+    pub target_class: u8,
+    pub reserved: [u8; 6],
+}
+
+impl SeyalComposerTarget {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            block_id: 0,
+            target_generation: 0,
+            revision: 0,
+            mode: 0,
+            target_class: 0,
+            reserved: [0; 6],
+        }
+    }
+}
+
+/// ADR-026 session affordance. `kind`: 0 none, 1 enable Blocks, 2 offer.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct SeyalSessionSurface {
+    pub kind: u8,
+    pub reserved: [u8; 7],
+    pub host_block_id: u64,
+    pub revision: u64,
+}
+
+impl SeyalSessionSurface {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            kind: 0,
+            reserved: [0; 7],
+            host_block_id: 0,
+            revision: 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod composer_status_abi_tests {
     use std::mem::{align_of, offset_of, size_of};
 
-    use super::SeyalComposerStatus;
+    use super::{SeyalComposerStatus, SeyalComposerTarget};
 
     #[test]
     fn composer_status_c_abi_includes_its_attachment_identity() {
@@ -441,6 +488,18 @@ mod composer_status_abi_tests {
         assert_eq!(offset_of!(SeyalComposerStatus, attachment_id_high), 16);
         assert_eq!(offset_of!(SeyalComposerStatus, eligibility), 24);
         assert_eq!(offset_of!(SeyalComposerStatus, reserved), 25);
+    }
+
+    #[test]
+    fn composer_target_c_abi_projects_the_live_block_identity() {
+        assert_eq!(size_of::<SeyalComposerTarget>(), 32);
+        assert_eq!(align_of::<SeyalComposerTarget>(), 8);
+        assert_eq!(offset_of!(SeyalComposerTarget, block_id), 0);
+        assert_eq!(offset_of!(SeyalComposerTarget, target_generation), 8);
+        assert_eq!(offset_of!(SeyalComposerTarget, revision), 16);
+        assert_eq!(offset_of!(SeyalComposerTarget, mode), 24);
+        assert_eq!(offset_of!(SeyalComposerTarget, target_class), 25);
+        assert_eq!(offset_of!(SeyalComposerTarget, reserved), 26);
     }
 }
 

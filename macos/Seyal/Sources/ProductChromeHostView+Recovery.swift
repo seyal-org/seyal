@@ -58,6 +58,29 @@ extension ProductChromeHostView {
     /// ownership at the moment AppKit accepts the responder change.
     func requestComposerFocusIfPaletteAllows() -> Bool {
         guard !commandPalette.isOpen else { return false }
+        // DirectInput owns the Running Block live surface; do not steal back to
+        // the Busy composer dock (#1468 / ADR-009 #1466).
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+            return focusBlockScopedDirectInputSurface()
+        }
+        if !centerColumn.secondaryHosts.isEmpty {
+            let shell = seyal_app_shell(pane.appHandle)
+            guard seyal_app_eligibility_for_pane(
+                pane.appHandle,
+                shell.focused_pane_lo,
+                shell.focused_pane_hi
+            ) == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
+            seyal_app_composer_for_pane(
+                pane.appHandle,
+                shell.focused_pane_lo,
+                shell.focused_pane_hi
+            ).mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+            else {
+                return false
+            }
+            return activeComposer.focusEditor()
+        }
         return composer.focusEditor()
     }
 
@@ -113,6 +136,127 @@ extension ProductChromeHostView {
             return stage
         }
         return "\(stage) · attempts \(snapshot.recovery_attempts)"
+    }
+
+    /// #1379 Defect B: show New shell only when Rust admits it for the focused
+    /// Pane (`seyal_app_new_shell_available`). Do not re-derive from the
+    /// app-wide recovery stage (ADR-015). Composer visibility stays with
+    /// `ComposerBridgeView.reconcile()` (Rust composer mode); this button
+    /// must not latch `isHidden` across Split (#1433).
+    func updateNewShellRecoveryAction() {
+        let show = seyal_app_new_shell_available(pane.appHandle) != 0
+        newShellButton.isHidden = !show
+    }
+
+    /// Explicit New shell after `exit`. Rust prepares the ended Pane, creates
+    /// one execution (SPEC-004 §18), and binds that id. The host only adopts
+    /// the pending display handle.
+    @objc func requestNewShellAfterExit() {
+        guard recoveryAttemptInFlight == nil else { return }
+        // Admit before tearing down the bridge so a dead button cannot drop
+        // a focused sibling's display connection (ADR-015 / #1379).
+        guard seyal_app_new_shell_available(pane.appHandle) != 0 else {
+            reconcileChrome()
+            return
+        }
+        pane.inputSurface.suppressesAutomaticBridgeRecovery = true
+        if pane.inputSurface.bridge?.clientHandle != 0
+            || pane.inputSurface.bridge?.isConnected == true
+        {
+            pane.inputSurface.bridge?.completeEagerClientDisconnect()
+            pane.inputSurface.bridge?.stop()
+        } else {
+            pane.inputSurface.bridge?.completeEagerClientDisconnect()
+        }
+        pane.inputSurface.isDetachingRuntimeConnection = false
+        let identity = RecoveryAttemptIdentity.primary(UInt64.max)
+        guard applyRuntimeRecoveryAction(
+            pane.appHandle,
+            kind: SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION
+        ) == 0,
+            seyal_app_replacement_bootstrap_pending(pane.appHandle) == 1
+        else {
+            pane.inputSurface.suppressesAutomaticBridgeRecovery = false
+            reconcileChrome()
+            return
+        }
+        recoveryAttemptInFlight = identity
+        recoveryLifecycleQueue.async { [weak self] in
+            let outcome = openCreatedExecutionHandle()
+            DispatchQueue.main.async { [weak self] in
+                seyalRunAsMainActorFromMainQueue {
+                    guard let self else {
+                        if case let .opened(opened) = outcome {
+                            seyal_bridge_disconnect_handle(opened.handle)
+                        }
+                        return
+                    }
+                    self.finishCreatedReplacement(outcome, identity: identity)
+                }
+            }
+        }
+        reconcileChrome()
+    }
+
+    private func finishCreatedReplacement(
+        _ outcome: RuntimeRecoveryAttemptOutcome,
+        identity: RecoveryAttemptIdentity
+    ) {
+        defer {
+            if recoveryAttemptInFlight == identity {
+                recoveryAttemptInFlight = nil
+            }
+            pane.inputSurface.suppressesAutomaticBridgeRecovery = false
+        }
+        switch outcome {
+        case let .opened(opened):
+            pane.inputSurface.bridge?.stop()
+            pane.inputSurface.isDetachingRuntimeConnection = false
+            var adopted = pane.inputSurface.adoptRecoveredHandle(opened)
+            if !adopted {
+                pane.inputSurface.bridge?.completeEagerClientDisconnect()
+                adopted = pane.inputSurface.adoptRecoveredHandle(opened)
+            }
+            guard adopted else {
+                seyal_bridge_disconnect_handle(opened.handle)
+                Self.logNewShellFailure("adopt-rejected after create")
+                break
+            }
+            // Attach publishes composer eligibility once. Drain it before bind
+            // so a later idle socket cannot leave the composer Waiting.
+            pane.inputSurface.bridge?.drainReadyDisplayWork()
+            let bound = applyRuntimeRecoveryAction(
+                pane.appHandle,
+                kind: SEYAL_APP_ACTION_CREATE_REPLACEMENT_EXECUTION
+            ) {
+                $0.flags = UInt16(SEYAL_APP_FLAG_HAS_EXECUTION)
+                    | UInt16(SEYAL_APP_FLAG_HAS_ATTACHMENT)
+                    | UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+                $0.target_execution_lo = opened.executionIDLow
+                $0.target_execution_hi = opened.executionIDHigh
+                $0.target_attachment_lo = opened.attachmentIDLow
+                $0.target_attachment_hi = opened.attachmentIDHigh
+                // Rust reads the adopted client's PTY generation.
+                $0.target_generation = 0
+                $0.reserved = 0
+            }
+            if bound == 0 {
+                pane.inputSurface.advanceRecoveryPresentationIfReady()
+            } else {
+                seyal_bridge_disconnect_handle(opened.handle)
+                Self.logNewShellFailure("bind created execution failed (\(bound))")
+            }
+        case .endpointMissing, .retryable, .controllerBusy, .executionEnded, .blocked:
+            Self.logNewShellFailure(String(describing: outcome))
+        }
+        reconcileChrome()
+    }
+
+    private static func logNewShellFailure(_ detail: String) {
+        NSLog(
+            "seyal: New shell create failed (%@); leaving New shell armed",
+            detail as NSString
+        )
     }
 
     func driveRecovery() {
@@ -219,13 +363,14 @@ extension ProductChromeHostView {
         let issuedAt = ProcessInfo.processInfo.systemUptime
         let executionIdentity = pane.inputSurface.recoveryExecutionIdentity
         let allowsImplicit = pane.inputSurface.allowsImplicitExecutionBootstrap
+        let openBudgetMs = remainingMs
         recoveryLifecycleQueue.async { [weak self] in
             // Queue delay consumes the Rust-issued budget rather than resetting it.
             let elapsed = ProcessInfo.processInfo.systemUptime - issuedAt
             let outcome = openRuntimeRecoveryHandle(
                 executionIdentity: executionIdentity,
                 allowsImplicitExecutionBootstrap: allowsImplicit,
-                remainingBudget: TimeInterval(remainingMs) / 1000 - elapsed
+                remainingBudget: TimeInterval(openBudgetMs) / 1000 - elapsed
             )
             DispatchQueue.main.async { [weak self] in
                 // Lifecycle work returns on the GCD main queue without a Swift
@@ -422,7 +567,7 @@ extension ProductChromeHostView {
         let now = runtimeRecoveryNowMillis()
         return applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_COMPLETE_RECOVERY) {
             $0.target_execution_lo = generation
-            $0.target_pty_generation = now
+            $0.target_generation = now
             $0.target_attachment_lo = handle
             $0.reserved = UInt32(outcome.rawValue) | (UInt32(launch.rawValue) << 8)
         }
@@ -436,7 +581,7 @@ extension ProductChromeHostView {
         let now = runtimeRecoveryNowMillis()
         applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_FIRE_RECOVERY) {
             $0.target_execution_lo = generation
-            $0.target_pty_generation = now
+            $0.target_generation = now
         }
         reconcileChrome()
     }

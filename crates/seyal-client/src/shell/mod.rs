@@ -7,6 +7,7 @@
 
 mod action_types;
 mod actions;
+mod close;
 mod effects;
 mod equalize;
 mod focus_direction;
@@ -14,9 +15,14 @@ mod focus_history;
 mod inventory;
 mod pane_ops;
 mod snapshot;
+mod terminal_tabs;
 mod tree;
+mod unpresented;
 mod workspace;
+mod workspace_ops;
 
+#[cfg(test)]
+mod close_tests;
 #[cfg(test)]
 mod pt1_tests;
 #[cfg(test)]
@@ -26,15 +32,28 @@ mod pt3_tests;
 #[cfg(test)]
 mod pt4_tests;
 #[cfg(test)]
+mod pt6_tests;
+#[cfg(test)]
+mod terminal_tabs_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unpresented_tests;
 #[cfg(test)]
 mod w2a_tests;
 #[cfg(test)]
+mod w5_tests;
+#[cfg(test)]
+mod w7_matrix_tests;
+#[cfg(test)]
 mod window_admission_tests;
+#[cfg(test)]
+mod workspace_ops_tests;
 
+use std::collections::BTreeMap;
 use std::fmt;
 
-use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, TerminalTabId, WindowId, WorkspaceId};
 
 use crate::pane_layout::SplitRatio;
 
@@ -47,6 +66,7 @@ pub use inventory::{
 pub use pane_ops::MoveSide;
 pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
+pub use unpresented::unpresented_palette_label;
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
 use focus_history::FocusHistory;
@@ -67,7 +87,10 @@ pub enum ShellError {
     UnknownWorkspace,
     UnknownTab,
     UnknownPane,
+    UnknownTerminalTab,
+    NoSelectedTerminalTab,
     TabCreationUnavailable,
+    WindowCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
@@ -89,8 +112,14 @@ pub enum ShellError {
     NotZoomed,
     /// `pane == neighbor`, `SwapPanes` with `a == b`, or neighbor not a same-Tab leaf.
     InvalidMoveTarget,
-    /// Extra Window create stays off until headed close exists (W4a / ADR-018 §3.3a).
-    WindowCreationUnavailable,
+    /// Adopt naming an execution owned by a different Workspace (ADR-017).
+    CrossWorkspaceAdopt,
+    /// Adopt/terminate of an execution that is not live-unpresented here.
+    ExecutionNotUnpresented,
+    /// CreateWorkspace / SetWorkspaceRoot rejected an empty root path.
+    InvalidWorkspaceRoot,
+    /// CreateWorkspace reused an already-known WorkspaceId (including default).
+    DuplicateWorkspace,
 }
 
 impl ShellError {
@@ -99,8 +128,13 @@ impl ShellError {
             Self::UnknownWorkspace => "Unknown Workspace.",
             Self::UnknownTab => "Unknown Tab.",
             Self::UnknownPane => "Unknown Pane.",
+            Self::UnknownTerminalTab => "Unknown terminal tab.",
+            Self::NoSelectedTerminalTab => "The Pane has no selected terminal tab.",
             Self::TabCreationUnavailable => {
                 "Creating tabs is unavailable until a distinct execution route is available."
+            }
+            Self::WindowCreationUnavailable => {
+                "Creating windows is unavailable until window admission is enabled."
             }
             Self::PaneSplitUnavailable => {
                 "Splitting panes is unavailable until a distinct execution route is available."
@@ -122,7 +156,12 @@ impl ShellError {
             Self::CrossWorkspaceMove => "A Tab cannot move across Workspaces.",
             Self::NotZoomed => "The Tab is not zoomed.",
             Self::InvalidMoveTarget => "Invalid pane move or swap target.",
-            Self::WindowCreationUnavailable => "Window creation is unavailable until close exists.",
+            Self::CrossWorkspaceAdopt => "An execution cannot be adopted across Workspaces.",
+            Self::ExecutionNotUnpresented => {
+                "This execution is not a live-unpresented execution in this Workspace."
+            }
+            Self::InvalidWorkspaceRoot => "Workspace root path must be non-empty.",
+            Self::DuplicateWorkspace => "That Workspace identity is already known.",
         }
     }
 }
@@ -149,12 +188,15 @@ pub struct ShellSnapshot {
     pub windows: Vec<WindowSnapshot>,
     pub active_workspace: WorkspaceId,
     pub last_active_workspace: WorkspaceId,
-    pub active_window: WindowId,
+    /// `None` in the zero-Window state (ADR-018 §3.3a).
+    pub active_window: Option<WindowId>,
     /// ADR-018 §6 fence. Bumps only on Window/Tab/PaneTree membership change.
     pub containment_generation: u64,
     /// Active-Window Tab projection (compatible with pre-W3 hosts).
     pub tabs: Vec<TabSnapshot>,
+    /// Placeholder identity when [`Self::active_window`] is `None`.
     pub active_tab: TabId,
+    /// Placeholder identity when [`Self::active_window`] is `None`.
     pub focused_pane: PaneId,
     /// Active-Tab zoom overlay (`None` when not zoomed). Topology unchanged.
     pub zoomed: Option<PaneId>,
@@ -168,11 +210,10 @@ pub struct ShellSnapshot {
     pub allows_tab_creation: bool,
     pub allows_window_creation: bool,
     pub allows_pane_splitting: bool,
-    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
-    /// Pane would currently be accepted (the last Tab/Pane cannot close).
-    /// Closing a bound Pane releases the binding; disposition is portable
-    /// provisioning authority (ADR-017 §6.1 detach-only).
-    /// Hosts read these instead of re-deriving the rule from counts.
+    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused Pane
+    /// would currently be accepted. Hierarchical close always admits the active
+    /// Tab / focused Pane while a Window exists (last Tab → Window, last Pane →
+    /// Tab). Hosts read these instead of re-deriving the rule from counts.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
 }
@@ -181,8 +222,19 @@ pub struct ShellSnapshot {
 pub struct PaneSnapshot {
     pub id: PaneId,
     pub title: String,
+    pub terminal_tabs: Vec<TerminalTabSnapshot>,
+    pub selected_terminal_tab: Option<TerminalTabId>,
+    /// Compatibility projection of the selected terminal only.
     pub execution: Option<ExecutionId>,
     pub allows_implicit_bootstrap: bool,
+    pub presentation_mode: crate::presentation::PresentationMode,
+    pub resting_presentation_mode: crate::presentation::PresentationMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalTabSnapshot {
+    pub id: TerminalTabId,
+    pub execution: Option<ExecutionId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -213,15 +265,19 @@ pub struct ShellState {
     allows_window_creation: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
-    /// Monotonic ADR-018 fence; bumps only on containment mutations.
+    /// Monotonic fence for Pane and pane-local terminal membership mutations.
     containment_generation: u64,
     /// Execution released by the most recent successful `ClosePane`, if any.
     /// Portable provisioning records it as unreferenced (ADR-017 §6.1).
     last_released_execution: Option<(PaneId, ExecutionId)>,
+    last_released_executions: Vec<(PaneId, TerminalTabId, ExecutionId)>,
+    last_removed_terminal_execution: Option<(PaneId, TerminalTabId, ExecutionId)>,
     /// Pane ids removed by the most recent successful `CloseTab` (detach-only).
     last_removed_tab_panes: Vec<PaneId>,
     /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
     pending_effects: Vec<ShellNativeEffect>,
+    /// Live executions with no Pane binding in this headed session (ADR-018 §3.3).
+    unpresented: BTreeMap<ExecutionId, WorkspaceId>,
 }
 
 impl ShellState {
@@ -232,23 +288,44 @@ impl ShellState {
         let pane = Pane {
             id: PaneId::new(),
             title: "Pane 1".to_owned(),
-            execution: None,
+            terminal_tabs: vec![crate::shell::workspace::TerminalTab {
+                id: TerminalTabId::new(),
+                execution: None,
+            }],
+            selected_terminal_tab: None,
             allows_implicit_execution_bootstrap: true,
             presentation_mode: crate::presentation::PresentationMode::Flow,
+            resting_presentation_mode: crate::presentation::PresentationMode::Flow,
         };
+        let mut pane = pane;
+        pane.selected_terminal_tab = pane.terminal_tabs.first().map(|row| row.id);
         let tab = Tab::with_pane(TabId::new(), "Terminal".to_owned(), pane);
         let tab_id = tab.id;
         let window_id = WindowId::new();
         let window = Window::try_new(window_id, WorkspaceId::m001_default(), vec![tab], tab_id)
             .expect("the production window has one tab");
-        let workspace = Workspace {
+        let detail = detail.into();
+        let mut workspace = Workspace {
             id: WorkspaceId::m001_default(),
             name: "Local".to_owned(),
-            detail: Some(detail.into()),
+            root_path: None,
+            detail: None,
             attention: false,
             windows: vec![window],
             active_window: Some(window_id),
         };
+        // Prefer a real filesystem root when the host/detail supplies one;
+        // otherwise bind $HOME while keeping the product name "Local" (ADR-028).
+        let candidate = detail.trim();
+        if !candidate.is_empty()
+            && !candidate.eq_ignore_ascii_case("local")
+            && (candidate.starts_with('/') || candidate.starts_with('~'))
+        {
+            workspace.bind_root_path(candidate.to_owned());
+        } else if let Ok(home) = std::env::var("HOME") {
+            workspace.bind_root_path(home);
+            workspace.name = "Local".to_owned();
+        }
         let mut shell = Self {
             last_active_workspace: workspace.id,
             workspaces: vec![workspace],
@@ -257,13 +334,16 @@ impl ShellState {
             // path as CreateTab (one ExecutionId per new terminal leaf).
             allows_pane_splitting: true,
             allows_tab_creation: true,
-            allows_window_creation: false,
+            allows_window_creation: true,
             last_error: None,
             next_tab_ordinal: 2,
             containment_generation: 0,
             last_released_execution: None,
+            last_released_executions: Vec::new(),
+            last_removed_terminal_execution: None,
             last_removed_tab_panes: Vec::new(),
             pending_effects: Vec::new(),
+            unpresented: BTreeMap::new(),
         };
         shell.seed_focus_from_product();
         shell
@@ -305,8 +385,11 @@ impl ShellState {
             next_tab_ordinal: 2,
             containment_generation: 0,
             last_released_execution: None,
+            last_released_executions: Vec::new(),
+            last_removed_terminal_execution: None,
             last_removed_tab_panes: Vec::new(),
             pending_effects: Vec::new(),
+            unpresented: BTreeMap::new(),
         };
         shell.seed_focus_from_product();
         Ok(shell)
@@ -403,7 +486,10 @@ impl ShellState {
         pane: PaneId,
         execution: ExecutionId,
     ) -> Result<(), ShellError> {
-        self.pane_mut(pane)?.execution = Some(execution);
+        self.pane_mut(pane)?
+            .selected_terminal_mut()
+            .ok_or(ShellError::NoSelectedTerminalTab)?
+            .execution = Some(execution);
         Ok(())
     }
 
@@ -432,10 +518,9 @@ impl ShellState {
         self.allows_window_creation = allowed;
     }
 
-    /// Test/C2 harness: flip the production gate without rebuilding the shell.
-    #[cfg(test)]
     /// Test-only policy flip. Called from macOS C2 harness suites via
     /// `ApplicationRoot::enable_tab_creation_for_test`.
+    #[cfg(test)]
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn set_allows_tab_creation_for_test(&mut self, allowed: bool) {
         self.allows_tab_creation = allowed;
@@ -447,7 +532,7 @@ impl ShellState {
     }
 
     pub fn pane_execution(&self, pane: PaneId) -> Result<Option<ExecutionId>, ShellError> {
-        Ok(self.pane(pane)?.execution)
+        Ok(self.pane(pane)?.execution())
     }
 
     /// Take the execution released by the last successful `ClosePane`, if any.
@@ -460,12 +545,12 @@ impl ShellState {
         std::mem::take(&mut self.last_removed_tab_panes)
     }
 
-    /// Clear a Pane→execution binding without removing the Pane (explicit
-    /// terminate). Presentation close uses [`ShellAction::ClosePane`] /
-    /// [`ShellAction::CloseTab`] instead.
+    /// Clear a Pane's selected execution without removing its chrome.
     pub fn release_execution(&mut self, pane: PaneId) -> Result<Option<ExecutionId>, ShellError> {
         let pane = self.pane_mut(pane)?;
-        Ok(pane.execution.take())
+        Ok(pane
+            .selected_terminal_mut()
+            .and_then(|terminal| terminal.execution.take()))
     }
 
     /// Whether `id` is a current Workspace in this shell.
@@ -507,7 +592,11 @@ impl ShellState {
         for workspace in &self.workspaces {
             for tab in workspace.tabs() {
                 for pane in tab.panes.values() {
-                    if pane.execution == Some(execution) {
+                    if pane
+                        .terminal_tabs
+                        .iter()
+                        .any(|terminal| terminal.execution == Some(execution))
+                    {
                         bound.push((workspace.id, tab.id, pane.id));
                     }
                 }
@@ -657,6 +746,7 @@ impl ShellState {
             ShellAction::CreateWindow { .. }
             | ShellAction::ActivateWorkspace { .. }
             | ShellAction::SelectWindow { .. }
+            | ShellAction::NativeWindowBecameKey { .. }
             | ShellAction::ObserveWindowBecameKey { .. }
             | ShellAction::SelectTab { .. }
             | ShellAction::CreateTab { .. }
@@ -665,12 +755,9 @@ impl ShellState {
             | ShellAction::MoveTabBefore { .. }
             | ShellAction::MoveTabToWindow { .. }
             | ShellAction::MoveTabToNewWindow { .. } => self.dispatch_w2a(action),
-            ShellAction::CloseTab {
-                id,
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.close_tab(id)),
+            ShellAction::CloseWindow { .. }
+            | ShellAction::CloseTab { .. }
+            | ShellAction::ClosePane { .. } => self.dispatch_close(action),
             ShellAction::SplitFocused {
                 axis,
                 containment_generation,
@@ -687,12 +774,6 @@ impl ShellState {
             } => self
                 .require_containment_generation(containment_generation)
                 .and_then(|()| self.split_pane(id, axis).map(|_| ())),
-            ShellAction::ClosePane {
-                id,
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.close_pane(id)),
             ShellAction::FocusPane { id } => self.focus_pane(id),
             ShellAction::ZoomPane { id } => self.zoom_pane(id),
             ShellAction::Unzoom => self.unzoom(),
@@ -724,105 +805,32 @@ impl ShellState {
                 .require_containment_generation(containment_generation)
                 .and_then(|()| self.equalize_focused()),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
+            ShellAction::NewTerminalTab {
+                pane,
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.new_terminal_tab(pane).map(|_| ())),
+            ShellAction::SelectTerminalTab { pane, terminal_tab } => {
+                self.select_terminal_tab(pane, terminal_tab)
+            }
+            ShellAction::BindTerminalExecution {
+                pane,
+                terminal_tab,
+                execution,
+            } => self.bind_terminal_execution(pane, terminal_tab, execution),
+            ShellAction::UnbindTerminal(pane, terminal_tab) => self.unbind(pane, terminal_tab),
+            ShellAction::CloseTerminalTab {
+                pane,
+                terminal_tab,
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.close_terminal_tab(pane, terminal_tab)),
+            ShellAction::RecordUnpresented { .. }
+            | ShellAction::ForgetUnpresented { .. }
+            | ShellAction::AdoptExecution { .. } => self.dispatch_unpresented(action),
         }
-    }
-
-    fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
-        let (removed, focus_successor) = {
-            let workspace = self.workspace_mut(self.active_workspace_id())?;
-            let was_active_tab = workspace.active_tab_id().ok() == Some(id);
-            // Capture pane ids before removal for detach-only dispose (ADR-017 §6.1).
-            let removed: Vec<PaneId> = workspace
-                .tab(id)
-                .map(|tab| tab.panes.keys().copied().collect())
-                .unwrap_or_default();
-            workspace.close_tab(id)?;
-            let successor = if was_active_tab {
-                Some(workspace.active_tab_mut()?.focused)
-            } else {
-                None
-            };
-            (removed, successor)
-        };
-        self.last_removed_tab_panes = removed;
-        self.purge_missing_panes();
-        if let Some(pane) = focus_successor {
-            self.focus_history.record(pane);
-        }
-        self.bump_containment_generation();
-        Ok(())
-    }
-
-    fn split_pane(&mut self, pane_id: PaneId, axis: SplitAxis) -> Result<PaneId, ShellError> {
-        if !self.allows_pane_splitting {
-            return Err(ShellError::PaneSplitUnavailable);
-        }
-        let workspace = self.workspace_mut(self.active_workspace_id())?;
-        let tab = workspace.active_tab_mut()?;
-        if !tab.panes.contains_key(&pane_id) {
-            return Err(ShellError::UnknownPane);
-        }
-        let pane_count = tab.panes.len();
-        let pane = Pane {
-            id: PaneId::new(),
-            title: format!("Pane {}", pane_count + 1),
-            execution: None,
-            allows_implicit_execution_bootstrap: false,
-            presentation_mode: crate::presentation::PresentationMode::Flow,
-        };
-        let id = pane.id;
-        // ADR-021 §3: successful structural mutation clears zoom.
-        tab.zoomed = None;
-        tab.panes.insert(id, pane);
-        tab.root = tab.root.replacing(
-            pane_id,
-            PaneTree::Split {
-                axis,
-                first: Box::new(PaneTree::Leaf(pane_id)),
-                second: Box::new(PaneTree::Leaf(id)),
-                ratio: SplitRatio::HALF,
-            },
-        );
-        tab.focused = id;
-        self.bump_containment_generation();
-        Ok(id)
-    }
-
-    fn close_pane(&mut self, pane_id: PaneId) -> Result<(), ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace_id())?;
-        let tab = workspace.active_tab_mut()?;
-        if !tab.allows_pane_close() {
-            return Err(ShellError::CannotCloseLastPane);
-        }
-        let Some(pane) = tab.panes.get(&pane_id) else {
-            return Err(ShellError::UnknownPane);
-        };
-        // Bound close releases presentation only (ADR-017 §6.1). Disposition
-        // (detach-only / unreferenced record) is portable provisioning authority.
-        let released = pane.execution.map(|execution| (pane_id, execution));
-        let focus_before = tab.focused;
-        let sibling_successor = tab.root.sibling_first_leaf(pane_id);
-        let Some(root) = tab.root.removing(pane_id) else {
-            return Err(ShellError::CannotCloseLastPane);
-        };
-        tab.root = root;
-        tab.panes.remove(&pane_id);
-        if tab.zoomed == Some(pane_id) {
-            tab.zoomed = None;
-        }
-        if tab.focused == pane_id || !tab.panes.contains_key(&tab.focused) {
-            tab.focused = sibling_successor
-                .or_else(|| tab.root.first_pane())
-                .expect("remaining Pane tree must contain a Pane");
-        }
-        let focus_successor = (tab.focused != focus_before).then_some(tab.focused);
-        self.last_released_execution = released;
-        self.purge_missing_panes();
-        if let Some(pane) = focus_successor {
-            self.focus_history.record(pane);
-        }
-        self.bump_containment_generation();
-        Ok(())
     }
 
     fn focus_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
@@ -878,15 +886,11 @@ impl ShellState {
         pane_id: PaneId,
         execution: ExecutionId,
     ) -> Result<(), ShellError> {
-        if !self.panes_bound_to(execution).is_empty() {
-            return Err(ShellError::ExecutionAlreadyBound);
-        }
-        let pane = self.pane_mut(pane_id)?;
-        if pane.execution.is_some() {
-            return Err(ShellError::ExecutionAlreadyBound);
-        }
-        pane.execution = Some(execution);
-        Ok(())
+        let terminal_tab = self
+            .pane(pane_id)?
+            .selected_terminal_tab
+            .ok_or(ShellError::NoSelectedTerminalTab)?;
+        self.bind_terminal_execution(pane_id, terminal_tab, execution)
     }
 
     fn focused_pane_id(&self) -> Result<PaneId, ShellError> {

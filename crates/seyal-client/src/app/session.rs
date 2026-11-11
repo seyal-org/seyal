@@ -23,7 +23,14 @@ impl Drop for ApplicationRoot {
                 let _ = crate::ffi::unregister_client(raw);
             }
         }
+        for (_, handle) in self.extra_terminal_clients.drain() {
+            let raw = handle.raw();
+            if seen.insert(raw) {
+                let _ = crate::ffi::unregister_client(raw);
+            }
+        }
         self.pane_client_raws.clear();
+        self.terminal_client_raws.clear();
     }
 }
 
@@ -62,6 +69,9 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         self.pane_client_raws.insert(fence.pane, handle);
+        if let Ok(Some(terminal)) = self.shell.selected_terminal_tab(fence.pane) {
+            self.terminal_client_raws.insert(terminal, handle);
+        }
         self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
@@ -91,6 +101,9 @@ impl ApplicationRoot {
             self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         }
         self.pane_client_raws.insert(fence.pane, handle);
+        if let Ok(Some(terminal)) = self.shell.selected_terminal_tab(fence.pane) {
+            self.terminal_client_raws.insert(terminal, handle);
+        }
         self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
@@ -136,6 +149,9 @@ impl ApplicationRoot {
         let raw = registered.raw();
         self.client_handle = Some(registered);
         self.pane_client_raws.insert(fence.pane, raw);
+        if let Ok(Some(terminal)) = self.shell.selected_terminal_tab(fence.pane) {
+            self.terminal_client_raws.insert(terminal, raw);
+        }
         self.remember_pane_runtime(fence.pane, runtime_id);
         crate::ffi::set_focused_display_handle(raw);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
@@ -223,10 +239,9 @@ impl ApplicationRoot {
             self.pending_effects
                 .push(NativeEffect::RealizeWindow { window: window.id });
         }
-        if !snap.windows.is_empty() {
-            self.pending_effects.push(NativeEffect::OrderFrontMakeKey {
-                window: snap.active_window,
-            });
+        if let Some(window) = snap.active_window {
+            self.pending_effects
+                .push(NativeEffect::OrderFrontMakeKey { window });
         }
         let pane = snap.focused_pane;
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
@@ -283,6 +298,8 @@ impl ApplicationRoot {
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
+        #[cfg(target_os = "macos")]
+        self.poll_unpresented_inventory_refresh();
         let display_handle = self
             .authority
             .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
@@ -313,8 +330,19 @@ impl ApplicationRoot {
             // XCTest/Seyal.app retry the same fd. Unregister only on terminal
             // socket loss (same set as `seyal_bridge_poll_for`).
             Err(error) if is_terminal_registry_loss(&error) => {
-                self.note_registry_client_loss(handle);
-                let _ = crate::ffi::unregister_client(handle);
+                let ended = matches!(error, crate::local::ClientError::NoRunningExecution);
+                // Close Terminal / P4: poll_prepare may accept type-39 and then
+                // return NoRunningExecution on Lifecycle::Finalized in the same
+                // turn. Absorb before bail so finish_terminal_termination can
+                // remove the Pane terminal tab; otherwise the tab stays forever.
+                let _ = self.absorb_wire_terminate_result(true);
+                self.note_terminal_client_loss(handle, ended);
+                // Match `seyal_bridge_poll`: keep the registry entry after shell
+                // exit so Flow can still drain final Block history (#1379).
+                // Disconnect/IO still unregister so level-trigger sources stop.
+                if !ended {
+                    let _ = crate::ffi::unregister_client(handle);
+                }
                 return self.fail(AppError::NoLiveClient);
             }
             Err(_) => return self.fail(AppError::NoLiveClient),
@@ -337,6 +365,7 @@ impl ApplicationRoot {
         // from the focused display Controller after a second-tab attach).
         self.poll_create_client_prepare()?;
         self.poll_unfocused_pane_clients();
+        self.poll_dispose_clients();
         while self.absorb_wire_create_result()?.is_some() {}
         let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
@@ -369,21 +398,34 @@ impl ApplicationRoot {
 
     /// Drain unfocused second-tab Controllers so type-39/control frames do not
     /// stall until the tab is focused again. Display output stays focused-pane.
-    /// Terminal poll errors clear that pane's authority (same loss path as
-    /// `seyal_bridge_poll_for`) so a dead fd cannot spin forever.
+    /// Terminal poll errors disarm that fd (same loss path as
+    /// `seyal_bridge_poll_for`). Shell exit keeps Flow authority.
     #[cfg(target_os = "macos")]
     fn poll_unfocused_pane_clients(&mut self) {
-        let focused = self.shell.snapshot().focused_pane;
+        // Shell focus can move to an unbound window while `authority` still
+        // identifies the displayed Controller. A live attach-for-dispose may
+        // be registered under that focused pane without becoming its display
+        // authority; it still needs polling to deliver its terminate result.
+        let display_handle = self
+            .authority
+            .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
+            .or_else(|| {
+                self.client_handle
+                    .as_ref()
+                    .map(crate::ffi::ClientRegistryHandle::raw)
+            });
         let handles: Vec<(PaneId, u64)> = self
             .pane_client_raws
             .iter()
-            .filter(|(pane, _)| **pane != focused)
+            .filter(|(_, raw)| Some(**raw) != display_handle)
             .map(|(pane, raw)| (*pane, *raw))
             .collect();
         for (_pane, raw) in handles {
-            if registry_client_is_gone(raw) {
-                self.note_registry_client_loss(raw);
-                let _ = crate::ffi::unregister_client(raw);
+            if let Some(ended) = registry_client_terminal_loss(raw) {
+                self.note_terminal_client_loss(raw, ended);
+                if !ended {
+                    let _ = crate::ffi::unregister_client(raw);
+                }
             }
         }
     }
@@ -394,20 +436,23 @@ impl ApplicationRoot {
 
 #[cfg(target_os = "macos")]
 fn is_terminal_registry_loss(error: &crate::local::ClientError) -> bool {
-    matches!(
-        error,
-        crate::local::ClientError::Disconnected
-            | crate::local::ClientError::Io
-            | crate::local::ClientError::NoRunningExecution
-    )
+    error.is_terminal_registry_loss()
 }
 
 #[cfg(target_os = "macos")]
 fn registry_client_is_gone(handle: u64) -> bool {
+    registry_client_terminal_loss(handle).is_some()
+}
+
+#[cfg(target_os = "macos")] // Some(true) means shell exit (NoRunningExecution).
+fn registry_client_terminal_loss(handle: u64) -> Option<bool> {
     match crate::ffi::with_client_mut(handle, LocalDisplayClient::poll_prepare) {
-        None => true,
-        Some(Err(error)) => is_terminal_registry_loss(&error),
-        Some(Ok(_)) => false,
+        None => Some(false),
+        Some(Err(error)) if is_terminal_registry_loss(&error) => Some(matches!(
+            error,
+            crate::local::ClientError::NoRunningExecution
+        )),
+        Some(Err(_) | Ok(_)) => None,
     }
 }
 
@@ -426,6 +471,12 @@ impl ApplicationRoot {
         fence: AppFence,
         evidence: BindingEvidence,
     ) -> Result<(), AppError> {
+        // New shell binds through CreateReplacementExecution onto the ended
+        // Pane. A generic Bind here would attach the created id to whoever
+        // is focused and can steal a sibling.
+        if self.replacement_bootstrap.is_some() {
+            return Err(AppError::StalePane);
+        }
         self.require_fence(fence)?;
         if self.authority.is_some() {
             return Err(AppError::AlreadyBound);
@@ -439,8 +490,16 @@ impl ApplicationRoot {
                 execution: evidence.execution,
             })
             .map_err(|_| AppError::AlreadyBound)?;
-        self.provisioning
-            .record_adopted_binding(fence.pane, evidence.execution);
+        let terminal_tab = self
+            .shell
+            .selected_terminal_tab(fence.pane)
+            .map_err(|_| AppError::UnknownPane)?
+            .ok_or(AppError::UnboundUnauthorized)?;
+        self.provisioning.record_adopted_terminal_binding(
+            fence.pane,
+            terminal_tab,
+            evidence.execution,
+        );
         #[cfg(target_os = "macos")]
         if let Some(handle) = self
             .client_handle
@@ -469,9 +528,12 @@ impl ApplicationRoot {
             pty_generation: evidence.pty_generation,
         };
         self.pane_authorities.insert(fence.pane, authority);
+        self.terminal_authorities.insert(terminal_tab, authority);
         self.bind_pane_recovery(fence.pane, evidence.execution);
         self.remember_primary_pane(fence.pane);
         self.authority = Some(authority);
+        // A live bind replaces any prior shell-exit latch on this Pane (#1379).
+        self.clear_execution_ended_for_pane(fence.pane);
         self.derive_presentation(evidence.alternate_screen)?;
         self.sync_composer_presentation();
         // R8.4 / #1124: new bind/attach must not keep a prior chord prefix.
@@ -620,12 +682,19 @@ impl ApplicationRoot {
                     raws.push(raw);
                 }
             }
+            for (_, handle) in self.extra_terminal_clients.drain() {
+                let raw = handle.raw();
+                if !raws.contains(&raw) {
+                    raws.push(raw);
+                }
+            }
             for raw in self.pane_client_raws.values() {
                 if !raws.contains(raw) {
                     raws.push(*raw);
                 }
             }
             self.pane_client_raws.clear();
+            self.terminal_client_raws.clear();
             if let Some(raw) = primary
                 && !raws.contains(&raw)
             {

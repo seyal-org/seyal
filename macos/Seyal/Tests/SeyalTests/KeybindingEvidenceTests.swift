@@ -25,13 +25,21 @@ final class KeybindingEvidenceTests: XCTestCase {
         XCTAssertEqual(palette.key_is_named, 0)
         XCTAssertEqual(palette.key_base, keyK)
 
-        let newTab = try XCTUnwrap(
+        let newTerminal = try XCTUnwrap(
+            KeybindingShortcutRealization.item(
+                commandId: KeybindingShortcutRealization.terminalCreate
+            )
+        )
+        XCTAssertEqual(newTerminal.has_key_equivalent, 1)
+        XCTAssertEqual(newTerminal.modifier_bits & 1, 1, "CMD bit")
+        XCTAssertEqual(newTerminal.key_base, keyT)
+
+        let layoutTab = try XCTUnwrap(
             KeybindingShortcutRealization.item(
                 commandId: KeybindingShortcutRealization.tabCreate
             )
         )
-        XCTAssertEqual(newTab.has_key_equivalent, 1)
-        XCTAssertEqual(newTab.key_base, keyT)
+        XCTAssertEqual(layoutTab.has_key_equivalent, 0, "⌘T creates a Pane terminal, not a Layout tab")
 
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         KeybindingShortcutRealization.realize(
@@ -40,6 +48,14 @@ final class KeybindingEvidenceTests: XCTestCase {
         XCTAssertEqual(item.keyEquivalent, "k")
         XCTAssertTrue(item.keyEquivalentModifierMask.contains(.command))
         XCTAssertEqual(item.title, "Command Palette")
+
+        let terminalItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        KeybindingShortcutRealization.realize(
+            terminalItem, commandId: KeybindingShortcutRealization.terminalCreate
+        )
+        XCTAssertEqual(terminalItem.keyEquivalent, "t")
+        XCTAssertTrue(terminalItem.keyEquivalentModifierMask.contains(.command))
+        XCTAssertEqual(terminalItem.title, "New Terminal")
     }
 
     /// §14.4 / acceptance: ApplicationCommand match is consumed (zero PTY path).
@@ -114,7 +130,7 @@ final class KeybindingEvidenceTests: XCTestCase {
         )
         XCTAssertEqual(reserved, 2, "reserved cmd+q → native Command handling")
 
-        // Palette owns the route: cmd+t misses, but New Tab's projected ⌘T
+        // Palette owns the route: cmd+t misses, but New Terminal's projected ⌘T
         // would still fire if we returned native — consume that cross-context
         // steal only.
         XCTAssertEqual(
@@ -125,7 +141,7 @@ final class KeybindingEvidenceTests: XCTestCase {
         let menuSteal = seyal_app_route_keystroke(handle, 1, 0, keyT, 0, 0, 0)
         XCTAssertEqual(
             menuSteal, 1,
-            "palette-open cmd+t → consumed (inactive New Tab menu equivalent)"
+            "palette-open cmd+t → consumed (inactive New Terminal menu equivalent)"
         )
         XCTAssertEqual(
             seyal_app_shell(handle).tab_count, 1,
@@ -149,7 +165,7 @@ final class KeybindingEvidenceTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         var refresh = SeyalAppAction()
@@ -173,5 +189,83 @@ final class KeybindingEvidenceTests: XCTestCase {
             let code = seyal_app_route_keystroke(handle, 0, 1, named, 0, 0, 0)
             XCTAssertEqual(code, 0, "arrow named=\(named) must fall through")
         }
+    }
+
+    /// #1467/#1468: AppKit/XCUI may deliver Ctrl+C/D as C0 scalars; classifier
+    /// must still emit ControlAscii letters so DirectInput cannot drop EOF/SIGINT.
+    func testControlAsciiMapsC0DeliveryToLetters() {
+        XCTAssertEqual(
+            TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: [.control],
+                charactersIgnoringModifiers: "\u{3}",
+                characters: nil
+            ),
+            0x43
+        )
+        XCTAssertEqual(
+            TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: [],
+                charactersIgnoringModifiers: nil,
+                characters: "\u{4}"
+            ),
+            0x44,
+            "bare C0 U+0004 (deleteForward path) must still map to 'D'"
+        )
+        XCTAssertEqual(
+            TerminalNativeKeyClassifier.controlLetterFromC0(
+                charactersIgnoringModifiers: "\u{4}",
+                characters: nil
+            ),
+            0x44
+        )
+        XCTAssertEqual(
+            TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: [.control],
+                charactersIgnoringModifiers: "d",
+                characters: nil
+            ),
+            0x44
+        )
+    }
+
+    /// Multipane DirectInput must stay armed from flags, explicit mode 3, or a
+    /// sticky ForegroundProgram target after Ctrl+C eligibility flicker.
+    func testBlockScopedDirectInputPublishHelpers() {
+        var direct = SeyalComposerTarget()
+        direct.block_id = 42
+        direct.mode = 3
+        direct.target_class = 2
+        XCTAssertTrue(seyalComposerTargetIsBlockScopedDirectInput(direct))
+        XCTAssertTrue(seyalComposerTargetOwnsRunningForeground(direct))
+        XCTAssertTrue(
+            seyalPublishesBlockScopedDirectInput(flags: 0, target: direct)
+        )
+
+        var sticky = SeyalComposerTarget()
+        sticky.block_id = 7
+        sticky.mode = 0 // Busy/Available flicker — not Submit
+        sticky.target_class = 2
+        XCTAssertFalse(seyalComposerTargetIsBlockScopedDirectInput(sticky))
+        XCTAssertTrue(seyalComposerTargetOwnsRunningForeground(sticky))
+        XCTAssertTrue(
+            seyalPublishesBlockScopedDirectInput(flags: 0, target: sticky)
+        )
+
+        var submit = SeyalComposerTarget()
+        submit.block_id = 7
+        submit.mode = 1
+        submit.target_class = 2
+        XCTAssertFalse(seyalComposerTargetOwnsRunningForeground(submit))
+        XCTAssertFalse(
+            seyalPublishesBlockScopedDirectInput(flags: 0, target: submit)
+        )
+
+        let flagOnly = SeyalComposerTarget()
+        XCTAssertTrue(
+            seyalPublishesBlockScopedDirectInput(
+                flags: UInt16(SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT),
+                target: flagOnly
+            )
+        )
     }
 }

@@ -14,12 +14,12 @@ Codex and GitHub Copilot CLI both discover project skills directly from `.agents
 | --- | --- |
 | Seyal architecture | `AGENTS.md` + `architecture-change` |
 | Project-context retrieval | thin `project-context` adapter → pinned AI-SDLC `project-context` |
-| Issue decomposition | `issue-refinement` facade → pinned AI-SDLC `work-item-design` + GitHub/Seyal deltas |
-| Implementation planning | thin `implementation-planning` adapter → pinned AI-SDLC `implementation-planning` + Seyal architecture/evidence planning gates |
-| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC `development-readiness` + Issue-body plan + Seyal Ready gate |
-| Implementation | `implement-issue` facade → pinned AI-SDLC `implementation` + Seyal human-owner/branch/test/docs/candidate gates |
+| Issue decomposition | `issue-refinement` facade → pinned AI-SDLC `create-issue` + GitHub/Seyal deltas |
+| Implementation planning | thin `implementation-planning` adapter → pinned AI-SDLC `create-issue` (issue-owned plan) + Seyal architecture/evidence planning gates |
+| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC 12-point DoR (`docs/WORKING-LOOP.md`) + Issue-body plan + Seyal Ready gate |
+| Implementation | `implement-issue` facade → pinned AI-SDLC `implement-issue` + Seyal human-owner/branch/test/docs/candidate gates |
 | PR review/re-review | `pr-review` facade → pinned AI-SDLC `pr-review` + Seyal architecture/terminal/evidence merge gates |
-| Review remediation | thin `address-pr-review` adapter → pinned AI-SDLC `address-pr-review` + Seyal one-PR/root-cause/check gates |
+| Review remediation | thin `address-pr-review` adapter → pinned AI-SDLC `process-review` + Seyal one-PR/root-cause/check gates |
 | Change verification | thin `verification` adapter → pinned AI-SDLC `verification` + Seyal evidence gates |
 | Milestone validation | `milestone-validation` facade → pinned AI-SDLC `verification` + Seyal aggregate milestone rules |
 | Native macOS design | `macos-native-design` |
@@ -49,13 +49,12 @@ The consumed generic layer is:
 ```text
 ai-sdlc
   project-context
-  work-item-design
-  implementation-planning
-  development-readiness
-  implementation
+  create-issue
+  implement-issue
   verification
   pr-review
-  address-pr-review
+  process-review
+  pr-merge
         ↓ exact reviewed pin materialized by make bootstrap-agents
 Seyal/.sdlc/framework/
         ↓
@@ -69,11 +68,13 @@ Seyal owns project knowledge and project/domain policy. AI-SDLC owns the reusabl
 The integration forms are deliberate:
 
 - **direct adapters** keep the generic capability name when Seyal adds a narrow local gate (`project-context`, `implementation-planning`, `development-readiness`, `verification`, `address-pr-review`);
-- **Seyal facades** preserve an established project workflow entrypoint or add a larger project-domain acceptance layer while delegating the reusable procedure (`issue-refinement` → `work-item-design`, `implement-issue` → `implementation`, `pr-review` → `pr-review`, `milestone-validation` → `verification`). Planning and review-remediation keep their generic names because their routing boundaries are explicit.
+- **Seyal facades** preserve an established project workflow entrypoint or add a larger project-domain acceptance layer while delegating the reusable procedure (`issue-refinement` → `create-issue`, `implement-issue` → `implement-issue`, `pr-review` → `pr-review`, `milestone-validation` → `verification`). Planning and review-remediation keep their generic names because their routing boundaries are explicit.
 
-`pr-review` is the single review/re-review discovery surface. It performs the full current-candidate implementation and merge-readiness review, consumes `verification`, and requests specialist review only when risk/policy requires it. There is no lighter diff-only `code-review` pass. `address-pr-review` is the separate remediation entrypoint for an `IN_REVIEW` candidate and must return to one full `pr-review` on that same PR; unfinished accepted scope remains under `implement-issue`.
+`pr-review` is the single review/re-review discovery surface. The first pass reviews the full current candidate once, consumes `verification`, requests specialist review only when risk/policy requires it, and lists every material blocker in that pass. There is no separate diff-only `code-review` pass. `address-pr-review` fixes that recorded set on the same PR. The follow-up confirms those findings and the diff since the reviewed head. A new full `pr-review` starts only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the review relied on. Unfinished accepted scope remains under `implement-issue`.
 
-The Issue body is the plan, and the draft/ready candidate stage is defined, in `docs/engineering/ISSUE-PROTOCOL.md`. Skills resolve those GitHub records. They do not keep the plan or the stage only in chat.
+The Issue body is the plan, and the draft/ready candidate stage is defined, in `docs/engineering/ISSUE-PROTOCOL.md`.
+
+The **human GitHub owner** remains the accountable Issue owner; it does **not** replace exclusive *agent execution* coordination. Seyal exposes the pinned generic `tools/workflow_claims.py` through `python3 scripts/seyal-ai-sdlc-claim.py {begin|verify|release} --repo <owner/repo> --phase <implement|review|process-review> --number <N>`. Its default user-local state root is shared across Seyal worktrees; `AI_SDLC_WORKER_ID` must be unique per active worker (set by the host) and retained for the same authorized resume. Token verification is required immediately before mutations. Without a genuine host invocation it is only a CLI/skill contract, not enforced ownership across Cursor/cloud agents. Do not substitute GitHub labels, assignees, or branches for the atomic agent claim. Skills resolve those GitHub records. They do not keep the plan or the stage only in chat.
 
 Do not also add local `work-item-design` or `implementation` aliases merely to mirror AI-SDLC. That would create overlapping discovery surfaces with the established Seyal facades. The generic source remains under `.sdlc/framework/` and the project facade/adapter contains only the Seyal-specific delta.
 
@@ -82,6 +83,12 @@ Terminal-specific skills such as `vt-tdd`, `terminal-conformance`, `metal-render
 Do not migrate skills mechanically. A procedure belongs in AI-SDLC only when it is genuinely product-agnostic, has a stable generic contract/evaluation, and Seyal can retain required domain constraints through context or a thin adapter without weakening quality gates.
 
 AI-SDLC is pinned by exact commit in `scripts/bootstrap-dev.sh`; `.sdlc/framework/` is local generated developer state and is not committed. Updating the pin requires a normal Seyal Issue/PR. The generic framework is never a product/runtime dependency.
+
+### Cursor pre-tool claim enforcement
+
+`.cursor/hooks.json` configures a fail-closed Cursor `preToolUse` hook (`.cursor/hooks/claim-gate.py`). A stable Cursor `conversation_id` determines the agent worker identity, rather than a human GitHub username. A strict `begin` invocation is permitted before ownership; read-only inspection commands remain possible. Before a write-capable Cursor tool (file edits, arbitrary shell, GitHub/MCP mutations) the hook re-verifies the worker's active issue/PR token against the pinned SQLite backend. Missing/invalid/released claims deny the tool. Release happens only after the documented handoff. The active resource record is stored privately outside the repository; a different issue/PR requires a release first.
+
+**Boundary:** This is a Cursor project hook, not an OS sandbox or GitHub-side policy. It cannot constrain manual shell processes, other IDEs, untrusted collaborators who modify/disable project hooks, tools outside Cursor's hook dispatch, or distinct cloud workers lacking a shared database. Project hooks require a trusted workspace. Before calling this fully verified, test the actual installed Cursor client with a no-claim `Write`/MCP/Shell attempt and a two-agent collision; tests of the Python hook alone do not prove Cursor executed it. Keep human merge approval and independent review separate.
 
 Reference-consumer evidence for this integration is recorded in `docs/engineering/AI-SDLC-REFERENCE-CONSUMER.md`.
 

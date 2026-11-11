@@ -10,7 +10,9 @@ use crate::{
     LocalDisplayClient,
 };
 
-use super::{error_code, with_display_client, with_display_client_mut, SeyalCopiedText};
+use super::{
+    error_code, with_client_mut, with_display_client, with_display_client_mut, SeyalCopiedText,
+};
 
 /// Reports whether the attached Runtime negotiated the additive TerminalKeyV2
 /// message. Native input uses this to preserve M001 routing with older peers.
@@ -46,6 +48,35 @@ pub unsafe extern "C" fn seyal_bridge_submit_utf8(bytes: *const u8, len: u32) ->
         return -4;
     };
     with_display_client_mut(|client| client.submit_committed_text(text))
+        .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
+}
+
+/// Submit committed UTF-8 on one adopted client without retargeting the
+/// focused display route.
+///
+/// # Safety
+/// Same byte contract as [`seyal_bridge_submit_utf8`]. `handle` must be an
+/// adopted client on this thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn seyal_bridge_submit_utf8_for(
+    handle: u64,
+    bytes: *const u8,
+    len: u32,
+) -> i32 {
+    if len == 0 {
+        return 0;
+    }
+    if bytes.is_null() {
+        return -4;
+    }
+    let Ok(len) = usize::try_from(len) else {
+        return -11;
+    };
+    let bytes = unsafe { slice::from_raw_parts(bytes, len) };
+    let Ok(text) = str::from_utf8(bytes) else {
+        return -4;
+    };
+    with_client_mut(handle, |client| client.submit_committed_text(text))
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 

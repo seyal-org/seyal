@@ -21,6 +21,10 @@ pub(crate) enum InputKind {
     /// Only the macOS composer route constructs this today.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Composer,
+    /// Consented stager line or the exact-N payload/padding write. Bypasses
+    /// the Armed/Delivering hold and does not close the local prompt gate.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Bootstrap,
 }
 
 pub(crate) struct AcceptedInput {
@@ -123,6 +127,8 @@ pub struct InputIngress {
     global_limit: usize,
     per_execution: Arc<AtomicUsize>,
     per_execution_limit: usize,
+    /// Set while F4 is Armed or Delivering. One atomic load; not an F9 sample.
+    held: Option<Arc<AtomicBool>>,
 }
 
 impl InputIngress {
@@ -136,6 +142,7 @@ impl InputIngress {
         global_limit: usize,
         per_execution: Arc<AtomicUsize>,
         per_execution_limit: usize,
+        held: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
             execution_id,
@@ -146,6 +153,7 @@ impl InputIngress {
             global_limit,
             per_execution,
             per_execution_limit,
+            held,
         }
     }
 
@@ -160,6 +168,14 @@ impl InputIngress {
     ) -> Result<(), RuntimeError> {
         if !self.active.load(Ordering::Acquire) {
             return Err(RuntimeError::ExecutionNotRunning);
+        }
+        if kind != InputKind::Bootstrap
+            && self
+                .held
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Acquire))
+        {
+            return Err(RuntimeError::InputHeld);
         }
         let reservation = InputReservation::reserve(
             Arc::clone(&self.global),

@@ -60,8 +60,8 @@ pub use selection::{
 };
 pub use style::Style;
 pub use terminal::{
-    Diagnostics, PreparedResize, ShellIntegrationEvent, ShellIntegrationToken, TerminalState,
-    MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS,
+    Diagnostics, PreparedResize, SessionShellKind, ShellIntegrationEvent, ShellIntegrationToken,
+    TerminalState, MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS,
 };
 pub use unicode_version::UNICODE_SEMANTIC_VERSION;
 pub use width::AmbiguousWidthPolicy;

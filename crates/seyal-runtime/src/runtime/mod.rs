@@ -48,9 +48,21 @@ mod integration_state;
 mod lifecycle;
 mod reactor_io;
 mod registry;
+#[cfg(target_os = "macos")]
+mod session_bootstrap;
+#[cfg(all(test, target_os = "macos"))]
+mod session_bootstrap_live;
+#[cfg(target_os = "macos")]
+mod session_overlay;
+#[cfg(target_os = "macos")]
+mod session_payload;
 mod shell_integration;
 #[cfg(all(test, target_os = "macos"))]
 mod shell_integration_live_tests;
+#[cfg(target_os = "macos")]
+mod ssh_spawn;
+#[cfg(all(test, target_os = "macos"))]
+mod ssh_spawn_live_tests;
 
 #[cfg(target_os = "macos")]
 mod local;
@@ -72,6 +84,8 @@ use local::LocalIpcState;
 pub struct Runtime {
     id: RuntimeId,
     default_workspace: WorkspaceId,
+    /// ADR-028 §2.5 interim admitted WorkspaceIds (includes default).
+    admitted_workspaces: std::collections::HashSet<WorkspaceId>,
     #[allow(dead_code)]
     singleton: SingletonGuard,
     reactor: ExecutionReactor,
@@ -130,9 +144,13 @@ impl Runtime {
                 Some(LocalIpcState::bind(&mut reactor, Some(runtime_dir))?)
             }
         };
+        let default_workspace = WorkspaceId::m001_default();
+        let mut admitted_workspaces = std::collections::HashSet::new();
+        admitted_workspaces.insert(default_workspace);
         Ok(Self {
             id: RuntimeId::new(),
-            default_workspace: WorkspaceId::m001_default(),
+            default_workspace,
+            admitted_workspaces,
             singleton,
             reactor,
             entries: HashMap::new(),

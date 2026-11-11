@@ -6,7 +6,7 @@ use seyal_exec::{
     TerminalProjectionSnapshot, TerminalProjectionUpdate,
 };
 use seyal_protocol::display::DisplayCellRole;
-use seyal_protocol::framing::{HEADER_LEN, MAX_FRAME_PAYLOAD};
+use seyal_protocol::framing::{envelope_presentation_frame, HEADER_LEN, MAX_FRAME_PAYLOAD};
 use std::sync::Arc;
 
 fn cell(index: usize) -> ProjectionCell {
@@ -331,6 +331,49 @@ fn v2_partial_row_packing_for_dense_sidecar() {
     cache.apply_batch(&batch).unwrap();
     assert_eq!(cache.cells.len(), 9);
     assert_eq!(cache.cells[0].text.len(), MAX_GRAPHEME_UTF8_BYTES);
+}
+
+#[test]
+fn v2_chunks_reserve_attachment_envelope_headroom() {
+    // This valid geometry produced a 262,128-byte pre-envelope chunk before
+    // §19. The 24-byte attachment/sequence prefix then exceeded the negotiated
+    // frame limit. Preserve the same near-limit sidecar density and prove each
+    // encoded frame can be wrapped for a bit-11 client.
+    let five_byte_grapheme = Arc::<[u8]>::from("a\u{0301}\u{0300}".as_bytes());
+    let seven_byte_grapheme = Arc::<[u8]>::from("a\u{0301}\u{0300}\u{0302}".as_bytes());
+    let mut cells = Vec::with_capacity(24 * 512);
+    for index in 0..(24 * 512) {
+        let text = if index < 10_272 {
+            five_byte_grapheme.clone()
+        } else {
+            seven_byte_grapheme.clone()
+        };
+        cells.push(ProjectionCell {
+            role: CellRole::Lead,
+            width: 1,
+            text,
+            scalar: 'a',
+            foreground: ProjectionColor::Default,
+            background: ProjectionColor::Default,
+            attributes: ProjectionAttributes::default(),
+        });
+    }
+    let snapshot = TerminalProjectionSnapshot {
+        rows: 24,
+        columns: 512,
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_visible: true,
+        alternate_screen: false,
+        source_damage_generation: 1,
+        damage: ProjectionDamage::full(24),
+        cells,
+    };
+
+    let batch = encode_snapshot_v2(&snapshot).unwrap();
+    assert!(batch.frames.iter().all(|frame| {
+        envelope_presentation_frame(frame, crate::AttachmentId::new(), 0).is_ok()
+    }));
 }
 
 #[test]

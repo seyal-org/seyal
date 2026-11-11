@@ -435,14 +435,19 @@ fn resolve_ordinal(
     diagnostics: &mut Vec<KeybindingDiagnostic>,
 ) -> Result<Option<Ordinal1To9>, ()> {
     let has_ordinal = entry.contains_key("ordinal");
-    if id == WorkspaceCommandId::TabSelectOrdinal {
+    if id == WorkspaceCommandId::TabSelectOrdinal || id == WorkspaceCommandId::WindowSelectOrdinal {
+        let required = if id == WorkspaceCommandId::TabSelectOrdinal {
+            "ordinal required for tab.select_ordinal"
+        } else {
+            "ordinal required for window.select_ordinal"
+        };
         let Some(value) = entry.get("ordinal") else {
             diagnostics.push(diag(
                 DiagnosticCategory::InvalidActionArgument,
                 keys_notation,
                 action_raw,
                 source,
-                "ordinal required for tab.select_ordinal",
+                required,
             ));
             return Err(());
         };

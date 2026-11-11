@@ -1,5 +1,6 @@
-//! SPEC-024 K3–K5: dispatch matched commands, own chord prefix wait, and read the projected table.
+//! SPEC-024 K3–K5 / K7 / K8: dispatch matched commands, own chord prefix wait, and read the projected table.
 
+use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
 use crate::goto::GotoScope;
 use crate::keybinding::{
@@ -8,7 +9,7 @@ use crate::keybinding::{
     WorkspaceCommand, WorkspaceCommandId,
 };
 use crate::presentation::{PresentationAction, PresentationMode};
-use crate::shell::SplitAxis;
+use crate::shell::{FocusDirection, MoveSide, ShellAction, ShellError, SplitAxis};
 use std::time::Instant;
 
 use super::{AppError, ApplicationRoot};
@@ -93,9 +94,20 @@ impl ApplicationRoot {
             WorkspaceCommandId::CommandPaletteOpen => self.open_palette(fence),
             WorkspaceCommandId::CommandPaletteClose => self.close_palette(fence),
             WorkspaceCommandId::TabCreate => self.create_tab(),
+            WorkspaceCommandId::TerminalCreate => self.new_terminal(),
+            WorkspaceCommandId::TerminalCloseFocused => {
+                let shell = self.shell.snapshot();
+                let pane = shell.focused_pane;
+                let terminal_tab = self
+                    .shell
+                    .selected_terminal_tab(pane)
+                    .map_err(|_| AppError::UnknownPane)?
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.close_terminal_tab(pane, terminal_tab, shell.containment_generation)
+            }
             WorkspaceCommandId::TabCloseFocused => {
                 let id = self.shell.snapshot().active_tab;
-                self.close_tab(id)
+                self.close_tab(id, self.shell.containment_generation())
             }
             WorkspaceCommandId::TabSelectPrevious => self.select_tab_relative(-1),
             WorkspaceCommandId::TabSelectNext => self.select_tab_relative(1),
@@ -113,10 +125,33 @@ impl ApplicationRoot {
             WorkspaceCommandId::PaneSplitDown => self.split_focused(SplitAxis::Down),
             WorkspaceCommandId::PaneCloseFocused => {
                 let id = self.shell.snapshot().focused_pane;
-                self.close_pane(id)
+                self.close_pane(id, self.shell.containment_generation())
             }
             WorkspaceCommandId::PaneFocusNext => self.focus_pane_relative(1),
             WorkspaceCommandId::PaneFocusPrevious => self.focus_pane_relative(-1),
+            WorkspaceCommandId::PaneFocusLeft => self.focus_direction(FocusDirection::Left),
+            WorkspaceCommandId::PaneFocusRight => self.focus_direction(FocusDirection::Right),
+            WorkspaceCommandId::PaneFocusUp => self.focus_direction(FocusDirection::Up),
+            WorkspaceCommandId::PaneFocusDown => self.focus_direction(FocusDirection::Down),
+            WorkspaceCommandId::PaneZoomToggle => self.zoom_toggle_focused(),
+            WorkspaceCommandId::PaneSwapLeft => self.swap_focused_direction(FocusDirection::Left),
+            WorkspaceCommandId::PaneSwapRight => self.swap_focused_direction(FocusDirection::Right),
+            WorkspaceCommandId::PaneSwapUp => self.swap_focused_direction(FocusDirection::Up),
+            WorkspaceCommandId::PaneSwapDown => self.swap_focused_direction(FocusDirection::Down),
+            WorkspaceCommandId::PaneMoveLeft => {
+                self.move_focused_beside(FocusDirection::Left, MoveSide::Left)
+            }
+            WorkspaceCommandId::PaneMoveRight => {
+                self.move_focused_beside(FocusDirection::Right, MoveSide::Right)
+            }
+            WorkspaceCommandId::PaneMoveUp => {
+                self.move_focused_beside(FocusDirection::Up, MoveSide::Above)
+            }
+            WorkspaceCommandId::PaneMoveDown => {
+                self.move_focused_beside(FocusDirection::Down, MoveSide::Below)
+            }
+            WorkspaceCommandId::PaneEqualizeFocused => self.equalize_focused(),
+            WorkspaceCommandId::PaneEqualizeTab => self.equalize_tab(),
             WorkspaceCommandId::PresentationSetFlow => {
                 self.transition_presentation(PresentationMode::Flow)
             }
@@ -137,12 +172,12 @@ impl ApplicationRoot {
             }
             WorkspaceCommandId::PresentationToggleTui => {
                 let mode = self.presentation.snapshot().mode;
-                let next = if mode == PresentationMode::Tui {
-                    PresentationMode::Flow
+                if mode == PresentationMode::Tui {
+                    // Leave TUI via resting restore — never force Flow (#1438).
+                    self.derive_presentation(false)
                 } else {
-                    PresentationMode::Tui
-                };
-                self.transition_presentation(next)
+                    self.transition_presentation(PresentationMode::Tui)
+                }
             }
             WorkspaceCommandId::ComposerHistorySearchOpen => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
@@ -166,6 +201,31 @@ impl ApplicationRoot {
                 self.history_forward(observed)
             }
             WorkspaceCommandId::AppQuit => self.quit(),
+            WorkspaceCommandId::AppCloseFocused => {
+                let shell = self.shell.snapshot();
+                self.close_pane(shell.focused_pane, shell.containment_generation)
+            }
+            WorkspaceCommandId::WindowNew => self.create_window(),
+            WorkspaceCommandId::WindowClose => {
+                let shell = self.shell.snapshot();
+                let id = shell.active_window.ok_or(AppError::ActionUnavailable)?;
+                self.close_window(id, shell.containment_generation)
+            }
+            WorkspaceCommandId::WindowCycleNext => {
+                self.cycle_window(crate::shell::CycleDirection::Next)
+            }
+            WorkspaceCommandId::WindowCyclePrevious => {
+                self.cycle_window(crate::shell::CycleDirection::Previous)
+            }
+            WorkspaceCommandId::WindowSelectOrdinal => {
+                let windows = self.shell.snapshot().windows;
+                let ordinal = command.ordinal.ok_or(AppError::ActionUnavailable)?.get();
+                let id = windows
+                    .get((ordinal as usize).saturating_sub(1))
+                    .map(|window| window.id)
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.select_window(id)
+            }
         }
     }
 
@@ -200,22 +260,98 @@ impl ApplicationRoot {
         self.focus_pane(panes[next].id)
     }
 
-    fn transition_presentation(&mut self, mode: PresentationMode) -> Result<(), AppError> {
-        let snap = self.presentation.snapshot();
-        let Some(identity) = snap.identity else {
-            return Err(AppError::ActionUnavailable);
+    /// SPEC-024 R5.1.2: Unzoom when the Tab is zoomed, else ZoomPane on the focused leaf.
+    pub(super) fn zoom_toggle_focused(&mut self) -> Result<(), AppError> {
+        let snap = self.shell.snapshot();
+        let action = if snap.zoomed.is_some() {
+            ShellAction::Unzoom
+        } else {
+            ShellAction::ZoomPane {
+                id: snap.focused_pane,
+            }
         };
-        self.presentation
-            .apply(PresentationAction::Transition {
-                mode,
-                identity,
-                explicit: true,
-                epoch: snap.epoch,
-            })
-            .map_err(|_| AppError::StalePresentationEpoch)?;
-        self.sync_focused_presentation_mode();
-        self.clear_chord_prefix();
+        self.shell.apply(action).map_err(pane_verb_error)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    /// SPEC-024 §5.1: `SwapPanes` with the §5.7 neighbor of the focused leaf.
+    pub(super) fn swap_focused_direction(
+        &mut self,
+        direction: FocusDirection,
+    ) -> Result<(), AppError> {
+        let focused = self.shell.snapshot().focused_pane;
+        let neighbor = self
+            .shell
+            .directional_neighbor_of_focused(direction)
+            .map_err(pane_verb_error)?;
+        self.shell
+            .apply(ShellAction::SwapPanes {
+                a: focused,
+                b: neighbor,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(pane_verb_error)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    /// SPEC-024 §5.1: `MovePaneBeside` with the §5.7 neighbor and mapped side.
+    pub(super) fn move_focused_beside(
+        &mut self,
+        direction: FocusDirection,
+        side: MoveSide,
+    ) -> Result<(), AppError> {
+        let focused = self.shell.snapshot().focused_pane;
+        let neighbor = self
+            .shell
+            .directional_neighbor_of_focused(direction)
+            .map_err(pane_verb_error)?;
+        self.shell
+            .apply(ShellAction::MovePaneBeside {
+                pane: focused,
+                neighbor,
+                side,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(pane_verb_error)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    /// Single resting-selection path for menu/keybinding (#1440). Flow/Raw
+    /// always latch through [`Self::select_resting_presentation`]. TUI is a
+    /// temporary takeover and must not rewrite the resting latch.
+    fn transition_presentation(&mut self, mode: PresentationMode) -> Result<(), AppError> {
+        match mode {
+            PresentationMode::Raw | PresentationMode::Flow => {
+                self.select_resting_presentation(self.fence(), mode == PresentationMode::Raw)
+            }
+            PresentationMode::Tui => {
+                let snap = self.presentation.snapshot();
+                let Some(identity) = snap.identity else {
+                    return Err(AppError::ActionUnavailable);
+                };
+                self.presentation
+                    .apply(PresentationAction::Transition {
+                        mode: PresentationMode::Tui,
+                        identity,
+                        explicit: false,
+                        epoch: snap.epoch,
+                    })
+                    .map_err(|_| AppError::StalePresentationEpoch)?;
+                self.sync_focused_presentation_mode();
+                self.clear_chord_prefix();
+                self.sync_composer_presentation();
+                Ok(())
+            }
+        }
     }
 
     /// Gate menu-originated CreateTab when the palette owns focus (R6.4.1).
@@ -230,5 +366,16 @@ impl ApplicationRoot {
 fn invoke_error(error: InvokeError) -> AppError {
     match error {
         InvokeError::ActionUnavailable => AppError::ActionUnavailable,
+    }
+}
+
+fn pane_verb_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::NoDirectionalNeighbor => AppError::NoDirectionalNeighbor,
+        ShellError::UnknownPane => AppError::UnknownPane,
+        ShellError::StaleContainment => AppError::StaleContainment,
+        ShellError::InvalidMoveTarget => AppError::InvalidMoveTarget,
+        ShellError::NotZoomed => AppError::NotZoomed,
+        _ => AppError::ActionUnavailable,
     }
 }

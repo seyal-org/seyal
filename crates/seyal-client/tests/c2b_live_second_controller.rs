@@ -98,7 +98,19 @@ fn poll_until(
         }
         thread::sleep(Duration::from_millis(10));
     }
-    panic!("deadline exceeded waiting for CreateTab live bind");
+    let snapshot = root.snapshot();
+    panic!(
+        "deadline exceeded waiting for CreateTab live bind: last_failure={:?}, app_error={:?}, outstanding={}, retries={}, tabs={}, focused_pane={:?}, panes={:?}, terminal_bindings={:?}, pane_intents={:?}",
+        root.provisioning().last_failure(),
+        snapshot.last_error,
+        root.provisioning().has_outstanding_intent(),
+        root.provisioning().automatic_retries(),
+        snapshot.shell.tabs.len(),
+        snapshot.shell.focused_pane,
+        snapshot.shell.panes.iter().map(|pane| (pane.id, pane.selected_terminal_tab, pane.execution, &pane.terminal_tabs)).collect::<Vec<_>>(),
+        snapshot.shell.panes.iter().flat_map(|pane| pane.terminal_tabs.iter().map(|terminal| (terminal.id, root.provisioning().terminal_execution(terminal.id)))).collect::<Vec<_>>(),
+        snapshot.shell.panes.iter().map(|pane| (pane.id, root.provisioning().pending_intent(pane.id).cloned())).collect::<Vec<_>>(),
+    );
 }
 
 #[test]
@@ -201,8 +213,12 @@ fn create_tab_live_second_controller_attach_binds_distinct_execution() {
     );
 
     let second_tab = root.snapshot().shell.active_tab;
-    root.apply(AppAction::CloseTab { id: second_tab })
-        .expect("close second tab (detach-only)");
+    let containment_generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::CloseTab {
+        id: second_tab,
+        containment_generation,
+    })
+    .expect("close second tab (detach-only)");
     assert!(root.provisioning().is_unreferenced(second_execution));
     assert_eq!(
         root.provisioning().recorded_execution(first_pane),
@@ -210,7 +226,7 @@ fn create_tab_live_second_controller_attach_binds_distinct_execution() {
         "unrelated first execution must remain recorded after detach-only close"
     );
     assert_eq!(root.provisioning().automatic_retries(), 0);
-    assert_eq!(root.extra_pane_client_count(), 0);
+    assert_eq!(root.extra_controller_client_count(), 0);
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
@@ -237,14 +253,40 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
     root.apply(AppAction::CreateTab).expect("CreateTab");
     let second_pane = root.snapshot().shell.focused_pane;
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
-        root.provisioning()
-            .recorded_execution(second_pane)
-            .is_some()
+        root.snapshot().shell.panes.iter().any(|pane| {
+            pane.terminal_tabs.iter().any(|terminal| {
+                root.provisioning()
+                    .terminal_execution(terminal.id)
+                    .is_some()
+            })
+        })
     });
+    let second_terminal = root
+        .snapshot()
+        .shell
+        .panes
+        .iter()
+        .find(|pane| pane.id == second_pane)
+        .and_then(|pane| pane.selected_terminal_tab)
+        .expect("selected terminal");
     let second_execution = root
         .provisioning()
-        .recorded_execution(second_pane)
-        .expect("second pane bound");
+        .terminal_execution(second_terminal)
+        .expect("second terminal bound");
+    assert_eq!(
+        root.snapshot()
+            .shell
+            .panes
+            .iter()
+            .find(|pane| pane.id == second_pane)
+            .and_then(|pane| pane
+                .terminal_tabs
+                .iter()
+                .find(|terminal| terminal.id == second_terminal))
+            .and_then(|terminal| terminal.execution),
+        Some(second_execution),
+        "ShellState must expose the execution bound to the selected terminal"
+    );
     assert_ne!(second_execution, first_execution);
 
     root.apply(AppAction::TerminateExecution {
@@ -253,9 +295,9 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
     .expect("P4 terminate on focused second-tab Controller");
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         root.provisioning()
-            .recorded_execution(second_pane)
+            .terminal_execution(second_terminal)
             .is_none()
-            && root.extra_pane_client_count() == 0
+            && root.extra_controller_client_count() == 0
     });
     assert!(
         root.provisioning().last_failure().is_none(),
@@ -289,7 +331,7 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
         ),
         "Runtime must no longer attach to the terminated second execution"
     );
-    assert_eq!(root.extra_pane_client_count(), 0);
+    assert_eq!(root.extra_controller_client_count(), 0);
     assert_eq!(root.provisioning().automatic_retries(), 0);
 
     stop.store(true, Ordering::Relaxed);
@@ -316,12 +358,16 @@ fn create_tab_close_before_created_disposes_via_section_6_3() {
 
     root.apply(AppAction::CreateTab).expect("CreateTab");
     let second_tab = root.snapshot().shell.active_tab;
-    root.apply(AppAction::CloseTab { id: second_tab })
-        .expect("CloseTab before type-37");
+    let containment_generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::CloseTab {
+        id: second_tab,
+        containment_generation,
+    })
+    .expect("CloseTab before type-37");
 
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         root.snapshot().shell.tabs.len() == 1
-            && root.extra_pane_client_count() == 0
+            && root.extra_controller_client_count() == 0
             && !root.provisioning().has_outstanding_intent()
     });
     thread::sleep(Duration::from_millis(200));
@@ -330,7 +376,7 @@ fn create_tab_close_before_created_disposes_via_section_6_3() {
         root.provisioning().recorded_execution(first_pane),
         Some(first_execution)
     );
-    assert_eq!(root.extra_pane_client_count(), 0);
+    assert_eq!(root.extra_controller_client_count(), 0);
     assert_eq!(root.snapshot().shell.tabs.len(), 1);
 
     stop.store(true, Ordering::Relaxed);
@@ -361,7 +407,7 @@ fn create_tab_attach_failure_n_times_stays_bounded() {
         root.apply(AppAction::CreateTab).expect("CreateTab admits");
         poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
             root.provisioning().last_failure().is_some()
-                && root.extra_pane_client_count() == 0
+                && root.extra_controller_client_count() == 0
                 && !root.provisioning().has_outstanding_intent()
         });
         assert_eq!(
@@ -371,7 +417,11 @@ fn create_tab_attach_failure_n_times_stays_bounded() {
         assert_eq!(root.provisioning().automatic_retries(), 0);
         if root.snapshot().shell.tabs.len() > before_tabs {
             let extra = root.snapshot().shell.active_tab;
-            let _ = root.apply(AppAction::CloseTab { id: extra });
+            let containment_generation = root.snapshot().shell.containment_generation;
+            let _ = root.apply(AppAction::CloseTab {
+                id: extra,
+                containment_generation,
+            });
             let _ = root.poll_client(root.fence());
         }
     }
@@ -416,7 +466,7 @@ fn create_tab_live_three_tabs_keep_distinct_executions() {
         executions.push(execution);
     }
     assert_eq!(root.snapshot().shell.tabs.len(), 3);
-    assert_eq!(root.extra_pane_client_count(), 2);
+    assert_eq!(root.extra_controller_client_count(), 2);
     assert_eq!(
         root.provisioning().recorded_execution(first_pane),
         Some(first_execution)
@@ -470,7 +520,7 @@ fn create_tab_live_capacity_exceeded_is_bounded_without_retry() {
         root.provisioning().recorded_execution(first_pane),
         Some(first_execution)
     );
-    assert_eq!(root.extra_pane_client_count(), 1);
+    assert_eq!(root.extra_controller_client_count(), 1);
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
@@ -545,6 +595,7 @@ fn create_tab_gated_attach_keeps_first_controller_polling() {
             .expect("first Controller");
     let mut root = ApplicationRoot::new();
     let first_pane = root.snapshot().shell.focused_pane;
+    let first_tab = root.snapshot().shell.windows[0].active_tab;
     root.attach_client(root.fence(), first).expect("bind first");
     let first_handle = root.pane_client_raw(first_pane).expect("first handle");
     let nonce = format!("C2B-OUT-{}", std::process::id());
@@ -558,8 +609,19 @@ fn create_tab_gated_attach_keeps_first_controller_polling() {
         0,
         "first Controller must still accept input while second attach is gated"
     );
-    let nonce_deadline = Instant::now() + Duration::from_secs(8);
-    while Instant::now() < nonce_deadline {
+    let hidden_deadline = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < hidden_deadline {
+        let _ = seyal_bridge_poll_for(first_handle);
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !ffi_test_registry_cache_contains(first_handle, &nonce),
+        "Hidden delivery must stay suspended while the second attach is gated"
+    );
+    root.apply(AppAction::SelectTab { id: first_tab })
+        .expect("reveal first Controller while second attach is gated");
+    let reveal_deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < reveal_deadline {
         let _ = seyal_bridge_poll_for(first_handle);
         if ffi_test_registry_cache_contains(first_handle, &nonce) {
             break;
@@ -568,7 +630,7 @@ fn create_tab_gated_attach_keeps_first_controller_polling() {
     }
     assert!(
         ffi_test_registry_cache_contains(first_handle, &nonce),
-        "first client's cache must receive bytes while the second attach is gated"
+        "resuming the revealed first Controller must restore output while the second attach is gated"
     );
     for _ in 0..25 {
         let _ = root.poll_client(root.fence());
@@ -672,7 +734,7 @@ fn create_tab_overlapping_attach_binds_both() {
     assert_ne!(first_execution, second);
     assert_ne!(first_execution, third);
     assert_ne!(second, third);
-    assert_eq!(root.extra_pane_client_count(), 2);
+    assert_eq!(root.extra_controller_client_count(), 2);
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
@@ -708,8 +770,12 @@ fn create_tab_close_unattached_tab_while_attach_in_flight_disposes() {
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         pane_awaiting_attach(root, third_pane) && root.queued_live_attach_count() >= 1
     });
-    root.apply(AppAction::CloseTab { id: third_tab })
-        .expect("close unattached B");
+    let containment_generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::CloseTab {
+        id: third_tab,
+        containment_generation,
+    })
+    .expect("close unattached B");
 
     release_tx.send(()).expect("release A");
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
@@ -723,7 +789,7 @@ fn create_tab_close_unattached_tab_while_attach_in_flight_disposes() {
         Some(first_execution)
     );
     assert!(root.provisioning().recorded_execution(third_pane).is_none());
-    assert_eq!(root.extra_pane_client_count(), 1);
+    assert_eq!(root.extra_controller_client_count(), 1);
     assert_eq!(root.provisioning().automatic_retries(), 0);
 
     stop.store(true, Ordering::Relaxed);
@@ -878,7 +944,7 @@ fn create_tab_attach_failure_fails_closed_for_input() {
     root.apply(AppAction::CreateTab).expect("CreateTab");
     let second_pane = root.snapshot().shell.focused_pane;
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
-        root.provisioning().last_failure().is_some() && root.extra_pane_client_count() == 0
+        root.provisioning().last_failure().is_some() && root.extra_controller_client_count() == 0
     });
     assert_eq!(root.snapshot().shell.focused_pane, second_pane);
     assert_eq!(

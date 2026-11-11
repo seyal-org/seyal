@@ -7,7 +7,15 @@ description: Seyal facade for generic AI-SDLC PR merge-readiness review, adding 
 
 Follow the canonical generic merge-readiness procedure in `.sdlc/framework/skills/pr-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
+Before changing PR state, publishing review comments or resolving threads, use the pinned executable claim via `python3 scripts/seyal-ai-sdlc-claim.py begin --repo seyal-org/seyal --phase review --number <PR>`; `verify` before each write, then `release` after review handoff. Require unique `AI_SDLC_WORKER_ID` per active worker and never substitute the human PR reviewer identity. A missing/held claim does not authorize a new PR.
+
 This is Seyal's single user-facing PR review and re-review entrypoint. The generic procedure reviews implementation correctness and merge readiness over the full current candidate, consumes exact-revision `verification`, and invokes only specialist reviews required by risk and project policy. There is no separate generic or Seyal `code-review` discovery surface.
+
+## One review cycle
+
+The first review of a candidate reads the whole pull request once and lists every material blocker in that pass. Do not stop at the first finding and leave the rest for a later cycle.
+
+`address-pr-review` fixes that recorded set on the same pull request. A remediation follow-up performs a **full-candidate re-review** against the exact current head, as required by the pinned generic procedure. Reuse unchanged valid evidence where project policy permits, but never treat review of only the latest comment or diff as independent approval. Run invalidated verification/specialist gates when the head or risk scope warrants them. Core and high-risk work still needs an independent human reviewer. The implementer does not self-approve.
 
 ## Mandatory cross-platform UI ownership gate
 

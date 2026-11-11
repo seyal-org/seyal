@@ -17,12 +17,10 @@ struct RuntimeBlockMetadata: Equatable, Sendable {
 /// history request numbers are only unique within their owning execution.
 struct PaneBlockKey: Hashable, Sendable {
   let paneID: String
+  /// Controller execution that owns this timeline. Block ids are local to a
+  /// Runtime execution and can repeat when a Pane switches terminal tabs.
+  let displayHandle: UInt64
   let blockID: UInt64
-
-  init(paneID: String, blockID: UInt64) {
-    self.paneID = paneID
-    self.blockID = blockID
-  }
 
   var accessibilityIdentifier: String {
     "pane.\(paneID).block.\(blockID)"
@@ -30,10 +28,14 @@ struct PaneBlockKey: Hashable, Sendable {
 }
 
 struct PaneHistoryRequestKey: Hashable, Sendable {
+  /// Registry Controller that owns the request. Multipane history must key by
+  /// handle because Block/request ids are only unique within one execution (#1426).
+  let displayHandle: UInt64
   let paneID: String
   let requestID: UInt64
 
-  init(paneID: String, requestID: UInt64) {
+  init(displayHandle: UInt64, paneID: String, requestID: UInt64) {
+    self.displayHandle = displayHandle
     self.paneID = paneID
     self.requestID = requestID
   }
@@ -83,6 +85,8 @@ struct NativeHistoryRange: Equatable {
   let revision: UInt64
   let rows: [[Cell]]
   let status: UInt32
+  /// Registry Controller that produced this range; 0 means focused/legacy path.
+  let sourceDisplayHandle: UInt64
 
   init(
     startLine: UInt64,
@@ -91,7 +95,8 @@ struct NativeHistoryRange: Equatable {
     requestID: UInt64,
     revision: UInt64,
     rows: [[Cell]],
-    status: UInt32 = 0
+    status: UInt32 = 0,
+    sourceDisplayHandle: UInt64 = 0
   ) {
     self.startLine = startLine
     self.endLine = endLine
@@ -100,6 +105,22 @@ struct NativeHistoryRange: Equatable {
     self.revision = revision
     self.rows = rows
     self.status = status
+    self.sourceDisplayHandle = sourceDisplayHandle
+  }
+
+  /// Plain text of retained history rows. Accessibility only; Metal still paints.
+  var transcriptText: String {
+    rows.map { row in
+      row.map { cell in
+        if !cell.graphemeUtf8.isEmpty,
+          let text = String(data: cell.graphemeUtf8, encoding: .utf8)
+        {
+          return text
+        }
+        guard let scalar = Unicode.Scalar(cell.scalar), scalar.value != 0 else { return "" }
+        return String(scalar)
+      }.joined()
+    }.joined(separator: "\n")
   }
 }
 
@@ -116,7 +137,9 @@ func mergeHistoryRange(
       requestID: chunk.requestID,
       revision: chunk.revision,
       rows: chunk.rows,
-      status: chunk.status
+      status: chunk.status,
+      sourceDisplayHandle: chunk.sourceDisplayHandle != 0
+        ? chunk.sourceDisplayHandle : previous.sourceDisplayHandle
     )
   }
   if chunk.rows.isEmpty {
@@ -127,7 +150,9 @@ func mergeHistoryRange(
       requestID: chunk.requestID,
       revision: chunk.revision,
       rows: previous.rows,
-      status: chunk.status
+      status: chunk.status,
+      sourceDisplayHandle: chunk.sourceDisplayHandle != 0
+        ? chunk.sourceDisplayHandle : previous.sourceDisplayHandle
     )
   }
   var rows = previous.rows
@@ -144,7 +169,9 @@ func mergeHistoryRange(
     requestID: chunk.requestID,
     revision: chunk.revision,
     rows: rows,
-    status: chunk.status
+    status: chunk.status,
+    sourceDisplayHandle: chunk.sourceDisplayHandle != 0
+      ? chunk.sourceDisplayHandle : previous.sourceDisplayHandle
   )
 }
 
@@ -188,8 +215,16 @@ struct NativeComposerResult: Equatable {
 struct NativeComposerStatus: Equatable {
   let eligibility: UInt8
   let revision: UInt64
+  let targetBlockID: UInt64
+  let targetGeneration: UInt64
+  let targetRevision: UInt64
+  let targetClass: UInt8
+  let targetMode: UInt8
 
-  static let cleared = NativeComposerStatus(eligibility: 0, revision: 0)
+  static let cleared = NativeComposerStatus(
+    eligibility: 0, revision: 0, targetBlockID: 0, targetGeneration: 0,
+    targetRevision: 0, targetClass: 0, targetMode: 0
+  )
 }
 
 /// Geometry for one canonical Block projection on the Pane-owned Metal
@@ -197,8 +232,54 @@ struct NativeComposerStatus: Equatable {
 /// replace one history buffer at a time or expose a partially updated order.
 struct NativeTranscriptRegion: Equatable {
   let id: UInt64
+  /// Controller whose history should paint this local Block id.
+  var displayHandle: UInt64 = 0
   let origin: NSPoint
   let clip: NSRect
+  var suppressesCursor: Bool = false
+  /// Bounded canonical history rows prepared for this Block's visible Pane
+  /// window. `nil` means this region is a running live-tail clip.
+  var historyRows: Range<Int>? = nil
+  var historyRequestID: UInt64 = 0
+  var historyRevision: UInt64 = 0
+}
+
+/// Selects a bounded row page for one Pane viewport. The complete history
+/// remains Runtime-owned; this range only chooses disposable prepared cells.
+struct HistoryRenderWindow: Equatable {
+  static let maximumRows = 512
+  static let overscanRows = 16
+
+  let rows: Range<Int>
+
+  /// Converts an AppKit document-space visible rectangle to the first terminal
+  /// history row. Flipped Block bodies use a top-left origin; ordinary AppKit
+  /// views use a bottom-left origin.
+  static func firstVisibleRow(
+    documentBounds: CGRect,
+    visibleBounds: CGRect,
+    isFlipped: Bool,
+    cellHeight: CGFloat
+  ) -> Int {
+    let distanceFromTop = isFlipped
+      ? visibleBounds.minY - documentBounds.minY
+      : documentBounds.maxY - visibleBounds.maxY
+    return Int((max(distanceFromTop, 0) / max(cellHeight, 1)).rounded(.down))
+  }
+
+  init(totalRows: Int, firstVisibleRow: Int, visibleRowCount: Int) {
+    let total = max(totalRows, 0)
+    let visibleStart = min(max(firstVisibleRow, 0), total)
+    let visibleCount = min(max(visibleRowCount, 0), Self.maximumRows)
+    let visibleEnd = visibleStart + min(visibleCount, total - visibleStart)
+    var lower = max(visibleStart - Self.overscanRows, 0)
+    var upper = visibleEnd + min(Self.overscanRows, total - visibleEnd)
+    if upper - lower > Self.maximumRows {
+      lower = min(max(visibleStart - (Self.maximumRows - visibleCount) / 2, 0), total - Self.maximumRows)
+      upper = min(total, lower + Self.maximumRows)
+    }
+    rows = lower..<max(lower, upper)
+  }
 }
 
 struct NativeTranscriptFrame: Equatable {

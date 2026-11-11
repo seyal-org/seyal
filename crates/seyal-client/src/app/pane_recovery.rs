@@ -304,13 +304,27 @@ impl ApplicationRoot {
 
     #[cfg(target_os = "macos")]
     pub(super) fn note_pane_attachment_loss(&mut self, pane: PaneId, handle: u64) {
-        if self
+        let owns_pane_client = self
             .extra_pane_clients
             .get(&pane)
-            .is_none_or(|owned| owned.raw() != handle)
-        {
+            .is_some_and(|owned| owned.raw() == handle);
+        let owns_selected_terminal_client = self
+            .shell
+            .selected_terminal_tab(pane)
+            .ok()
+            .flatten()
+            .and_then(|terminal_tab| {
+                self.extra_terminal_clients
+                    .get(&terminal_tab)
+                    .map(|owned| owned.raw() == handle)
+            })
+            .unwrap_or(false);
+        if !owns_pane_client && !owns_selected_terminal_client {
             // The create-admitting primary connection keeps its existing
-            // whole-session recovery path.
+            // whole-session recovery path. Production split Panes may be
+            // owned through their selected TerminalTab instead of the
+            // extra_pane_clients map; both represent the same pane-scoped
+            // attachment authority.
             return;
         }
         let Some(target) = self.pane_recovery.current_target(pane) else {

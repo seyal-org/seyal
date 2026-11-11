@@ -2,6 +2,14 @@ import Foundation
 
 @MainActor
 final class RustDisplayBridge {
+  nonisolated static func isTerminalPollResult(_ result: Int32) -> Bool {
+    result == -3 || result == -6 || result == -10
+  }
+
+  nonisolated static func pollResultClosesConnection(_ result: Int32) -> Bool {
+    isTerminalPollResult(result) || result == -4 || result == -18
+  }
+
   typealias FrameHandler = @MainActor (SeyalPreparedFrame) -> Void
   typealias TimelineHandler = @MainActor () -> Void
   typealias HistoryHandler = @MainActor (NativeHistoryRange) -> Void
@@ -83,6 +91,13 @@ final class RustDisplayBridge {
   let handleBox = RustBridgeHandleBox()
   var teardown: RustBridgeTeardownCoordinator!
   var clientHandle: UInt64 = 0
+  /// This window's focused Pane registry handle. The primary surface publishes
+  /// that prepared frame. Zero keeps `clientHandle`, so a background window
+  /// does not adopt another window's focus.
+  var windowFocusedDisplayHandle: UInt64 = 0
+  /// When non-zero, `selectPresentedClient` prefers this Controller (pane-local
+  /// DirectInput / identity samples) without mutating window focus.
+  var submissionDisplayHandleOverride: UInt64 = 0
   var isConnected = false
   var lastRecoveryResult = RecoveryResult.current()
   /// The last bundled-helper failure is retained for the recovery coordinator
@@ -179,20 +194,32 @@ final class RustDisplayBridge {
   @discardableResult
   func adoptRecoveredHandle(_ opened: RuntimeRecoveryOpenedHandle) -> Bool {
     let handle = opened.handle
-    guard !isConnected, !teardown.disconnectPending else {
-      seyal_bridge_disconnect_handle(handle)
+    if isConnected || teardown.disconnectPending {
+      NSLog(
+        "seyal: adopt rejected fence isConnected=%d disconnectPending=%d clientHandle=%llu",
+        isConnected ? 1 : 0,
+        teardown.disconnectPending ? 1 : 0,
+        clientHandle
+      )
+      // Do not disconnect here — caller may clear the fence and retry adopt
+      // with the same pending handle.
       return false
     }
     lastLaunchError = nil
     guard seyal_bridge_adopt_handle(handle) == 0 else {
-      seyal_bridge_disconnect_handle(handle)
+      NSLog("seyal: adopt rejected seyal_bridge_adopt_handle")
+      // Pending handle was not taken; caller may disconnect.
       onError(-1)
       onStatusChanged()
       return false
     }
     let recoveryResult = RecoveryResult(opened: opened)
     lastRecoveryResult = recoveryResult
-    return finishAdoptedHandle(handle, recoveryResult: recoveryResult)
+    let finished = finishAdoptedHandle(handle, recoveryResult: recoveryResult)
+    if !finished {
+      NSLog("seyal: adopt rejected finishAdoptedHandle (fd/reconstruction)")
+    }
+    return finished
   }
 
   @discardableResult
@@ -348,7 +375,10 @@ final class RustDisplayBridge {
       completeEagerClientDisconnect()
       return
     }
-    guard isConnected || socketFileDescriptor >= 0 else { return }
+    // Half-torn shell-exit / poll-loss often leaves isConnected=false while
+    // clientHandle is still non-zero (Controller lease held). Still drop the
+    // lease so a later New shell open_first is not ControllerBusy.
+    guard isConnected || socketFileDescriptor >= 0 || clientHandle != 0 else { return }
 
     isConnected = false
     disconnectRuntimeReconstruction(continuityAppHandle)
@@ -384,6 +414,42 @@ final class RustDisplayBridge {
     onStatusChanged()
   }
 
+  /// Rust may discover a Pane's loss while polling a sibling Controller and
+  /// unregister this bridge's primary handle first. The primary read source
+  /// then wakes with no registry entry. Convert that state into the normal
+  /// recovery signal while leaving the other Pane handles and their sources
+  /// alive (#1426 / SPEC-009 §8.2.2).
+  @discardableResult
+  func handlePrimaryRegistryRemovalIfNeeded() -> Bool {
+    let lostHandle = clientHandle
+    guard isConnected, lostHandle != 0, seyal_bridge_socket_fd_for(lostHandle) < 0 else {
+      return false
+    }
+    isConnected = false
+    disconnectRuntimeReconstruction(continuityAppHandle)
+    runtimeBlockMetadata = nil
+    discardHistoryRequests(forDisplayHandle: lostHandle)
+    lastTimelineRevision = 0
+    lastComposerResultRequestID = 0
+    clearComposerStatus()
+    runtimeIdentityWords = (0, 0)
+    attachmentIdentityWords = (0, 0)
+    clientHandle = 0
+    handleBox.value = 0
+    socketFileDescriptor = -1
+    if let readSource {
+      self.readSource = nil
+      readSource.cancel()
+    }
+    if let writeSource {
+      self.writeSource = nil
+      writeSource.cancel()
+    }
+    onError(-10)
+    onStatusChanged()
+    return true
+  }
+
   /// Drops the live CLIENT handle immediately and clears teardown so `start()`
   /// is not blocked on async DispatchSource cancel hops.
   func completeEagerClientDisconnect() {
@@ -409,10 +475,32 @@ final class RustDisplayBridge {
     return seyal_bridge_select(clientHandle) == 0
   }
 
+  /// Identity reads for the frame this window is showing. Restores the
+  /// readiness client afterward so poll stays on this bridge's own fd.
+  @discardableResult
+  func selectPresentedClient() -> Bool {
+    let handle: UInt64
+    if submissionDisplayHandleOverride != 0 {
+      handle = submissionDisplayHandleOverride
+    } else if windowFocusedDisplayHandle != 0 {
+      handle = windowFocusedDisplayHandle
+    } else {
+      handle = clientHandle
+    }
+    guard isConnected, handle != 0 else { return false }
+    return seyal_bridge_select(handle) == 0
+  }
+
+  /// Select an explicit Controller for pane-local DirectInput / history work.
+  @discardableResult
+  func selectDisplayHandle(_ handle: UInt64) -> Bool {
+    guard isConnected, handle != 0 else { return false }
+    return seyal_bridge_select(handle) == 0
+  }
+
   /// One DispatchSourceRead per live Controller fd. CreateTab's second
   /// client must not steal the first connection's readiness handler.
   func armAuxiliaryReadSources() {
-    guard isConnected else { return }
     var live = Set<UInt64>()
     var cursor: UInt64 = 0
     while true {
@@ -427,12 +515,30 @@ final class RustDisplayBridge {
       let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
       source.setEventHandler { [weak self] in
         seyalRunAsMainActorFromMainQueue {
-          guard let self, self.isConnected else { return }
+          guard let self, self.auxiliaryReadSources[handle] != nil else { return }
           let result = seyal_bridge_poll_for(handle)
+          if result < 0, !Self.pollResultClosesConnection(result) {
+            // Transient poll errors leave this Controller registered. Keep the
+            // source armed so the next readiness event can make progress.
+            return
+          }
           if result < 0 {
             // Level-trigger progress: EOF/disconnect must disarm this fd's
-            // sources and drop the dead client. Tab 1 stays up (do not stop()).
+            // sources. Tab 1 stays up (do not stop()).
             self.cancelAuxiliarySources(for: handle)
+            // Shell exit (-6): match primary drainReadyDisplayWork — publish
+            // final Block history / timeline while the client is still
+            // registered, then disconnect. Early disconnect dropped retained
+            // clear→exit bodies for an unfocused sibling Controller (#1379 /
+            // SPEC-009 §8.2.2).
+            if result == -6 {
+              // Handle-addressed history (#1426): do not rely on select→focused.
+              self.publishHistoryRanges(forDisplayHandle: handle)
+              if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
+                self.onTimeline()
+              }
+              self.publishHistoryRanges(forDisplayHandle: handle)
+            }
             seyal_bridge_disconnect_handle(handle)
             _ = self.selectClient()
             self.publishCurrentFrame()
@@ -441,10 +547,23 @@ final class RustDisplayBridge {
             self.onStatusChanged()
             return
           }
+          // Publish history for the polled Controller before focus gating so
+          // unfocused multipane Flow leaves receive completed Block bodies (#1424/#1426).
+          self.publishHistoryRanges(forDisplayHandle: handle)
           self.onRegistryHandlePolled?(handle)
+          if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
+            self.runtimeBlockMetadata = self.currentBlockMetadata()
+            self.publishHistoryRanges(forDisplayHandle: handle)
+            self.publishComposerResult()
+            self.publishComposerStatus()
+            let revision = seyal_bridge_block_timeline_revision()
+            if revision != self.lastTimelineRevision {
+              self.lastTimelineRevision = revision
+              self.onTimeline()
+            }
+          }
           _ = self.selectClient()
           self.publishCurrentFrame()
-          self.publishComposerStatus()
           self.synchronizeWriteReadinessSource()
         }
       }

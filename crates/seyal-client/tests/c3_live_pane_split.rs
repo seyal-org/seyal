@@ -155,6 +155,12 @@ fn split_live_two_by_two_binds_four_distinct_executions() {
     let c = live_split(&mut root, SplitAxis::Down);
 
     assert_eq!(root.snapshot().shell.panes.len(), 4);
+    assert!(
+        root.snapshot().shell.windows[0].tabs[0].panes.iter().all(
+            |pane| pane.presentation_mode == seyal_client::presentation::PresentationMode::Flow
+        ),
+        "explicit Right+Down splits select Blocks across every Pane in the Tab"
+    );
     let mut executions = std::collections::HashSet::new();
     for pane in [a, b, d, c] {
         let execution = root
@@ -191,6 +197,86 @@ fn split_live_two_by_two_binds_four_distinct_executions() {
             "each live leaf keeps a distinct Controller registry handle"
         );
     }
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+/// Issue #1433 — Split Right must not disconnect the pane being split away
+/// from. The GUI repro ran a real command on the original pane, split
+/// right, and observed Pane 1 drop to "Waiting to reconnect" within the
+/// settle window, then stay disconnected even after an explicit refocus
+/// (the GUI's "click the stuck pane" retry affordance).
+#[test]
+fn split_live_keeps_original_pane_connected_after_real_command_and_refocus() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_isolated_runtime(None);
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first)
+        .expect("bind first Controller");
+
+    // Produce real PTY output on the original pane before splitting, like
+    // the `ls -lta` / `pwd` the user ran before Split Right.
+    root.apply(seyal_client::app::AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(seyal_client::composer::RuntimeComposerEligibility::Unsupported),
+        revision: 1,
+        target: None,
+    })
+    .expect("unsupported test shell retains the safe direct-terminal fallback");
+    root.apply(seyal_client::app::AppAction::SubmitInput {
+        fence: root.fence(),
+        text: "echo SEYAL_1433_PROBE\n".to_owned(),
+    })
+    .expect("submit real command before split");
+    let settle = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < settle {
+        let _ = root.poll_client(root.fence());
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        root.pane_client_poll_ok(first_pane),
+        "original pane must still be connected before splitting"
+    );
+
+    let second_pane = live_split(&mut root, SplitAxis::Right);
+
+    // Keep polling for a few seconds past the new pane's bind — matches the
+    // window during which the live GUI observed Pane 1 going "Waiting to
+    // reconnect" without any further user action.
+    let settle_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < settle_deadline {
+        let _ = root.poll_client(root.fence());
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        root.pane_client_poll_ok(first_pane),
+        "Split Right must not disconnect the originating pane's live Controller"
+    );
+    assert!(
+        root.pane_client_raw(first_pane).is_some(),
+        "the originating pane must keep a registered Controller handle"
+    );
+
+    // Explicit refocus (matches the GUI's "click to reconnect" affordance on
+    // the stuck pane). This must not be a no-op on an already-dead handle.
+    root.apply(seyal_client::app::AppAction::FocusPane { id: first_pane })
+        .expect("refocus original pane");
+    let _ = root.poll_client(root.fence());
+    assert!(
+        root.pane_client_poll_ok(first_pane),
+        "refocusing the original pane after split must not lose its connection"
+    );
+    assert!(root.pane_client_raw(second_pane).is_some());
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
@@ -277,8 +363,12 @@ fn split_live_resize_targets_each_execution_and_rejects_stale_pane() {
         root.propose_pane_geometry(second_pane, f64::NAN, 799.0, 0.0, 0.0, 10.0, 20.0),
         Err(AppError::InvalidPayload)
     );
-    root.apply(AppAction::ClosePane { id: second_pane })
-        .expect("close second Pane");
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::ClosePane {
+        id: second_pane,
+        containment_generation: generation,
+    })
+    .expect("close second Pane");
     assert_eq!(
         root.propose_pane_geometry(second_pane, 509.0, 799.0, 0.0, 0.0, 10.0, 20.0),
         Err(AppError::UnknownPane)
@@ -322,8 +412,12 @@ fn split_live_close_pane_detaches_only_and_leaves_siblings() {
         .recorded_execution(third)
         .expect("third bound");
 
-    root.apply(AppAction::ClosePane { id: third })
-        .expect("close split leaf");
+    let containment_generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::ClosePane {
+        id: third,
+        containment_generation,
+    })
+    .expect("close split leaf");
     assert!(root.provisioning().is_unreferenced(third_execution));
     assert_eq!(
         root.provisioning().recorded_execution(second),
