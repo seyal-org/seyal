@@ -358,34 +358,17 @@ remains — not to a hidden/focusable empty-canvas surface under Flow.
 
 ## 5. Flow output projection
 
+**Accepted native-Block target (ADR-009 #1480 / #1482):** The following production cutover replaces history-range card assembly with Rust-owned canonical `BlockContent` (prompt/command and output RegionGrids), one `RegionStore`/`VTWindowMap`, and one Rust viewport-indexed batched Metal render plan. Existing history-range/Pane card APIs are *legacy implementation seams*, not an independent second truth or the target data model. No per-Block PTY/VT engine or duplicate writable raw grid is permitted. This target becomes the production path only through one verified single-owner cutover; current runtime functionality and input fencing cannot be weakened.
+
 ### 5.1 Completed Blocks
 
-A completed Block references a bounded canonical history range from its trusted
-start/end anchors. The client may cache disposable prepared GPU data for visible
-ranges, but the range remains authoritative in Runtime terminal/history state.
+A completed Block is a first-class Rust-owned content object whose `PromptCommandRegion` and `OutputRegion` refer directly to canonical Block-owned RegionGrid source units in the one `RegionStore`. Completion changes command lifecycle but does not freeze cells still accessible by the active VT cursor. Retained content moves once into the shared byte-bounded HistoryStore. A renderer may cache only disposable bounded prepared GPU pages; client-side history-range reconstruction is not native Block authority.
 
-For output longer than one bounded history response, the Pane transcript keeps
-the Block's full intrinsic scroll extent while the renderer prepares only a
-bounded page for the rows visible in that Pane (with bounded overscan). A page
-is addressed through the Block's stable history anchors and Runtime history
-range protocol; the client must not concatenate an unbounded Block into one
-GPU buffer or substitute a second terminal/history model. Scrolling, resize,
-and backing-scale changes request or prepare the page for the new viewport and
-preserve the user's Pane scroll position. The rendered page cache is keyed by
-Pane/execution, Block, history revision and visible range; a content or range
-change invalidates glyph data even when clip geometry is unchanged. PTY/VT
-progress must not wait for page retrieval or GPU preparation. The renderer's
-per-page row/cell bounds remain enforced for every request and buffer.
-Changes to source line bounds, total history extent, cell metrics, or backing
-scale also invalidate the prepared page so resize/font changes cannot reuse
-stale glyph positions.
+The Rust Block viewport index resolves `BlockId`, `RegionId` and source-unit anchors to visible RegionGrid rows. It publishes one bounded batched `BlockViewportPlan` for visible Blocks/rows with bounded overscan; no O(all Blocks) AppKit card assembly or N-per-Block IPC history requests on ordinary output/scroll. Resize, scale, damage or content revisions invalidate only affected derived pages and preserve source-relative scroll/selection anchors. PTY/VT progress never waits for rendering or GPU preparation. Canonical source-unit history remains byte-bounded; any eviction reports a typed stale/unavailable result rather than fabricating Block output.
 
 ### 5.2 Running Block
 
-A running Block requires a bounded derived live projection from its trusted
-start anchor through the current primary output tail. It must update without
-waiting on persistence/Block mutation and without materializing another terminal
-state model.
+A running Block owns a writable `OutputRegion` inside the authoritative Rust `PrimaryBlockEngine`. It updates from VT mutation through the single `VTWindowMap`, including CR/progress rewriting, terminal cursor addressing and cross-Block edits, without waiting on persistence, IPC, Swift or the renderer. A bounded read-only viewport plan draws only visible content.
 
 The live projection may reuse current-frame/history data internally, but final
 presentation is clipped to the running Block output region. The Pane-wide live
@@ -531,17 +514,14 @@ create or focus a raw terminal target underneath the transcript.
 
 ## 7. Ownership and security
 
-Runtime/Workspace owns Block IDs, command boundary records, logical anchors and
-completion state. `TerminalState` owns terminal semantics/history. The client
-receives bounded read-only projections.
+Runtime/Workspace owns Block IDs, trusted command-boundary validation, input fencing and completion state. The Rust `TerminalState` owns the one VT semantic authority and canonical `PrimaryBlockEngine` containing Block-owned RegionGrids and shared retained HistoryStore. The Rust viewport emits bounded read-only projections; Swift/Metal does not own the Block content, history or layout.
 
 No command text, shell environment, secrets or terminal cells may be copied into
 an unbounded client transcript solely to render a Block. Protocol capabilities,
 attachment authorization, malformed-record quarantine and bounded queues are
 mandatory.
 
-Flow/Raw/TUI switching is presentation/input routing only. It cannot create a
-second PTY, parser, grid, history authority or child process.
+Flow/Raw/TUI switching is presentation/input routing only. It cannot create a second PTY, parser, **independently writable terminal engine or shadow raw grid**, history authority or child process. Multiple **Block-owned content RegionGrids inside one VT authority** are permitted and required by accepted ADR-009.
 
 Input-transition correctness is security-sensitive: a stale first responder,
 IME callback, mouse route, eligibility result or admission result must not mutate
