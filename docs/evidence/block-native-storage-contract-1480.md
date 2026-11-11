@@ -67,9 +67,11 @@ LineId every frame.
 A single physical VT row can contain cells written by different
 Blocks/regions. Store ordered `OwnedSourceRun` spans per `LineId`
 and source-unit offset; the `VTWindowMap` reads all of them in terminal
-column order. A `CompositeRow` display item may contain several Block
-runs but is painted once with no fabricated newline. Each Block's
-copy/search uses its owned source units. A current command overwriting a
+column order. A `CompositeRow` may remain visually contiguous, or disjoint
+Block-owned spans may appear in separate *UI* cards. This is an optional
+presentation split, **never a canonical hard break or a PTY cursor move**;
+each source cell appears once, with source anchors preserved across the
+visual break. Each Block's copy/search uses its owned source units. A current command overwriting a
 cell transfers that cell's *current* ownership to the current RegionId
 and invalidates its previous region; it does **not** retain a secret
 previous-value snapshot. Terminal semantics define the visible text.
