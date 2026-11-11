@@ -12,6 +12,7 @@
 - **Authority:** Review candidate for Issue #1480 and PR #1481. The Accepted decision below, ADR-004/010/011/015/025, and SPEC-008 remain controlling until a reviewed coordinated amendment is merged.
 - **Source analysis:** [Warp comparison and counterexamples](../evidence/block-native-primary-screen-source-review-1480.md).
 - **Goal and test contract:** [Native-Block architecture acceptance matrix](../evidence/block-native-acceptance-matrix-1480.md).
+- **Concrete storage/event contract:** [RegionGrid, VTWindowMap, attribution and viewport interfaces](../evidence/block-native-storage-contract-1480.md).
 - **No implementation authorization:** This document chooses an architecture candidate and proof obligations; it does not demonstrate working features or change #1478's release verdict.
 
 ### Goal: Warp-grade native Blocks, Seyal-grade independent Runtime
