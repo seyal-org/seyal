@@ -6,236 +6,99 @@
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
 
-## Proposed amendment — Block-native content on one canonical screen (#1480; NOT ACCEPTED)
+## Proposed amendment — Seyal native-Block terminal content architecture (#1480)
 
-**Status: Proposed, architecture review only, 2026-11-11.** This section does not
-override the existing **Accepted** decision below, ADR-004, ADR-010, ADR-011,
-ADR-015, or SPEC-008 until explicit independent acceptance. It is not permission
-to implement or to merge M003 #1478. Source evidence:
-[Warp/Seyal code analysis](../evidence/block-native-primary-screen-source-review-1480.md)
-and [Architecture issue #1480](https://github.com/seyal-org/seyal/issues/1480).
+- **Status:** PROPOSED, NOT ACCEPTED — 2026-11-11.
+- **Authority:** Review candidate for Issue #1480 and PR #1481. The Accepted decision below, ADR-004/010/011/015/025, and SPEC-008 remain controlling until a reviewed coordinated amendment is merged.
+- **Source analysis:** [Warp comparison and counterexamples](../evidence/block-native-primary-screen-source-review-1480.md).
+- **Goal and test contract:** [Native-Block architecture acceptance matrix](../evidence/block-native-acceptance-matrix-1480.md).
+- **No implementation authorization:** This document chooses an architecture candidate and proof obligations; it does not demonstrate working features or change #1478's release verdict.
 
-### Decision proposed for acceptance
+### Goal: Warp-grade native Blocks, Seyal-grade independent Runtime
 
-Seyal's primary-screen **product and content organization** SHALL be genuinely
-Block-native, but the existing canonical VT semantics SHALL not be replaced.
-One \`TerminalExecution\` has one PTY and one \`TerminalState\`. Within the
-\`TerminalState\`, one canonical primary \`Screen\` with its \`HistoryStore\`
-remains the sole owner of mutable cells, cursor, line IDs, source units, wrap
-lineage, damage and retained terminal content (ADR-004/010/011). The proposed
-\`PrimaryBlockDocument\` is the Rust-owned **structured organization and
-viewport model over that very storage**, not another primary screen, second
-VT parser, independently writable Block grid, or replayed transcript.
+A *native Block* SHALL be a first-class Rust-owned terminal content object with an independently addressable prompt/command region, output region, lifecycle, copy/search/selection semantics, layout, scroll anchor and bounded storage. It SHALL NOT be only command metadata plus a pair of line numbers looked up in a separate conventional transcript. The terminal experience shall show Blocks by default for a trusted supported shell, growing upward from the composer, with no invisible terminal viewport behind them.
 
-\`\`\`text
-Runtime -> TerminalExecution (PTY, child, execution lifecycle)
-           -> one Parser / TerminalState
-              -> PRIMARY: PrimaryBlockDocument
-                 -> one mutable Screen (existing VT active-screen semantics)
-                 -> one retained HistoryStore (existing canonical segments)
-                 -> native Block objects:
-                    identity, trusted lifecycle, unit-precise source spans,
-                    references to canonical active/retained content
-                 -> unstructured spans for content without trusted boundaries
-                 -> derived indexed Block geometry / scroll / selection
-              -> ALTERNATE: existing full-screen TUI Screen
-           -> one bounded Rust read-only viewport/render projection
-           -> existing Metal renderer; Swift thin platform adapter
-\`\`\`
+**Non-negotiable outcome:** One PTY per TerminalExecution; one Rust VT parser/semantic authority; *real canonical Block-owned content regions* for the primary screen; one alternate-screen TUI; one indexed viewport; one Metal compositor and thin Swift platform host. No extra PTY/child/parser per command, no second independently mutable traditional primary screen, no synthetic terminal output, and no Swift-owned Block/content/layout authority.
 
-**Content is stored once.** The Block object **owns its semantic content
-membership** and stable source-span references; the canonical \`Screen\` and
-\`HistoryStore\` own the actual cell/source-unit allocations. A Block does
-not get a PTY, child, VT state machine, independent grid or duplicate history.
-This is Block-native document organization, not merely Swift cards over a
-mutable per-Pane transcript: canonical Block indices and all layout/scroll
-decisions originate in Rust. It does **not** require verbatim Warp \`BlockGrid\`
-storage: Warp's per-Block mutable grids cannot be substituted blindly without
-proving equivalent global VT cursor/erase and ADR-010 reflow semantics.
+An architecture may be called **design GO** only if it makes G1–G9 of the acceptance matrix mutually consistent and specifies exact proof and cutover. An implementation may be called **product GO** only after measured end-to-end acceptance. Neither threshold is reached merely by merging this ADR.
 
-**Important distinction:** a Block marked \`Completed\` by trusted shell
-integration does NOT make every visible cell physically immutable. Terminal
-escape sequences can still address rows of a prior Block *while those rows
-remain in the active screen*. They must mutate the **one** canonical active
-\`Screen\` and invalidate the affected Block's presentation. Content becomes
-immutable only on existing terminal-history sealing / ownership transfer when
-it leaves the writable primary screen. No completed-Block snapshot may falsely
-override active VT truth. Completed Block lifecycle metadata may remain stable
-while its still-addressable visible cells are edited.
+### Chosen candidate: one terminal semantic authority containing Block-owned grids
 
-### Exact ownership and transition rules
+The old proposal "Block metadata + one global grid/history + Rust card layout" is **rejected as insufficiently native**. Moving card geometry into Rust without changing Block storage would leave the most important limitation intact.
 
-1. **Terminal bytes and mutation:** the existing parser and VT action handler
-   apply operations to \`TerminalState\` first. Printable text, CR, BS, CSI
-   cursor addressing, erase, insert/delete, scroll margins, SGR, hyperlinks,
-   Unicode and resize have **identical canonical Screen semantics** with or
-   without trusted Block boundaries. Block logic never intercepts or suppresses
-   a valid terminal operation, and does not place IPC/Swift/layout work in the
-   PTY/VT mutation hot path.
+The independent Seyal implementation SHALL use one *PrimaryBlockEngine* as the primary-screen content store. Its BlockList owns individual `BlockContent` objects. Each BlockContent contains at least a `PromptCommandRegion` and `OutputRegion`; both expose an addressable grid/row model and own canonical region content. An `UnstructuredRegion` is the equivalent content object when trusted Block boundaries do not exist. Active writable cells and completed retained source units live in this **same** storage system. A region is not a nested VT engine and has no PTY.
 
-2. **Command boundaries:** Rust Runtime validates nonce-bound OSC 133 shell
-   integration, Controller/Execution identity and input epoch as before. The
-   parser provides *ordered* boundary observations tied to its canonical
-   source/cursor generation at the point the marker is consumed. Runtime binds
-   each accepted event to a stable BlockId. Marker candidates cannot grant
-   input authority or create trusted Blocks before validation. If a batch
-   contains marker, output, marker, attribution must respect **wire order**;
-   delayed Controller synchronization must not reorder or erase Block content.
-   No prompt/output text heuristics and no PTY replay.
+```text
+Workspace -> Pane -> pane-local TerminalTab -> TerminalExecution
+                                            one PTY + shell/process group
+                                            one Parser / TerminalState
+                                             | 
+                PRIMARY (one PrimaryBlockEngine content authority)
+                   BlockList
+                     Block {id, prompt/command RegionGrid, output RegionGrid,
+                            lifecycle, source spans, selection, layout}
+                     Block { ... }
+                     UnstructuredRegion {canonical RegionGrid}
+                   Canonical RegionStore (mutable pages + compact sealed segments)
+                   VT WindowMap (PTY rows/columns -> RegionStore cell slots)
+                   one global cursor / modes / styles / damage / LineId allocator
+                   derived height+visible-range index / scroll anchors
+                ALTERNATE
+                   canonical TUI Screen (nvim, tmux, htop)
+                                             |
+                   bounded Rust viewport/render plan
+                                             |
+                   Metal renderer / thin Swift host
+```
 
-3. **Content attribution:** canonical source spans retain \`ExecutionId\`,
-   \`BlockId\` (or \`Unstructured\`), source \`LineId\`, unit offsets and
-   generation as needed. Mixed-owner content on the *same visual row* is
-   representable: a display row must be painted exactly once, and splitting
-   its content into multiple cards cannot insert a fake terminal newline.
-   When a mutation crosses a Block boundary in the **active writable screen**,
-   the screen operation wins. All affected Block-derived views are invalidated;
-   if their layout cannot render such an overlap without changing output,
-   the affected contiguous region is displayed as one faithful unstructured
-   region with Block metadata still discoverable. Never discard output to
-   preserve a card shape.
+**Critical distinction:** The `VT WindowMap` is a *coordinate map into* canonical Block/Unstructured regions, NOT a separately populated writable `Vec<Cell>` with copied output. Exactly one canonical cell/source unit exists at any instant. A view/projection may cache disposable pixels but cannot create another semantic history. The existing `Screen.cells` implementation would need a deliberate owner-preserving migration into this address model; simply layering Block regions over that Vec is forbidden.
 
-4. **Completed content and eviction:** when canonical rows leave the active
-   screen, ownership transfers once into existing ADR-010 immutable/compact
-   \`HistoryStore\` segments. Block records retain stable source-unit spans
-   or indexed segment slices into that store; they never retain an unbounded
-   private cell clone. \`clear\` / ED2 uses existing history sealing, line-ID
-   remint and canvas floor, rather than inventing another canonical clear.
-   Evicted content is reported as missing/stale and related Block slices,
-   selections, search/viewport caches and accessibility payloads are pruned.
-   Expired Block metadata may be compacted to bounded unstructured history
-   groups; it must not make still-retained terminal source content disappear.
+**Storage invariant:** Each RegionGrid owns its content identity, mutable writable units and immutable completed segments *through the one canonical RegionStore*. The RegionStore/HistoryStore is the sole physical allocator and eviction authority for committed source units; a Block's region ownership is explicit in the store's segment descriptors and lookup index. Historical content is obtained by `BlockId + RegionId + source-unit span`, not by guessing a global line range or requesting Swift to extract one. The terminal-wide retained-history API remains a *read-only concatenated view* of region-owned segments, not an independent second history store. The amendment to ADR-010 must explicitly preserve byte caps, line identity, hard/soft wrap, cold persistence and eviction status.
 
-5. **Reflow and coordinates:** ADR-010/011 source units, \`LineId\` plus unit
-   offsets, HardBreak/SoftWrap and grapheme width are authoritative. Block
-   boundaries are source-unit precise; they do not depend on current visual
-   row number. Width changes rebuild *derived* row geometry and height index,
-   never reparse shell bytes or rewrite sealed history. Scroll follows stable
-   BlockId/source anchor plus within-row offset, not a continuously restored
-   absolute document pixel height. Selection, copy, find, hyperlink and AX map
-   back to the same source anchors.
+### VT correctness must outrank pretty Block boundaries
 
-6. **Fallback and interactivity:** unknown/untrusted/missing shell markers,
-   early output, SSH/subshell sessions and ambiguous writes use a
-   \`UnstructuredRegion\` inside the **same** primary document. The existing
-   Rust Flow/Raw/DirectInput/Relay mode and input-epoch contract governs
-   interaction; fallback is an **exclusive presentation**, never a hidden
-   second Raw viewport beneath Blocks. Supported trusted shells remain
-   Blocks-first. A bad Block projection cannot change PTY, terminal cursor,
-   child lifecycle or a sibling Pane. Full-screen alternate-screen TUI uses
-   the one existing alternate \`Screen\`, with independent input and viewport;
-   returning to primary does not rebuild its execution.
+The PTY sees one conventional screen-sized terminal address space. The parser has **one** cursor and VT mode machine for the execution. Printable input, CR, BS, CSI cursor addressing, erase, insert/delete, scroll margins, SGR, hyperlinks and Unicode operate on the `VT WindowMap`. A screen row may reference cells from multiple RegionGrids; each visible cell is rendered exactly once. On write, the operation touches the canonically addressed region and publishes its damage, even if that region belongs to an earlier completed command. A Block's `Completed` *lifecycle* does not imply its still-addressable live cells are immutable.
 
-7. **Display pipeline:** Rust owns Block ordering, measured heights,
-   viewport-visible Block and source-row lookup, clipping and renderer
-   intent. Publish a **batched bounded** viewport projection keyed by
-   \`ExecutionId\`, Controller/display handle, damage generation, Block/source
-   revision and presentation epoch. Metal draws only visible source rows and
-   Block chrome from that projection. Swift realizes macOS windows, IME,
-   accessibility, native events and GPU resources, not authoritative Block
-   geometry or transcript/scroll state. Stale or out-of-order packets are
-   rejected; scroll/focus must not force all Block cards to be rebuilt.
+**Content sealing:** A unit may become immutable when normal VT history transfer makes it no longer writable through the PTY screen (e.g., scroll-off), or when other provably equivalent terminal semantics apply. `BlockFinished` alone must not seal live cells. On scroll-off, region-owned mutable units transfer **once** into the shared compact retained segment allocator; all source anchors and Block membership survive. No duplicate snapshot is held as truth. Block metadata eviction must never evict still-retained content without the approved history policy.
 
-8. **Complexity and budgets:** mutable primary-screen cell memory remains
-   bounded by terminal dimensions and the pre-existing active payload limits.
-   Retained source content, Block metadata/index, prepared glyph/pages and
-   pending projections all have explicit per-execution and aggregate bounds.
-   For B retained Blocks and V visible Blocks, a normal height/anchor update
-   should be incremental, targeted **O(log B)** (plus changed visible rows);
-   a viewport query targets **O(log B + V + visible rows)**. A full reflow on
-   explicit resize may cost more, with lazy reflow for old segments. These are
-   design requirements, **not measured performance claims**. Warp's current
-   whole-tree rebuild and reported long-uptime memory behavior must not be
-   inherited.
+**Cross-Block edits:** If cursor-up/erase/CR writes into previous Block content, the global VT operation wins and Block caches/indexes are invalidated for affected source spans. Preserve original command identity where valid, but attribute modified cells by current write provenance. A single physical row shared by two Blocks remains one physical row. If it cannot be split into two independent Block cards without inserting a fake newline or clipping output, co-render the relevant row as a faithful *composite/unstructured region* while retaining the associated Block identities, exact copy ranges and navigation metadata. This fallback affects only the ambiguous region; it is not license to discard or merge all Blocks.
 
-### Architecture compatibility
+**Clear:** ED2 and similar operations retain the preexisting approved user-visible semantics (retained history, reminted LineIds, canvas floor), now expressed as owned RegionStore operations. Terminal clear must never silently delete previous Block content beyond its approved retention policy. Entering alternate screen preserves the primary BlockEngine and switches the sole parser's active VT surface to the separate existing TUI Screen; exit returns to exactly the same primary content.
 
-- **ADR-004:** retain one parser, mutable \`Screen\`, global cursor, mode,
-  LineId allocator and damage. Block indexing does not replace VT actions.
-- **ADR-010/011:** retain the one \`HistoryStore\`, sealed segments, unit
-  anchors, hard/soft lineage, lazy reflow and eviction limits. Block-owned
-  **membership** is different from duplicated ownership of terminal bytes.
-- **ADR-009/SPEC-008:** preserve one trusted command per Block, bottom composer,
-  Block-default supported shell, exclusive Flow/Raw/TUI, running-program
-  interaction and safe fallback. The *implementation* of Flow geometry changes.
-- **ADR-015:** Rust owns product layout and projection; thin Swift uses Metal
-  without deriving Block decisions.
-- **ADR-025:** each Pane-local terminal Tab references its own execution,
-  source document, scroll anchor and input fencing.
+### Trusted boundaries and causal attribution
 
-The original ADR-009 prohibition on **per-Block PTY/VT/grid/copied transcript**
-stays valid. The precise proposed amendment is to allow a **single canonical
-Rust primary BlockDocument** and Block-owned *source membership/indexes*
-without a second screen. This reconciles ADR-004/010 rather than silently
-superseding them. If source-level implementation proves that a second
-independently mutable grid is necessary, that is a **new architecture
-decision**, not implied authorization from this proposal.
+The parser MUST publish an ordered bounded sequence of typed VT mutations and shell marker observations with a monotonic per-execution `StreamSequence` and immutable source-coordinate snapshot. Current `CommandStarted {line}` and `CommandFinished {line}` records are **not sufficient** for precise same-row or same-read attribution; extend the event contract to source-unit/column boundaries and batch position. A PTY read containing `output -> OSC C -> output -> OSC D -> output` MUST not attribute all its output to the last marker.
 
-### Acceptance fixtures and explicit expected invariants
+The Runtime verifies nonce-bound OSC 133, ExecutionId/Controller identity, shell state, target generation and epoch before assigning trusted Block IDs. Because markers may be validated after a parser feed, mutation/event ordering SHALL be retained with a **bounded per-read attribution journal** or equivalent transactional mechanism. Only the classification journal is transient: the canonical cells themselves are written once. On journal overflow, stale/reordered/untrusted markers or ambiguous provenance, classify the affected source spans as Unstructured and preserve all terminal bytes. No parser replay; no output text heuristics; no untrusted shell claiming a trusted Block.
 
-- **Shell continuity:** \`cd\`, \`export\`, shell functions and job control
-  continue within the one PTY across multiple Blocks; no command subprocess
-  emulation or PTY creation.
-- **Cross-Block edit:** print \`abc\` without newline, accept a new command,
-  then issue CR/CSI-up/erase and repaint. Primary screen cells/cursor must
-  match the existing VT-engine golden at each step. One canonical row is
-  rendered once; any overlapping Block view is invalidated or unstructured.
-- **Progress/clear:** CR-updated percentage overwrites active cells; ED2
-  retains only the history mandated by ADR-010, remints LineIds, floors the
-  live canvas without resurrecting stale cards.
-- **Split PTY read:** arbitrary byte chunking around OSC markers and UTF-8
-  cannot alter final content, Block attribution or integration admission
-  relative to a single-chunk feed.
-- **Reflow:** after 80→40→120 columns, retained source-unit anchors, selection
-  and copy remain stable; only derived rows/heights change. No width change
-  generates or loses terminal content.
-- **TUI/remote:** \`nvim\`, \`tmux\`, \`htop\`, \`python3\` and SSH retain
-  correct input/cursor semantics; untrusted markers never grant authority.
-  Return from TUI reveals unchanged canonical primary content.
-- **Multipane/reconnect:** two panes with multiple pane-local tabs can
-  stream while unfocused, scroll independently and reconnect without
-  cross-execution content or input leakage.
-- **Scale:** 10k/100k/1M-line classes, 1/10/50/100 execution populations,
-  long-running prompts, index updates, occlusion and eviction must
-  demonstrate measured CPU/RSS/latency ceilings in an implementation spec.
-  Unit/integration, exact-head macOS headed and stress tests must pass. No
-  benchmark or conformance success is claimed in this ADR review.
+Document precisely when prompt/command/output regions begin/end, including command-without-newline, multiple markers in a chunk, shell exit, SIGINT, nested SSH/session, background activity and a prompt-creation race. A per-execution ID does not grant input authority; composer, DirectInput and Relay still require their existing fencing.
 
-### Migration and rollback
+### Viewport, input and resource contract
 
-A prototype, if needed to resolve the canonical-span mapping, belongs on an
-isolated **non-mergeable** R&D branch. Production migration SHALL use a
-single-authority cutover: \`TerminalState\` continues to own one \`Screen\`
-and \`HistoryStore\`; after the Rust BlockDocument/index and viewport
-protocol are proven, native card geometry and per-Block history-range
-assembly are removed as authoritative production paths **in the same
-integration boundary**. A read-only transitional projection is permissible
-only when it does not create duplicate VT/history or presentation policy and
-has a removal test. Roll back the complete integration if exact-head
-conformance/resource or headed usability fails. Never ship dual mutable
-primary engines or feature-flag-driven permanent old/new parallelism.
+Rust owns Block ordering, BlockId/RegionId mapping, source-unit selection/search/copy, height index, scroll anchoring, viewport-visible region lookup, hit-test decisions and renderer intent. A batched bounded `BlockViewportPlan` binds ExecutionId, Controller/displayHandle, presentation epoch, source revision, VT damage generation, scroll anchor and visible clipped rows. Metal draws it; Swift handles native events, IME/AX, windowing and GPU resource realization. No separate AppKit `NSStackView` should own the authoritative Block height/document or reconstruct one history range per card.
 
-### Alternatives and sign-off
+- Normal per-Block geometry updates MUST be incremental, target `O(log B)` plus changed visible rows; lookup targets `O(log B + V + visible rows)` with B retained Blocks and V visible. Full historical reflow on an ordinary keystroke is forbidden. Explicit resize can invalidate derived row caches; lazy history reflow must respect existing ADR-010 anchors.
+- Active region bytes, sealed segments, Block index metadata, pending event journal, IPC packet payloads and GPU pages MUST be bounded per execution **and** across the Runtime. Occluded/detached panes must not retain unbounded hot pages. Exact ceiling values are measured and frozen in the future implementation spec, never guessed here.
+- Every Pane-local terminal tab owns an independent Execution/BlockEngine/view anchor; focus changes input routing only. An unfocused pane continues showing its own Block timeline. Reconnect resends only canonical state and bounded projections; it does not replay raw PTY output.
+- Composer must support correct Enter, history, completion/Tab, cd, paste, selection, IME and DirectInput/Relay/TUI takeover. Mouse click positioning inside a native composer is required; arbitrary PTY cursor reposition by mouse is only promised when the terminal program/protocol supports it.
+- A trusted supported shell defaults to Blocks. Unsupported/untrusted shells use a faithful unstructured primary rendering path, not a hidden Raw layer behind Blocks. Terminal correctness is never conditional on Block metadata.
 
-1. **Keep original metadata → Swift card/history clips:** lowest initial
-   migration risk, but continues the cross-language Block geometry/scroll
-   coupling and cannot provide a Rust-native primary document.
-2. **Fork/import Warp:** rejected: product/runtime mismatch, unnecessary
-   replacement, and AGPL code reuse obligations. Consult source as evidence,
-   independently implement Seyal code under Apache-2.0.
-3. **Independent source-backed BlockDocument (chosen proposal):** native
-   content semantics and Rust viewport while preserving known VT and history
-   invariants; avoids Warp's per-Block grid clones and full-tree hot-path
-   rebuild. Effectiveness requires measurable proof.
-4. **New PTY/VT engine or one VT/grid per Block:** rejected because it
-   duplicates terminal authority or breaks shell continuity.
+### Warp comparison and independent design constraints
 
-**Review gate:** This section is now a **decision-complete proposal**, not
-evidence of a working solution. Obtain non-author architecture/security
-review, explicit owner acceptance, docs/CI checks, and independently validate
-the block attribution + cross-Block VT golden invariants before calling it
-an *accepted* ADR. Update any affected SPEC-008 and implementations only
-after acceptance. Existing M003 #1478 NO-GO remains separate.
+Warp source demonstrates one TerminalModel with BlockList/AltScreen, `Block` storing HeaderGrid and output BlockGrid, compact `FlatStorage` and indexed Block height lookup. Seyal SHOULD match *native content isolation, scroll/copy/navigation, command lifecycle, prompt, keyboard and TUI behavior* while independently implementing the storage and renderer. Do NOT import Warp AGPL source.
+
+Seyal deliberately differs in: one Runtime-owned PTY/session with pane-local tabs, primary canonical source-unit/LineId/reflow contracts, Rust/Metal/headless architecture, **bounded** per-execution and aggregate history, and incremental height index instead of Warp's observed full-tree rebuild in `update_blocks_and_sumtree`. These are **design targets**, not proof of measured superiority.
+
+### Reconciliation, migration, review gates
+
+- **ADR-004:** Preserve single VT parser/modes/damage and one *semantic* primary address space, while expressly allowing multiple RegionGrids **inside** that one authoritative PrimaryBlockEngine. The old "one grid" phrasing must be amended in the same accepted architecture package; it may not be interpreted as banning all Block-local canonical storage.
+- **ADR-010/011:** Retained primary content remains owned once, with canonical source units, LineId, HardBreak/SoftWrap, byte-bounded compact segments, lazy reflow and deterministic eviction. Update the storage *container* and history concatenation rule; do not create independent mutable Block snapshots or another allocator.
+- **ADR-009/SPEC-008:** Preserve trusted boundaries, Block-first Flow, no hidden full-grid Raw viewport, one bottom composer and exclusive Flow/Raw/TUI, including DirectInput/Relay. Explicitly redefine a native Block from "history range metadata" to Block-owned content.
+- **ADR-015/025:** Rust portable authority remains; Swift platform/Metal host thin; stable pane-local tab/Controller identity and reconnect boundaries.
+
+Migration MUST be planned as an **all-at-once canonical terminal storage authority cutover in the relevant execution engine**, not a second writable live grid behind Flow. The old VT Screen implementation may be used in offline differential tests but not simultaneously as a shipped source of truth. Non-mergeable prototype/fixture branch may validate the address map and same-row attribution. Rollback of the production cutover must restore the previous single canonical engine, without mixing old/new persisted snapshots. Keep M003 #1478 gates independent; the new ADR does not make current Blocks production-ready.
+
+**Design acceptance is conditional on passing the exact counterexamples and review matrix** in the linked evidence: cross-Block VT edits, same-row output, marker ordering, Unicode/reflow, ED2, SSH/REPL/TUI, long-history viewport, focus/scroll/reconnect, memory bounds and full native usability. A human non-author must review the architecture changes and coordinated ADR-004/010/011/spec compatibility before declaring **design GO**. No claim of "better than Warp" is justified before native Block features and long-uptime performance are measured.
 
 ---
 
