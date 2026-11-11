@@ -15,7 +15,7 @@
 | Busy accept latch + AX Busy under DirectInput | **UNIT PASS**; headed Busy XCUI **PASS** (both cases) |
 | Composer hittable after Flow / relaunch | **PASS** (dock restore + Flow latch wait) |
 | Focus-churn scroll markers | **PASS** (draft capture across FOCUS_PANE reconcile) |
-| Pane-local terminal tab markers | **FAIL** (`SEYAL_TAB_ONE_MARKER` still missing after tab select) |
+| Pane-local terminal tab markers | **FAIL** — submit clears draft/`available`, but AX only shows sibling `seyal-secondary-block-0:echo SEYAL_PANE_TWO_MARKER`; no primary Block for `SEYAL_TAB_ONE_MARKER` (`/tmp/seyal-1474-tabs-r7.log`) |
 | Spawn-time SSH session Block | **FAIL** (composer stays `busy` after `ssh` submit on this runner) |
 | `make check` | run on tip before handoff |
 
