@@ -1,0 +1,74 @@
+name: Foundation Full Suite
+
+on:
+  schedule:
+    # After nightly fuzz (17 6 UTC); full Foundation surface including XCUI/bench.
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundation-full-suite-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-full:
+    name: rust-full
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Bootstrap pinned Rust toolchain
+        run: make bootstrap
+      - name: Build production Rust surface
+        run: make build
+      - name: Format lint unit and repository checks
+        run: make check
+      - name: Benchmark harness smoke
+        run: make bench
+
+  native-macos-full:
+    name: native-macos-full
+    runs-on: macos-15
+    # Historical every-PR native-macos-smoke surface: check + XCUI + bench.
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Select pinned Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Bootstrap pinned Rust and native toolchains
+        run: make bootstrap
+      - name: Build Rust plus Seyal.app
+        run: make build
+      - name: Native format lint unit and repository checks
+        run: make check
+      - name: Unit, PTY, native smoke, XCTest and XCUIAutomation
+        run: make test
+      - name: Preserve native UI rendered evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: seyal-macos-ui-xcresult-full-suite
+          path: target/macos-ui-tests.xcresult
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Native PTY benchmark baseline
+        env:
+          # GitHub-hosted macOS runners may be headless and cannot deliver
+          # CAMetalDisplayLink callbacks. Interactive/local runs require the
+          # presentation proxy and remain the acceptance measurement.
+          SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK: "0"
+          # This job validates the unsigned CI benchmark artifact, not a
+          # distributable release. Keep the Release packaging contract
+          # explicit without requiring a private Apple signing credential.
+          SEYAL_CODESIGN_IDENTITY: "-"
+        run: make bench
