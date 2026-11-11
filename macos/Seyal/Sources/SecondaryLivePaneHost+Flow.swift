@@ -135,6 +135,7 @@ extension SecondaryLivePaneHost {
                     action.target_generation = generation
                     guard seyal_app_apply(self.appHandle, &action) == 0 else { return }
                     self.applyTranscriptPresentation()
+                    self.onCommandConsumed?()
                     self.window?.makeFirstResponder(self.surface)
                 }
                 : nil

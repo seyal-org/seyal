@@ -9,7 +9,7 @@
 
 | Deliverable | Verdict | Notes |
 |---|---|---|
-| Terminal correctness | PASS (code) / UNVERIFIED (full headed matrix) | Permanent PTY→VT→Metal path on master; Gate 1 regressions covered by existing suites |
+| Terminal correctness | PARTIAL | Gate 1 P0s from audit: multipane Raw/TUI focus, unfocused alt-screen TUI, composer caret/hitTest — landed on PR; headed matrix still open |
 | Blocks | PARTIAL | Multipane Flow live; Rerun ABI 87 + seam projection landed; history-backed Copy still open |
 | Composer | PASS (code) | History + DirectInput (#1471) on base |
 | Workspace | PASS (code) / PARTIAL (multi-window live) | Splits/layouts/nav live; inactive NSWindows still placeholder (classified deferral) |

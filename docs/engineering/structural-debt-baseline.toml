@@ -36,9 +36,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 848
-issue = 1467
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
+acknowledged_loc = 853
+issue = 1474
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 DirectInput borrow stays here while #1474 wires Candidate-D alternate-screen reconcile for unfocused Flow↔TUI without a second PTY/VT authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
@@ -252,9 +252,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1064
-issue = 1467
-responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1467/#1468 add per-pane Block-scoped DirectInput dock retraction and post-REPL Available reclaim on that same host rather than a second chrome authority."
+ceiling_loc = 1066
+issue = 1474
+responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1467/#1468 DirectInput reclaim stays here while #1474 routes multipane Raw/TUI keys to liveContent's primary surface instead of a hidden bridgeless host."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"

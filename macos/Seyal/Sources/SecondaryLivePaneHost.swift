@@ -122,6 +122,11 @@ final class SecondaryLivePaneHost: NSView {
         surface.onEnsureDirectInputBridge = { [weak self] in
             self?.ensureDirectInputBridgeBorrow()
         }
+        // Unfocused Flow↔TUI from Candidate-D alt-screen (#867 / #1474).
+        surface.onAlternateScreenChanged = { [weak self] _ in
+            self?.reconcileFlowPresentation()
+            self?.onCommandConsumed?()
+        }
         translatesAutoresizingMaskIntoConstraints = true
         clipsToBounds = true
         setAccessibilityElement(true)

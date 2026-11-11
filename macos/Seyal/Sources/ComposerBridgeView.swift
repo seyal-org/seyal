@@ -190,6 +190,24 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         return window?.makeFirstResponder(textView) ?? false
     }
 
+    /// Placeholder sits above the editor in z-order; clicks on empty-draft
+    /// chrome must still focus the text view (#867 / #1474).
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        if hit === placeholder || hit?.isDescendant(of: placeholder) == true {
+            return textView.isEditable ? textView : self
+        }
+        return hit
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if focusEditor() {
+            textView.mouseDown(with: event)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
   var editorIsFirstResponder: Bool {
     window?.firstResponder === textView
   }
@@ -355,14 +373,19 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             // The Rust draft is authoritative in every mode (SPEC-008 §4). A
             // Runtime-published busy state with an empty draft (command
             // accepted, prompt not back yet) must show the placeholder, not
-            // the text that was already submitted.
+            // the text that was already submitted. Skip identical rewrites so
+            // status/focus reconcile does not reset the caret (#867 / #1474).
+            let decoded: String
             if composer.draft_utf8_len > 0, let bytes = composer.draft_utf8 {
-                textView.string = String(
+                decoded = String(
                     decoding: UnsafeBufferPointer(start: bytes, count: Int(composer.draft_utf8_len)),
                     as: UTF8.self
                 )
             } else {
-                textView.string = ""
+                decoded = ""
+            }
+            if textView.string != decoded {
+                textView.string = decoded
             }
         }
         placeholder.isHidden = !textView.string.isEmpty

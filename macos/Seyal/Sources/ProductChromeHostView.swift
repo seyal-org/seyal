@@ -664,9 +664,11 @@ final class ProductChromeHostView: NSView {
     }
 
     /// Focused Pane Metal surface for Flow DirectInput / Raw / TUI keys.
+    /// Multipane Raw/TUI covers the host with liveContent (#867 / #1474).
     func focusedInputSurface() -> InteractiveMetalSurfaceView {
         let shell = seyal_app_shell(pane.appHandle)
         if !centerColumn.secondaryHosts.isEmpty,
+            centerColumn.liveContent.isHidden,
             let host = centerColumn.presentationHost(
                 paneLo: shell.focused_pane_lo,
                 paneHi: shell.focused_pane_hi
