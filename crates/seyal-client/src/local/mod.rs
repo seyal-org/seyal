@@ -403,13 +403,9 @@ impl LocalDisplayClient {
             self.composer_target,
             status.eligibility,
         ) {
-            (
-                true,
-                Some(target),
-                _,
-            ) if target.mode == ComposerTargetMode::Submit
-                && target.scope
-                    == seyal_runtime::local_ipc::framing::BlockScope::Session =>
+            (true, Some(target), _)
+                if target.mode == ComposerTargetMode::Submit
+                    && target.scope == seyal_runtime::local_ipc::framing::BlockScope::Session =>
             {
                 1
             }
