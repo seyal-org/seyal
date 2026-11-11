@@ -673,7 +673,7 @@ fn negotiated_type_45_projects_submit_relay_direct_and_unavailable() {
     let mut target = ComposerTarget {
         attachment_id: attachment,
         target: InputTargetClass::TrustedShell,
-        scope: BlockScope::Session,
+        scope: BlockScope::Local,
         mode: ComposerTargetMode::Submit,
         reason: ComposerTargetReason::None,
         block_id: 0,
@@ -685,39 +685,57 @@ fn negotiated_type_45_projects_submit_relay_direct_and_unavailable() {
     let (code, submit_revision, _) = client.projected_composer_status().expect("submit");
     assert_eq!(
         code, 2,
-        "stale Submit must not override type 23 Busy during admission"
+        "stale local-scope Submit must not override type 23 Busy during admission"
     );
     assert!(
         submit_revision >= revision,
         "projection revision stays monotonic"
     );
 
-    // At a trusted prompt, Submit + Available is the resting projection.
+    // Trusted session prompt: host Block keeps type 23 Busy while Session-scope
+    // Submit means the remote prompt admits the next command (ADR-026 / #1474).
+    target.scope = BlockScope::Session;
+    target.revision = 4;
+    client.composer_target = Some(target);
+    client.note_composer_projection();
+    let (code, session_revision, _) = client
+        .projected_composer_status()
+        .expect("trusted session submit");
+    assert_eq!(
+        code, 1,
+        "Session-scope Submit projects Available over host Busy"
+    );
+    assert!(session_revision > submit_revision);
+
+    // At a local trusted prompt, Submit + Available is the resting projection.
+    target.scope = BlockScope::Local;
+    target.revision = 5;
+    client.composer_target = Some(target);
     client.composer_status = Some(ComposerStatus {
         attachment_id: attachment,
         eligibility: ComposerEligibility::Available,
-        revision: 3,
+        revision: 5,
     });
     client.note_composer_projection();
     let (code, available_revision, _) = client
         .projected_composer_status()
         .expect("submit+available");
     assert_eq!(code, 1, "Submit + Available projects as available");
-    assert!(available_revision >= submit_revision);
+    assert!(available_revision >= session_revision);
 
     target.mode = ComposerTargetMode::Unavailable;
     target.reason = ComposerTargetReason::NotAtPrompt;
-    target.revision = 4;
+    target.revision = 6;
     client.composer_target = Some(target);
     client.note_composer_projection();
     let (code, unavailable_revision, _) = client.projected_composer_status().expect("unavailable");
     assert_eq!(code, 2);
-    assert!(unavailable_revision > submit_revision);
+    assert!(unavailable_revision > available_revision);
 
     target.mode = ComposerTargetMode::Relay;
     target.reason = ComposerTargetReason::None;
     target.block_id = 7;
-    target.revision = 5;
+    target.revision = 7;
     client.composer_target = Some(target);
     client.note_composer_projection();
     let (code, relay_revision, _) = client.projected_composer_status().expect("relay");
@@ -727,7 +745,7 @@ fn negotiated_type_45_projects_submit_relay_direct_and_unavailable() {
     target.mode = ComposerTargetMode::DirectInput;
     target.reason = ComposerTargetReason::None;
     target.block_id = 9;
-    target.revision = 6;
+    target.revision = 8;
     client.composer_target = Some(target);
     client.note_composer_projection();
     let (code, direct_revision, _) = client.projected_composer_status().expect("direct");

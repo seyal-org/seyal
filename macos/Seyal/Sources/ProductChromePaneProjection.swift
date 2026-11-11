@@ -96,16 +96,17 @@ extension ProductChromeHostView {
         guard let bridge = pane.inputSurface.bridge else { return }
         bridge.onRegistryHandlePolled = { [weak self] displayHandle in
             guard let self else { return }
-            if let host = self.centerColumn.secondaryHost(displayHandle: displayHandle) {
-                host.noteRegistryPolled(clientHandle: displayHandle)
-                return
-            }
-            // Tab switches can leave host.displayHandle briefly stale while the
-            // shell binding already names the polled Controller (#1474).
-            for host in self.centerColumn.secondaryHosts
-            where host.liveBindingDisplayHandleForRegistry() == displayHandle {
-                // updateDisplayHandle syncs from the new Controller.
-                _ = host.updateDisplayHandle(displayHandle)
+            // Sync Candidate-D Blocks only for the Pane's *selected* terminal
+            // Controller. Matching `host.displayHandle` alone lets an unselected
+            // tab's empty timeline wipe the selected tab's Accept (#1474).
+            for host in self.centerColumn.secondaryHosts {
+                let live = host.liveBindingDisplayHandleForRegistry()
+                guard live != 0, live == displayHandle else { continue }
+                if host.displayHandle != live {
+                    _ = host.updateDisplayHandle(live)
+                } else {
+                    host.noteRegistryPolled(clientHandle: live)
+                }
                 return
             }
         }

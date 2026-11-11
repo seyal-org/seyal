@@ -80,6 +80,7 @@
 		A1000000000000000000005A /* ProductChromeHostView+Blocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */; };
 		A100000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift */; };
 		A100000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */; };
+		A100000000000000000000F2 /* ProductChromeHostView+ComposerResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F2 /* ProductChromeHostView+ComposerResult.swift */; };
 		A1000000000000000000005B /* ProductChromeHostView+Recovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */; };
 		A1000000000000000000005C /* ProductChromeHostView+ChromeActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */; };
 		A1000000000000000000005D /* RendererValidationDisplayLinkDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */; };
@@ -199,6 +200,7 @@
 		A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+Blocks.swift"; sourceTree = "<group>"; };
 		A200000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+RunningProgramInput.swift"; sourceTree = "<group>"; };
 		A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+TranscriptLayout.swift"; sourceTree = "<group>"; };
+		A200000000000000000000F2 /* ProductChromeHostView+ComposerResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+ComposerResult.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+Recovery.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+ChromeActions.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererValidationDisplayLinkDriver.swift; sourceTree = "<group>"; };
@@ -321,6 +323,7 @@
 				A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */,
 				A200000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift */,
 				A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */,
+				A200000000000000000000F2 /* ProductChromeHostView+ComposerResult.swift */,
 				A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */,
 				A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */,
 				A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */,
@@ -565,6 +568,7 @@
 				A1000000000000000000005A /* ProductChromeHostView+Blocks.swift in Sources */,
 				A100000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift in Sources */,
 				A100000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift in Sources */,
+				A100000000000000000000F2 /* ProductChromeHostView+ComposerResult.swift in Sources */,
 				A1000000000000000000005B /* ProductChromeHostView+Recovery.swift in Sources */,
 				A1000000000000000000005C /* ProductChromeHostView+ChromeActions.swift in Sources */,
 				A1000000000000000000005D /* RendererValidationDisplayLinkDriver.swift in Sources */,

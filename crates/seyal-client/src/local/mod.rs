@@ -392,20 +392,36 @@ impl LocalDisplayClient {
         );
         // Type 45 is the negotiated composer fact. Type 23 is the legacy
         // Busy/Available fallback used only when no ComposerTarget has arrived.
-        // Submit+Busy is the admission race: status flips to Busy before the
-        // matching Unavailable target frame is applied; projecting Available
-        // here would overwrite a local Busy latch and leave AX on `available`
-        // while the shell still owns the command (#1474 headed busy cases).
+        // Submit+Busy (local scope) is the admission race: status flips to Busy
+        // before the matching Unavailable target frame is applied; projecting
+        // Available here would overwrite a local Busy latch (#1474 headed busy).
+        // Trusted session prompts are Session-scope Submit while the host Block
+        // keeps type 23 Busy — that resting state must project Available so SSH
+        // session Blocks can accept the next command (#1474 / ADR-026).
         let code = match (
             self.session_bootstrap_negotiated,
-            self.composer_target.map(|target| target.mode),
+            self.composer_target,
             status.eligibility,
         ) {
-            (true, Some(ComposerTargetMode::Submit), ComposerEligibility::Busy) => 2,
-            (true, Some(ComposerTargetMode::Submit), _) => 1,
-            (true, Some(ComposerTargetMode::Relay), _) => 4,
-            (true, Some(ComposerTargetMode::DirectInput), _) => 5,
-            (true, Some(ComposerTargetMode::Unavailable), _) => 2,
+            (
+                true,
+                Some(target),
+                _,
+            ) if target.mode == ComposerTargetMode::Submit
+                && target.scope
+                    == seyal_runtime::local_ipc::framing::BlockScope::Session =>
+            {
+                1
+            }
+            (true, Some(target), ComposerEligibility::Busy)
+                if target.mode == ComposerTargetMode::Submit =>
+            {
+                2
+            }
+            (true, Some(target), _) if target.mode == ComposerTargetMode::Submit => 1,
+            (true, Some(target), _) if target.mode == ComposerTargetMode::Relay => 4,
+            (true, Some(target), _) if target.mode == ComposerTargetMode::DirectInput => 5,
+            (true, Some(target), _) if target.mode == ComposerTargetMode::Unavailable => 2,
             (_, _, eligibility) => match eligibility {
                 ComposerEligibility::Available => 1,
                 ComposerEligibility::Busy => 2,

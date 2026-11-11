@@ -7,8 +7,12 @@ extension XCTestCase {
         in app: XCUIApplication, submitCommand: (String) -> Void
     ) throws {
         let token = String(UUID().uuidString.prefix(8))
-        let scriptURL = URL(fileURLWithPath: "/tmp/s1049-\(token).sh")
-        let startedURL = URL(fileURLWithPath: "/tmp/s1049-\(token).ran")
+        // XCUI runners are sandboxed and cannot create fixtures under `/tmp`
+        // (NSCocoaErrorDomain 513). Use the runner temporary directory; the
+        // non-sandboxed app/Runtime can still exec and write the started latch.
+        let fixtureRoot = FileManager.default.temporaryDirectory
+        let scriptURL = fixtureRoot.appendingPathComponent("s1049-\(token).sh")
+        let startedURL = fixtureRoot.appendingPathComponent("s1049-\(token).ran")
         try """
         trap 'printf "\\033[?1049l"' EXIT
         : > \(startedURL.path)

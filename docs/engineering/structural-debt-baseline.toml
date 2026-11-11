@@ -256,9 +256,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1171
+ceiling_loc = 1074
 issue = 1474
-responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1474 binds ComposerResult Accept to the source Controller and forces pane-local Block sync after Accept so tab markers cannot clear a sibling draft."
+responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, focus, and layout; #1474 moves ComposerResult Accept routing into ProductChromeHostView+ComposerResult.swift and keeps only the host façade here."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"

@@ -3328,17 +3328,25 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         let hostMain = sourceRoot.appendingPathComponent("ProductChromeHostView.swift")
         let hostMainText = (try? String(contentsOf: hostMain, encoding: .utf8)) ?? ""
+        let composerResult = sourceRoot.appendingPathComponent(
+            "ProductChromeHostView+ComposerResult.swift"
+        )
+        let composerResultText = (try? String(contentsOf: composerResult, encoding: .utf8)) ?? ""
         XCTAssertTrue(
-            hostMainText.contains("distributeComposerResult"),
+            composerResultText.contains("distributeComposerResult"),
             "ComposerResult must route to the owning multipane leaf (#1474)"
         )
         XCTAssertTrue(
-            hostMainText.contains("seyal_app_apply_composer_result_for_pane"),
+            composerResultText.contains("seyal_app_apply_composer_result_for_pane"),
             "multipane ComposerResult must clear pending without stealing focus fence"
         )
         XCTAssertTrue(
-            hostMainText.contains("Bind Accept to the Controller that produced it"),
+            composerResultText.contains("Bind Accept to the Controller that produced it"),
             "multipane Accept must not fall through to a sibling pending request_id"
+        )
+        XCTAssertTrue(
+            composerResultText.contains("seyal_bridge_block_count_for"),
+            "Accept wait must peek the producing Controller timeline, not focused-display"
         )
         let bridgeFrame = sourceRoot.appendingPathComponent("RustDisplayBridge+Frame.swift")
         let bridgeFrameText = (try? String(contentsOf: bridgeFrame, encoding: .utf8)) ?? ""
@@ -3369,6 +3377,14 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(
             projectionText.contains("restoreLegacyComposerAccessibilityIfNeeded"),
             "pane host reconcile must keep legacy dock AX retired in multipane Flow"
+        )
+        XCTAssertTrue(
+            projectionText.contains("liveBindingDisplayHandleForRegistry()"),
+            "registry Block sync must follow the selected terminal, not stale displayHandle"
+        )
+        XCTAssertTrue(
+            projectionText.contains("unselected tab's empty timeline wipe"),
+            "unselected terminal tabs must not replace the selected tab's Block projection"
         )
         let blocksHost = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
         let blocksHostText = (try? String(contentsOf: blocksHost, encoding: .utf8)) ?? ""

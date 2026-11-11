@@ -27,6 +27,18 @@ pub extern "C" fn seyal_bridge_block_count() -> u32 {
         .unwrap_or(0)
 }
 
+/// Candidate-D Block count for one adopted Controller. Multipane / pane-local
+/// tabs must not peek the focused-display client when waiting for a just-
+/// accepted BlockTimeline (#1474).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_count_for(handle: u64) -> u32 {
+    super::with_client(handle, |client| {
+        u32::try_from(client.block_timeline().records.len()).ok()
+    })
+    .flatten()
+    .unwrap_or(0)
+}
+
 /// Returns a borrowed record from the current Runtime-owned replacement
 /// cache. The command pointer is valid until the next bridge poll/disconnect.
 #[unsafe(no_mangle)]

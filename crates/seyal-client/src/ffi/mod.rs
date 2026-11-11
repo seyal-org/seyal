@@ -111,7 +111,8 @@ pub use attach_wakeup::{
 };
 #[allow(unused_imports)]
 pub use display::{
-    seyal_bridge_block_count, seyal_bridge_block_record, seyal_bridge_block_timeline_revision,
+    seyal_bridge_block_count, seyal_bridge_block_count_for, seyal_bridge_block_record,
+    seyal_bridge_block_timeline_revision,
     seyal_bridge_composer_result, seyal_bridge_composer_result_for, seyal_bridge_composer_status,
     seyal_bridge_ensure_prepared, seyal_bridge_ensure_prepared_for,
     seyal_bridge_execution_block_metadata, seyal_bridge_flush_writable,
