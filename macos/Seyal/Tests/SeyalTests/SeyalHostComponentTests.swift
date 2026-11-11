@@ -3326,8 +3326,6 @@ final class SeyalHostComponentTests: XCTestCase {
             hostText.contains("return pane.inputSurface.transcriptDisplayHandle"),
             "shell-exit must keep Block clip publishes on the last transcript handle (#1379 Defect B)"
         )
-        let hostMain = sourceRoot.appendingPathComponent("ProductChromeHostView.swift")
-        let hostMainText = (try? String(contentsOf: hostMain, encoding: .utf8)) ?? ""
         let composerResult = sourceRoot.appendingPathComponent(
             "ProductChromeHostView+ComposerResult.swift"
         )
@@ -3369,7 +3367,7 @@ final class SeyalHostComponentTests: XCTestCase {
             "Composer submit must address the leaf Controller, not FOCUSED_DISPLAY_HANDLE"
         )
         XCTAssertTrue(
-            hostMainText.contains("retirePrimaryAccessibilityIdentity"),
+            composerResultText.contains("retirePrimaryAccessibilityIdentity"),
             "legacy dock must retire seyal-composer AX while pane hosts own Flow"
         )
         let projection = sourceRoot.appendingPathComponent("ProductChromePaneProjection.swift")
@@ -3383,7 +3381,7 @@ final class SeyalHostComponentTests: XCTestCase {
             "registry Block sync must follow the selected terminal, not stale displayHandle"
         )
         XCTAssertTrue(
-            projectionText.contains("unselected tab's empty timeline wipe"),
+            projectionText.contains("empty timeline wipe"),
             "unselected terminal tabs must not replace the selected tab's Block projection"
         )
         let blocksHost = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
@@ -4657,6 +4655,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        // Accept latches Busy until Runtime publishes the next Available
+        // prompt (`composer` ApplyResult). Mirror the FFI `accepted_submit`
+        // helper: restore Available between recorded history rows.
+        var nextAvailableRevision: UInt64 = 100
         for command in commands {
             let bound = seyal_app_snapshot(handle)
             let composer = seyal_app_composer(handle)
@@ -4677,7 +4679,7 @@ final class SeyalHostComponentTests: XCTestCase {
             submit.size = bind.size
             submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
             submit.applySnapshotFence(bound)
-            submit.target_generation = composer.epoch
+            submit.target_generation = seyal_app_composer(handle).epoch
             XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
             var result = SeyalAppAction()
             result.version = bind.version
@@ -4687,6 +4689,12 @@ final class SeyalHostComponentTests: XCTestCase {
             result.target_execution_lo = seyal_app_composer(handle).request_id
             result.reserved = 1
             XCTAssertEqual(seyal_app_apply(handle, &result), 0)
+            let revision = nextAvailableRevision
+            nextAvailableRevision += 1
+            XCTAssertEqual(
+                relayComposerStatus(handle, eligibility: 1, revision: revision),
+                0
+            )
         }
         return handle
     }

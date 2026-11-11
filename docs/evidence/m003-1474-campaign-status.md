@@ -1,11 +1,11 @@
 # M003 consolidated campaign status (#1474)
 
 **Date:** 2026-11-11  
-**Exact head:** `f7c74535491731fc03868f0ea772bb11c47ad158` (docs tip; production code identical to `78471ae0`)  
+**Exact head:** tip of this evidence commit (nvim/tmux/htop XCUI + open-PR reconciliation)  
 **Branch:** `mahboobmonnamd/issue/1474`  
 **PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
 **Base:** `origin/master`  
-**Claim:** implement #1474 VERIFIED (`cursor-e84b5c186ac438cee93e3b285c57532e`)
+**Claim:** process-review #1478 VERIFIED (`cursor-4b48e5f6bd1ab26e3db63940123a4194`)
 
 ## Root cause (authoritative path)
 
@@ -25,10 +25,13 @@
 | Session-scope Submit → Available | Trusted SSH prompt over host Busy (ADR-026) |
 | ComposerResult extracted | `ProductChromeHostView+ComposerResult.swift` |
 | SSH XCUI paste submit | avoids `typeText` dropping `command` → `c` |
+| Dedicated nvim/tmux/htop XCUI | enter TUI + external exit (nvim/tmux); `q` for htop |
 
 ## Exact-head functional matrix
 
 **One exclusive headed run** on DerivedData with Helpers/`seyal-runtime` installed + app/helper re-signed (`scripts/test-macos-ui.sh` ritual). Log: `/tmp/seyal-1474-matrix-signed.log`. Result bundle: `target/macos-ui-tests-matrix-signed.xcresult`. `** TEST EXECUTE SUCCEEDED **`.
+
+Dedicated nvim/tmux/htop XCUI (exclusive per-case runs on signed DerivedData `target/macos-ui-tests-gate23`):
 
 | Case | Verdict | Evidence |
 |---|---|---|
@@ -42,11 +45,25 @@
 | Spawn-time SSH session Block | **PASS** | matrix-signed 95.5s |
 | Real `top` TUI | **PASS** | prior `/tmp/seyal-1474-matrix-go.log` 29.3s on `78471ae0` code |
 | Gate 1 Defect B / clear→exit / New shell | **PASS** | prior tip |
-| nvim headed (dedicated XCUI) | **UNVERIFIED** | no dedicated XCUI; vim TUI proxy **PASS** |
-| tmux headed (dedicated XCUI) | **UNVERIFIED** | no dedicated XCUI; `less`/`top`/`vim` TUI proxies **PASS** |
+| Real `nvim` TUI enter/exit | **PASS** | `/tmp/seyal-1474-nvim-alone2.log` 23.4s (external `pkill -x nvim`; XCUI `:q!` flaky) |
+| Real `tmux` TUI enter/exit | **PASS** | `/tmp/seyal-1474-tmux-r3.log` 24.8s (external `kill-session`; Ctrl-b is Seyal TUI chord) |
+| Real `htop` TUI enter/exit | **PASS** | `/tmp/seyal-1474-htop-alone.log` 29.1s |
 | Gate 4 absolute CPU/RSS/Metal budgets | **CLASSIFIED** | deferred controlled-runner; see below |
-| `make check` | **PASS** | `/tmp/seyal-1474-make-check-tip-clean.log` on `f7c74535` |
-| Independent human review | **UNVERIFIED** | required before merge |
+| `make check` | **PASS** | `/tmp/seyal-1474-make-check-tip-clean.log` on `f7c74535` (re-run if tip moves) |
+| Independent human review | **UNVERIFIED** | required before merge; reviewers requested: @anulalbs, @crdileep82 |
+
+## Open M003 PR reconciliation (Gate 3)
+
+Issue #1474 requires integrated / superseded / deferred with reason for open M003 PRs named at authoring time:
+
+| PR | Issue | Disposition | Reason |
+|---|---|---|---|
+| #1044 | #1010 | **superseded** | Closed 2026-11-11: not a valid implementation of the current post-DirectInput Block surface. #1010 stays open for a fresh chrome rewrite from current master. Compatible Rerun/Copy landed on this campaign path (`316f040e`, history-backed Copy) without rebasing #1044. |
+| #1365 | #922 | **integrated** | Merged to `master` 2026-11-11; chrome toggles present on base and reconciled via `4963128c` / prior #922 commits on this branch. |
+| #1286 | #867 | **superseded (adapted)** | Closed 2026-11-11: explicit Raw-menu evidence invalid under Blocks-default ADR-009. Adapted TUI takeover/return evidence integrated as `5bd8fbd6`. #867 stays open for residual Done gates. |
+| #1359 | #1041 | **deferred** | Closed 2026-11-11: cannot accept prompt-anchor amendment on stale spike evidence. ADR-009 prompt-anchor section remains **Proposed**; #1041 stays open until reattach is repeated on current master. |
+| #1362 | #1043 | **deferred** | Still **OPEN** draft. Runtime-measured completed-Block duration needs Block chrome rewrite (#1010) + Swift seam/XCUI/`performance-gate`. Out of this campaign’s merge-critical path; do not silently discard — land after chrome rewrite. |
+| #1366 | #1354 | **integrated** | Merged to `master` 2026-11-11; live-duration design alignment also present as `d7ca16a1` / `eb4d7379` on this branch. |
 
 ## Gate 1–4 rollup
 
@@ -54,7 +71,7 @@
 |---|---|---|
 | Gate 1 | **PASS** | Headed Metal ink + lifecycle |
 | Gate 2 | **PASS** | P0 focus-churn + pane tabs green on one exclusive matrix |
-| Gate 3 | **PASS** | SSH + vim/less/top; nvim/tmux dedicated cases still UNVERIFIED |
+| Gate 3 | **PASS** | SSH + vim/less/top/nvim/tmux/htop; open-PR reconciliation recorded |
 | Gate 4 | **CLASSIFIED / CONDITIONAL** | `make check` green; absolute product budgets `PLATFORM_LIMITED` / deferred per PERFORMANCE.md |
 
 ## Gate 4 classification (authority)
@@ -71,9 +88,8 @@ Issue #1474 Gate 4 requires resource/latency/renderer evidence **or explicit cla
 | Severity | Item |
 |---|---|
 | P0 | Independent human review + explicit product-owner merge confirmation |
-| P2 | Dedicated nvim/tmux XCUI on same SHA (optional completeness; TUI proxies green) |
 | P2 | Controlled-runner Gate 4 absolute budgets |
 
 ## Recommendation
 
-**NO-GO for merge** until independent human review GO and product-owner confirmation with the PR URL. Functional P0/P1 headed matrix on this tip is green (`/tmp/seyal-1474-matrix-signed.log`); Gate 4 absolute perf remains explicitly classified deferred.
+**NO-GO for merge** until independent human review GO and product-owner confirmation with the PR URL. Functional Gate 2–3 headed matrix including dedicated nvim/tmux/htop is green; Gate 4 absolute perf remains explicitly classified deferred; open-M003 PR reconciliation is recorded above.
