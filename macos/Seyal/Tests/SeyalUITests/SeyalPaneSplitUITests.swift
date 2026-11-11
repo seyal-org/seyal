@@ -2608,9 +2608,18 @@ final class SeyalPaneSplitUITests: XCTestCase {
         guard expectBlock else { return }
         let marker = blockMarker ?? blockMarkerToken(in: command) ?? command
         let block = anyPaneBlock(in: app, containing: marker)
-        XCTAssertTrue(
-            block.waitForExistence(timeout: 10),
-            "the selected execution records its own submitted command; marker=\(marker)"
+        if block.waitForExistence(timeout: 10) { return }
+        let composerAX = (focusedComposer.value as? String) ?? "nil"
+        let hostAX = (element(app, "seyal-pane-presentation-host").value as? String) ?? "nil"
+        let editorAX = (editor.value as? String) ?? "nil"
+        let blockLabels = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES %@", "^(seyal-block|seyal-secondary-block)-[0-9]+$")
+        ).allElementsBoundByIndex.prefix(8).map {
+            "\($0.identifier):\(($0.label as String?) ?? "")"
+        }.joined(separator: " | ")
+        XCTFail(
+            "the selected execution records its own submitted command; marker=\(marker) "
+                + "composer=\(composerAX) host=\(hostAX) editor=\(editorAX) blocks=[\(blockLabels)]"
         )
     }
 
