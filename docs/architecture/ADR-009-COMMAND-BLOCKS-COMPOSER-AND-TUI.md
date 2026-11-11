@@ -21,7 +21,7 @@ A *native Block* SHALL be a first-class Rust-owned terminal content object with 
 
 **Non-negotiable outcome:** One PTY per TerminalExecution; one Rust VT parser/semantic authority; *real canonical Block-owned content regions* for the primary screen; one alternate-screen TUI; one indexed viewport; one Metal compositor and thin Swift platform host. No extra PTY/child/parser per command, no second independently mutable traditional primary screen, no synthetic terminal output, and no Swift-owned Block/content/layout authority.
 
-An architecture may be called **design GO** only if it makes G1–G9 of the acceptance matrix mutually consistent and specifies exact proof and cutover. An implementation may be called **product GO** only after measured end-to-end acceptance. Neither threshold is reached merely by merging this ADR.
+An architecture may be called **design GO** only if it makes G1–G10 of the acceptance matrix mutually consistent and specifies exact proof and cutover. An implementation may be called **product GO** only after measured end-to-end acceptance. Neither threshold is reached merely by merging this ADR.
 
 ### Chosen candidate: one terminal semantic authority containing Block-owned grids
 
