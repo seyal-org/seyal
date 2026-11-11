@@ -3736,6 +3736,10 @@ final class SeyalHostComponentTests: XCTestCase {
             inputText.contains("publishHistoryRanges(forDisplayHandle: polledHandle)"),
             "polling an unfocused Controller must publish its own completed history"
         )
+        XCTAssertTrue(
+            inputText.contains("onRegistryHandlePolled?(polledHandle)"),
+            "primary Controller polls must notify multipane leaf hosts (#1474)"
+        )
     }
 
     @MainActor

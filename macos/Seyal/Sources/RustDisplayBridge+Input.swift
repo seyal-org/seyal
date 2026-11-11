@@ -319,6 +319,12 @@ extension RustDisplayBridge {
       // Publish this poll source before selecting the focused presentation
       // client. Pane-local Block ids are only meaningful on their Controller.
       publishHistoryRanges(forDisplayHandle: polledHandle)
+      // Multipane leaf hosts (including the Pane that still owns clientHandle)
+      // sync Candidate-D Blocks through this registry hook. Skipping it left
+      // the primary Controller's SecondaryLivePaneHost without noteRegistryPolled
+      // after split, so sibling submits painted Blocks but the original Pane's
+      // markers never appeared in AX (#1474 / #1424).
+      onRegistryHandlePolled?(polledHandle)
       publishBlockCopy()
       _ = selectPresentedClient()
       publishComposerResult()
