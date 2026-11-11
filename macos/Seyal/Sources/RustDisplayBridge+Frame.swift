@@ -197,11 +197,15 @@ extension RustDisplayBridge {
 
   func publishComposerResult() {
     guard isConnected, selectPresentedClient() else { return }
+    let handle: UInt64 = {
+      if submissionDisplayHandleOverride != 0 { return submissionDisplayHandleOverride }
+      if windowFocusedDisplayHandle != 0 { return windowFocusedDisplayHandle }
+      return clientHandle
+    }()
     let result = seyal_bridge_composer_result()
-    guard result.request_id != 0,
-      result.request_id != lastComposerResultRequestID
-    else { return }
-    lastComposerResultRequestID = result.request_id
+    let last = lastComposerResultRequestIDByHandle[handle] ?? 0
+    guard result.request_id != 0, result.request_id != last else { return }
+    lastComposerResultRequestIDByHandle[handle] = result.request_id
     let code: NativeComposerResult.Code
     switch result.code {
     case 0: code = .accepted

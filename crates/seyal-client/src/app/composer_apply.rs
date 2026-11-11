@@ -152,6 +152,28 @@ impl ApplicationRoot {
             .map_err(composer_error)
     }
 
+    /// Apply a Runtime ComposerResult to a specific Pane without requiring
+    /// focused fence authority. Multipane leaf accepts must clear pending on
+    /// the submitting Pane even when a sibling briefly holds focus (#1474).
+    pub fn apply_composer_result_for_pane(
+        &mut self,
+        pane: seyal_core::PaneId,
+        request_id: u64,
+        accepted: bool,
+    ) -> Result<(), AppError> {
+        if !self.pane_known(pane) {
+            return Err(AppError::UnknownPane);
+        }
+        self.composer
+            .apply(ComposerAction::ApplyResult {
+                pane,
+                request_id,
+                accepted,
+            })
+            .map(|_| ())
+            .map_err(composer_error)
+    }
+
     pub(super) fn focused_blocks(&self) -> Vec<crate::composer::BlockProjection> {
         let pane = self.shell.snapshot().focused_pane;
         self.composer

@@ -164,12 +164,37 @@ final class SecondaryLivePaneHost: NSView {
             self?.onFocus?()
         }
         // Bridgeless surfaces borrow the window bridge; submit must still reach
-        // the focused Controller so Flow commands and TUI entry work (#1424).
+        // this Pane's Controller. Pin window focus to `displayHandle` at the
+        // submit boundary so a stale focused-handle after Pane/tab switches
+        // cannot send Flow commands to a sibling timeline (#1474 / #1424).
         composer.onSubmitComposer = { [weak self] command in
-            self?.historyBridge?.submitComposerCommand(command) ?? -10
+            guard let self, let bridge = self.historyBridge else { return -10 }
+            // Tab switches can update presentation AX before `displayHandle` is
+            // refreshed; resolve the live binding handle at the submit boundary
+            // (#1474 pane-local terminal tabs).
+            let handle = self.liveBindingDisplayHandle()
+            guard handle != 0 else { return -10 }
+            if handle != self.displayHandle {
+                _ = self.updateDisplayHandle(handle)
+            }
+            let priorOverride = bridge.submissionDisplayHandleOverride
+            bridge.windowFocusedDisplayHandle = handle
+            bridge.submissionDisplayHandleOverride = handle
+            defer { bridge.submissionDisplayHandleOverride = priorOverride }
+            return bridge.submitComposerCommand(command)
         }
         composer.onSubmitRaw = { [weak self] command in
-            self?.historyBridge?.submitCommittedText(command) ?? -10
+            guard let self, let bridge = self.historyBridge else { return -10 }
+            let handle = self.liveBindingDisplayHandle()
+            guard handle != 0 else { return -10 }
+            if handle != self.displayHandle {
+                _ = self.updateDisplayHandle(handle)
+            }
+            let priorOverride = bridge.submissionDisplayHandleOverride
+            bridge.windowFocusedDisplayHandle = handle
+            bridge.submissionDisplayHandleOverride = handle
+            defer { bridge.submissionDisplayHandleOverride = priorOverride }
+            return bridge.submitCommittedText(command)
         }
         composer.onCommandConsumed = { [weak self] in
             self?.reconcileFlowPresentation()
@@ -560,7 +585,14 @@ final class SecondaryLivePaneHost: NSView {
     /// Unfocused panes still retract the Busy dock while their REPL owns mode 3.
     private func focusBlockScopedDirectInputIfEligible() {
         let direct = panePublishesBlockScopedDirectInput
-        applyDirectInputMergedLayout(direct)
+        let paneComposer = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        let available = paneComposer.mode == UInt16(SEYAL_APP_COMPOSER_AVAILABLE.rawValue)
+        let relay = paneComposer.mode == UInt16(SEYAL_APP_COMPOSER_RELAY.rawValue)
+        // Sticky Running targets can outlive Available. Never leave the dock at
+        // alpha 0 after the prompt returns — XCUI submit then hits a nil
+        // hitTest (#1474 pane-local tabs).
+        let retractDock = direct && !available && !relay
+        applyDirectInputMergedLayout(retractDock)
         ensureDirectInputBridgeBorrow()
         guard inputOwned else {
             // Never stop the shared Controller bridge; only drop the borrow.
@@ -571,7 +603,7 @@ final class SecondaryLivePaneHost: NSView {
             return
         }
         surface.syncInputRoutePresentation()
-        guard direct else {
+        guard retractDock else {
             _ = composer.focusEditor()
             return
         }
@@ -588,7 +620,8 @@ final class SecondaryLivePaneHost: NSView {
             if !transcriptBottomToHost.isActive {
                 transcriptBottomToHost.isActive = true
             }
-            composer.isHidden = true
+            composer.isHidden = false
+            composer.alphaValue = 0
         } else {
             if transcriptBottomToHost.isActive {
                 transcriptBottomToHost.isActive = false
@@ -596,6 +629,10 @@ final class SecondaryLivePaneHost: NSView {
             if !transcriptBottomToComposer.isActive {
                 transcriptBottomToComposer.isActive = true
             }
+            // Unhide before reconcile so a stale DirectInput hide cannot leave
+            // the leaf dock at a zero frame after constraints return (#1474).
+            composer.isHidden = false
+            composer.alphaValue = 1
             composer.reconcile()
         }
         needsLayout = true
@@ -661,6 +698,17 @@ final class SecondaryLivePaneHost: NSView {
             return String(format: "%016llx%016llx", binding.execution_hi, binding.execution_lo)
         }
         return String(repeating: "0", count: 32)
+    }
+
+    /// Selected terminal's Controller for this Pane from the live shell binding.
+    private func liveBindingDisplayHandle() -> UInt64 {
+        let paneCount = Int(seyal_app_shell(appHandle).pane_count)
+        for index in 0..<paneCount {
+            let binding = seyal_app_pane_binding(appHandle, UInt32(index))
+            guard binding.pane_lo == paneLo, binding.pane_hi == paneHi else { continue }
+            return binding.display_handle
+        }
+        return displayHandle
     }
 
     private func updateAvailabilityPresentation() {

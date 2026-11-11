@@ -80,6 +80,10 @@ extension ProductChromeHostView {
             // arrive through noteRegistryPolled → reconcileFlowPresentation.
             host.reconcileFocusOwnershipPresentation()
         }
+        // Multipane Flow: only leaf hosts may advertise `seyal-composer`. The
+        // hidden liveContent dock kept the same AX id and stole XCUI submit
+        // after optimistic accept was removed (#1474 / #1424).
+        restoreLegacyComposerAccessibilityIfNeeded()
         // After leaf ownership + forced composer status republish, reclaim Metal
         // FR for Block-scoped DirectInput (generation-stable status alone will
         // not call performChromeReconcile's eligibility routeFocus).

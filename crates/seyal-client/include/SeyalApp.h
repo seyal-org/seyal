@@ -1134,6 +1134,13 @@ int32_t seyal_app_sync_pane_runtime_blocks(
     uint64_t handle,
     uint64_t pane_lo,
     uint64_t pane_hi);
+/* Apply ComposerResult to a Pane without focused fence (multipane leaf accept). */
+int32_t seyal_app_apply_composer_result_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    uint64_t request_id,
+    uint8_t accepted);
 /* 0 unbound, 1 Flow, 2 Raw, 3 Tui — pane-scoped presentation proxy (#1424). */
 uint16_t seyal_app_eligibility_for_pane(
     uint64_t handle,

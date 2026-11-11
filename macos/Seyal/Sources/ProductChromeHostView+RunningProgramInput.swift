@@ -126,8 +126,10 @@ extension ProductChromeHostView {
     func focusBlockScopedDirectInputIfEligible(_ snapshot: SeyalAppSnapshot) {
         guard focusedPanePublishesBlockScopedDirectInput(snapshot) else {
             pane.inputSurface.syncInputRoutePresentation()
-            // Eligibility often stays Flow across the handoff, so
-            // performChromeReconcile will not call routeFocus on its own.
+            // DirectInput end must restore dock constraints even when eligibility
+            // stays Flow (no generation bump). routeFocus alone leaves a hidden
+            // zero-frame composer (#1474 Gate 2–3 hittable failures).
+            applyComposerPlacement()
             routeFocus()
             return
         }

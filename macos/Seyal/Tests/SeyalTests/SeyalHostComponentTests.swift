@@ -3326,6 +3326,46 @@ final class SeyalHostComponentTests: XCTestCase {
             hostText.contains("return pane.inputSurface.transcriptDisplayHandle"),
             "shell-exit must keep Block clip publishes on the last transcript handle (#1379 Defect B)"
         )
+        let hostMain = sourceRoot.appendingPathComponent("ProductChromeHostView.swift")
+        let hostMainText = (try? String(contentsOf: hostMain, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            hostMainText.contains("distributeComposerResult"),
+            "ComposerResult must route to the owning multipane leaf (#1474)"
+        )
+        XCTAssertTrue(
+            hostMainText.contains("seyal_app_apply_composer_result_for_pane"),
+            "multipane ComposerResult must clear pending without stealing focus fence"
+        )
+        let bridgeFrame = sourceRoot.appendingPathComponent("RustDisplayBridge+Frame.swift")
+        let bridgeFrameText = (try? String(contentsOf: bridgeFrame, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            bridgeFrameText.contains("lastComposerResultRequestIDByHandle"),
+            "ComposerResult dedup must be per-Controller handle for multipane"
+        )
+        XCTAssertTrue(
+            hostMainText.contains("retirePrimaryAccessibilityIdentity"),
+            "legacy dock must retire seyal-composer AX while pane hosts own Flow"
+        )
+        let projection = sourceRoot.appendingPathComponent("ProductChromePaneProjection.swift")
+        let projectionText = (try? String(contentsOf: projection, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            projectionText.contains("restoreLegacyComposerAccessibilityIfNeeded"),
+            "pane host reconcile must keep legacy dock AX retired in multipane Flow"
+        )
+        let blocksHost = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
+        let blocksHostText = (try? String(contentsOf: blocksHost, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            blocksHostText.contains("composer.isHidden = false"),
+            "DirectInput end must unhide the dock before reconcile (#1474 zero-frame hittable)"
+        )
+        let runningInput = sourceRoot.appendingPathComponent(
+            "ProductChromeHostView+RunningProgramInput.swift"
+        )
+        let runningInputText = (try? String(contentsOf: runningInput, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            runningInputText.contains("applyComposerPlacement()"),
+            "DirectInput handoff must restore dock placement, not only routeFocus"
+        )
         let historySurface = sourceRoot.appendingPathComponent("MetalSurfaceView+History.swift")
         let historySurfaceText = (try? String(contentsOf: historySurface, encoding: .utf8)) ?? ""
         XCTAssertTrue(

@@ -444,6 +444,35 @@ pub extern "C" fn seyal_app_sync_pane_runtime_blocks(
     })
 }
 
+/// Clear a Pane's pending ComposerResult without stealing focused fence
+/// authority from a sibling leaf (#1474 multipane accept).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_apply_composer_result_for_pane(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+    request_id: u64,
+    accepted: u8,
+) -> i32 {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        let Ok(id) = id16(pane_lo, pane_hi) else {
+            return -2;
+        };
+        let pane = PaneId::from_bytes(id);
+        match state
+            .root
+            .apply_composer_result_for_pane(pane, request_id, accepted != 0)
+        {
+            Ok(()) => 0,
+            Err(_) => -4,
+        }
+    })
+}
+
 /// Read the pane's own selected presentation. Composer visibility is focus and
 /// runtime state; it must not turn an unfocused Flow Pane into Raw.
 #[unsafe(no_mangle)]

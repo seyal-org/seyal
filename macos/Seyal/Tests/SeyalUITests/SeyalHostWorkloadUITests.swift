@@ -865,7 +865,18 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             composer.waitForExistence(timeout: timeout),
             "XCUI must stay on Flow/Blocks; composer missing — UI looks like a normal terminal"
         )
-        XCTAssertTrue(composer.firstMatch.isHittable, "XCUI must keep composer hittable")
+        // DirectInput dock retract can clear for a quiet command after existence;
+        // wait for the Ready hittable dock instead of sampling one frame (#1474).
+        let hittable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: composer.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [hittable], timeout: timeout),
+            .completed,
+            "XCUI must keep composer hittable; value=\(composer.value ?? "nil") frame=\(composer.firstMatch.frame)"
+        )
         XCTAssertTrue(blocks.waitForExistence(timeout: 5), "XCUI must keep seyal-blocks")
         XCTAssertTrue(transcript.waitForExistence(timeout: 5), "XCUI must keep the transcript")
         XCTAssertGreaterThan(transcript.firstMatch.frame.height, 120, "transcript must remain a full Flow surface")

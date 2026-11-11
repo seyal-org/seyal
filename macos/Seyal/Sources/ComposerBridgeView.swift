@@ -193,6 +193,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     /// Placeholder sits above the editor in z-order; clicks on empty-draft
     /// chrome must still focus the text view (#867 / #1474).
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // DirectInput retracts the dock with alpha 0 (still AX-visible Busy).
+        // Do not steal clicks from the Running Block Metal surface.
+        if alphaValue < 0.01 { return nil }
         let hit = super.hitTest(point)
         if hit === placeholder || hit?.isDescendant(of: placeholder) == true {
             return textView.isEditable ? textView : self
@@ -220,6 +223,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         guard let boundPaneLo, let boundPaneHi else {
             setAccessibilityIdentifier("seyal-composer")
             textView.setAccessibilityIdentifier("seyal-composer-editor")
+            setAccessibilityElement(true)
             return
         }
         if primary {
@@ -231,6 +235,26 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             )
             textView.setAccessibilityIdentifier("seyal-secondary-composer-editor")
         }
+        setAccessibilityElement(true)
+    }
+
+    /// Hide the single-pane dock from AX while multipane leaf hosts own Flow.
+    func retirePrimaryAccessibilityIdentity() {
+        setAccessibilityIdentifier("seyal-composer-legacy-dock")
+        textView.setAccessibilityIdentifier("seyal-composer-legacy-editor")
+        setAccessibilityElement(false)
+        textView.setAccessibilityElement(false)
+        execute.setAccessibilityElement(false)
+    }
+
+    /// Restore the single-pane dock as the primary Flow composer AX target.
+    func restorePrimaryAccessibilityIdentity() {
+        guard boundPaneLo == nil else { return }
+        setAccessibilityIdentifier("seyal-composer")
+        textView.setAccessibilityIdentifier("seyal-composer-editor")
+        setAccessibilityElement(true)
+        textView.setAccessibilityElement(true)
+        execute.setAccessibilityElement(true)
     }
 
     override func viewDidMoveToWindow() {
@@ -294,7 +318,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             let shell = seyal_app_shell(appHandle)
             if shell.focused_pane_lo != paneLo || shell.focused_pane_hi != paneHi {
                 onEnsureFocused?()
-                _ = window?.makeFirstResponder(textView)
+                if textView.isEditable {
+                    _ = window?.makeFirstResponder(textView)
+                }
             }
         }
     }
@@ -331,12 +357,17 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             return snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
                 && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
         }()
+        // Raw/TUI/Hidden may fully remove the dock. Block-scoped DirectInput
+        // keeps the view in the AX tree (alpha/placement owned by the host) so
+        // Busy admission stays observable as `busy` instead of a stale
+        // `available` after `isHidden` (#1474 headed Busy XCUI).
         let hidden = direct
-            || blockScopedDirectInput
             || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
         // Presentation/epoch transitions revoke composer IME ownership: cancel
         // uncommitted marked text without submitting (SPEC-008 / #866).
-        if (direct || hidden || composer.epoch != lastEpoch), hasMarkedText() {
+        if (direct || hidden || blockScopedDirectInput || composer.epoch != lastEpoch),
+            hasMarkedText()
+        {
             textView.inputContext?.discardMarkedText()
         }
         isHidden = hidden
@@ -357,16 +388,22 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         history.isEnabled = available && recall.flags & UInt16(SEYAL_APP_HISTORY_HAS_ENTRIES) != 0
         if inlineRelayPresentation {
             placeholder.stringValue = ""
-        } else if busy, !blockScopedDirectInput {
+        } else if busy || blockScopedDirectInput {
             // Match Rust ComposerMode::Busy placeholder — never look Available.
             placeholder.stringValue = "Waiting for prompt..."
         } else {
             placeholder.stringValue = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
         }
+        // DirectInput retracts the dock visually via host placement. When Rust
+        // mode is Busy, AX must read `busy` (not a stale Available). When Rust
+        // mode is Available again, Available wins — sticky DirectInput flags
+        // must not keep AX Busy after the prompt returns (#1474 SSH/Busy).
         let axValue: String =
-            blockScopedDirectInput
-            ? "hidden"
-            : (relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden")))
+            relay
+            ? "relay"
+            : (available
+                ? "available"
+                : ((busy || blockScopedDirectInput) ? "busy" : "hidden"))
         setAccessibilityValue(axValue)
         // XCUI samples AX asynchronously; without a value-changed post the
         // waiter can keep a stale `available` across a quiet Busy latch (#1474).
@@ -565,8 +602,15 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         return copyUTF8(row.title, row.title_len) ?? ""
     }
 
-    private func pushDraft() {
+    private func pushDraft(command: String? = nil) {
+        // Capture before focus reconcile: FOCUS_PANE → chrome reconcile can
+        // rewrite textView from an empty Rust draft and drop the XCUI paste
+        // (#1474 pane-local marker routing).
+        let draft = command ?? textView.string
         let snapshot = prepareFocusedMutation()
+        if textView.string != draft {
+            textView.string = draft
+        }
         let composer = readComposer()
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -574,7 +618,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         action.applySnapshotFence(snapshot)
         action.target_generation = composer.epoch
-        let utf8 = Array(textView.string.utf8)
+        let utf8 = Array(draft.utf8)
         utf8.withUnsafeBufferPointer { buffer in
             action.payload = buffer.baseAddress
             action.payload_len = UInt32(buffer.count)
@@ -583,11 +627,15 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     }
 
     private func submit() {
-        pushDraft()
+        let command = textView.string
+        guard !command.isEmpty else { return }
+        pushDraft(command: command)
         let composer = readComposer()
         guard composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0 else { return }
-        let command = textView.string
         let snapshot = prepareFocusedMutation()
+        if textView.string != command {
+            textView.string = command
+        }
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)

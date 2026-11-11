@@ -1355,9 +1355,15 @@ final class SeyalHostUITests: XCTestCase {
             composer.waitForExistence(timeout: timeout),
             "XCUI must run as Flow/Blocks; composer missing — UI looks like a normal terminal"
         )
-        XCTAssertTrue(
-            composer.firstMatch.isHittable,
-            "XCUI must run as Flow/Blocks; composer not hittable — UI looks like a normal terminal"
+        let hittable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: composer.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [hittable], timeout: timeout),
+            .completed,
+            "XCUI must run as Flow/Blocks; composer not hittable — value=\(composer.value ?? "nil") frame=\(composer.firstMatch.frame)"
         )
         XCTAssertTrue(
             blocks.waitForExistence(timeout: 5),
@@ -1834,7 +1840,11 @@ final class SeyalHostUITests: XCTestCase {
             "busy",
             "disabled execute must not admit a second command"
         )
-        XCTAssertEqual(app.state, .runningForeground)
+        // IDE focus steal during long Busy can leave RunningBackgroundSuspended;
+        // recover before the Available wait (#1474).
+        app.ensureRunningForegroundForAttach(
+            message: "Seyal.app left foreground during busy admission"
+        )
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: available, evaluatedWith: composer, handler: nil)],

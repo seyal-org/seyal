@@ -457,8 +457,10 @@ extension ProductChromeHostView {
         if shouldRestoreEditorFocus { routeFocus() }
     }
 
-    /// Hide the Pane dock and fill the transcript to the Pane bottom while
+    /// Retract the Pane dock and fill the transcript to the Pane bottom while
     /// Block-scoped DirectInput owns keys in the Running Block live region.
+    /// Keep the composer in the AX tree (`alphaValue = 0`, not `isHidden`) so
+    /// Busy admission stays readable as `busy` during sleep/REPL (#1474).
     func presentDirectInputMergedBlockSurface() {
         if composerInlineBlockID != 0 {
             composerInlineBlockID = 0
@@ -467,7 +469,9 @@ extension ProductChromeHostView {
         }
         NSLayoutConstraint.deactivate(composerDockConstraints)
         setRelayTranscriptViewportBottomAnchored(true)
-        composer.isHidden = true
+        composer.isHidden = false
+        composer.alphaValue = 0
+        composer.reconcile()
         layoutSubtreeIfNeeded()
         syncTranscriptDocumentSize()
         if followingLiveEnd {
@@ -484,8 +488,14 @@ extension ProductChromeHostView {
             composer.translatesAutoresizingMaskIntoConstraints = false
         }
         composer.translatesAutoresizingMaskIntoConstraints = false
+        // DirectInput deactivates dock constraints. Unhide + re-activate before
+        // reconcile so a missed placement cannot leave a zero-frame AX target
+        // (`inf,inf,0,0`) that XCUI treats as exists-but-not-hittable (#1474).
         NSLayoutConstraint.activate(composerDockConstraints)
+        composer.isHidden = false
+        composer.alphaValue = 1
         composer.reconcile()
+        layoutSubtreeIfNeeded()
         if restoreFocus { routeFocus() }
     }
 

@@ -423,12 +423,17 @@ final class ProductChromeHostView: NSView {
             self.applyHistoryRange(range)
         }
         pane.inputSurface.onComposerResultChanged = { [weak self] result in
+            guard let self else { return }
             let accepted = result.code == .accepted || result.code == .unsupported
-            self?.composer.applyComposerResult(requestID: result.requestID, accepted: accepted)
-            if !accepted {
-                self?.composer.presentAdmissionFailure(result.code)
-            }
-            self?.reconcileChrome()
+            // Multipane leaf composers own SUBMIT pending after Execute. Draining
+            // only the legacy dock left pane hosts Busy with no Block AX after
+            // optimistic accept was removed (#1474 / #1424).
+            self.distributeComposerResult(
+                requestID: result.requestID,
+                accepted: accepted,
+                failureCode: accepted ? nil : result.code
+            )
+            self.reconcileChrome()
         }
         installComposerStatusHandler()
         pane.onProductChanged = { [weak self] in
@@ -661,6 +666,54 @@ final class ProductChromeHostView: NSView {
             return owned.composer
         }
         return composer
+    }
+
+    /// Apply a Runtime ComposerResult to the Pane that owns the matching
+    /// pending request. Multipane must not fan-out through focused fences —
+    /// that stole focus via `prepareFocusedMutation` after the first sibling
+    /// submit and dropped pane-local markers (#1474 / #1424).
+    func distributeComposerResult(
+        requestID: UInt64,
+        accepted: Bool,
+        failureCode: NativeComposerResult.Code?
+    ) {
+        if centerColumn.secondaryHosts.isEmpty {
+            composer.applyComposerResult(requestID: requestID, accepted: accepted)
+            if let failureCode {
+                composer.presentAdmissionFailure(failureCode)
+            }
+            return
+        }
+        // Retire the legacy dock from AX while pane hosts own Flow so XCUI and
+        // hit-testing cannot submit through a hidden competing `seyal-composer`.
+        composer.retirePrimaryAccessibilityIdentity()
+        let appHandle = pane.appHandle
+        for host in centerColumn.secondaryHosts {
+            let snap = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
+            guard snap.request_id == requestID, requestID != 0 else { continue }
+            let applied = seyal_app_apply_composer_result_for_pane(
+                appHandle,
+                host.paneLo,
+                host.paneHi,
+                requestID,
+                accepted ? 1 : 0
+            )
+            guard applied == 0 else { continue }
+            host.composer.reconcile()
+            if let failureCode {
+                host.composer.presentAdmissionFailure(failureCode)
+            }
+            return
+        }
+    }
+
+    /// Restore single-pane dock AX when multipane hosts collapse.
+    func restoreLegacyComposerAccessibilityIfNeeded() {
+        guard centerColumn.secondaryHosts.isEmpty else {
+            composer.retirePrimaryAccessibilityIdentity()
+            return
+        }
+        composer.restorePrimaryAccessibilityIdentity()
     }
 
     /// Focused Pane Metal surface for Flow DirectInput / Raw / TUI keys.

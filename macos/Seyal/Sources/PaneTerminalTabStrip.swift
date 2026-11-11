@@ -62,6 +62,9 @@ final class PaneTerminalTabStrip: NSView {
         addSubview(tabViewport)
         addSubview(actionStack)
         actionStack.frame = CGRect(x: 0, y: 0, width: actionWidth, height: 24)
+        // Publish a non-zero strip geometry immediately so XCUI cannot sample
+        // action buttons before the first parent layout pass (#1474).
+        frame = CGRect(x: 0, y: 0, width: max(actionWidth + 24, 120), height: Self.height)
         setAccessibilityChildren([tabViewport, actionStack])
         for (index, tab) in tabs.enumerated() {
             // C05: one quiet tab row. Selection is typography plus a 2 pt
@@ -146,10 +149,20 @@ final class PaneTerminalTabStrip: NSView {
         actionStack.addArrangedSubview(add)
         tabStack.setFrameSize(tabStack.fittingSize)
 
+        // Only the focused strip advertises the stable global split ids. Sibling
+        // strips used the same ids and XCUI firstMatch could hit a zero-frame
+        // unfocused control, synthesizing clicks that spawned extra windows
+        // (#1474 Gate 2 pane markers).
+        let splitRightId = focused
+            ? "seyal-split-right"
+            : "seyal-pane-\(paneHi)-\(paneLo)-split-right"
+        let splitDownId = focused
+            ? "seyal-split-down"
+            : "seyal-pane-\(paneHi)-\(paneLo)-split-down"
         let splitRight = Self.iconButton(
             symbol: "rectangle.split.2x1",
             label: "Split Pane Right",
-            identifier: "seyal-split-right",
+            identifier: splitRightId,
             target: self,
             action: #selector(splitRightPane)
         )
@@ -158,7 +171,7 @@ final class PaneTerminalTabStrip: NSView {
         let splitDown = Self.iconButton(
             symbol: "rectangle.split.1x2",
             label: "Split Pane Down",
-            identifier: "seyal-split-down",
+            identifier: splitDownId,
             target: self,
             action: #selector(splitDownPane)
         )
@@ -266,9 +279,12 @@ final class PaneTerminalTabStrip: NSView {
         button.setAccessibilityIdentifier(identifier)
         button.setAccessibilityLabel(label)
         button.toolTip = label
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 24).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        // Frame-based sizing matches the frame-managed actionStack. Auto Layout
+        // width/height anchors on arranged subviews left AX frames at (0,0,0,0)
+        // until a late layout pass; XCUI then synthesized clicks at the display
+        // origin and spawned interrupting `seyal-window-*` surfaces (#1474).
+        button.translatesAutoresizingMaskIntoConstraints = true
+        button.setFrameSize(NSSize(width: 24, height: 24))
         return button
     }
 

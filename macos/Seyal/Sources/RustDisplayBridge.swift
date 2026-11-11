@@ -120,7 +120,10 @@ final class RustDisplayBridge {
   var historyRevisions: [PaneHistoryRequestKey: (revision: UInt64, requestID: UInt64)] = [:]
   var historyContinuations:
     [PaneHistoryRequestKey: (startUnit: UInt32, range: NativeHistoryRange)] = [:]
-  var lastComposerResultRequestID: UInt64 = 0
+  /// Per-Controller ComposerResult dedup. Multipane Controllers each allocate
+  /// request ids from 1; a single window-global last id dropped sibling
+  /// accepts and left pane-local markers missing (#1474 Gate 2).
+  var lastComposerResultRequestIDByHandle: [UInt64: UInt64] = [:]
   var composerStatusRelayTracker = ComposerStatusRelayTracker()
 
   init(
@@ -344,7 +347,7 @@ final class RustDisplayBridge {
     historyRevisions.removeAll(keepingCapacity: false)
     historyContinuations.removeAll(keepingCapacity: false)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: false)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)
@@ -392,7 +395,7 @@ final class RustDisplayBridge {
     historyRevisions.removeAll(keepingCapacity: false)
     historyContinuations.removeAll(keepingCapacity: false)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: false)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)
@@ -432,7 +435,7 @@ final class RustDisplayBridge {
     runtimeBlockMetadata = nil
     discardHistoryRequests(forDisplayHandle: lostHandle)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: false)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)
