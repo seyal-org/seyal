@@ -217,10 +217,13 @@ struct NativeComposerStatus: Equatable {
   let revision: UInt64
   let targetBlockID: UInt64
   let targetGeneration: UInt64
+  let targetRevision: UInt64
+  let targetClass: UInt8
   let targetMode: UInt8
 
   static let cleared = NativeComposerStatus(
-    eligibility: 0, revision: 0, targetBlockID: 0, targetGeneration: 0, targetMode: 0
+    eligibility: 0, revision: 0, targetBlockID: 0, targetGeneration: 0,
+    targetRevision: 0, targetClass: 0, targetMode: 0
   )
 }
 
@@ -234,6 +237,49 @@ struct NativeTranscriptRegion: Equatable {
   let origin: NSPoint
   let clip: NSRect
   var suppressesCursor: Bool = false
+  /// Bounded canonical history rows prepared for this Block's visible Pane
+  /// window. `nil` means this region is a running live-tail clip.
+  var historyRows: Range<Int>? = nil
+  var historyRequestID: UInt64 = 0
+  var historyRevision: UInt64 = 0
+}
+
+/// Selects a bounded row page for one Pane viewport. The complete history
+/// remains Runtime-owned; this range only chooses disposable prepared cells.
+struct HistoryRenderWindow: Equatable {
+  static let maximumRows = 512
+  static let overscanRows = 16
+
+  let rows: Range<Int>
+
+  /// Converts an AppKit document-space visible rectangle to the first terminal
+  /// history row. Flipped Block bodies use a top-left origin; ordinary AppKit
+  /// views use a bottom-left origin.
+  static func firstVisibleRow(
+    documentBounds: CGRect,
+    visibleBounds: CGRect,
+    isFlipped: Bool,
+    cellHeight: CGFloat
+  ) -> Int {
+    let distanceFromTop = isFlipped
+      ? visibleBounds.minY - documentBounds.minY
+      : documentBounds.maxY - visibleBounds.maxY
+    return Int((max(distanceFromTop, 0) / max(cellHeight, 1)).rounded(.down))
+  }
+
+  init(totalRows: Int, firstVisibleRow: Int, visibleRowCount: Int) {
+    let total = max(totalRows, 0)
+    let visibleStart = min(max(firstVisibleRow, 0), total)
+    let visibleCount = min(max(visibleRowCount, 0), Self.maximumRows)
+    let visibleEnd = visibleStart + min(visibleCount, total - visibleStart)
+    var lower = max(visibleStart - Self.overscanRows, 0)
+    var upper = visibleEnd + min(Self.overscanRows, total - visibleEnd)
+    if upper - lower > Self.maximumRows {
+      lower = min(max(visibleStart - (Self.maximumRows - visibleCount) / 2, 0), total - Self.maximumRows)
+      upper = min(total, lower + Self.maximumRows)
+    }
+    rows = lower..<max(lower, upper)
+  }
 }
 
 struct NativeTranscriptFrame: Equatable {

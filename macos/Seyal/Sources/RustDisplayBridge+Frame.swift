@@ -1,22 +1,44 @@
 import Foundation
 
 struct ComposerStatusRelayTracker {
-  private var lastKey: (revision: UInt64, attachmentLow: UInt64, attachmentHigh: UInt64)?
+  private struct Key: Equatable {
+    let revision: UInt64
+    let attachmentLow: UInt64
+    let attachmentHigh: UInt64
+    let targetBlockID: UInt64
+    let targetGeneration: UInt64
+    let targetRevision: UInt64
+    let targetClass: UInt8
+    let targetMode: UInt8
+  }
+
+  private var lastKey: Key?
 
   mutating func shouldRelay(
     revision: UInt64,
     attachmentIDLow: UInt64,
-    attachmentIDHigh: UInt64
+    attachmentIDHigh: UInt64,
+    targetBlockID: UInt64 = 0,
+    targetGeneration: UInt64 = 0,
+    targetRevision: UInt64 = 0,
+    targetClass: UInt8 = 0,
+    targetMode: UInt8 = 0
   ) -> Bool {
     guard revision != 0 else { return false }
-    if let previous = lastKey,
-      previous.revision == revision,
-      previous.attachmentLow == attachmentIDLow,
-      previous.attachmentHigh == attachmentIDHigh
-    {
+    let key = Key(
+      revision: revision,
+      attachmentLow: attachmentIDLow,
+      attachmentHigh: attachmentIDHigh,
+      targetBlockID: targetBlockID,
+      targetGeneration: targetGeneration,
+      targetRevision: targetRevision,
+      targetClass: targetClass,
+      targetMode: targetMode
+    )
+    if lastKey == key {
       return false
     }
-    lastKey = (revision, attachmentIDLow, attachmentIDHigh)
+    lastKey = key
     return true
   }
 
@@ -122,25 +144,42 @@ extension RustDisplayBridge {
   func publishComposerStatus() {
     guard isConnected, selectPresentedClient() else { return }
     let status = seyal_bridge_composer_status()
+    let target = seyal_bridge_composer_target()
     let shouldRelay = composerStatusRelayTracker.shouldRelay(
       revision: status.revision,
       attachmentIDLow: status.attachment_id_low,
-      attachmentIDHigh: status.attachment_id_high
+      attachmentIDHigh: status.attachment_id_high,
+      targetBlockID: target.block_id,
+      targetGeneration: target.target_generation,
+      targetRevision: target.revision,
+      targetClass: target.target_class,
+      targetMode: target.mode
     )
     guard shouldRelay else { return }
-    let target = seyal_bridge_composer_target()
     let accepted = onComposerStatus(
       NativeComposerStatus(
         eligibility: status.eligibility,
         revision: status.revision,
         targetBlockID: target.block_id,
         targetGeneration: target.target_generation,
+        targetRevision: target.revision,
+        targetClass: target.target_class,
         targetMode: target.mode
       )
     )
     if !accepted {
       composerStatusRelayTracker.abandonClaim()
     }
+  }
+
+  /// Multipane FOCUS_PANE: drop dedup and re-apply the newly focused
+  /// Controller's composer status. A sibling Available can clear the shared
+  /// ApplicationRoot target; without this, a quiet DirectInput REPL never
+  /// republishes and Metal keys die until the next status revision.
+  func republishFocusedComposerStatus() {
+    guard isConnected, windowFocusedDisplayHandle != 0 else { return }
+    composerStatusRelayTracker.abandonClaim()
+    publishComposerStatus()
   }
 
   /// Transport lost: the relayed fact no longer describes a live attachment.

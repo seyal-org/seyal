@@ -243,7 +243,14 @@ pub(crate) struct ComposerFacts {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DerivedComposer {
     Submit,
-    Relay { block_id: u64 },
+    Relay {
+        block_id: u64,
+    },
+    /// Character-level input into Running Block `block_id` while Flow chrome
+    /// remains (ADR-009 #1466). Distinct from line-level [`Self::Relay`].
+    DirectInput {
+        block_id: u64,
+    },
     Unavailable(ComposerTargetReason),
 }
 
@@ -252,6 +259,7 @@ impl DerivedComposer {
         match self {
             Self::Submit => ComposerTargetMode::Submit,
             Self::Relay { .. } => ComposerTargetMode::Relay,
+            Self::DirectInput { .. } => ComposerTargetMode::DirectInput,
             Self::Unavailable(_) => ComposerTargetMode::Unavailable,
         }
     }
@@ -259,14 +267,9 @@ impl DerivedComposer {
     pub(crate) fn reason(self) -> ComposerTargetReason {
         match self {
             Self::Unavailable(reason) => reason,
-            Self::Submit | Self::Relay { .. } => ComposerTargetReason::None,
-        }
-    }
-
-    pub(crate) fn block_id(self) -> u64 {
-        match self {
-            Self::Relay { block_id } => block_id,
-            Self::Submit | Self::Unavailable(_) => 0,
+            Self::Submit | Self::Relay { .. } | Self::DirectInput { .. } => {
+                ComposerTargetReason::None
+            }
         }
     }
 }
@@ -298,9 +301,11 @@ pub(crate) fn input_target_scope(overlay: SessionOverlay) -> BlockScope {
     }
 }
 
-/// ADR-026 §3.2. Without F9, local-scope Relay opens only after Decline or
-/// Failed on that same Running host Block. A Trusted session may Relay to
-/// its own Running Block. Armed/Delivering holds every direct route.
+/// ADR-026 §3.2 plus ADR-009 #1466 Block-scoped direct input. Without F9,
+/// local-scope Relay opens only after Decline or Failed on that same Running
+/// host Block. A Trusted session may Relay to its own Running Block. Otherwise
+/// a known Running Block on Flow/primary/Controller publishes DirectInput
+/// (character-level; not Submit). Armed/Delivering holds every direct route.
 pub(crate) fn derive_composer(facts: ComposerFacts) -> DerivedComposer {
     if facts.overlay.holds_direct_input() {
         return DerivedComposer::Unavailable(ComposerTargetReason::BootstrapHold);
@@ -335,8 +340,9 @@ pub(crate) fn derive_composer(facts: ComposerFacts) -> DerivedComposer {
             {
                 DerivedComposer::Relay { block_id }
             } else {
-                // F9 unavailable: Busy until Decline/Failed enables Relay (§8.4).
-                DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
+                // ADR-009 #1466: Flow + Running(b) + primary + Controller →
+                // Block-scoped character input. Composer Submit stays closed.
+                DerivedComposer::DirectInput { block_id }
             }
         }
         ShellFact::Running { block: None } => {
@@ -559,17 +565,16 @@ mod tests {
         let overlay = SessionOverlay::SpawnArmed { host_block: 5 };
         assert_eq!(overlay.wire(), SessionOverlayWire::None);
         assert_eq!(overlay.offer_generation(), None);
-        assert_eq!(
-            derive_composer(ComposerFacts {
-                integration: ShellFact::Running { block: Some(5) },
-                primary_screen: true,
-                flow: true,
-                controller: true,
-                overlay,
-                session_integration: ShellFact::Unproven,
-            }),
-            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
-        );
+        let derived = derive_composer(ComposerFacts {
+            integration: ShellFact::Running { block: Some(5) },
+            primary_screen: true,
+            flow: true,
+            controller: true,
+            overlay,
+            session_integration: ShellFact::Unproven,
+        });
+        assert_eq!(derived, DerivedComposer::DirectInput { block_id: 5 });
+        assert_ne!(derived.mode(), ComposerTargetMode::Relay);
     }
 
     #[test]
@@ -593,8 +598,8 @@ mod tests {
                 overlay: SessionOverlay::Declined { host_block: 11 },
                 session_integration: ShellFact::Unproven,
             }),
-            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt),
-            "Declined Relay stays on the declined host Block"
+            DerivedComposer::DirectInput { block_id: 12 },
+            "Declined Relay stays on the declined host Block; other Running Blocks use DirectInput"
         );
         assert_eq!(
             derive_composer(ComposerFacts {
@@ -605,7 +610,7 @@ mod tests {
                 overlay: SessionOverlay::Failed { host_block: 11 },
                 session_integration: ShellFact::Unproven,
             }),
-            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
+            DerivedComposer::DirectInput { block_id: 12 }
         );
     }
 
@@ -680,7 +685,7 @@ mod tests {
     }
 
     #[test]
-    fn running_without_explicit_relay_enable_stays_unavailable() {
+    fn running_without_relay_publishes_block_scoped_direct_input() {
         assert_eq!(
             derive_composer(ComposerFacts {
                 integration: ShellFact::Running { block: Some(5) },
@@ -690,7 +695,7 @@ mod tests {
                 overlay: SessionOverlay::None,
                 session_integration: ShellFact::Unproven,
             }),
-            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
+            DerivedComposer::DirectInput { block_id: 5 }
         );
         assert_eq!(
             derive_composer(ComposerFacts {
@@ -701,7 +706,30 @@ mod tests {
                 overlay: SessionOverlay::Candidate { host_block: 5 },
                 session_integration: ShellFact::Unproven,
             }),
-            DerivedComposer::Unavailable(ComposerTargetReason::NotAtPrompt)
+            DerivedComposer::DirectInput { block_id: 5 }
+        );
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(5) },
+                primary_screen: false,
+                flow: true,
+                controller: true,
+                overlay: SessionOverlay::None,
+                session_integration: ShellFact::Unproven,
+            }),
+            DerivedComposer::Unavailable(ComposerTargetReason::AlternateScreen),
+            "alternate screen still selects TUI, not DirectInput"
+        );
+        assert_eq!(
+            derive_composer(ComposerFacts {
+                integration: ShellFact::Running { block: Some(5) },
+                primary_screen: true,
+                flow: false,
+                controller: true,
+                overlay: SessionOverlay::None,
+                session_integration: ShellFact::Unproven,
+            }),
+            DerivedComposer::Unavailable(ComposerTargetReason::NotFlow)
         );
     }
 

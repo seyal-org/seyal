@@ -43,6 +43,11 @@ final class ThinPaneHostView: NSView {
             self?.bindFromBridgeIfNeeded(force: true)
             self?.onProductChanged?()
         }
+        inputSurface.onBridgeDisconnected = { [weak self] in
+            // Close Terminal Finalized stops frames; MultiWindow must still
+            // drain DestroyWindow and sync realizations (#1402).
+            self?.onProductChanged?()
+        }
     }
 
     @available(*, unavailable)
@@ -55,6 +60,9 @@ final class ThinPaneHostView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // Flow DirectInput click→focus is owned by CommandBlockView (card body
+        // forward). Metal must not claim the live-tail hit or XCUI / AppKit
+        // treat `seyal-block-*-body` as obscured (#1468).
         let hit = super.hitTest(point)
         // Flow paints terminal pixels over Block bodies. Metal returns nil from
         // hitTest, but this pane still sits above the transcript. Default

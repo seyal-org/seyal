@@ -17,21 +17,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // macOS-default: closing the last window quits the headed app so Dock
-        // does not keep Seyal as "Running in Background". Cmd-Q still runs the
-        // ADR-018 §4 confirm + bounded detach path via applicationShouldTerminate.
-        true
+        // ADR-018 §3.3a: zero-Window composition stays running (Dock reopen /
+        // ⌘⇧N re-enter). Closing the last window must not quit; Cmd-Q still
+        // uses applicationShouldTerminate for confirm + bounded detach.
+        false
     }
 
     func applicationShouldHandleReopen(
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        // ADR-018 §3.3a: Dock reopen with no visible windows forwards ActivateWorkspace.
-        if !flag {
-            host?.handleDockReopen()
+        // ADR-018 §3.3a: Rust window count is authority. AppKit's
+        // hasVisibleWindows can stay true after the last product window is
+        // destroyed (ordered-out / unreleased NSWindow), which previously
+        // skipped zero-Window create on Dock click.
+        guard let host else { return false }
+        let productWindows = seyal_app_shell(host.appHandle).window_count
+        if productWindows == 0 {
+            host.handleDockReopen()
             return true
         }
+        if !flag {
+            // Miniaturized / occluded product windows: raise MRU, do not create.
+            host.handleDockReopen()
+            return true
+        }
+        // Visible product windows: AppKit brings them forward.
         return false
     }
 

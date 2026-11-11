@@ -28,6 +28,10 @@ SAFE_GIT = {"status", "diff", "log", "show", "rev-parse"}
 SAFE_SHELL = {"pwd", "ls", "rg", "grep"}
 CLAIM_COMMAND = ["python3", "scripts/seyal-ai-sdlc-claim.py"]
 SAFE_ARG = re.compile(r"^[a-zA-Z0-9_./:@=-]+$")
+# Narrow bootstrap for authorized plan pickup when no Issue exists yet.
+# Body must come from --body-file (no --body / heredoc / shell expansion).
+ISSUE_CREATE_FLAGS = {"--repo", "--title", "--body-file", "--label", "--assignee"}
+SHELL_META = ("$", "`", ";", "|", "&", ">", "<", "\n", "\r")
 
 
 def safe_readonly_mcp(tool: str) -> bool:
@@ -84,7 +88,67 @@ def claim_invocation(command: str):
     return args
 
 
+def safe_issue_create(command: str) -> bool:
+    """Allow creating a GitHub Issue without a prior claim (plan bootstrap only).
+
+    Requires ``gh issue create ... --body-file <safe-path>`` with a fixed flag
+    vocabulary and no shell metacharacters in the command string. This breaks
+    the claim↔Issue chicken-and-egg when the user authorizes an approved plan
+    that has no ticket yet. Unrelated mutations stay denied.
+    """
+    if any(token in command for token in SHELL_META):
+        return False
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        return False
+    if len(args) < 5 or args[:3] != ["gh", "issue", "create"]:
+        return False
+    index = 3
+    saw_body_file = False
+    while index < len(args):
+        flag = args[index]
+        if flag not in ISSUE_CREATE_FLAGS or index + 1 >= len(args):
+            return False
+        value = args[index + 1]
+        if not SAFE_ARG.fullmatch(value):
+            return False
+        if flag == "--body-file":
+            saw_body_file = True
+        index += 2
+    return saw_body_file
+
+
+def safe_issue_create_mcp(tool: str, args: dict | None) -> bool:
+    """Allow GitHub MCP issue create without a prior claim (same bootstrap)."""
+    if not isinstance(tool, str) or not isinstance(args, dict):
+        return False
+    # CallDynamicTool form used by Cursor dynamic MCP namespaces.
+    if tool == "CallDynamicTool":
+        namespace = str(args.get("namespace") or "").casefold()
+        name = str(args.get("toolName") or "").casefold()
+        if "github" not in namespace or name not in {"issue_write", "create_issue"}:
+            return False
+        arguments = args.get("arguments")
+        if not isinstance(arguments, dict):
+            return False
+        method = str(arguments.get("method") or "").casefold()
+        # create_issue has no method; issue_write uses method=create.
+        return name == "create_issue" or method == "create"
+    if not tool.startswith("MCP:"):
+        return False
+    leaf = tool[4:].casefold().rsplit("__", 1)[-1]
+    if leaf.startswith("github_"):
+        leaf = leaf[len("github_"):]
+    if leaf not in {"issue_write", "create_issue"}:
+        return False
+    method = str(args.get("method") or "").casefold()
+    return leaf == "create_issue" or method == "create"
+
+
 def safe_shell(command: str) -> bool:
+    if safe_issue_create(command):
+        return True
     try:
         args = shlex.split(command)
     except ValueError:

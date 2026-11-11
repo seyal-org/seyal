@@ -5,13 +5,13 @@ use seyal_runtime::local_ipc::framing::{
 use std::os::unix::net::UnixStream;
 
 #[test]
-fn negotiated_relay_projects_runtime_block_identity_for_composer_placement() {
+fn negotiated_target_projects_block_identity_even_when_relay_is_unavailable() {
     let (stream, _peer) = UnixStream::pair().expect("pair");
     let mut client = test_client(stream);
     client.session_bootstrap_negotiated = true;
     client.composer_target = Some(ComposerTarget {
         attachment_id: client.attachment_id,
-        target: InputTargetClass::TrustedShell,
+        target: InputTargetClass::ForegroundProgram,
         scope: BlockScope::Session,
         mode: ComposerTargetMode::Relay,
         reason: ComposerTargetReason::None,
@@ -23,7 +23,57 @@ fn negotiated_relay_projects_runtime_block_identity_for_composer_placement() {
 
     assert_eq!(
         client.projected_composer_target(),
-        Some((7, 43, 5, ComposerTargetMode::Relay as u8)),
-        "the active Runtime Block target is projected solely for input placement"
+        Some((
+            7,
+            43,
+            5,
+            ComposerTargetMode::Relay as u8,
+            InputTargetClass::ForegroundProgram as u8,
+        )),
+        "a Relay target retains the Runtime Block identity"
+    );
+
+    client.composer_target = Some(ComposerTarget {
+        attachment_id: client.attachment_id,
+        target: InputTargetClass::ForegroundProgram,
+        scope: BlockScope::Local,
+        mode: ComposerTargetMode::DirectInput,
+        reason: ComposerTargetReason::None,
+        block_id: 11,
+        target_generation: 44,
+        revision: 6,
+    });
+    assert_eq!(
+        client.projected_composer_target(),
+        Some((
+            11,
+            44,
+            6,
+            ComposerTargetMode::DirectInput as u8,
+            InputTargetClass::ForegroundProgram as u8,
+        )),
+        "DirectInput preserves the exact foreground Block for Flow Block-scoped keys"
+    );
+
+    client.composer_target = Some(ComposerTarget {
+        attachment_id: client.attachment_id,
+        target: InputTargetClass::ForegroundProgram,
+        scope: BlockScope::Local,
+        mode: ComposerTargetMode::Unavailable,
+        reason: ComposerTargetReason::NotAtPrompt,
+        block_id: 13,
+        target_generation: 45,
+        revision: 7,
+    });
+    assert_eq!(
+        client.projected_composer_target(),
+        Some((
+            13,
+            45,
+            7,
+            ComposerTargetMode::Unavailable as u8,
+            InputTargetClass::ForegroundProgram as u8,
+        )),
+        "Unavailable still preserves Block identity for explicit Raw fallback"
     );
 }

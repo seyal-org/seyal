@@ -190,4 +190,82 @@ final class KeybindingEvidenceTests: XCTestCase {
             XCTAssertEqual(code, 0, "arrow named=\(named) must fall through")
         }
     }
+
+    /// #1467/#1468: AppKit/XCUI may deliver Ctrl+C/D as C0 scalars; classifier
+    /// must still emit ControlAscii letters so DirectInput cannot drop EOF/SIGINT.
+    func testControlAsciiMapsC0DeliveryToLetters() {
+        XCTAssertEqual(
+            TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: [.control],
+                charactersIgnoringModifiers: "\u{3}",
+                characters: nil
+            ),
+            0x43
+        )
+        XCTAssertEqual(
+            TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: [],
+                charactersIgnoringModifiers: nil,
+                characters: "\u{4}"
+            ),
+            0x44,
+            "bare C0 U+0004 (deleteForward path) must still map to 'D'"
+        )
+        XCTAssertEqual(
+            TerminalNativeKeyClassifier.controlLetterFromC0(
+                charactersIgnoringModifiers: "\u{4}",
+                characters: nil
+            ),
+            0x44
+        )
+        XCTAssertEqual(
+            TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: [.control],
+                charactersIgnoringModifiers: "d",
+                characters: nil
+            ),
+            0x44
+        )
+    }
+
+    /// Multipane DirectInput must stay armed from flags, explicit mode 3, or a
+    /// sticky ForegroundProgram target after Ctrl+C eligibility flicker.
+    func testBlockScopedDirectInputPublishHelpers() {
+        var direct = SeyalComposerTarget()
+        direct.block_id = 42
+        direct.mode = 3
+        direct.target_class = 2
+        XCTAssertTrue(seyalComposerTargetIsBlockScopedDirectInput(direct))
+        XCTAssertTrue(seyalComposerTargetOwnsRunningForeground(direct))
+        XCTAssertTrue(
+            seyalPublishesBlockScopedDirectInput(flags: 0, target: direct)
+        )
+
+        var sticky = SeyalComposerTarget()
+        sticky.block_id = 7
+        sticky.mode = 0 // Busy/Available flicker — not Submit
+        sticky.target_class = 2
+        XCTAssertFalse(seyalComposerTargetIsBlockScopedDirectInput(sticky))
+        XCTAssertTrue(seyalComposerTargetOwnsRunningForeground(sticky))
+        XCTAssertTrue(
+            seyalPublishesBlockScopedDirectInput(flags: 0, target: sticky)
+        )
+
+        var submit = SeyalComposerTarget()
+        submit.block_id = 7
+        submit.mode = 1
+        submit.target_class = 2
+        XCTAssertFalse(seyalComposerTargetOwnsRunningForeground(submit))
+        XCTAssertFalse(
+            seyalPublishesBlockScopedDirectInput(flags: 0, target: submit)
+        )
+
+        let flagOnly = SeyalComposerTarget()
+        XCTAssertTrue(
+            seyalPublishesBlockScopedDirectInput(
+                flags: UInt16(SEYAL_APP_COMPOSER_BLOCK_SCOPED_DIRECT_INPUT),
+                target: flagOnly
+            )
+        )
+    }
 }

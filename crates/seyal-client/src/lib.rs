@@ -85,10 +85,11 @@ pub use ffi::{
     seyal_bridge_history_range_peek_for_handle, seyal_bridge_history_range_row_for_handle,
     seyal_bridge_next_handle, seyal_bridge_next_history_request_id_for, seyal_bridge_poll,
     seyal_bridge_poll_for, seyal_bridge_provisioning_wakeup_fd,
-    seyal_bridge_request_history_range_for, seyal_bridge_select, seyal_bridge_set_runtime_dir,
-    seyal_bridge_socket_fd_for, seyal_bridge_wants_write_for, seyal_launch_policy_failure_copy,
-    seyal_launch_policy_warning_copy, test_register_pending_client, SeyalAppPaneBinding,
-    SeyalAppPaneRecoveryTarget,
+    seyal_bridge_request_history_range_for, seyal_bridge_select,
+    seyal_bridge_session_request_for_handle, seyal_bridge_session_surface_for_handle,
+    seyal_bridge_set_runtime_dir, seyal_bridge_socket_fd_for, seyal_bridge_wants_write_for,
+    seyal_launch_policy_failure_copy, seyal_launch_policy_warning_copy,
+    test_register_pending_client, SeyalAppPaneBinding, SeyalAppPaneRecoveryTarget,
 };
 
 #[cfg(target_os = "macos")]

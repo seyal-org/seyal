@@ -43,11 +43,14 @@ final class SecondaryLivePaneHost: NSView {
     let paneHi: UInt64
     var onFocus: (() -> Void)?
     var onRetryRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
+    /// Product shortcut consumed in this pane's composer (e.g. ⌘D); host must
+    /// reconcile chrome and re-route first responder (#1464).
+    var onCommandConsumed: (() -> Void)?
     /// Shared window bridge for completed-Block history (surfaces are bridgeless).
     weak var historyBridge: RustDisplayBridge?
     private(set) var displayHandle: UInt64
     private var recoveryTarget: SeyalAppPaneRecoveryTarget
-    let surface: MetalSurfaceView
+    let surface: InteractiveMetalSurfaceView
     private(set) var composer: ComposerBridgeView!
     let transcript = NSScrollView()
     let blocks = NSStackView()
@@ -84,6 +87,8 @@ final class SecondaryLivePaneHost: NSView {
     private var surfaceTopToTranscript: NSLayoutConstraint!
     private var surfaceBottomToHost: NSLayoutConstraint!
     private var surfaceBottomToTranscript: NSLayoutConstraint!
+    private var transcriptBottomToComposer: NSLayoutConstraint!
+    private var transcriptBottomToHost: NSLayoutConstraint!
     private var flowConstraints: [NSLayoutConstraint] = []
     /// Keeps transcript document extent across Block rebuilds when the user has
     /// scrolled away from live end (#1424).
@@ -105,14 +110,18 @@ final class SecondaryLivePaneHost: NSView {
         self.paneHi = paneHi
         self.displayHandle = displayHandle
         self.recoveryTarget = recoveryTarget
-        surface = MetalSurfaceView(
+        surface = InteractiveMetalSurfaceView(
             frame: .zero,
-            paneID: String(format: "live-%016llx%016llx", paneHi, paneLo),
-            allowsImplicitExecutionBootstrap: false
+            appHandle: appHandle,
+            paneID: String(format: "live-%016llx%016llx", paneHi, paneLo)
         )
         composer = ComposerBridgeView(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
+        composer.boundDisplayHandle = displayHandle
         super.init(frame: .zero)
         surface.activateTranscriptDisplayHandle(displayHandle)
+        surface.onEnsureDirectInputBridge = { [weak self] in
+            self?.ensureDirectInputBridgeBorrow()
+        }
         translatesAutoresizingMaskIntoConstraints = true
         clipsToBounds = true
         setAccessibilityElement(true)
@@ -157,6 +166,7 @@ final class SecondaryLivePaneHost: NSView {
         }
         composer.onCommandConsumed = { [weak self] in
             self?.reconcileFlowPresentation()
+            self?.onCommandConsumed?()
         }
 
         blocks.orientation = .vertical
@@ -173,7 +183,6 @@ final class SecondaryLivePaneHost: NSView {
         )
         transcriptLeadingSpacerHeight.isActive = true
         blocks.insertArrangedSubview(transcriptLeadingSpacer, at: 0)
-
         let clip = TranscriptClipView()
         clip.drawsBackground = false
         clip.copiesOnScroll = false
@@ -216,17 +225,21 @@ final class SecondaryLivePaneHost: NSView {
         surfaceTopToTranscript = surface.topAnchor.constraint(equalTo: transcript.topAnchor)
         surfaceBottomToHost = surface.bottomAnchor.constraint(equalTo: bottomAnchor)
         surfaceBottomToTranscript = surface.bottomAnchor.constraint(equalTo: transcript.bottomAnchor)
-        let transcriptFillsToComposer = transcript.bottomAnchor.constraint(
+        transcriptBottomToComposer = transcript.bottomAnchor.constraint(
             equalTo: composer.topAnchor,
             constant: -12
         )
-        transcriptFillsToComposer.priority = .defaultHigh
+        transcriptBottomToComposer.priority = .defaultHigh
+        transcriptBottomToHost = transcript.bottomAnchor.constraint(
+            equalTo: bottomAnchor,
+            constant: -10
+        )
         flowConstraints = [
             transcript.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             transcript.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             transcript.topAnchor.constraint(equalTo: topAnchor, constant: 10),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
-            transcriptFillsToComposer,
+            transcriptBottomToComposer,
             composer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             composer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             composer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
@@ -284,7 +297,16 @@ final class SecondaryLivePaneHost: NSView {
         let localPoint = convert(point, from: superview)
         guard bounds.contains(localPoint) else { return nil }
         if inputOwned {
-            return super.hitTest(point)
+            let hit = super.hitTest(point)
+            // Match ThinPaneHostView: Flow Metal returns nil, but the host must
+            // not swallow the click or XCUI/`seyal-block-*-body` stay obscured.
+            if hit === self,
+                !surface.inspectRendererPresentation().drawsLiveGrid,
+                surface.rawScrollOffset == 0
+            {
+                return nil
+            }
+            return hit
         }
         let hit = super.hitTest(point)
         if let hit, hit === retryButton || hit.isDescendant(of: composer) || hit === composer {
@@ -374,6 +396,7 @@ final class SecondaryLivePaneHost: NSView {
         historyProjectionRequests.discard(forDisplayHandle: displayHandle)
         surface.activateTranscriptDisplayHandle(handle)
         displayHandle = handle
+        composer.boundDisplayHandle = handle
         restoresScrollForDisplayHandleChange = true
         updateAvailabilityPresentation()
         needsLayout = true
@@ -484,9 +507,95 @@ final class SecondaryLivePaneHost: NSView {
             setAccessibilityLabel("Focus secondary terminal pane")
             setAccessibilityIdentifier("seyal-secondary-live-pane")
         }
+        // Focused: Metal/composer FR. Unfocused: still retract Busy dock while
+        // this Controller's REPL owns DirectInput (#1467 multipane).
+        focusBlockScopedDirectInputIfEligible()
         // Retag retained cards without rebuilding so focus ownership swaps do
         // not drop XCUI Block identity or force a transcript reflow (#1424).
         retagArrangedBlockAccessibilityIdentifiers()
+    }
+
+    /// Status / focus path: re-hide the Busy dock and reclaim Metal without a
+    /// Block rebuild (DirectInput does not bump snapshot generation).
+    func refreshBlockScopedDirectInputPresentation() {
+        composer.reconcile()
+        focusBlockScopedDirectInputIfEligible()
+    }
+
+    /// This pane owns Flow Block-scoped DirectInput. Prefer the per-pane
+    /// composer eligibility flag (survives sibling focus); fall back to the
+    /// Controller target. Never the shared ApplicationRoot snapshot flag.
+    private var panePublishesBlockScopedDirectInput: Bool {
+        let eligibility = seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else { return false }
+        let paneComposer = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        guard displayHandle != 0 else {
+            return seyalComposerFlagsPublishBlockScopedDirectInput(paneComposer.flags)
+        }
+        return seyalPublishesBlockScopedDirectInput(
+            flags: paneComposer.flags,
+            target: seyal_bridge_composer_target_for_handle(displayHandle)
+        )
+    }
+
+    /// Re-arm borrowed bridge + DirectInput flag before AX focus / keyDown.
+    private func ensureDirectInputBridgeBorrow() {
+        let direct = panePublishesBlockScopedDirectInput
+        surface.panePublishesBlockScopedDirectInput = direct
+        guard inputOwned else { return }
+        if surface.bridge == nil, let historyBridge {
+            surface.bridge = historyBridge
+        }
+    }
+
+    /// Focused Flow + DirectInput: keys go to this pane's live surface (#1468).
+    /// When DirectInput ends, return keys to this pane's composer (Warp-like).
+    /// Unfocused panes still retract the Busy dock while their REPL owns mode 3.
+    private func focusBlockScopedDirectInputIfEligible() {
+        let direct = panePublishesBlockScopedDirectInput
+        applyDirectInputMergedLayout(direct)
+        ensureDirectInputBridgeBorrow()
+        guard inputOwned else {
+            // Never stop the shared Controller bridge; only drop the borrow.
+            if surface.bridge === historyBridge {
+                surface.bridge = nil
+            }
+            surface.syncInputRoutePresentation()
+            return
+        }
+        surface.syncInputRoutePresentation()
+        guard direct else {
+            _ = composer.focusEditor()
+            return
+        }
+        window?.makeFirstResponder(surface)
+    }
+
+    /// Warp-like: retract the Busy dock and fill the transcript while DirectInput
+    /// owns the Running Block; restore the dock when DirectInput ends.
+    private func applyDirectInputMergedLayout(_ directInput: Bool) {
+        if directInput {
+            if transcriptBottomToComposer.isActive {
+                transcriptBottomToComposer.isActive = false
+            }
+            if !transcriptBottomToHost.isActive {
+                transcriptBottomToHost.isActive = true
+            }
+            composer.isHidden = true
+        } else {
+            if transcriptBottomToHost.isActive {
+                transcriptBottomToHost.isActive = false
+            }
+            if !transcriptBottomToComposer.isActive {
+                transcriptBottomToComposer.isActive = true
+            }
+            composer.reconcile()
+        }
+        needsLayout = true
+        // Focus-switch DirectInput must not leave Metal at a zero frame —
+        // XCUI/AppKit then synthesize keys into an empty target.
+        layoutSubtreeIfNeeded()
+        publishFrame()
     }
 
     private func retagArrangedBlockAccessibilityIdentifiers() {
@@ -596,6 +705,7 @@ final class SecondaryLivePaneHost: NSView {
             // (#1379 adversarial review B2).
             historyProjectionRequests.discard(forDisplayHandle: displayHandle)
             composer.isHidden = true
+            transcriptBottomToHost.isActive = false
             clearPreservedDocumentHeight()
             surface.preserveRawScrollbackAfterPresentationChange(eligibility: eligibility)
         } else {
@@ -606,6 +716,7 @@ final class SecondaryLivePaneHost: NSView {
             // Composer visibility still follows pane-scoped reconcile().
             composer.reconcile()
             refreshInputOwnershipChrome()
+            focusBlockScopedDirectInputIfEligible()
         }
         needsLayout = true
     }
@@ -658,6 +769,7 @@ final class SecondaryLivePaneHost: NSView {
         } else {
             // Benign interim: fill with Metal surface until PaneLayoutView
             // publishes a non-zero region frame in the same reconcile turn.
+            transcriptBottomToHost.isActive = false
             NSLayoutConstraint.deactivate(flowConstraints)
             NSLayoutConstraint.activate([
                 surfaceLeadingToHost,

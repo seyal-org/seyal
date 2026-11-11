@@ -12,7 +12,11 @@ extension SecondaryLivePaneHost {
                 .filter { $0 !== transcriptLeadingSpacer }
                 .forEach { $0.removeFromSuperview() }
             blockCards.removeAll()
+            syncTranscriptDocumentSize()
+            setTranscriptDocumentOffsetY(0)
+            followingLiveEnd = true
             lastBlockCount = 0
+            rememberTranscriptScrollState()
             return
         }
         // Preserve scroll across projection rebuilds so focus/reconcile churn
@@ -32,6 +36,12 @@ extension SecondaryLivePaneHost {
         blockCards.removeAll(keepingCapacity: true)
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
         let count = Int(composerSnap.block_count)
+        let sessionSurface = seyal_bridge_session_surface_for_handle(displayHandle)
+        let composerTarget = seyal_bridge_composer_target_for_handle(displayHandle)
+        let requestableSessionHost = sessionSurface.kind == 0
+            ? sessionSurface.host_block_id
+            : 0
+        let sessionDisplayHandle = displayHandle
         let floorLo = composerSnap.canvas_floor_block_id_lo
         let floorHi = composerSnap.canvas_floor_block_id_hi
         let cellHeight = surface.terminalPresentationCellSize().height
@@ -90,6 +100,59 @@ extension SecondaryLivePaneHost {
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
             card.setOutputLines(lines, cellHeight: cellHeight)
+            card.canRequestSessionBootstrap = blockID != 0 && blockID == requestableSessionHost
+            card.onRequestSessionBootstrap = card.canRequestSessionBootstrap
+                ? { [weak self, sessionDisplayHandle, blockID, sessionRevision = sessionSurface.revision] in
+                    self?.onFocus?()
+                    _ = seyal_bridge_session_request_for_handle(
+                        sessionDisplayHandle,
+                        blockID,
+                        sessionRevision
+                    )
+                }
+                : nil
+            // DirectInput (mode 3) owns ordinary REPL keys; Interact is Raw fallback only.
+            let runningDirectTarget = inputOwned
+                && blockID != 0
+                && blockID == composerTarget.block_id
+                && composerTarget.target_class == 2
+                && (row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK))
+                    == UInt16(SEYAL_APP_BLOCK_STATE_RUNNING)
+            card.canInteractWithRunningProgram = runningDirectTarget
+                && composerTarget.mode == 0
+            card.onInteractWithRunningProgram = card.canInteractWithRunningProgram
+                ? { [weak self, blockID, generation = composerTarget.target_generation,
+                     revision = composerTarget.revision] in
+                    guard let self else { return }
+                    let interactionFence = seyal_app_snapshot(self.appHandle)
+                    var action = SeyalAppAction()
+                    action.version = UInt16(SEYAL_APP_ABI_VERSION)
+                    action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+                    action.kind = UInt16(SEYAL_APP_ACTION_INTERACT_WITH_RUNNING_BLOCK.rawValue)
+                    action.applySnapshotFence(interactionFence)
+                    action.target_execution_lo = blockID
+                    action.target_execution_hi = revision
+                    action.target_generation = generation
+                    guard seyal_app_apply(self.appHandle, &action) == 0 else { return }
+                    self.applyTranscriptPresentation()
+                    self.window?.makeFirstResponder(self.surface)
+                }
+                : nil
+            card.onRequestDirectInputFocus = runningDirectTarget
+                ? { [weak self, blockID] in
+                    guard let self else { return }
+                    let target = seyal_bridge_composer_target_for_handle(self.displayHandle)
+                    guard seyalComposerTargetIsBlockScopedDirectInput(target),
+                        blockID == target.block_id
+                    else { return }
+                    self.onFocus?()
+                    if self.surface.bridge == nil, let historyBridge = self.historyBridge {
+                        self.surface.bridge = historyBridge
+                    }
+                    self.surface.syncInputRoutePresentation()
+                    self.window?.makeFirstResponder(self.surface)
+                }
+                : nil
             // Focused hosts use the primary seyal-block-* ids so existing XCUI
             // and host assertions keep working; unfocused stay pane-secondary.
             let prefix = inputOwned ? "seyal-block-" : "seyal-secondary-block-"
@@ -126,6 +189,7 @@ extension SecondaryLivePaneHost {
         historyProjectionRequests.retain(blockIDs: retained, forDisplayHandle: displayHandle)
         historyBridge?.discardHistoryRequests(except: retained, forDisplayHandle: displayHandle)
         surface.removeTranscriptRegions(except: retained)
+        followingLiveEnd = savedFollowing
         syncTranscriptDocumentSize()
         publishLiveTailBlocks()
         publishBlockOutputFrame()
@@ -397,12 +461,44 @@ extension SecondaryLivePaneHost {
         for (blockID, card) in blockCards {
             let clip = card.body.convert(card.body.bounds, to: surface)
             guard clip.width > 0, clip.height > 0 else { continue }
+            let historyRows: Range<Int>?
+            let historyRequestID: UInt64
+            let historyRevision: UInt64
+            if let range = surface.retainedHistoryRange(
+                blockID: blockID,
+                displayHandle: displayHandle
+            ) {
+                let visibleBody = card.body.convert(surface.bounds, from: surface)
+                    .intersection(card.body.bounds)
+                let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
+                let firstVisibleRow = HistoryRenderWindow.firstVisibleRow(
+                    documentBounds: card.body.bounds,
+                    visibleBounds: visibleBody,
+                    isFlipped: card.body.isFlipped,
+                    cellHeight: cellHeight
+                )
+                let visibleRowCount = Int((visibleBody.height / cellHeight).rounded(.up))
+                historyRows = HistoryRenderWindow(
+                    totalRows: range.rows.count,
+                    firstVisibleRow: firstVisibleRow,
+                    visibleRowCount: visibleRowCount
+                ).rows
+                historyRequestID = range.requestID
+                historyRevision = range.revision
+            } else {
+                historyRows = nil
+                historyRequestID = 0
+                historyRevision = 0
+            }
             regions.append(
                 NativeTranscriptRegion(
                     id: blockID,
                     displayHandle: displayHandle,
                     origin: clip.origin,
-                    clip: clip
+                    clip: clip,
+                    historyRows: historyRows,
+                    historyRequestID: historyRequestID,
+                    historyRevision: historyRevision
                 )
             )
         }
@@ -436,14 +532,17 @@ extension SecondaryLivePaneHost {
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
-        let height = max(max(contentHeight, viewportHeight), max(preservedHeight, 1))
-        let spacerHeight = max(height - contentHeight, 0)
-        if abs(transcriptLeadingSpacerHeight.constant - spacerHeight) > 0.5 {
-            transcriptLeadingSpacerHeight.constant = spacerHeight
+        let spacers = TranscriptDocumentSizing.spacerHeights(
+            contentHeight: contentHeight,
+            viewportHeight: viewportHeight,
+            preservedDocumentHeight: preservedHeight
+        )
+        if abs(transcriptLeadingSpacerHeight.constant - spacers.leading) > 0.5 {
+            transcriptLeadingSpacerHeight.constant = spacers.leading
             layoutSubtreeIfNeeded()
         }
-        if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - height) > 0.5 {
-            blocks.setFrameSize(NSSize(width: width, height: height))
+        if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - spacers.document) > 0.5 {
+            blocks.setFrameSize(NSSize(width: width, height: spacers.document))
             transcript.reflectScrolledClipView(transcript.contentView)
             layoutSubtreeIfNeeded()
         }
@@ -453,12 +552,12 @@ extension SecondaryLivePaneHost {
     /// `NSStackView.fittingSize`, which can retain the prior document frame
     /// while Blocks are rebuilt after focus/projection changes (#1426).
     func transcriptCardsContentHeight() -> CGFloat {
-        let cards = blocks.arrangedSubviews.filter { $0 !== transcriptLeadingSpacer }
-        guard !cards.isEmpty else { return 0 }
-        let cardHeight = cards.reduce(CGFloat.zero) { total, view in
-            total + max(view.fittingSize.height, view.bounds.height)
-        }
-        return cardHeight + CGFloat(max(cards.count - 1, 0)) * blocks.spacing
+        TranscriptDocumentSizing.contentHeight(
+            arrangedSubviews: blocks.arrangedSubviews,
+            leadingSpacer: transcriptLeadingSpacer,
+            spacing: blocks.spacing,
+            edgeInsets: blocks.edgeInsets
+        )
     }
 
     func transcriptDocumentScrollHeight() -> CGFloat {

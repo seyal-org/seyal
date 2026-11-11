@@ -85,7 +85,7 @@ eligible composer
   -> command accepted by trusted integration
   -> Block(Current, command identity, start LineId)
   -> canonical execution/output continues
-  -> running Block receives bounded live-tail projection
+  -> running Block receives bounded live-tail projection, with a proven blank suffix omitted from its card geometry
   -> trusted command completion + accepted final drain
   -> Block(Completed, end LineId, exit metadata)
 ```
@@ -93,6 +93,16 @@ eligible composer
 The Runtime owns lifecycle truth. Missing, malformed, conflicting or stale
 metadata causes the client to quarantine the structured projection and select a
 safe presentation; it never changes PTY/VT authority.
+
+The running Block's live-tail projection preserves every visible row from its
+trusted start anchor through the last row containing terminal content or the
+cursor. The paired Rust display may prove that rows after this boundary are
+blank; those trailing rows are omitted from the Block card so a short live
+Block stays docked above its Pane composer. No leading row, nonblank/styled
+row, or cursor row may be removed. If the same-generation cell proof is
+unavailable, the complete candidate clip is retained. This changes only the
+Block projection geometry; the authoritative VT grid, cursor, and PTY remain
+unchanged.
 
 ## 3. Presentation state contract
 
@@ -151,6 +161,37 @@ not another viewport added to Flow.
 **Accepted ADR-026 (#1384):** labeled Relay is not
 Raw and does not satisfy this section. Raw remains the full-Pane
 character-level presentation.
+
+**Running-program interaction fallback:** Runtime's current `Running(BlockId)`
+and composer `Busy` facts do not prove whether a foreground program accepts
+line input, requires character-level input, or is simply producing output.
+Seyal must not infer that distinction from command text, terminal output, or a
+hidden Raw view. A Running Block therefore exposes an explicit **Interact with
+running program** action. The action is available only for the current live
+Block and is bound to its Pane, ExecutionId, Controller attachment, target
+generation, and presentation epoch. Rust rejects stale or mismatched actions.
+
+On acceptance, Rust temporarily presents that Pane's same execution in full-Pane
+Raw before native keyboard, mouse, paste, or IME input can be admitted. Ordinary
+Running Blocks remain in Flow until the user requests interaction. Alternate
+screen still takes TUI priority. The temporary Raw presentation ends only when
+Runtime reports a fresh trusted local-shell prompt for that execution or the
+execution ends; Raw is retained across an intervening TUI session while the
+same foreground program remains active. A stale target, detached Controller,
+or changed presentation epoch admits no input and cannot change a sibling Pane.
+
+This action requests direct terminal interaction; it does not enable session
+bootstrap, alter SSH trust, or use Relay. Trusted session Relay remains a
+separate line-input route. Unsupported foreground programs and character-level
+workflows use Raw; line-oriented trusted session programs may continue using
+Relay when that is sufficient.
+
+Type 45 carries the known foreground `BlockId` and target generation even when
+composer mode is `Unavailable`. The `Unavailable` mode still prohibits Submit
+and Relay; the identity is solely the Rust-validated target for the explicit
+direct-input action above. This lets local Python/Node and other Running
+programs expose the same deliberate Raw fallback without presenting session
+bootstrap or guessing from command text.
 
 **User-confirmed #1398 SSH Flow UX requirement:** While a trusted, line-oriented
 foreground program is in Relay, the existing Pane composer is presented on the
@@ -270,17 +311,31 @@ snapshot.
 - composer availability follows the Accepted ADR-026 (#1384) §3.2 input
   target. A `TrustedShell` target, including `TrustedShell(session)`, is
   composer mode `Submit`. A `ForegroundProgram` target may be labeled
-  `Relay`. Neither mode is implied by Block lifecycle `Running` alone. When
-  the input target is `None`, the composer is disabled or represented by real
-  busy state;
+  `Relay` (line-level) or `DirectInput` (ADR-009 #1466 Block-scoped
+  character-level while Flow remains). Neither Submit nor Relay is implied by
+  Block lifecycle `Running` alone. When the input target is `None`, the
+  composer is disabled or represented by real busy state;
 - supported Pane-level control actions such as an explicit interrupt may route
   through typed input semantics without turning empty Flow space into a raw
   terminal surface;
-- arbitrary character-level terminal input is not routed through Flow merely
-  because a hidden Metal view exists; the Pane transitions to Raw first when
-  such semantics are required;
+- under Accepted ADR-009 #1466, when presentation is Flow, the canonical
+  screen is primary, the attachment is Controller, and the input target is
+  `ForegroundProgram(b)` with mode `DirectInput`, character-level terminal
+  input (keys, IME commits that encode input, paste, and mouse reports that
+  encode input) may be routed into Running Block `b`'s live region without a
+  full-Pane Raw transition. Empty Flow canvas still must not expose a second
+  Raw viewport or empty-canvas terminal hit-test. Cases outside that contract
+  keep a usable full-Pane Raw/TUI direct-terminal path;
 - IME/first-responder/accessibility/mouse ownership follows the active
-  presentation mode and section 3.4 transition fence.
+  presentation mode, the DirectInput focus target when published, and
+  section 3.4 transition fence.
+- in multipane Flow, keyboard focus routes to the Rust-focused Pane's visible,
+  Pane-owned composer; the hidden single-pane composer must not receive text or
+  submit on that Pane's behalf. Single-pane Flow keeps the root composer, while
+  Raw/TUI routes to the focused terminal surface.
+- a Pane draft mutation is fenced to its PaneId. If Rust focus differs, transfer
+  focus and restore the native editor before applying it; once Rust focus
+  matches, do not reapply focus during each edit or steal subsequent characters.
 
 When the current Flow input target is `ForegroundProgram(b)` with an admitted
 line-level Relay, the Pane's single Rust-owned composer/editor is visually
@@ -297,7 +352,9 @@ Direct-terminal event classification, committed-text atomicity, composition-only
 IME document semantics, key encoding, queue bounds and resize transactions remain
 governed by SPEC-006. Under accepted ADR-009/#858 those direct-terminal
 interaction rules apply to the **active Raw/TUI/direct-terminal presentation
-endpoint**, not to a hidden/focusable surface under Flow.
+endpoint**, and under Accepted ADR-009 #1466 also to the **Block-scoped
+DirectInput focus target** on a primary-screen Running Block while Flow chrome
+remains — not to a hidden/focusable empty-canvas surface under Flow.
 
 ## 5. Flow output projection
 
@@ -306,6 +363,22 @@ endpoint**, not to a hidden/focusable surface under Flow.
 A completed Block references a bounded canonical history range from its trusted
 start/end anchors. The client may cache disposable prepared GPU data for visible
 ranges, but the range remains authoritative in Runtime terminal/history state.
+
+For output longer than one bounded history response, the Pane transcript keeps
+the Block's full intrinsic scroll extent while the renderer prepares only a
+bounded page for the rows visible in that Pane (with bounded overscan). A page
+is addressed through the Block's stable history anchors and Runtime history
+range protocol; the client must not concatenate an unbounded Block into one
+GPU buffer or substitute a second terminal/history model. Scrolling, resize,
+and backing-scale changes request or prepare the page for the new viewport and
+preserve the user's Pane scroll position. The rendered page cache is keyed by
+Pane/execution, Block, history revision and visible range; a content or range
+change invalidates glyph data even when clip geometry is unchanged. PTY/VT
+progress must not wait for page retrieval or GPU preparation. The renderer's
+per-page row/cell bounds remain enforced for every request and buffer.
+Changes to source line bounds, total history extent, cell metrics, or backing
+scale also invalidate the prepared page so resize/font changes cannot reuse
+stale glyph positions.
 
 ### 5.2 Running Block
 

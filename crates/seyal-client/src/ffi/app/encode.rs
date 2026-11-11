@@ -17,6 +17,8 @@ pub(crate) const SNAP_CONTROLLER: u16 = 2;
 pub(crate) const SNAP_FROZEN: u16 = 4;
 pub(crate) const SNAP_HAS_EXECUTION: u16 = 8;
 pub(crate) const SNAP_HAS_ATTACHMENT: u16 = 16;
+/// Flow + Running(b) Block-scoped DirectInput (ADR-009 #1466 / #1468).
+pub(crate) const SNAP_BLOCK_SCOPED_DIRECT_INPUT: u16 = 32;
 pub(crate) const ROW_SELECTED: u16 = 1;
 /// Block-row `flags`: low bits are the presentation state (1..3); bit 3 marks
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
@@ -50,6 +52,9 @@ pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnap
     }
     if snap.attachment.is_some() {
         flags |= SNAP_HAS_ATTACHMENT;
+    }
+    if snap.block_scoped_direct_input {
+        flags |= SNAP_BLOCK_SCOPED_DIRECT_INPUT;
     }
     SeyalAppSnapshot {
         version: APP_ABI_VERSION,

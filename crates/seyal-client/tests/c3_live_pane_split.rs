@@ -230,6 +230,7 @@ fn split_live_keeps_original_pane_connected_after_real_command_and_refocus() {
         fence: root.fence(),
         eligibility: Some(seyal_client::composer::RuntimeComposerEligibility::Unsupported),
         revision: 1,
+        target: None,
     })
     .expect("unsupported test shell retains the safe direct-terminal fallback");
     root.apply(seyal_client::app::AppAction::SubmitInput {

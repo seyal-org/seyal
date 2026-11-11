@@ -7,6 +7,10 @@ private final class ComposerTextView: NSTextView {
     /// Returns true when the key event was consumed by Rust routing.
     var onRouteKeystroke: ((NSEvent) -> Bool)?
 
+    /// Busy / DirectInput must not let a non-editable dock steal keys from the
+    /// Running Block live surface (#1468).
+    override var acceptsFirstResponder: Bool { isEditable }
+
     override func keyDown(with event: NSEvent) {
         if onRouteKeystroke?(event) == true {
             return
@@ -40,6 +44,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     /// Pane before mutating (ADR-009 multipane / fence authority).
     private let boundPaneLo: UInt64?
     private let boundPaneHi: UInt64?
+    /// Multipane Flow host Controller. DirectInput hide follows this handle's
+    /// live target so a sibling Available cannot resurrect the Busy dock.
+    var boundDisplayHandle: UInt64 = 0
     private let textView = ComposerTextView()
     private let placeholder = NSTextField(labelWithString: "")
     private let execute = NSButton(title: "", target: nil, action: nil)
@@ -178,7 +185,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
 
     @discardableResult
     func focusEditor() -> Bool {
-        window?.makeFirstResponder(textView) ?? false
+        // Never force-focus a non-editable Busy dock over DirectInput Metal.
+        guard textView.isEditable else { return false }
+        return window?.makeFirstResponder(textView) ?? false
     }
 
   var editorIsFirstResponder: Bool {
@@ -255,10 +264,21 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     /// return a fresh focused snapshot for mutating actions.
     @discardableResult
     private func prepareFocusedMutation() -> SeyalAppSnapshot {
-        if boundPaneLo != nil {
-            onEnsureFocused?()
-        }
+        prepareBoundPaneInputFocus()
         return seyal_app_snapshot(appHandle)
+    }
+
+    /// If this editor reports a draft change before Rust focus reaches its Pane,
+    /// reconcile that focus and restore this responder before applying the
+    /// draft mutation to Rust.
+    private func prepareBoundPaneInputFocus() {
+        if let paneLo = boundPaneLo, let paneHi = boundPaneHi {
+            let shell = seyal_app_shell(appHandle)
+            if shell.focused_pane_lo != paneLo || shell.focused_pane_hi != paneHi {
+                onEnsureFocused?()
+                _ = window?.makeFirstResponder(textView)
+            }
+        }
     }
 
     func reconcile() {
@@ -270,7 +290,32 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let direct = boundPaneLo == nil
             && (snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
                 || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue))
-        let hidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+        // Warp-like: Block-scoped DirectInput owns keys in the Running Block.
+        // Hide the Busy dock so users are not offered a second typing surface.
+        // Pane-bound: this Pane's composer flag and/or Controller target — never
+        // the shared ApplicationRoot snapshot (siblings clear that on Available).
+        let blockScopedDirectInput: Bool = {
+            if boundPaneLo != nil {
+                guard boundDisplayHandle != 0 else {
+                    return seyalComposerFlagsPublishBlockScopedDirectInput(composer.flags)
+                }
+                return seyalPublishesBlockScopedDirectInput(
+                    flags: composer.flags,
+                    target: seyal_bridge_composer_target_for_handle(boundDisplayHandle)
+                )
+            }
+            if seyalPublishesBlockScopedDirectInput(
+                flags: composer.flags,
+                target: seyal_bridge_composer_target()
+            ) {
+                return true
+            }
+            return snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                && snapshot.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
+        }()
+        let hidden = direct
+            || blockScopedDirectInput
+            || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
         // Presentation/epoch transitions revoke composer IME ownership: cancel
         // uncommitted marked text without submitting (SPEC-008 / #866).
         if (direct || hidden || composer.epoch != lastEpoch), hasMarkedText() {
@@ -282,16 +327,28 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let busy = composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue)
         textView.isEditable = available || relay
         hasReconciledComposerState = true
+        // Resign a Busy/disabled editor so DirectInput Metal can keep keys.
+        if !textView.isEditable, window?.firstResponder === textView {
+            window?.makeFirstResponder(nil)
+        }
         let isNowFocusEligible = isFocusEligibleForRecovery
         execute.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_EXECUTE))
         execute.isEnabled = composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0
         let recall = seyal_app_composer_history(appHandle)
         history.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_HISTORY))
         history.isEnabled = available && recall.flags & UInt16(SEYAL_APP_HISTORY_HAS_ENTRIES) != 0
-        placeholder.stringValue = inlineRelayPresentation
-            ? "" : copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
+        if inlineRelayPresentation {
+            placeholder.stringValue = ""
+        } else if busy, !blockScopedDirectInput {
+            // Match Rust ComposerMode::Busy placeholder — never look Available.
+            placeholder.stringValue = "Waiting for prompt..."
+        } else {
+            placeholder.stringValue = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
+        }
         setAccessibilityValue(
-            relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden"))
+            blockScopedDirectInput
+                ? "hidden"
+                : (relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden")))
         )
         if composer.epoch != lastEpoch {
             lastEpoch = composer.epoch

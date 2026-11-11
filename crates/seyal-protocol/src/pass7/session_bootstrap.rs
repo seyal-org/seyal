@@ -85,12 +85,15 @@ impl InputTargetClass {
 }
 
 /// Derived composer mode. `Relay` is plaintext to the foreground program.
+/// `DirectInput` is Block-scoped character-level input while Flow remains
+/// (ADR-009 #1466); it is not Submit and not line-level Relay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ComposerTargetMode {
     Unavailable = 0,
     Submit = 1,
     Relay = 2,
+    DirectInput = 3,
 }
 
 impl ComposerTargetMode {
@@ -99,12 +102,14 @@ impl ComposerTargetMode {
             0 => Ok(Self::Unavailable),
             1 => Ok(Self::Submit),
             2 => Ok(Self::Relay),
+            3 => Ok(Self::DirectInput),
             _ => Err(FramingError::MalformedPayload),
         }
     }
 }
 
-/// Why the composer is unavailable. `None` when mode is Submit or Relay.
+/// Why the composer is unavailable. `None` when mode is Submit, Relay, or
+/// DirectInput.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ComposerTargetReason {
@@ -490,6 +495,19 @@ mod tests {
         };
         assert_eq!(target.encode().len(), 48);
         assert_eq!(ComposerTarget::decode(&target.encode()).unwrap(), target);
+
+        let direct = ComposerTarget {
+            attachment_id: attachment(),
+            target: InputTargetClass::ForegroundProgram,
+            scope: BlockScope::Local,
+            mode: ComposerTargetMode::DirectInput,
+            reason: ComposerTargetReason::None,
+            block_id: 9,
+            target_generation: 6,
+            revision: 7,
+        };
+        assert_eq!(direct.encode().len(), 48);
+        assert_eq!(ComposerTarget::decode(&direct.encode()).unwrap(), direct);
     }
 
     #[test]

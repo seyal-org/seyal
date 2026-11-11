@@ -1,10 +1,9 @@
 name: Foundation Quality
 
 on:
-  # PR-only: master is gated by required status checks on these jobs, so a
-  # post-merge push re-run would duplicate the same Foundation suite without
-  # adding merge protection. Docs stays path-filtered on push; fuzz uses
-  # schedule/workflow_dispatch for non-PR evidence.
+  # Fast PR gate only. Full XCUI / make bench / duplicated macOS make check run
+  # on the scheduled Foundation Full Suite workflow. Docs stays path-filtered;
+  # fuzz uses schedule/workflow_dispatch (registry smoke remains below).
   pull_request:
     types: [opened, synchronize, reopened, edited]
 
@@ -79,17 +78,13 @@ jobs:
         run: make build
       - name: Format lint unit and repository checks
         run: make check
-      - name: Benchmark harness smoke
-        run: make bench
 
-  native-macos-smoke:
-    name: native-macos-smoke
+  native-macos-compile:
+    name: native-macos-compile
     runs-on: macos-15
-    # Gate 1 XCUI + cold `make bench` needs ~36–37m on typical macos-15
-    # runners; #1424 multipane headed cases add several more minutes. Prior
-    # 40m cancelled mid-XCUI on this PR. Keep rust-and-harness-quality's
-    # separate 15m bench job as the contract gate.
-    timeout-minutes: 55
+    # Slim PR compile gate only. Full make check / XCUI / make bench run on the
+    # scheduled Foundation Full Suite so every-PR wall-clock stays short.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -103,26 +98,3 @@ jobs:
         run: make bootstrap
       - name: Build Rust plus Seyal.app
         run: make build
-      - name: Native format lint unit and repository checks
-        run: make check
-      - name: Unit, PTY, native smoke, XCTest and XCUIAutomation
-        run: make test
-      - name: Preserve native UI rendered evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: seyal-macos-ui-xcresult
-          path: target/macos-ui-tests.xcresult
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Native PTY benchmark baseline
-        env:
-          # GitHub-hosted macOS runners may be headless and cannot deliver
-          # CAMetalDisplayLink callbacks. Interactive/local runs require the
-          # presentation proxy and remain the acceptance measurement.
-          SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK: "0"
-          # This job validates the unsigned CI benchmark artifact, not a
-          # distributable release. Keep the Release packaging contract
-          # explicit without requiring a private Apple signing credential.
-          SEYAL_CODESIGN_IDENTITY: "-"
-        run: make bench

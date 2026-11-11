@@ -9,7 +9,7 @@ use seyal_protocol::framing::{CommandBlock, CommandBlockState, COMMAND_BLOCK_FLA
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
-use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
+use crate::composer::RuntimeBlockRecord;
 use crate::ffi::with_active_client;
 use crate::navigation::{decode_resource_address, ResourceAddress};
 use crate::pane_layout::SplitPosition;
@@ -239,18 +239,8 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             address: decode_optional_address(action.payload, action.payload_len)?,
         }),
         51 => Ok(AppAction::ClosePalette { fence }),
-        52 => Ok(AppAction::ApplyRuntimeComposerStatus {
-            fence,
-            eligibility: match action.reserved {
-                0 => None,
-                1 => Some(RuntimeComposerEligibility::Available),
-                2 => Some(RuntimeComposerEligibility::Busy),
-                3 => Some(RuntimeComposerEligibility::Unsupported),
-                4 => Some(RuntimeComposerEligibility::Relay),
-                _ => return Err(-6),
-            },
-            revision: action.target_execution_lo,
-        }),
+        52 => super::pane_composer::decode_runtime_composer_status(action, fence),
+        86 => super::pane_composer::decode_interact_with_running_block(action, fence),
         53 => Ok(AppAction::CancelRecovery),
         54 => Ok(AppAction::AdvanceRecoveryStage {
             stage: match action.reserved & 0xffff {

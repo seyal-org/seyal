@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "df20a7dac6d299891720f90ae56332d7476ead9f"
+          "fingerprint": "7e22ffb535a37ac88002fb74d4eb701f059db148"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "df20a7dac6d299891720f90ae56332d7476ead9f"
+          "fingerprint": "7e22ffb535a37ac88002fb74d4eb701f059db148"
         }
       ],
       "relationships": [
@@ -104,7 +104,7 @@
       "id": "COMP-PANE-PRESENTATION",
       "kind": "component",
       "title": "Pane Flow Raw TUI presentation",
-      "summary": "Per TerminalExecution, exactly one user-visible presentation is active: Flow native Blocks/composer, Raw full-Pane primary grid, or TUI full-Pane takeover. Resting presentation is grid-first Raw (#1438); Flow is an explicit trusted-shell mode. The combined multipane PR proposes that a successful split opts every Flow-capable pane in its tab into Flow while preserving TUI takeover, pane-local history, and sibling recovery isolation.",
+      "summary": "Per TerminalExecution, exactly one user-visible presentation is active: Flow native Blocks/composer, Raw full-Pane primary grid, or TUI full-Pane takeover. Resting presentation is grid-first Raw (#1438); Flow is an explicit trusted-shell mode. The combined multipane PR proposes that a successful split opts every Flow-capable pane in its tab into Flow while preserving TUI takeover, pane-local history, and sibling recovery isolation; #1466 Accepted Block-scoped direct input for primary-screen Running REPLs while Flow chrome remains.",
       "tags": [
         "pane",
         "presentation",
@@ -126,7 +126,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "00a5111adc59f9a8dfd8d8f5a7ebdb60eb30c6e3"
+          "fingerprint": "7e667b853d5df734937f786165b41a095651f975"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
@@ -134,7 +134,7 @@
         },
         {
           "path": "docs/specs/SPEC-008-M003-COMMAND-BLOCKS.md",
-          "fingerprint": "2e503e14d53d67dd6483af8e2f49a43dc4e13520"
+          "fingerprint": "f5f6632d1e9c7ddbec76f743a3384414a5e77621"
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
@@ -193,7 +193,7 @@
       "id": "DEC-ADR-009",
       "kind": "decision",
       "title": "ADR-009 Command Blocks composer and presentation takeover",
-      "summary": "Accepted command-Block baseline plus #858/#859 mutually exclusive Flow/Raw/TUI takeover, renderer reuse without viewport authority, and fenced input-ownership transitions; #1438 establishes grid-first Raw resting mode. The combined multipane PR proposes tab-wide Flow opt-in after a successful split, pending merge.",
+      "summary": "Accepted command-Block baseline plus #858/#859 mutually exclusive Flow/Raw/TUI takeover, renderer reuse without viewport authority, and fenced input-ownership transitions; #1438 establishes grid-first Raw resting mode. The combined multipane PR proposes tab-wide Flow opt-in after a successful split, pending merge; #1466 Accepted Block-scoped direct input for Running REPLs.",
       "tags": [
         "adr",
         "adr-009",
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "00a5111adc59f9a8dfd8d8f5a7ebdb60eb30c6e3"
+          "fingerprint": "7e667b853d5df734937f786165b41a095651f975"
         }
       ],
       "relationships": [
@@ -355,7 +355,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-026-CONSENTED-SESSION-REMOTE-SHELL-BOOTSTRAP.md",
-          "fingerprint": "dba557ddb7254bc967bdc0409f083ac4b1575c0e"
+          "fingerprint": "97132cb670a177d124f896fcef0af8e7b9161605"
         }
       ],
       "relationships": []

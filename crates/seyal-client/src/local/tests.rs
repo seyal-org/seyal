@@ -9,6 +9,8 @@ use std::os::unix::net::UnixStream;
 
 #[path = "tests/delivery.rs"]
 mod delivery;
+#[path = "tests/session_bootstrap.rs"]
+mod session_bootstrap;
 pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
     LocalDisplayClient {
         stream,
@@ -645,7 +647,7 @@ fn same_generation_and_row_count_conflicting_ids_are_fatal() {
 }
 
 #[test]
-fn negotiated_type_45_projects_submit_relay_and_unavailable() {
+fn negotiated_type_45_projects_submit_relay_direct_and_unavailable() {
     use seyal_runtime::local_ipc::framing::{
         BlockScope, ComposerEligibility, ComposerStatus, ComposerTarget, ComposerTargetMode,
         ComposerTargetReason, InputTargetClass,
@@ -706,6 +708,16 @@ fn negotiated_type_45_projects_submit_relay_and_unavailable() {
     assert_eq!(code, 4);
     assert!(relay_revision > unavailable_revision);
 
+    target.mode = ComposerTargetMode::DirectInput;
+    target.reason = ComposerTargetReason::None;
+    target.block_id = 9;
+    target.revision = 6;
+    client.composer_target = Some(target);
+    client.note_composer_projection();
+    let (code, direct_revision, _) = client.projected_composer_status().expect("direct");
+    assert_eq!(code, 5, "DirectInput projects as eligibility byte 5");
+    assert!(direct_revision > relay_revision);
+
     client.session_bootstrap_negotiated = false;
     client.composer_status = Some(ComposerStatus {
         attachment_id: attachment,
@@ -718,7 +730,7 @@ fn negotiated_type_45_projects_submit_relay_and_unavailable() {
         code, 2,
         "without negotiation, type 45 does not override type 23"
     );
-    assert!(legacy_revision > relay_revision);
+    assert!(legacy_revision > direct_revision);
 }
 
 #[test]

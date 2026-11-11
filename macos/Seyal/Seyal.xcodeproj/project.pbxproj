@@ -43,6 +43,7 @@
 		A10000000000000000000042 /* InteractiveMetalSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000042 /* InteractiveMetalSurfaceView.swift */; };
 		A10000000000000000000043 /* RendererPresentationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000043 /* RendererPresentationPlan.swift */; };
 		A10000000000000000000044 /* ComposerBridgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000044 /* ComposerBridgeView.swift */; };
+		A100000000000000000000A1 /* SeyalComposerTargetDirectInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000A1 /* SeyalComposerTargetDirectInput.swift */; };
 		A10000000000000000000047 /* ComposerHistoryOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000047 /* ComposerHistoryOverlayView.swift */; };
 		A10000000000000000000045 /* ProductChromeHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* ProductChromeHostView.swift */; };
 		A10000000000000000000081 /* ProductChromePaneProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000081 /* ProductChromePaneProjection.swift */; };
@@ -77,6 +78,8 @@
 		A10000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift */; };
 		A10000000000000000000059 /* ProductChromeBlockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000059 /* ProductChromeBlockViews.swift */; };
 		A1000000000000000000005A /* ProductChromeHostView+Blocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */; };
+		A100000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift */; };
+		A100000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */; };
 		A1000000000000000000005B /* ProductChromeHostView+Recovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */; };
 		A1000000000000000000005C /* ProductChromeHostView+ChromeActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */; };
 		A1000000000000000000005D /* RendererValidationDisplayLinkDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */; };
@@ -174,6 +177,7 @@
 		A20000000000000000000042 /* InteractiveMetalSurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveMetalSurfaceView.swift; sourceTree = "<group>"; };
 		A20000000000000000000043 /* RendererPresentationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererPresentationPlan.swift; sourceTree = "<group>"; };
 		A20000000000000000000044 /* ComposerBridgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerBridgeView.swift; sourceTree = "<group>"; };
+		A200000000000000000000A1 /* SeyalComposerTargetDirectInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalComposerTargetDirectInput.swift; sourceTree = "<group>"; };
 		A20000000000000000000047 /* ComposerHistoryOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerHistoryOverlayView.swift; sourceTree = "<group>"; };
 		A20000000000000000000045 /* ProductChromeHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromeHostView.swift; sourceTree = "<group>"; };
 		A20000000000000000000081 /* ProductChromePaneProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromePaneProjection.swift; sourceTree = "<group>"; };
@@ -193,6 +197,8 @@
 		A20000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalTerminalRenderer+GPUCompletionSelfTest.swift"; sourceTree = "<group>"; };
 		A20000000000000000000059 /* ProductChromeBlockViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromeBlockViews.swift; sourceTree = "<group>"; };
 		A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+Blocks.swift"; sourceTree = "<group>"; };
+		A200000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+RunningProgramInput.swift"; sourceTree = "<group>"; };
+		A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+TranscriptLayout.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+Recovery.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+ChromeActions.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererValidationDisplayLinkDriver.swift; sourceTree = "<group>"; };
@@ -275,6 +281,7 @@
 				A20000000000000000000045 /* ProductChromeHostView.swift */,
 				A20000000000000000000081 /* ProductChromePaneProjection.swift */,
 				A20000000000000000000044 /* ComposerBridgeView.swift */,
+				A200000000000000000000A1 /* SeyalComposerTargetDirectInput.swift */,
 				A20000000000000000000047 /* ComposerHistoryOverlayView.swift */,
 				A20000000000000000000046 /* NativeThemeRealization.swift */,
 				A2000000000000000000006C /* LaunchPolicyProductCopy.swift */,
@@ -312,6 +319,8 @@
 				A20000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift */,
 				A20000000000000000000059 /* ProductChromeBlockViews.swift */,
 				A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */,
+				A200000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift */,
+				A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */,
 				A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */,
 				A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */,
 				A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */,
@@ -524,6 +533,7 @@
 				A10000000000000000000045 /* ProductChromeHostView.swift in Sources */,
 				A10000000000000000000081 /* ProductChromePaneProjection.swift in Sources */,
 				A10000000000000000000044 /* ComposerBridgeView.swift in Sources */,
+				A100000000000000000000A1 /* SeyalComposerTargetDirectInput.swift in Sources */,
 				A10000000000000000000047 /* ComposerHistoryOverlayView.swift in Sources */,
 				A10000000000000000000046 /* NativeThemeRealization.swift in Sources */,
 				A1000000000000000000006C /* LaunchPolicyProductCopy.swift in Sources */,
@@ -553,6 +563,8 @@
 				A10000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift in Sources */,
 				A10000000000000000000059 /* ProductChromeBlockViews.swift in Sources */,
 				A1000000000000000000005A /* ProductChromeHostView+Blocks.swift in Sources */,
+				A100000000000000000000F0 /* ProductChromeHostView+RunningProgramInput.swift in Sources */,
+				A100000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift in Sources */,
 				A1000000000000000000005B /* ProductChromeHostView+Recovery.swift in Sources */,
 				A1000000000000000000005C /* ProductChromeHostView+ChromeActions.swift in Sources */,
 				A1000000000000000000005D /* RendererValidationDisplayLinkDriver.swift in Sources */,

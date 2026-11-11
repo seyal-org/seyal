@@ -33,7 +33,7 @@ fn new_terminal_action_adds_tab_to_focused_pane_without_splitting() {
 }
 
 #[test]
-fn close_focused_terminal_removes_only_selected_terminal_and_keeps_pane() {
+fn close_focused_terminal_removes_selected_then_last_closes_window() {
     let mut root = ApplicationRoot::new();
     let before = root.snapshot().shell;
     let pane = before.focused_pane;
@@ -84,28 +84,107 @@ fn close_focused_terminal_removes_only_selected_terminal_and_keeps_pane() {
         BindingContext::APP,
     )
     .expect("close the remaining selected terminal");
-    assert!(root
-        .snapshot()
-        .shell
-        .panes
-        .iter()
-        .find(|row| row.id == pane)
-        .unwrap()
-        .terminal_tabs
-        .is_empty());
-
-    assert_eq!(
+    let closed = root.snapshot().shell;
+    assert!(
+        closed.windows.is_empty(),
+        "final terminal in a sole Pane hierarchical-closes the Window"
+    );
+    assert!(closed.panes.is_empty());
+    assert!(
         root.invoke_workspace_command(
             WorkspaceCommand {
                 id: WorkspaceCommandId::TerminalCloseFocused,
                 ordinal: None,
             },
             BindingContext::APP,
-        ),
-        Err(crate::app::AppError::ActionUnavailable),
-        "cmd+w with an empty Pane must not fall back to closing its layout"
+        )
+        .is_err(),
+        "zero-window composition has no focused terminal to close"
     );
-    let empty = root.snapshot().shell;
-    assert_eq!(empty.windows.len(), window_count);
-    assert_eq!(empty.panes.len(), before.panes.len());
+}
+
+#[test]
+fn closing_final_terminal_in_a_split_pane_collapses_that_pane() {
+    use crate::shell::SplitAxis;
+
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .expect("split creates a sibling Pane");
+    let shell = root.snapshot().shell;
+    assert_eq!(shell.panes.len(), 2);
+    let split_pane = shell.focused_pane;
+    assert_ne!(split_pane, first_pane);
+    let terminal_tab = shell
+        .panes
+        .iter()
+        .find(|row| row.id == split_pane)
+        .unwrap()
+        .selected_terminal_tab
+        .unwrap();
+
+    root.apply(AppAction::CloseTerminalTab {
+        pane: split_pane,
+        terminal_tab,
+        containment_generation: shell.containment_generation,
+    })
+    .expect("final terminal in a non-sole Pane collapses the Pane");
+
+    let after = root.snapshot().shell;
+    assert_eq!(after.panes.len(), 1);
+    assert_eq!(after.panes[0].id, first_pane);
+    assert!(
+        after.panes.iter().all(|row| row.id != split_pane),
+        "collapsed Pane must leave the tree"
+    );
+}
+
+#[test]
+fn dock_reopen_after_closing_split_terminals_one_by_one() {
+    use crate::shell::SplitAxis;
+
+    let mut root = ApplicationRoot::new();
+    let workspace = root.snapshot().shell.active_workspace;
+    root.apply(AppAction::NewTerminal)
+        .expect("second terminal on first Pane");
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .expect("split");
+    root.apply(AppAction::NewTerminal)
+        .expect("second terminal on split Pane");
+
+    // Close every selected terminal until the Window hierarchical-closes.
+    let mut guard = 0;
+    while !root.snapshot().shell.windows.is_empty() {
+        guard += 1;
+        assert!(guard < 16, "close loop must terminate");
+        let snap = root.snapshot().shell;
+        let pane = snap.focused_pane;
+        let row = snap
+            .panes
+            .iter()
+            .find(|candidate| candidate.id == pane)
+            .expect("focused Pane");
+        let terminal_tab = row
+            .selected_terminal_tab
+            .or_else(|| row.terminal_tabs.first().map(|tab| tab.id))
+            .expect("focused Pane still has a terminal to close");
+        root.apply(AppAction::CloseTerminalTab {
+            pane,
+            terminal_tab,
+            containment_generation: snap.containment_generation,
+        })
+        .expect("close next terminal");
+    }
+
+    root.apply(AppAction::SelectWorkspace { id: workspace })
+        .expect("Dock ActivateWorkspace after multi-close must create");
+    assert_eq!(root.snapshot().shell.windows.len(), 1);
+    assert!(
+        !root.snapshot().shell.panes.is_empty(),
+        "re-created Window must project a Pane"
+    );
 }

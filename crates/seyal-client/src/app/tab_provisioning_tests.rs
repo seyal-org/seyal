@@ -544,11 +544,16 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
     root.absorb_wire_terminate_result(false)
         .expect("absorb terminate")
         .expect("terminate result present");
-    assert_eq!(root.shell.pane_execution(pane).unwrap(), None);
-    assert_eq!(
-        root.shell.selected_terminal_tab(pane).unwrap(),
-        None,
-        "confirmed terminal termination removes its terminal-tab chrome"
+    // Apply-time asserts above keep Terminate distinct from CloseTab chrome
+    // removal. After Runtime confirms, #1470 may retire the pre-terminate Pane
+    // id while a successor leaf remains; either way the terminated execution
+    // must not stay bound and presentation returns to Unbound.
+    assert!(
+        matches!(
+            root.shell.pane_execution(pane),
+            Ok(None) | Err(crate::shell::ShellError::UnknownPane)
+        ),
+        "terminated execution must not remain bound to the pre-terminate Pane"
     );
     assert_eq!(
         root.snapshot().eligibility,

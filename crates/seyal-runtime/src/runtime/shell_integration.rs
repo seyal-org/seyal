@@ -131,7 +131,10 @@ impl Runtime {
                         super::session_overlay::DerivedComposer::Relay { .. } => {
                             FencedAdmission::Relay
                         }
-                        super::session_overlay::DerivedComposer::Unavailable(_) => {
+                        super::session_overlay::DerivedComposer::Unavailable(_)
+                        | super::session_overlay::DerivedComposer::DirectInput { .. } => {
+                            // DirectInput is character-level Block-scoped input;
+                            // composer Submit/Relay admissions stay closed.
                             FencedAdmission::Busy
                         }
                         super::session_overlay::DerivedComposer::Submit => {

@@ -59,6 +59,28 @@ final class CommandBlockView: NSView {
     private let bodyTranscript = BlockBodyTranscript(frame: .zero)
     /// Host click on the header; `true` when the card is already selected.
     var onSelect: ((Bool) -> Void)?
+    /// Explicit ADR-026 setup action. Candidate state is offered from the
+    /// running host Block's context menu, never as an automatic banner.
+    var canRequestSessionBootstrap = false
+    var onRequestSessionBootstrap: (() -> Void)?
+    /// Explicit fallback for foreground programs that require direct terminal
+    /// input. The request is fenced against the current Runtime target in Rust.
+    var canInteractWithRunningProgram = false {
+        didSet {
+            guard oldValue != canInteractWithRunningProgram else { return }
+            interactButton.isHidden = !canInteractWithRunningProgram
+            if canInteractWithRunningProgram {
+                statusTrailingToHeader.isActive = false
+                statusTrailingToInteractButton.isActive = true
+            } else {
+                statusTrailingToInteractButton.isActive = false
+                statusTrailingToHeader.isActive = true
+            }
+        }
+    }
+    var onInteractWithRunningProgram: (() -> Void)?
+    /// Flow DirectInput: click the Running Block to focus Metal (#1468).
+    var onRequestDirectInputFocus: (() -> Void)?
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
     var isSelected = false {
         didSet {
@@ -73,10 +95,13 @@ final class CommandBlockView: NSView {
     private let prompt = NSTextField(labelWithString: "")
     private let command = NSTextField(labelWithString: "")
     private let status = NSTextField(labelWithString: "")
+    private let interactButton = NSButton(title: "Interact", target: nil, action: nil)
     private let seam = NSView()
     private var state: UInt16
     private var bodyHeight: NSLayoutConstraint!
     private var seamTopConstraint: NSLayoutConstraint!
+    private var statusTrailingToHeader: NSLayoutConstraint!
+    private var statusTrailingToInteractButton: NSLayoutConstraint!
     private var theme: NativeTheme?
 
     static func visibleOutputLineCount(_ text: String) -> Int {
@@ -119,6 +144,15 @@ final class CommandBlockView: NSView {
         status.tag = 2
         status.setContentHuggingPriority(.required, for: .horizontal)
         status.translatesAutoresizingMaskIntoConstraints = false
+        interactButton.isBordered = false
+        interactButton.bezelStyle = .inline
+        interactButton.font = .systemFont(ofSize: 11, weight: .medium)
+        interactButton.target = self
+        interactButton.action = #selector(interactWithRunningProgramFromMenu)
+        interactButton.setAccessibilityLabel("Interact with running program")
+        interactButton.setAccessibilityIdentifier("seyal-running-program-interact")
+        interactButton.isHidden = true
+        interactButton.translatesAutoresizingMaskIntoConstraints = false
         seam.translatesAutoresizingMaskIntoConstraints = false
         seam.wantsLayer = true
         header.translatesAutoresizingMaskIntoConstraints = false
@@ -131,6 +165,7 @@ final class CommandBlockView: NSView {
         header.addSubview(self.prompt)
         header.addSubview(command)
         header.addSubview(status)
+        header.addSubview(interactButton)
         header.wantsLayer = true
         header.layer?.cornerRadius = 6
         addSubview(header)
@@ -141,6 +176,11 @@ final class CommandBlockView: NSView {
         )
         // Rust owns session classification; SSH Blocks retain the normal Block geometry.
         seamTopConstraint = seam.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 12)
+        statusTrailingToHeader = status.trailingAnchor.constraint(equalTo: header.trailingAnchor)
+        statusTrailingToInteractButton = status.trailingAnchor.constraint(
+            lessThanOrEqualTo: interactButton.leadingAnchor,
+            constant: -8
+        )
         NSLayoutConstraint.activate([
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -150,7 +190,10 @@ final class CommandBlockView: NSView {
             self.prompt.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             command.leadingAnchor.constraint(equalTo: self.prompt.trailingAnchor, constant: 8),
             command.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            status.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            statusTrailingToHeader,
+            interactButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -8),
+            interactButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            interactButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
             status.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             command.trailingAnchor.constraint(lessThanOrEqualTo: status.leadingAnchor, constant: -12),
             body.leadingAnchor.constraint(equalTo: command.leadingAnchor),
@@ -238,7 +281,12 @@ final class CommandBlockView: NSView {
         // The card is itself an accessibility element, so XCUI cannot see the
         // body (the live-tail target) without an explicit child list. Header
         // labels stay in the tree so VoiceOver still hears prompt, command, and status.
-        return [prompt, command, status, bodyTranscript]
+        var children: [Any] = [prompt, command, status]
+        if canInteractWithRunningProgram {
+            children.append(interactButton)
+        }
+        children.append(bodyTranscript)
+        return children
     }
 
     /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must
@@ -246,6 +294,11 @@ final class CommandBlockView: NSView {
     /// once output exists — a header-only gesture never sees that click.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
+        // Keep the explicit Running Block action interactive. Returning the
+        // Block for every child hit previously swallowed NSButton mouse events.
+        if hit === interactButton || hit?.isDescendant(of: interactButton) == true {
+            return hit
+        }
         return hit == nil ? nil : self
     }
 
@@ -261,7 +314,42 @@ final class CommandBlockView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        onRequestDirectInputFocus?()
         onSelect?(isSelected)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard canRequestSessionBootstrap || canInteractWithRunningProgram else {
+            return super.menu(for: event)
+        }
+        let menu = NSMenu()
+        if canInteractWithRunningProgram {
+            let interact = NSMenuItem(
+                title: "Interact with running program",
+                action: #selector(interactWithRunningProgramFromMenu),
+                keyEquivalent: ""
+            )
+            interact.target = self
+            menu.addItem(interact)
+        }
+        if canRequestSessionBootstrap {
+        let enable = NSMenuItem(
+            title: seyal_bridge_session_copy(4).map { String(cString: $0) } ?? "",
+            action: #selector(requestSessionBootstrapFromMenu),
+            keyEquivalent: ""
+        )
+        enable.target = self
+        menu.addItem(enable)
+        }
+        return menu
+    }
+
+    @objc private func interactWithRunningProgramFromMenu() {
+        onInteractWithRunningProgram?()
+    }
+
+    @objc private func requestSessionBootstrapFromMenu() {
+        onRequestSessionBootstrap?()
     }
 
     func apply(theme: NativeTheme) {
@@ -283,6 +371,7 @@ final class CommandBlockView: NSView {
             status.textColor = theme.muted
             seam.layer?.backgroundColor = theme.seam.cgColor
         }
+        interactButton.contentTintColor = theme.accent
     }
 }
 

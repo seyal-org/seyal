@@ -24,7 +24,8 @@ use seyal_runtime::{
         encode_frame, BlockTimeline, ComposerEligibility, ComposerResult, ComposerResultCode,
         ComposerStatus, ComposerTarget, ComposerTargetMode, CreateExecutionResult, ErrorCode,
         ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot, Lifecycle, MessageType, Role,
-        SessionOffer, SessionStatus, TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        SessionOffer, SessionOverlayWire, SessionStatus, TerminateExecutionResult, HEADER_LEN,
+        MAX_FRAME_PAYLOAD,
     },
     pass8::BlockState,
     AttachmentId, ExecutionId,
@@ -298,8 +299,9 @@ impl LocalDisplayClient {
         self.composer_status
     }
 
-    /// ADR-026 session affordance for the thin host. `kind`: 0 none, 1 enable
-    /// Blocks (Candidate/Declined/Failed), 2 consent offer. Copy stays Rust.
+    /// ADR-026 session surface for the thin host. `kind`: 0 hidden banner,
+    /// 2 consent offer. A hidden surface may carry a Candidate host Block id
+    /// for its explicit context-menu action. Copy stays Rust.
     pub fn projected_session_surface(&self) -> (u8, u64, u64) {
         if !self.session_bootstrap_negotiated {
             return (0, 0, 0);
@@ -310,18 +312,34 @@ impl LocalDisplayClient {
         let Some(status) = self.session_status else {
             return (0, 0, 0);
         };
-        use seyal_runtime::local_ipc::framing::SessionOverlayWire;
         match status.overlay {
             SessionOverlayWire::Candidate
             | SessionOverlayWire::Declined
-            | SessionOverlayWire::Failed => (1, status.host_block_id, status.revision),
-            _ => (0, status.host_block_id, status.revision),
+            | SessionOverlayWire::Failed => (0, status.host_block_id, status.revision),
+            _ => (0, 0, status.revision),
         }
+    }
+
+    /// Host Block eligible for an explicit session request from its context
+    /// menu. Candidate state is never rendered as a proactive banner.
+    pub fn explicit_session_request_target(&self) -> Option<(u64, u64)> {
+        if !self.session_bootstrap_negotiated || self.session_offer.is_some() {
+            return None;
+        }
+        let status = self.session_status?;
+        matches!(
+            status.overlay,
+            SessionOverlayWire::Candidate
+                | SessionOverlayWire::Declined
+                | SessionOverlayWire::Failed
+        )
+        .then_some((status.host_block_id, status.revision))
+        .filter(|(block_id, _)| *block_id != 0)
     }
 
     /// Eligibility byte and revision the host should relay. Type 23 stays the
     /// legacy Busy/Available fact. When a negotiated type 45 says Relay, the
-    /// byte is 4 and the revision moves even if type 23 did not.
+    /// byte is 4; DirectInput is 5. The revision moves even if type 23 did not.
     pub fn projected_composer_status(&self) -> Option<(u8, u64, [u8; 16])> {
         let status = self.composer_status?;
         let revision = if self.composer_projection_revision == 0 {
@@ -341,7 +359,7 @@ impl LocalDisplayClient {
         Some((eligibility, revision, status.attachment_id.to_bytes()))
     }
 
-    pub fn projected_composer_target(&self) -> Option<(u64, u64, u64, u8)> {
+    pub fn projected_composer_target(&self) -> Option<(u64, u64, u64, u8, u8)> {
         if !self.session_bootstrap_negotiated {
             return None;
         }
@@ -351,6 +369,7 @@ impl LocalDisplayClient {
             target.target_generation,
             target.revision,
             target.mode as u8,
+            target.target as u8,
         ))
     }
 
@@ -371,6 +390,7 @@ impl LocalDisplayClient {
         ) {
             (true, Some(ComposerTargetMode::Submit)) => 1,
             (true, Some(ComposerTargetMode::Relay)) => 4,
+            (true, Some(ComposerTargetMode::DirectInput)) => 5,
             (true, Some(ComposerTargetMode::Unavailable)) => 2,
             _ => match status.eligibility {
                 ComposerEligibility::Available => 1,

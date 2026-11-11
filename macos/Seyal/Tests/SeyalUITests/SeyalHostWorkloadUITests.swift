@@ -27,6 +27,171 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "824-high-volume")
     }
 
+    func testLocalPythonDoesNotShowSSHSetupPromptAndBlockStaysBottomDocked() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "python3 -q")
+
+        let pythonBlock = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "python3 -q")
+        ).firstMatch
+        XCTAssertTrue(pythonBlock.waitForExistence(timeout: 12), "Python must stay in its running Block")
+
+        let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
+        XCTAssertFalse(
+            setupTitle.waitForExistence(timeout: 2),
+            "a non-SSH Candidate must not interrupt a Python REPL with a setup banner"
+        )
+
+        let blocksScroll = app.scrollViews["seyal-blocks-scroll"].firstMatch
+        XCTAssertTrue(blocksScroll.exists)
+        // Warp-like DirectInput: Busy dock retracts so the Running Block is the
+        // only typing surface (no second composer place).
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 2),
+            "DirectInput must hide the Busy composer dock while the REPL owns keys"
+        )
+        XCTAssertLessThanOrEqual(
+            blocksScroll.frame.maxY - pythonBlock.frame.maxY,
+            96,
+            "the active Python Block must stay docked at the live end of the transcript"
+        )
+        // ADR-009 #1466 DirectInput: no Interact→Raw for ordinary local REPLs.
+        XCTAssertFalse(
+            app.buttons["seyal-running-program-interact"].waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for local python"
+        )
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        let directRoute = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directRoute], timeout: 5),
+            .completed,
+            "Flow DirectInput must expose the terminal AX text route without Raw"
+        )
+        let pythonBody = pythonBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        XCTAssertTrue(pythonBody.waitForExistence(timeout: 5))
+        pythonBody.click()
+        let pythonMarker = "seyal-m003-python-repl-input"
+        app.typeText("print('\(pythonMarker)'); raise SystemExit")
+        app.typeKey("\r", modifierFlags: [])
+        let pythonOutput = expectation(
+            for: NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                pythonMarker,
+                pythonMarker
+            ),
+            evaluatedWith: pythonBody,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [pythonOutput], timeout: 8),
+            .completed,
+            "keyboard input must reach the local Python REPL via Block-scoped DirectInput"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer dock returns after Python exits")
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 5),
+            .completed,
+            "composer must leave DirectInput after Python exits"
+        )
+        attachScreenshot(app, name: "m003-local-python-bottom-dock")
+    }
+
+    func testNodeREPLDoesNotShowUnsolicitedSessionSetupBanner() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/node") else {
+            throw XCTSkip("Node.js is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "/opt/homebrew/bin/node")
+
+        let nodeBlock = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES 'seyal-block-[0-9]+' AND label CONTAINS %@", "/opt/homebrew/bin/node")
+        ).firstMatch
+        XCTAssertTrue(nodeBlock.waitForExistence(timeout: 12), "Node must run in its actual local PTY Block")
+        let setupTitle = app.descendants(matching: .any)["seyal-session-bootstrap-title"].firstMatch
+        XCTAssertFalse(
+            setupTitle.waitForExistence(timeout: 2),
+            "a non-SSH Node Candidate must not pop a session setup prompt"
+        )
+        XCTAssertFalse(
+            app.buttons["seyal-running-program-interact"].waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for local node"
+        )
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        XCTAssertEqual(
+            terminal.elementType,
+            .textView,
+            "Flow DirectInput must expose the terminal AX text route without Raw"
+        )
+        let nodeBody = nodeBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        XCTAssertTrue(nodeBody.waitForExistence(timeout: 5))
+        nodeBody.click()
+        let nodeMarker = "seyal-m003-node-repl-input"
+        app.typeText("console.log('\(nodeMarker)'); process.exit(0)")
+        app.typeKey("\r", modifierFlags: [])
+        let nodeOutput = expectation(
+            for: NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                nodeMarker,
+                nodeMarker
+            ),
+            evaluatedWith: nodeBody,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [nodeOutput], timeout: 8),
+            .completed,
+            "keyboard input must reach the local Node REPL via Block-scoped DirectInput"
+        )
+        // Warp-like: after the REPL exits, the Flow composer dock owns keys again
+        // without requiring a click back into the dock.
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), "composer editor returns after Node exits")
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 5),
+            .completed,
+            "composer must leave Busy/DirectInput after Node exits"
+        )
+        let handoffMarker = "seyal-m003-composer-handoff"
+        app.typeText("echo \(handoffMarker)")
+        let draft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", handoffMarker),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [draft], timeout: 5),
+            .completed,
+            "composer must reclaim keyboard focus after Node exits (Warp-like handoff)"
+        )
+        attachScreenshot(app, name: "m003-node-no-session-banner")
+        app.terminate()
+    }
+
     /// #1379: completed Flow Blocks must paint output bodies, not titles-only
     /// chrome with an empty white Metal clip.
     func testCompletedFlowBlockKeepsPaintedOutputBody() throws {
@@ -378,6 +543,94 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         }
         assertFlowBlocksOrFail(in: app)
         attachScreenshot(app, name: "824-altscreen-return")
+    }
+
+    func testRealLessSessionTakesOverAndReturnsToFlow() throws {
+        let lessPath = "/usr/bin/less"
+        guard FileManager.default.isExecutableFile(atPath: lessPath) else {
+            throw XCTSkip("less is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer {
+            if app.state == .runningForeground, !composer.isHittable {
+                if terminal.isHittable { terminal.click() }
+                app.typeText("q")
+            }
+        }
+
+        submitComposerCommand(app, "\(lessPath) /etc/hosts")
+        let enteredTUI = expectation(
+            for: NSPredicate(format: "isHittable == false"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [enteredTUI], timeout: 12), .completed,
+            "real less must take over the pane instead of leaving the Flow composer active"
+        )
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.click()
+        app.typeText("q")
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 12), .completed,
+            "q in the actual less TUI must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-less-flow-return")
+    }
+
+    func testRealTopSessionReturnsToFlow() throws {
+        let topPath = "/usr/bin/top"
+        guard FileManager.default.isExecutableFile(atPath: topPath) else {
+            throw XCTSkip("top is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer {
+            if app.state == .runningForeground,
+               !composer.isHittable || app.buttons["seyal-running-program-interact"].exists
+            {
+                let interact = app.buttons["seyal-running-program-interact"]
+                if interact.isHittable { interact.click() }
+                if terminal.isHittable { terminal.click() }
+                app.typeText("q")
+            }
+        }
+
+        submitComposerCommand(app, "\(topPath) -o cpu")
+        let interact = app.buttons["seyal-running-program-interact"]
+        let startDeadline = Date().addingTimeInterval(12)
+        while Date() < startDeadline, composer.isHittable, !interact.exists {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(
+            !composer.isHittable || interact.exists,
+            "top must either enter its requested TUI or remain available through its running Block"
+        )
+        if composer.isHittable {
+            XCTAssertTrue(interact.isHittable, "Flow keeps its composer while top does not enter alternate screen")
+            interact.click()
+        }
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.click()
+        app.typeText("q")
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 12), .completed,
+            "q in the actual top TUI must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-top-flow-return")
     }
 
     func testGuiRelaunchReconnectsWithoutKillingExecution() throws {

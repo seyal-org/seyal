@@ -1,42 +1,5 @@
 import AppKit
 
-enum HistoryRangeRouting {
-    enum Destination: Equatable {
-        case primary
-        case secondary(UInt64)
-        case primaryAndSecondary(UInt64)
-        case discard
-    }
-
-    static func destination(
-        sourceDisplayHandle: UInt64,
-        primaryDisplayHandle: UInt64,
-        secondaryDisplayHandles: Set<UInt64>
-    ) -> Destination {
-        if sourceDisplayHandle == 0 {
-            return secondaryDisplayHandles.isEmpty ? .primary : .discard
-        }
-        // In multipane Flow, PaneLayoutView installs a durable
-        // SecondaryLivePaneHost for every visible leaf, including the focused
-        // pane. Its handle is also `primaryDisplayHandle` because that pane
-        // owns input, but its Block cards live in the per-pane host. Prefer
-        // the exact host before falling back to the single-pane transcript.
-        if secondaryDisplayHandles.contains(sourceDisplayHandle),
-           sourceDisplayHandle == primaryDisplayHandle,
-           primaryDisplayHandle != 0
-        {
-            return .primaryAndSecondary(sourceDisplayHandle)
-        }
-        if secondaryDisplayHandles.contains(sourceDisplayHandle) {
-            return .secondary(sourceDisplayHandle)
-        }
-        if sourceDisplayHandle == primaryDisplayHandle, primaryDisplayHandle != 0 {
-            return .primary
-        }
-        return .discard
-    }
-}
-
 @MainActor
 extension ProductChromeHostView {
     @objc func transcriptDidScroll() {
@@ -104,14 +67,75 @@ extension ProductChromeHostView {
     func installComposerStatusHandler() {
         pane.inputSurface.onComposerStatusChanged = { [weak self] status in
             guard let self else { return false }
-            let blockID = status.eligibility == 4 && status.targetMode == 2
-                ? status.targetBlockID : 0
-            self.relayTarget = (blockID, status.targetGeneration, status.targetMode)
+            let blockID = status.targetClass == 2 ? status.targetBlockID : 0
+            self.relayTarget = (
+                blockID,
+                status.targetGeneration,
+                status.targetRevision,
+                status.targetClass,
+                status.targetMode
+            )
             let accepted = self.relayComposerStatus(status)
             if accepted {
+                // Status can publish DirectInput / Running(b) without bumping
+                // snapshot generation. performChromeReconcile then short-circuits
+                // and never rebuildBlocks — empty transcript + Busy dock.
+                self.ensureRunningDirectInputBlockCards()
+                self.rebindDirectInputClickTargets()
                 self.reconcileChrome()
+                // Multipane hosts own their Busy dock; generation-stable status
+                // must still retract/restore DirectInput layout per Controller.
+                for host in self.centerColumn.secondaryHosts {
+                    host.refreshBlockScopedDirectInputPresentation()
+                }
+                // After Busy resigns the dock editor, reclaim Metal for DirectInput.
+                let snap = seyal_app_snapshot(self.pane.appHandle)
+                self.focusBlockScopedDirectInputIfEligible(snap)
             }
             return accepted
+        }
+    }
+
+    /// Project + rebuild when the Running DirectInput target has no card yet.
+    /// Never rebuild against an empty timeline: that would wipe cards and, if
+    /// snapshot generation does not move, leave Busy + blank transcript.
+    func ensureRunningDirectInputBlockCards() {
+        let targetID = relayTarget.blockID
+        guard targetID != 0, relayTarget.targetClass == 2 else { return }
+        guard blockCards[targetID] == nil else { return }
+        let snap = seyal_app_snapshot(pane.appHandle)
+        let direct = snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+            || snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        // Multipane Flow owns cards on SecondaryLivePaneHost; legacy transcript
+        // stays empty by design when secondary hosts are installed.
+        guard !direct, centerColumn.secondaryHosts.isEmpty else { return }
+        projectRuntimeBlocks()
+        let composer = seyal_app_composer(pane.appHandle)
+        let timelineContainsTarget = (0..<Int(composer.block_count)).contains { index in
+            seyal_app_block_row(pane.appHandle, UInt32(index)).id_lo == targetID
+        }
+        guard timelineContainsTarget else { return }
+        rebuildBlocks()
+        publishLiveTailBlocks()
+        publishBlockOutputFrame()
+    }
+
+    /// Keep Warp-like click-to-focus wired after late DirectInput publication.
+    func rebindDirectInputClickTargets() {
+        for (blockID, card) in blockCards {
+            let isRunningTarget = blockID != 0
+                && blockID == relayTarget.blockID
+                && relayTarget.targetClass == 2
+            card.onRequestDirectInputFocus = isRunningTarget
+                ? { [weak self, blockID] in
+                    guard let self else { return }
+                    let snap = seyal_app_snapshot(self.pane.appHandle)
+                    guard self.snapshotPublishesBlockScopedDirectInput(snap),
+                        blockID == self.relayTarget.blockID
+                    else { return }
+                    _ = self.focusBlockScopedDirectInputSurface()
+                }
+                : nil
         }
     }
 
@@ -140,23 +164,34 @@ extension ProductChromeHostView {
         syncTranscriptDocumentSize()
     }
 
-    /// Relay Runtime's composer eligibility into the Rust root unchanged
-    /// (#978). Rust decides what the composer shows; this only carries it.
+    /// Relay Runtime's composer eligibility and target into Rust unchanged.
+    /// Rust decides presentation and input ownership; this is a thin adapter.
     @discardableResult
     func relayComposerStatus(_ status: NativeComposerStatus) -> Bool {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS.rawValue)
-        action.applySnapshotFence(snapshot)
-        action.reserved = UInt32(status.eligibility)
-        action.target_execution_lo = status.revision
-        return seyal_app_apply(pane.appHandle, &action) == 0
+        let accepted = seyal_app_apply_runtime_composer_status(
+            pane.appHandle,
+            status.eligibility,
+            status.revision,
+            status.targetBlockID,
+            status.targetGeneration,
+            status.targetRevision,
+            status.targetClass,
+            status.targetMode
+        ) == 0
+        if accepted {
+            let snapshot = seyal_app_snapshot(pane.appHandle)
+            focusBlockScopedDirectInputIfEligible(snapshot)
+        }
+        return accepted
     }
 
     func applyTranscriptPresentation(_ snapshot: SeyalAppSnapshot) {
         pane.inputSurface.activateTranscriptDisplayHandle(activeBlockDisplayHandle)
+        // The explicit Running Block action enters Raw without a full chrome
+        // reconciliation. Keep AppKit's first-responder and AX route in sync
+        // with Rust's authoritative eligibility on every presentation change.
+        pane.inputSurface.syncInputRoutePresentation()
+        focusBlockScopedDirectInputIfEligible(snapshot)
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct
@@ -195,6 +230,11 @@ extension ProductChromeHostView {
         blockCards.removeAll(keepingCapacity: true)
         let composer = seyal_app_composer(pane.appHandle)
         let count = Int(composer.block_count)
+        let sessionDisplayHandle = activeBlockDisplayHandle
+        let sessionSurface = seyal_bridge_session_surface_for_handle(sessionDisplayHandle)
+        let requestableSessionHost = sessionSurface.kind == 0
+            ? sessionSurface.host_block_id
+            : 0
         let floorLo = composer.canvas_floor_block_id_lo
         let floorHi = composer.canvas_floor_block_id_hi
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
@@ -258,6 +298,18 @@ extension ProductChromeHostView {
             card.setOutputLines(lines, cellHeight: cellHeight)
             card.setAccessibilityIdentifier("seyal-block-\(visibleIndex)")
             card.setBodyAccessibilityIdentifier("seyal-block-\(visibleIndex)-body")
+            card.canRequestSessionBootstrap = blockID != 0 && blockID == requestableSessionHost
+            card.onRequestSessionBootstrap = card.canRequestSessionBootstrap
+                ? { [weak self, sessionDisplayHandle, blockID, sessionRevision = sessionSurface.revision] in
+                    _ = seyal_bridge_session_request_for_handle(
+                        sessionDisplayHandle,
+                        blockID,
+                        sessionRevision
+                    )
+                    self?.sessionBootstrap.reconcile()
+                }
+                : nil
+            configureRunningProgramInteraction(for: card, blockID: blockID, flags: row.flags)
             visibleIndex += 1
             if blockID != 0,
                let retainedRange = pane.inputSurface.retainedHistoryRange(
@@ -329,19 +381,22 @@ extension ProductChromeHostView {
     func applyComposerPlacement() {
         let shouldRestoreEditorFocus = composer.editorIsFirstResponder
         let snapshot = seyal_app_snapshot(pane.appHandle)
-        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+        let rawOrTui = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        if rawOrTui {
+            restoreDockComposerPresentation(restoreFocus: shouldRestoreEditorFocus)
+            return
+        }
+        // Warp-like DirectInput: retract the Busy dock and let the Running Block
+        // own the live input surface (no second typing place).
+        if snapshotPublishesBlockScopedDirectInput(snapshot) {
+            presentDirectInputMergedBlockSurface()
+            return
+        }
         let target = relayTarget.mode == 2 && relayTarget.generation != 0
             ? blockCards[relayTarget.blockID] : nil
-        guard !direct, relayTarget.blockID != 0, let target else {
-            setRelayTranscriptViewportBottomAnchored(false)
-            if composerInlineBlockID != 0 {
-                composerInlineBlockID = 0
-                composer.setInlineRelayPresentation(false)
-                composer.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate(composerDockConstraints)
-                if shouldRestoreEditorFocus { composer.focusEditor() }
-            }
+        guard relayTarget.blockID != 0, let target else {
+            restoreDockComposerPresentation(restoreFocus: shouldRestoreEditorFocus)
             return
         }
         // Relay positions the Pane composer over the running prompt. Keep the
@@ -353,12 +408,13 @@ extension ProductChromeHostView {
             return
         }
         NSLayoutConstraint.deactivate(composerDockConstraints)
+        composer.translatesAutoresizingMaskIntoConstraints = true
         composer.setInlineRelayPresentation(true)
         // Keep the one Pane composer above the full-pane Metal surface. A
         // Block is an output/history projection and is underneath that surface;
         // reparenting the editor into its body makes AX see input that pixels
         // cannot paint. The converted cursor rect follows transcript scrolling.
-        composer.translatesAutoresizingMaskIntoConstraints = true
+        composer.setFrameSize(NSSize(width: composer.frame.width, height: 24))
         liveContent.addSubview(composer, positioned: .above, relativeTo: pane)
         composerInlineBlockID = relayTarget.blockID
         layoutSubtreeIfNeeded()
@@ -368,7 +424,39 @@ extension ProductChromeHostView {
             scrollTranscriptToLiveEnd()
         }
         positionInlineComposerAtCurrentCursor()
-        if shouldRestoreEditorFocus { composer.focusEditor() }
+        if shouldRestoreEditorFocus { routeFocus() }
+    }
+
+    /// Hide the Pane dock and fill the transcript to the Pane bottom while
+    /// Block-scoped DirectInput owns keys in the Running Block live region.
+    func presentDirectInputMergedBlockSurface() {
+        if composerInlineBlockID != 0 {
+            composerInlineBlockID = 0
+            composer.setInlineRelayPresentation(false)
+            composer.translatesAutoresizingMaskIntoConstraints = false
+        }
+        NSLayoutConstraint.deactivate(composerDockConstraints)
+        setRelayTranscriptViewportBottomAnchored(true)
+        composer.isHidden = true
+        layoutSubtreeIfNeeded()
+        syncTranscriptDocumentSize()
+        if followingLiveEnd {
+            scrollTranscriptToLiveEnd()
+        }
+        publishBlockOutputFrame()
+    }
+
+    func restoreDockComposerPresentation(restoreFocus: Bool) {
+        setRelayTranscriptViewportBottomAnchored(false)
+        if composerInlineBlockID != 0 {
+            composerInlineBlockID = 0
+            composer.setInlineRelayPresentation(false)
+            composer.translatesAutoresizingMaskIntoConstraints = false
+        }
+        composer.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate(composerDockConstraints)
+        composer.reconcile()
+        if restoreFocus { routeFocus() }
     }
 
     func setRelayTranscriptViewportBottomAnchored(_ anchored: Bool) {
@@ -583,8 +671,19 @@ extension ProductChromeHostView {
     func syncTranscriptDocumentSize() {
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
-        let contentHeight = max(fitted.height - transcriptLeadingSpacerHeight.constant, 0)
+        // Measure the arranged cards themselves. NSStackView.fittingSize can
+        // retain the stretched document height after a previous tall stream;
+        // subtracting the spacer from that stale value leaves short Blocks
+        // stranded above the composer instead of bottom-docking them (#1426).
         let hasCards = !blockCards.isEmpty
+        let contentHeight = hasCards
+            ? TranscriptDocumentSizing.contentHeight(
+                arrangedSubviews: blocks.arrangedSubviews,
+                leadingSpacer: transcriptLeadingSpacer,
+                spacing: blocks.spacing,
+                edgeInsets: blocks.edgeInsets
+            )
+            : 0
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let height = max(contentHeight, viewportHeight, 1)
@@ -645,12 +744,44 @@ extension ProductChromeHostView {
         for (blockID, card) in blockCards {
             let clip = card.body.convert(card.body.bounds, to: surface)
             guard clip.width > 0, clip.height > 0 else { continue }
+            let historyRows: Range<Int>?
+            let historyRequestID: UInt64
+            let historyRevision: UInt64
+            if let range = surface.retainedHistoryRange(
+                blockID: blockID,
+                displayHandle: activeBlockDisplayHandle
+            ) {
+                let visibleBody = card.body.convert(surface.bounds, from: surface)
+                    .intersection(card.body.bounds)
+                let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
+                let firstVisibleRow = HistoryRenderWindow.firstVisibleRow(
+                    documentBounds: card.body.bounds,
+                    visibleBounds: visibleBody,
+                    isFlipped: card.body.isFlipped,
+                    cellHeight: cellHeight
+                )
+                let visibleRowCount = Int((visibleBody.height / cellHeight).rounded(.up))
+                historyRows = HistoryRenderWindow(
+                    totalRows: range.rows.count,
+                    firstVisibleRow: firstVisibleRow,
+                    visibleRowCount: visibleRowCount
+                ).rows
+                historyRequestID = range.requestID
+                historyRevision = range.revision
+            } else {
+                historyRows = nil
+                historyRequestID = 0
+                historyRevision = 0
+            }
             regions.append(NativeTranscriptRegion(
                 id: blockID,
                 displayHandle: activeBlockDisplayHandle,
                 origin: clip.origin,
                 clip: clip,
-                suppressesCursor: blockID == relayTarget.blockID && relayTarget.mode == 2
+                suppressesCursor: blockID == relayTarget.blockID && relayTarget.mode == 2,
+                historyRows: historyRows,
+                historyRequestID: historyRequestID,
+                historyRevision: historyRevision
             ))
         }
         return regions

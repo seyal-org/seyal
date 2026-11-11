@@ -45,6 +45,744 @@ final class SeyalPaneSplitUITests: XCTestCase {
         assertSingleLiveSurface(in: app, focusedRegion: focused)
     }
 
+    /// #1464: ⌘D from the composer must re-route first responder so typing
+    /// appears in the visible pane editor without an extra click.
+    func testComposerShowsTypedDraftImmediatelyAfterCommandDSplit() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+        let editorBefore = element(app, "seyal-composer-editor")
+        XCTAssertTrue(editorBefore.waitForExistence(timeout: 8))
+        editorBefore.click()
+
+        app.typeKey("d", modifierFlags: .command)
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        XCTAssertTrue(
+            element(app, "seyal-pane-presentation-host").waitForExistence(timeout: 8),
+            "focused Flow leaf keeps a durable presentation host after ⌘D"
+        )
+
+        let marker = "cmd-d-visible-\(Int(Date().timeIntervalSince1970) % 100_000)"
+        // Do not click the composer or pane — that masked #1464.
+        app.typeText("echo \(marker)")
+
+        let editor = element(app, "seyal-composer-editor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        let visibleDraft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", marker),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [visibleDraft], timeout: 5),
+            .completed,
+            "typed text must appear in the visible composer after ⌘D without clicking; value=\(editor.value ?? "nil")"
+        )
+        editor.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: marker)
+                .waitForExistence(timeout: 10),
+            "Return must still submit the visible draft to Blocks"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    func testSecondPaneComposerShowsTypedDraftBeforeSubmitAfterPriorCommands() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand("ls", in: app)
+        submitComposerCommand("ls -lrt", in: app)
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+
+        let secondPane = element(app, "seyal-pane-region-1")
+        let composer = element(app, "seyal-composer")
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        let editor = composer.descendants(matching: .any)
+            .matching(identifier: "seyal-composer-editor")
+            .firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        XCTAssertTrue(secondPane.frame.insetBy(dx: -1, dy: -1).contains(editor.frame))
+        let marker = "pane2-visible"
+        let command = "echo \(marker)"
+        app.typeText(command)
+
+        let visibleDraft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", marker),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [visibleDraft], timeout: 5),
+            .completed,
+            "typed text must appear in the second-pane composer before Return; value=\(editor.value ?? "nil")"
+        )
+        let draftScreenshot = editor.screenshot()
+        let attachment = XCTAttachment(screenshot: draftScreenshot)
+        attachment.name = "Second pane composer draft before submit"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let recognizedDraft = try recognizedText(in: draftScreenshot)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        XCTAssertTrue(
+            recognizedDraft.contains(marker),
+            "the second-pane draft must be visibly painted before Return; OCR=\(recognizedDraft)"
+        )
+        XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
+
+        editor.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: marker)
+                .waitForExistence(timeout: 10),
+            "the visible draft must submit to the focused pane's Block timeline"
+        )
+
+        element(app, "seyal-pane-region-0").click()
+        waitForFocus(app, region: 0)
+        let unfocusedEditor = element(app, "seyal-secondary-composer-editor")
+        XCTAssertTrue(unfocusedEditor.waitForExistence(timeout: 8))
+        XCTAssertTrue(secondPane.frame.insetBy(dx: -1, dy: -1).contains(unfocusedEditor.frame))
+        let unfocusedMarker = "pane2-unfocused"
+        unfocusedEditor.click()
+        app.typeText("echo \(unfocusedMarker)")
+        waitForFocus(app, region: 1)
+        let refocusedUnfocusedEditor = element(app, "seyal-composer-editor")
+        XCTAssertTrue(refocusedUnfocusedEditor.waitForExistence(timeout: 8))
+        let unfocusedDraft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", unfocusedMarker),
+            evaluatedWith: refocusedUnfocusedEditor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [unfocusedDraft], timeout: 5),
+            .completed,
+            "clicking an unfocused pane composer must transfer focus without losing typing; value=\(refocusedUnfocusedEditor.value ?? "nil")"
+        )
+        XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
+        refocusedUnfocusedEditor.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: unfocusedMarker).waitForExistence(timeout: 10),
+            "typing into an unfocused pane's composer must submit to that pane"
+        )
+
+        let clickedMarker = "pane2-clicked"
+        let primaryEditor = element(app, "seyal-composer-editor")
+        XCTAssertTrue(primaryEditor.waitForExistence(timeout: 8))
+        primaryEditor.click()
+        primaryEditor.typeText("echo \(clickedMarker)")
+        let clickedDraft = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", clickedMarker),
+            evaluatedWith: primaryEditor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [clickedDraft], timeout: 5),
+            .completed,
+            "clicking the focused pane editor must keep subsequent typing in that editor"
+        )
+        primaryEditor.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(
+            anyPaneBlock(in: app, containing: clickedMarker).waitForExistence(timeout: 10),
+            "text typed after an explicit composer click must submit in the same pane"
+        )
+    }
+
+    func testSecondPanePythonReceivesInputViaDirectInput() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        submitComposerCommand("python3 -q", in: app, expectBlock: false)
+        XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
+
+        let secondPane = element(app, "seyal-pane-region-1")
+        XCTAssertFalse(
+            element(app, "seyal-running-program-interact").waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for Pane 2 python"
+        )
+        // Leaf hosts sit above regions in the view tree; locate by frame.
+        let terminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: secondPane,
+            timeout: 8
+        )
+        let directRoute = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directRoute], timeout: 8),
+            .completed,
+            "Flow DirectInput must expose Pane 2 terminal input without Interact→Raw"
+        )
+
+        let pythonBlock = anyPaneBlock(in: app, containing: "python3")
+        XCTAssertTrue(
+            pythonBlock.waitForExistence(timeout: 12),
+            "Pane 2 must keep the running python Block under DirectInput"
+        )
+        XCTAssertTrue(
+            secondPane.frame.insetBy(dx: -1, dy: -1).contains(
+                CGPoint(x: pythonBlock.frame.midX, y: pythonBlock.frame.midY)
+            ),
+            "python Block must sit in Pane 2"
+        )
+        let pythonBody = pythonBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        if pythonBody.waitForExistence(timeout: 5) {
+            pythonBody.click()
+        } else {
+            terminal.click()
+        }
+        let evaluatedOutput = "seyalpy-ok"
+        app.typeText("print('seyalpy'+'-ok')")
+        app.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(secondPane.frame.insetBy(dx: -1, dy: -1).contains(terminal.frame))
+        let renderedText = try waitForRenderedText(evaluatedOutput, in: terminal)
+        XCTAssertTrue(
+            renderedText.contains(evaluatedOutput),
+            "Python must evaluate the typed expression in Pane 2; the computed result is absent from the source; OCR=\(renderedText)"
+        )
+    }
+
+    /// Headed #1467 regression: after Ctrl+C, Pane 2 python must keep
+    /// DirectInput (composer stays retracted), then Ctrl+D (EOF) must exit the
+    /// REPL and restore the Available composer — the multipane exit path users
+    /// hit. Prefer classic REPL so pyrepl post-SIGINT quirks do not hide the
+    /// DirectInput ownership contract under test.
+    func testSecondPanePythonControlCThenControlDExitsDirectInput() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        // System Python 3.9 classic REPL: deterministic empty-line EOF after SIGINT.
+        // mise/pyrepl (3.13+) can swallow a lone post-SIGINT EOF in some TERM setups.
+        submitComposerCommand("/usr/bin/python3 -q", in: app, expectBlock: false)
+
+        let secondPane = element(app, "seyal-pane-region-1")
+        let terminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: secondPane,
+            timeout: 8
+        )
+        let directBefore = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directBefore], timeout: 8),
+            .completed,
+            "Pane 2 python must enter DirectInput before Ctrl+C"
+        )
+        let pythonBody = anyPaneBlock(in: app, containing: "python3")
+            .descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier ENDSWITH '-body'"))
+            .firstMatch
+        if pythonBody.waitForExistence(timeout: 5) {
+            pythonBody.click()
+        } else {
+            terminal.click()
+        }
+
+        app.typeKey("c", modifierFlags: .control)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertEqual(
+            terminal.elementType,
+            .textView,
+            "first Ctrl+C must keep Pane 2 python DirectInput (composer must not steal keys)"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        if composer.exists {
+            XCTAssertFalse(
+                composer.isHittable,
+                "python DirectInput dock must stay retracted after the first Ctrl+C"
+            )
+        }
+
+        // Re-click so XCUI Ctrl+D lands on the live surface after SIGINT.
+        if pythonBody.exists {
+            pythonBody.click()
+        } else {
+            terminal.click()
+        }
+        app.typeKey("d", modifierFlags: .control)
+
+        // Match single-pane HostWorkload restore: editor exists + Available mode
+        // (isHittable alone can lag while the dock is reclaiming focus).
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        XCTAssertTrue(
+            editor.waitForExistence(timeout: 12),
+            "Pane 2 composer dock must return after python Ctrl+C then Ctrl+D"
+        )
+        let available = expectation(
+            for: NSPredicate(format: "value == %@", "available"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [available], timeout: 8),
+            .completed,
+            "Pane 2 python Ctrl+D must exit DirectInput and restore Available composer"
+        )
+        let leftDirectInput = expectation(
+            for: NSPredicate { _, _ in terminal.elementType != .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [leftDirectInput], timeout: 8),
+            .completed,
+            "Pane 2 terminal must leave DirectInput textArea after python Ctrl+D"
+        )
+    }
+
+    /// After the first Ctrl+C, Node still owns the PTY; DirectInput must not
+    /// hand keys to an Available composer before the second Ctrl+C / Ctrl+D.
+    func testSecondPaneNodeControlCKeepsDirectInputThenExits() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        submitComposerCommand("node", in: app, expectBlock: false)
+
+        let secondPane = element(app, "seyal-pane-region-1")
+        let terminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: secondPane,
+            timeout: 8
+        )
+        let directBefore = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directBefore], timeout: 8),
+            .completed,
+            "Pane 2 node must enter DirectInput before Ctrl+C"
+        )
+        let nodeBody = anyPaneBlock(in: app, containing: "node")
+            .descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier ENDSWITH '-body'"))
+            .firstMatch
+        if nodeBody.waitForExistence(timeout: 5) {
+            nodeBody.click()
+        } else {
+            terminal.click()
+        }
+
+        app.typeKey("c", modifierFlags: .control)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        XCTAssertEqual(
+            terminal.elementType,
+            .textView,
+            "first Ctrl+C must keep Pane 2 DirectInput (composer must not steal keys)"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        if composer.exists {
+            XCTAssertFalse(
+                composer.isHittable,
+                "DirectInput dock must stay retracted after the first Ctrl+C"
+            )
+        }
+
+        app.typeKey("d", modifierFlags: .control)
+        let returned = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: composer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returned], timeout: 12),
+            .completed,
+            "Pane 2 node Ctrl+D must exit DirectInput and restore the composer"
+        )
+    }
+
+    /// Multipane Flow DirectInput must deliver Ctrl+C (0x03) and Ctrl+D (0x04)
+    /// to the focused Pane 2 PTY without Interact→Raw (#1467 headed regression).
+    func testSecondPaneDirectInputControlCAndDReachPty() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-di-ctrl-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let capture = directory.appendingPathComponent("captured.bin")
+        let ready = directory.appendingPathComponent("ready")
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let script = """
+        import os, select, sys, termios, time, tty
+        fd = sys.stdin.fileno()
+        saved = termios.tcgetattr(fd)
+        data = bytearray()
+        path = \(String(reflecting: capture.path))
+        def flush():
+            with open(path, "wb") as output:
+                output.write(data)
+        try:
+            tty.setraw(fd)
+            os.write(1, b"SEYAL-DI-CTRL-READY\\n")
+            open(\(String(reflecting: ready.path)), "wb").close()
+            flush()
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                if not select.select([fd], [], [], 0.25)[0]:
+                    continue
+                chunk = os.read(fd, 64)
+                if not chunk:
+                    break
+                data.extend(chunk)
+                flush()
+                if 0x03 in data and 0x04 in data and b"hi" in data:
+                    break
+        finally:
+            flush()
+            termios.tcsetattr(fd, termios.TCSANOW, saved)
+        """
+        let scriptURL = directory.appendingPathComponent("receive.py")
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        submitComposerCommand("/usr/bin/python3 '\(scriptURL.path)'", in: app, expectBlock: false)
+
+        let secondPane = element(app, "seyal-pane-region-1")
+        let terminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: secondPane,
+            timeout: 8
+        )
+        let directRoute = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directRoute], timeout: 8),
+            .completed,
+            "Flow DirectInput must expose Pane 2 terminal before Ctrl+C/D"
+        )
+        let readyWait = expectation(
+            for: NSPredicate { _, _ in
+                FileManager.default.fileExists(atPath: ready.path)
+            },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [readyWait], timeout: 8), .completed)
+        let runningBody = anyPaneBlock(in: app, containing: "python3")
+            .descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier ENDSWITH '-body'"))
+            .firstMatch
+        if runningBody.waitForExistence(timeout: 5) {
+            runningBody.click()
+        } else {
+            terminal.click()
+        }
+        XCTAssertEqual(terminal.elementType, .textView, "Pane 2 must stay DirectInput before typing")
+
+        // Prove FR/DirectInput with printable bytes, then SIGINT + EOF.
+        app.typeText("hi")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        app.typeKey("c", modifierFlags: .control)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        app.typeKey("d", modifierFlags: .control)
+
+        let sawControls = expectation(
+            for: NSPredicate { _, _ in
+                guard let captured = try? Data(contentsOf: capture) else { return false }
+                return captured.contains(0x03) && captured.contains(0x04)
+            },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [sawControls], timeout: 12),
+            .completed,
+            "Pane 2 DirectInput must deliver printable + Ctrl+C/D; bytes=\(String(describing: try? Data(contentsOf: capture).map { String(format: "%02x", $0) }.joined(separator: " ")))"
+        )
+    }
+
+    /// Sibling Available must not clear the REPL pane's DirectInput; refocus
+    /// must type again (headed multipane regression).
+    func testDirectInputSurvivesFocusSwitchAwayAndBack() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        submitComposerCommand("python3 -q", in: app, expectBlock: false)
+
+        let replPane = element(app, "seyal-pane-region-1")
+        let otherPane = element(app, "seyal-pane-region-0")
+        let terminalBefore = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: replPane,
+            timeout: 8
+        )
+        let directBefore = expectation(
+            for: NSPredicate { _, _ in terminalBefore.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directBefore], timeout: 8),
+            .completed,
+            "REPL pane DirectInput must arm before the focus switch"
+        )
+
+        otherPane.click()
+        waitForFocus(app, region: 0)
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "python3").waitForExistence(timeout: 8))
+        // Unfocused REPL pane must retract its Busy dock (no Available/Busy chrome).
+        let unfocusedReplComposer = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
+        ).allElementsBoundByIndex.first { candidate in
+            let frame = candidate.frame
+            guard replPane.frame.insetBy(dx: -1, dy: -1)
+                .contains(CGPoint(x: frame.midX, y: frame.midY))
+            else { return false }
+            let value = candidate.value as? String
+            return value == "available" || value == "busy"
+        }
+        XCTAssertNil(
+            unfocusedReplComposer,
+            "unfocused DirectInput REPL must not expose an Available/Busy composer dock"
+        )
+        // Focused empty sibling must keep a visible composer (Available or
+        // pre-prompt Busy) — never inherit the sibling's DirectInput hide.
+        // Focused leaf uses primary AX id `seyal-composer` (not *-editor).
+        let focusedEmptyComposer = try waitForElement(
+            app,
+            matchingIdentifier: "^seyal-composer(-[0-9a-f]+-[0-9a-f]+)?$",
+            in: otherPane,
+            timeout: 8
+        )
+        let emptyVisible = expectation(
+            for: NSPredicate(format: "value == %@ OR value == %@", "available", "busy"),
+            evaluatedWith: focusedEmptyComposer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [emptyVisible], timeout: 5),
+            .completed,
+            "focused empty pane must keep a visible composer while the sibling REPL runs DirectInput; value=\(focusedEmptyComposer.value ?? "nil")"
+        )
+
+        replPane.click()
+        waitForFocus(app, region: 1)
+        let terminalAfter = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: replPane,
+            timeout: 8
+        )
+        let directAfter = expectation(
+            for: NSPredicate { _, _ in terminalAfter.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directAfter], timeout: 8),
+            .completed,
+            "refocusing the REPL pane must restore Block-scoped DirectInput after sibling Available"
+        )
+        let pythonBody = anyPaneBlock(in: app, containing: "python3").descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier ENDSWITH '-body'")).firstMatch
+        if pythonBody.waitForExistence(timeout: 5) {
+            pythonBody.click()
+        } else {
+            terminalAfter.click()
+        }
+        let evaluatedOutput = "seyalfocus-ok"
+        app.typeText("print('seyalfocus'+'-ok')")
+        app.typeKey("\r", modifierFlags: [])
+        let renderedText = try waitForRenderedText(evaluatedOutput, in: terminalAfter)
+        XCTAssertTrue(
+            renderedText.contains(evaluatedOutput),
+            "python must accept keys after focus leaves and returns; OCR=\(renderedText)"
+        )
+    }
+
+    /// node → then split must match split → then node: REPL dock retracts,
+    /// new pane keeps Available composer (#1467 ordering asymmetry).
+    func testNodeThenSplitKeepsDirectInputAndSiblingComposer() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/node") else {
+            throw XCTSkip("Node.js is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand("node", in: app, expectBlock: false)
+        let terminalBeforeSplit = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminalBeforeSplit.waitForExistence(timeout: 8))
+        let directBefore = expectation(
+            for: NSPredicate { _, _ in terminalBeforeSplit.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directBefore], timeout: 8),
+            .completed,
+            "single-pane node must enter Block-scoped DirectInput before split"
+        )
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        // Split focuses the new leaf; original node pane is unfocused.
+        waitForFocus(app, region: 1)
+        let nodePane = element(app, "seyal-pane-region-0")
+        let newPane = element(app, "seyal-pane-region-1")
+        XCTAssertTrue(anyPaneBlock(in: app, containing: "node").waitForExistence(timeout: 12))
+
+        let nodeComposerVisible = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
+        ).allElementsBoundByIndex.contains { candidate in
+            let frame = candidate.frame
+            guard nodePane.frame.insetBy(dx: -1, dy: -1)
+                .contains(CGPoint(x: frame.midX, y: frame.midY))
+            else { return false }
+            let value = candidate.value as? String
+            return value == "available" || value == "busy"
+        }
+        XCTAssertFalse(
+            nodeComposerVisible,
+            "after node→split, the unfocused node pane must keep DirectInput dock retracted"
+        )
+
+        let newComposer = try waitForElement(
+            app,
+            matchingIdentifier: "^seyal-composer(-[0-9a-f]+-[0-9a-f]+)?$",
+            in: newPane,
+            timeout: 8
+        )
+        let newVisible = expectation(
+            for: NSPredicate(format: "value == %@ OR value == %@", "available", "busy"),
+            evaluatedWith: newComposer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [newVisible], timeout: 5),
+            .completed,
+            "new pane after node→split must show a visible composer; value=\(newComposer.value ?? "nil")"
+        )
+
+        nodePane.click()
+        waitForFocus(app, region: 0)
+        let nodeTerminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: nodePane,
+            timeout: 8
+        )
+        let directAfter = expectation(
+            for: NSPredicate { _, _ in nodeTerminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directAfter], timeout: 8),
+            .completed,
+            "refocusing the node pane after split must restore DirectInput"
+        )
+    }
+
+    func testSecondPaneNodeReceivesInputWithoutSessionSetupPopup() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        element(app, "seyal-pane-region-1").click()
+        waitForFocus(app, region: 1)
+        waitForUsablePty(in: app)
+        submitComposerCommand("node", in: app, expectBlock: false)
+        XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
+
+        let secondPane = element(app, "seyal-pane-region-1")
+        XCTAssertFalse(
+            element(app, "seyal-running-program-interact").waitForExistence(timeout: 2),
+            "DirectInput must not require Interact for Pane 2 node"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-session-bootstrap-title"].exists,
+            "a local Node REPL must not be interrupted by a session setup popup"
+        )
+        let terminal = try waitForElement(
+            app,
+            matchingIdentifier: "terminal-input",
+            in: secondPane,
+            timeout: 8
+        )
+        let directRoute = expectation(
+            for: NSPredicate { _, _ in terminal.elementType == .textView },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [directRoute], timeout: 8),
+            .completed,
+            "Flow DirectInput must expose Pane 2 terminal input without Interact→Raw"
+        )
+
+        let nodeBlock = anyPaneBlock(in: app, containing: "node")
+        XCTAssertTrue(
+            nodeBlock.waitForExistence(timeout: 12),
+            "Pane 2 must keep the running node Block under DirectInput"
+        )
+        XCTAssertTrue(
+            secondPane.frame.insetBy(dx: -1, dy: -1).contains(
+                CGPoint(x: nodeBlock.frame.midX, y: nodeBlock.frame.midY)
+            ),
+            "node Block must sit in Pane 2"
+        )
+        let nodeBody = nodeBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        if nodeBody.waitForExistence(timeout: 5) {
+            nodeBody.click()
+        } else {
+            terminal.click()
+        }
+        let evaluatedOutput = "seyalnode-ok"
+        app.typeText("console.log('seyalnode'+'-ok')")
+        app.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(secondPane.frame.insetBy(dx: -1, dy: -1).contains(terminal.frame))
+        let renderedText = try waitForRenderedText(evaluatedOutput, in: terminal)
+        XCTAssertTrue(
+            renderedText.contains(evaluatedOutput),
+            "Node must evaluate the typed expression in Pane 2; the computed result is absent from the source; OCR=\(renderedText)"
+        )
+    }
+
     func testPaneTabOverflowNeverOverlapsNeighborOrTrailingActions() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
@@ -1599,8 +2337,28 @@ final class SeyalPaneSplitUITests: XCTestCase {
             NSPredicate(format: "identifier MATCHES %@", identifierPattern)
         ).allElementsBoundByIndex.first { candidate in
             let frame = candidate.frame
-            return regionFrame.contains(CGPoint(x: frame.midX, y: frame.midY))
+            return regionFrame.insetBy(dx: -1, dy: -1)
+                .contains(CGPoint(x: frame.midX, y: frame.midY))
         }
+    }
+
+    private func waitForElement(
+        _ app: XCUIApplication,
+        matchingIdentifier identifierPattern: String,
+        in region: XCUIElement,
+        timeout: TimeInterval
+    ) throws -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let match = element(app, matchingIdentifier: identifierPattern, in: region) {
+                return match
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return try XCTUnwrap(
+            element(app, matchingIdentifier: identifierPattern, in: region),
+            "expected \(identifierPattern) inside \(region.identifier)"
+        )
     }
 
     private func click(_ app: XCUIApplication, _ identifier: String) {
@@ -1974,6 +2732,21 @@ final class SeyalPaneSplitUITests: XCTestCase {
         request.usesLanguageCorrection = false
         try VNImageRequestHandler(cgImage: image).perform([request])
         return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+    }
+
+    private func waitForRenderedText(
+        _ expected: String,
+        in element: XCUIElement,
+        timeout: TimeInterval = 5
+    ) throws -> String {
+        let deadline = Date().addingTimeInterval(timeout)
+        var renderedText = ""
+        while Date() < deadline {
+            renderedText = try recognizedText(in: element.screenshot())
+            if renderedText.contains(expected) { return renderedText }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return renderedText
     }
 
     private func waitForAbsence(_ element: XCUIElement, _ message: String) {

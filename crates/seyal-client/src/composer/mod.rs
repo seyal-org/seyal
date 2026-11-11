@@ -45,6 +45,8 @@ pub enum RuntimeComposerEligibility {
     Unsupported,
     /// Type 45 `Relay`. Type 23 stays `Busy` for legacy clients.
     Relay,
+    /// Type 45 `DirectInput` (#1466). Submit closed; Flow Block-scoped keys.
+    DirectInput,
 }
 
 /// Why a [`ComposerAction`] was rejected. The previous state is unchanged
@@ -267,6 +269,10 @@ pub struct ComposerSnapshot {
     pub pending_request_id: Option<u64>,
     pub epoch: u64,
     pub allows_direct_terminal: bool,
+    /// Type 45 DirectInput on this Pane's composer eligibility (#1466/#1468).
+    /// Independent of focus: multipane hosts retract the Busy dock from this
+    /// bit so a sibling Available cannot resurrect "Type a command…".
+    pub block_scoped_direct_input: bool,
     pub blocks: Vec<BlockProjection>,
     /// Active Flow canvas starts at this Block after `clear`. `None` while the
     /// session has not cleared, and while shell-exit reveals full history.
@@ -382,9 +388,10 @@ impl PaneComposer {
             Some(RuntimeComposerEligibility::Relay) => ComposerMode::Relay,
             Some(RuntimeComposerEligibility::Available)
             | Some(RuntimeComposerEligibility::Unsupported) => ComposerMode::Available,
-            // Runtime has not proved a trusted prompt for this attachment:
-            // fail closed rather than let Return silently receive `Busy`.
-            Some(RuntimeComposerEligibility::Busy) | None => ComposerMode::Busy {
+            // No trusted prompt (or DirectInput): fail closed for Submit.
+            Some(RuntimeComposerEligibility::Busy)
+            | Some(RuntimeComposerEligibility::DirectInput)
+            | None => ComposerMode::Busy {
                 process: self.running_command().unwrap_or_default(),
             },
         }
@@ -646,6 +653,12 @@ impl ComposerState {
             pending_request_id: composer.pending_request_id,
             epoch: composer.epoch,
             allows_direct_terminal: composer.input_route == InputRoute::DirectTerminal,
+            block_scoped_direct_input: matches!(
+                composer
+                    .runtime_eligibility
+                    .map(|(eligibility, _)| eligibility),
+                Some(RuntimeComposerEligibility::DirectInput)
+            ),
             blocks: composer.blocks.clone(),
             // Shell-exit reveals the full retained transcript for review.
             canvas_floor: if composer.execution_ended {

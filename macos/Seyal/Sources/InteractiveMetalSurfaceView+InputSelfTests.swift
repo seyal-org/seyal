@@ -62,8 +62,23 @@ extension InteractiveMetalSurfaceView {
         else {
             return false
         }
+        guard
+            TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: control, charactersIgnoringModifiers: "q") == 0x51
+        else { return false }
+        // C0 delivery (U+0003 / U+0004) must still map to ControlAscii letters.
         return TerminalNativeKeyClassifier.controlASCII(
-            modifierFlags: control, charactersIgnoringModifiers: "q") == 0x51
+            modifierFlags: control,
+            charactersIgnoringModifiers: "\u{3}",
+            characters: nil
+        ) == 0x43
+            && TerminalNativeKeyClassifier.controlASCII(
+                modifierFlags: [],
+                charactersIgnoringModifiers: nil,
+                characters: "\u{4}"
+            ) == 0x44
+            && TerminalNativeKeyClassifier.controlLetterFromC0(
+                charactersIgnoringModifiers: "\u{4}", characters: nil) == 0x44
     }
 
     static func compositionUTF16SelfTest() -> Bool {
