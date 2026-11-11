@@ -102,6 +102,11 @@ impl ApplicationRoot {
                 target_generation,
                 target_revision,
             ),
+            AppAction::RerunBlock {
+                fence,
+                id,
+                composer_epoch,
+            } => self.rerun_block(fence, id, composer_epoch),
             AppAction::SelectRestingPresentation { fence, raw } => {
                 self.select_resting_presentation(fence, raw)
             }

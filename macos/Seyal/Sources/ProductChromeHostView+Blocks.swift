@@ -309,7 +309,9 @@ extension ProductChromeHostView {
                     self?.sessionBootstrap.reconcile()
                 }
                 : nil
-            configureRunningProgramInteraction(for: card, blockID: blockID, flags: row.flags)
+            configureRunningProgramInteraction(
+                for: card, blockID: blockID, flags: row.flags,
+                blockIndex: UInt32(index), idLo: row.id_lo, idHi: row.id_hi)
             visibleIndex += 1
             if blockID != 0,
                let retainedRange = pane.inputSurface.retainedHistoryRange(

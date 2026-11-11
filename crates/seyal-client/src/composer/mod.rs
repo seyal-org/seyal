@@ -7,6 +7,7 @@
 //! [`ComposerSnapshot`]. Do not call this from the PTY→VT→damage path. Do not
 //! invent Block completions.
 
+mod block_actions;
 mod history;
 
 use std::collections::HashMap;
@@ -17,6 +18,10 @@ use seyal_protocol::framing::BlockScope;
 
 use crate::presentation::{InputRoute, PresentationMode};
 
+pub use block_actions::{
+    block_actions, composer_admits_rerun, BlockActionKind, BlockActionPlacement,
+    BlockActionProjection,
+};
 use history::{HistoryOverlay, PaneHistory};
 pub use history::{HistoryOverlaySnapshot, HISTORY_CAPACITY, HISTORY_VISIBLE_ROWS};
 

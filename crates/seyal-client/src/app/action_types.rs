@@ -113,6 +113,13 @@ pub enum AppAction {
         target_generation: u64,
         target_revision: u64,
     },
+    /// Load a focused-Pane Block's command as the composer draft so the host
+    /// submits it through the ordinary composer path (#1010 / #1474 Rerun).
+    RerunBlock {
+        fence: AppFence,
+        id: BlockId,
+        composer_epoch: u64,
+    },
     /// User choice of the non-TUI resting presentation (#867, #1438).
     /// `raw == true` selects grid-first Raw (clears Flow opt-in). `raw == false`
     /// opts into Flow when integration allows. Shell-integration status alone

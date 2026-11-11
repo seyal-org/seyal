@@ -187,6 +187,12 @@ pub enum AppError {
     ExecutionNotUnpresented,
     /// Attachment delivery suspend/resume failed. ABI 62.
     DeliveryControlFailed,
+    /// Rerun refused because the Block is still Running. ABI 63.
+    BlockRunning,
+    /// Rerun refused because the composer is not Available. ABI 64.
+    ComposerUnavailable,
+    /// Rerun refused because the composer draft is non-empty. ABI 65.
+    ComposerDraftOccupied,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

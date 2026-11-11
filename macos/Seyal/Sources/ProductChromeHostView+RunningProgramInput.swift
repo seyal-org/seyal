@@ -5,7 +5,10 @@ extension ProductChromeHostView {
     func configureRunningProgramInteraction(
         for card: CommandBlockView,
         blockID: UInt64,
-        flags: UInt16
+        flags: UInt16,
+        blockIndex: UInt32,
+        idLo: UInt64,
+        idHi: UInt64
     ) {
         let target = relayTarget
         let running = blockID != 0
@@ -49,6 +52,37 @@ extension ProductChromeHostView {
                     blockID == self.relayTarget.blockID
                 else { return }
                 _ = self.focusBlockScopedDirectInputSurface()
+            }
+            : nil
+        // Rust-projected seam Rerun (#1010 / #1474): host only dispatches ABI 87.
+        let actionCount = seyal_app_block_action_count(pane.appHandle, blockIndex)
+        var canRerun = false
+        for actionIndex in 0..<actionCount {
+            let row = seyal_app_block_action_row(pane.appHandle, blockIndex, actionIndex)
+            let placement = (row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK))
+                >> UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT)
+            guard row.kind == UInt16(SEYAL_APP_BLOCK_ACTION_RERUN),
+                placement == UInt16(SEYAL_APP_BLOCK_ACTION_SEAM)
+            else { continue }
+            canRerun = row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_ENABLED) != 0
+            break
+        }
+        card.canRerun = canRerun
+        card.onRerun = canRerun
+            ? { [weak self, idLo, idHi] in
+                guard let self else { return }
+                let fence = seyal_app_snapshot(self.pane.appHandle)
+                var action = SeyalAppAction()
+                action.version = UInt16(SEYAL_APP_ABI_VERSION)
+                action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+                action.kind = UInt16(SEYAL_APP_ACTION_RERUN_BLOCK.rawValue)
+                action.applySnapshotFence(fence)
+                action.target_execution_lo = idLo
+                action.target_execution_hi = idHi
+                action.target_generation = seyal_app_composer(self.pane.appHandle).epoch
+                guard seyal_app_apply(self.pane.appHandle, &action) == 0 else { return }
+                self.composer.reconcile()
+                self.reconcileChrome()
             }
             : nil
     }

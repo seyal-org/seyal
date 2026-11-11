@@ -42,9 +42,9 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 815
-issue = 1467
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 focus Flow DirectInput on composer-status relay and rebuild Running cards when DirectInput status publishes without a second transcript authority."
+acknowledged_loc = 817
+issue = 1474
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 DirectInput rebuild stays here while #1474 passes Block identity into the Running-program/Rerun seam without a second transcript authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
@@ -84,15 +84,15 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1136
-issue = 1467
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 exposes block_scoped_direct_input on the same AppHandle snapshot façade rather than a second ABI module."
+ceiling_loc = 1128
+issue = 1474
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 DirectInput snapshot bits remain here while #1474 moves block_row + quick-action rows into block_actions.rs and ratchets the ceiling down."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/mod.rs"
-acknowledged_loc = 707
-issue = 1467
-reason = "Composer target/mode projection stays one cold-path reducer; #1467 adds ComposerTargetMode::DirectInput beside Submit/Relay/Unavailable without a second composer authority. rustfmt wrap of the DirectInput eligibility match is included."
+acknowledged_loc = 712
+issue = 1474
+reason = "Composer target/mode projection stays one cold-path reducer; #1467 DirectInput remains here while #1474 exports block_actions / composer_admits_rerun from this module without a second composer authority (rustfmt wrap included)."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

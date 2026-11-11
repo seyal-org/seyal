@@ -9,7 +9,7 @@
 | Deliverable | Verdict | Notes |
 |---|---|---|
 | Terminal correctness | PASS (code) / UNVERIFIED (full headed matrix) | Permanent PTY→VT→Metal path on master; Gate 1 regressions covered by existing suites |
-| Blocks | PARTIAL | Multipane Flow live; Copy/Rerun VF-5 still integrating from #1010 |
+| Blocks | PARTIAL | Multipane Flow live; Rerun ABI 87 + seam projection landed; history-backed Copy still open |
 | Composer | PASS (code) | History + DirectInput (#1471) on base |
 | Workspace | PASS (code) / PARTIAL (multi-window live) | Splits/layouts/nav live; inactive NSWindows still placeholder (classified deferral) |
 | Pane-local tabs | PASS (code) / PARTIAL (docs) | #1382/#1470 on master; ADR-025 header still Proposed |
@@ -17,7 +17,7 @@
 | Lifecycle | PASS (code) | W2b/W6/W7 + zero-window reopen on master |
 | Native UX | PARTIAL | #1365 chrome toggles integrated; Adaptive Depth/#1010 remainder open |
 | Local settings | PASS (code) | TOML/theme/font/keybindings; #993 human sign-off still open |
-| Quality | IN PROGRESS | Campaign PR gates pending `make check` + headed evidence |
+| Quality | PARTIAL | `make check` green after Rerun land; headed Rerun/Copy evidence still open |
 
 ## Work integrated from existing PRs
 
@@ -25,7 +25,7 @@
 |---|---|
 | PR #1365 / `crdileep82/issue/922` | **Integrated** (fast-forward) — View-menu sidebar/inspector toggles |
 | PR #1286 / `mahboobmonnamd/issue/867` | **Adapted** — Raw palette tests rewritten for Blocks-default; TUI/reconnect headed coverage retained |
-| PR #1044 / `crdileep82/issue/1010` | **In progress** — surgical Copy/Rerun port (closed unmerged tip; credit @crdileep82) |
+| PR #1044 / `crdileep82/issue/1010` | **Rerun landed** — action projection + `RerunBlock` ABI 87 + Swift seam (credit @crdileep82); Copy pasteboard/history path still open |
 | PR #1359 / #1362 / #1366 | **Deferred** — ADR acceptance / duration / docs; not silent discard |
 | Closed-unmerged #1434 / #1458 | **Superseded** by #1448 / #1459 path |
 
@@ -38,7 +38,8 @@
 
 | Severity | Item |
 |---|---|
-| P1 | Block Copy/Rerun chrome (#1010) not yet on head |
+| P1 | Block Copy pasteboard/history path (#1010 remainder) not yet on head |
+| P2 | Headed Rerun seam evidence after `make check` |
 | P1 | Formal #868/#869 freeze ledger |
 | P2 | ADR-025 acceptance PR by non-author |
 | P2 | #993 product-owner config confirmation |
