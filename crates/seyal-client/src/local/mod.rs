@@ -392,15 +392,21 @@ impl LocalDisplayClient {
         );
         // Type 45 is the negotiated composer fact. Type 23 is the legacy
         // Busy/Available fallback used only when no ComposerTarget has arrived.
+        // Submit+Busy is the admission race: status flips to Busy before the
+        // matching Unavailable target frame is applied; projecting Available
+        // here would overwrite a local Busy latch and leave AX on `available`
+        // while the shell still owns the command (#1474 headed busy cases).
         let code = match (
             self.session_bootstrap_negotiated,
             self.composer_target.map(|target| target.mode),
+            status.eligibility,
         ) {
-            (true, Some(ComposerTargetMode::Submit)) => 1,
-            (true, Some(ComposerTargetMode::Relay)) => 4,
-            (true, Some(ComposerTargetMode::DirectInput)) => 5,
-            (true, Some(ComposerTargetMode::Unavailable)) => 2,
-            _ => match status.eligibility {
+            (true, Some(ComposerTargetMode::Submit), ComposerEligibility::Busy) => 2,
+            (true, Some(ComposerTargetMode::Submit), _) => 1,
+            (true, Some(ComposerTargetMode::Relay), _) => 4,
+            (true, Some(ComposerTargetMode::DirectInput), _) => 5,
+            (true, Some(ComposerTargetMode::Unavailable), _) => 2,
+            (_, _, eligibility) => match eligibility {
                 ComposerEligibility::Available => 1,
                 ComposerEligibility::Busy => 2,
                 ComposerEligibility::Unsupported => 3,

@@ -245,8 +245,7 @@ fn accepted_submit(handle: u64, command: &str) {
     result.reserved = 1;
     assert_eq!(unsafe { seyal_app_apply(handle, &result) }, 0);
     // Accept latches Busy; restore Available like the next trusted prompt.
-    static NEXT_AVAILABLE: std::sync::atomic::AtomicU64 =
-        std::sync::atomic::AtomicU64::new(100);
+    static NEXT_AVAILABLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(100);
     let revision = NEXT_AVAILABLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     assert_eq!(relay_composer_status(handle, 1, revision), 0);
 }

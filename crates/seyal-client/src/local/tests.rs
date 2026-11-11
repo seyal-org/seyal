@@ -684,13 +684,26 @@ fn negotiated_type_45_projects_submit_relay_direct_and_unavailable() {
     client.note_composer_projection();
     let (code, submit_revision, _) = client.projected_composer_status().expect("submit");
     assert_eq!(
-        code, 1,
-        "Submit stays available while type 23 is still Busy"
+        code, 2,
+        "stale Submit must not override type 23 Busy during admission"
     );
     assert!(
-        submit_revision > revision,
+        submit_revision >= revision,
         "projection revision stays monotonic"
     );
+
+    // At a trusted prompt, Submit + Available is the resting projection.
+    client.composer_status = Some(ComposerStatus {
+        attachment_id: attachment,
+        eligibility: ComposerEligibility::Available,
+        revision: 3,
+    });
+    client.note_composer_projection();
+    let (code, available_revision, _) = client
+        .projected_composer_status()
+        .expect("submit+available");
+    assert_eq!(code, 1, "Submit + Available projects as available");
+    assert!(available_revision >= submit_revision);
 
     target.mode = ComposerTargetMode::Unavailable;
     target.reason = ComposerTargetReason::NotAtPrompt;

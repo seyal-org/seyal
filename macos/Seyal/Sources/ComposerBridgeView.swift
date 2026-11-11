@@ -592,17 +592,15 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.applySnapshotFence(snapshot)
         action.target_generation = composer.epoch
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
+        // Keep pending_request_id until Runtime's ComposerResult is drained.
+        // Optimistic accept cleared pending before Busy status arrived and let
+        // a stale Submit→Available projection win on quiet commands (#1474).
         var status = onSubmitComposer?(command) ?? -10
         if status == -12 {
             let payload = command.hasSuffix("\r") ? command : command + "\r"
             status = onSubmitRaw?(payload) ?? -10
         }
-        if status == 0 {
-            let submitted = readComposer()
-            if submitted.request_id != 0 {
-                applyComposerResult(requestID: submitted.request_id, accepted: true)
-            }
-        }
+        _ = status
         reconcile()
     }
 

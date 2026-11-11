@@ -701,12 +701,7 @@ fn submit_accepted(state: &mut ComposerState, pane: PaneId, command: &str) {
     // prompt; history affordances require Available.
     static NEXT_AVAILABLE: AtomicU64 = AtomicU64::new(100);
     let revision = NEXT_AVAILABLE.fetch_add(1, Ordering::Relaxed);
-    eligible(
-        state,
-        pane,
-        RuntimeComposerEligibility::Available,
-        revision,
-    );
+    eligible(state, pane, RuntimeComposerEligibility::Available, revision);
 }
 
 #[test]

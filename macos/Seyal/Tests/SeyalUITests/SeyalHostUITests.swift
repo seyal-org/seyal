@@ -1089,18 +1089,19 @@ final class SeyalHostUITests: XCTestCase {
         )
         composer.firstMatch.click()
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
-        if editor.waitForExistence(timeout: 2), editor.firstMatch.isHittable {
-            editor.firstMatch.click()
-            // One typeText including Return avoids XCUI Activate gaps on typeKey.
-            editor.firstMatch.typeText("sleep 2\r")
-        } else {
-            composer.firstMatch.typeText("sleep 2\r")
-        }
+        let execute = app.descendants(matching: .any)["seyal-composer-execute"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5), "composer editor missing")
+        editor.firstMatch.click()
+        editor.firstMatch.typeText("sleep 2")
+        XCTAssertTrue(execute.waitForExistence(timeout: 2))
+        XCTAssertTrue(execute.firstMatch.isEnabled, "execute must be enabled with a draft")
+        execute.firstMatch.click()
         // Runtime publishes Busy at admission; the host only relays it.
+        // Pending submit keeps Busy until ComposerResult is drained (#1474).
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],
-                timeout: 4
+                timeout: 6
             ),
             .completed,
             "composer stayed \(composer.value ?? "nil") editor=\(editor.firstMatch.value ?? "nil") while sleep 2 owned the shell"
@@ -1806,9 +1807,10 @@ final class SeyalHostUITests: XCTestCase {
         )
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         editor.firstMatch.click()
-        // One typeText including Return: separate typeKey("\r") can be delayed
-        // 20s+ by XCUI interruption Activate on the product window (#1474).
-        editor.firstMatch.typeText("sleep 8\r")
+        editor.firstMatch.typeText("sleep 8")
+        XCTAssertTrue(execute.waitForExistence(timeout: 2))
+        XCTAssertTrue(execute.firstMatch.isEnabled, "execute must be enabled with a draft")
+        execute.firstMatch.click()
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],

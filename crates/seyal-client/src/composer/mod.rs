@@ -509,7 +509,9 @@ impl ComposerState {
                     // eligibility publish. Unsupported stays Available by
                     // design and must not be overridden here.
                     if matches!(
-                        composer.runtime_eligibility.map(|(eligibility, _)| eligibility),
+                        composer
+                            .runtime_eligibility
+                            .map(|(eligibility, _)| eligibility),
                         Some(RuntimeComposerEligibility::Available) | None
                     ) {
                         let revision = composer
