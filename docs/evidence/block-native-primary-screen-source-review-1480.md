@@ -78,3 +78,71 @@ The precise representation of cross-Block cursor addressing and historical conte
 ## 6. Decision status
 
 **PROPOSED evaluation only.** Accepted ADR-004/009/010/011/015 and current Seyal production invariants still control. The candidate cannot be implemented as production code until conflicts are explicitly resolved through architecture acceptance. The unmerged #1478 has its own NO-GO gates; it is not implicitly cancelled or approved here.
+
+
+## 7. Adversarial follow-up: why source-backed native Blocks are safer than grid-per-Block cloning
+
+**Correction to the initial option C:** the phrase "Block-owned storage" was
+too ambiguous. Our preferred *Seyal* architecture is **Block-native
+membership and viewport organization over ONE canonical active screen and
+ONE canonical retained history**, not per-Block independently writable
+terminal grids. This is a deliberate departure from Warp's physical storage
+strategy, not a claim that Seyal already has a Block-native UI.
+
+Confirmed Seyal source at master \`2a4c11b8\`:
+
+- \`crates/seyal-terminal/src/terminal/vt/mod.rs\`: \`TerminalCore.primary:
+  Screen\`, \`alternate: Option<Screen>\`, global \`LineIdAllocator\`;
+  \`editing_mutation\` applies every VT action to the selected Screen.
+- \`crates/seyal-terminal/src/screen/mod.rs\`: \`Screen\` contains the
+  authoritative \`cells\`, \`cell_anchors\`, \`line_ids\`, \`row_breaks\`,
+  \`cursor\`, \`history: HistoryStore\`, \`scroll_top/bottom\`.
+- \`crates/seyal-terminal/src/screen/ops.rs\`: \`cursor_up\` can address
+  earlier lines within the active grid. \`erase_display_all\` seals rows
+  through \`append_row_to_history\`, empties active cells and remints
+  LineIds. This invalidates the assumption that command completion alone
+  makes all visible cells physically immutable.
+- \`crates/seyal-runtime/src/runtime/shell_integration.rs\`: the Runtime
+  drains terminal shell events after parser progress; Block lifecycle and
+  Controller identity are Runtime concern. New unit-precise Block boundary
+  mapping must preserve ordering within a single PTY-read batch.
+
+These are existing **semantic invariants**, not design preferences. A
+\`BlockDocument\` that mutates an independent grid alongside \`Screen\` would
+violate ADR-004/010 and create replay/synchronization bugs. Instead, the
+native Rust Block index references one canonical active/retained content
+allocation by stable unit-level source anchors and owns its own ordered
+content membership, viewport geometry and Block navigation. This is
+substantially more than the current Swift card layout, without a second
+VT engine.
+
+### Explicit counterexamples and required behavior
+
+| Adversarial input | Expected result of proposed model |
+| --- | --- |
+| \`printf abc\` then new trusted Block on same physical row | One row rendered once; source-span attribution may be mixed without inserting a newline |
+| ANSI \`CSI 1 A\` then erase/write affecting earlier completed Block's still-visible row | Canonical \`Screen\` mutates that row; previous Block metadata stays stable but viewport is invalidated; unstructured overlap is allowed |
+| Long output scrolls off viewport, then later command writes | Scrolled source units are sealed into the single \`HistoryStore\`; later terminal cursor operations cannot address those scrolled-off units |
+| OSC command marker and output occur in one parser feed batch | Ordered marker observations and canonical content anchors preserve command identity even though the Runtime validates integration after the feed |
+| Unsupported shell/SSH without trusted markers | Primary content is one unstructured region with normal VT input/output; never guess Block borders |
+| \`clear\` / ED2 | Follow the current Screen/HistoryStore sealing and reminting semantics, then move Rust Block canvas floor |
+| Column resize during long soft-wrapped output | Retained source units/anchors stay unchanged, and only derived Block/row geometry is rebuilt |
+| TUI alternate-screen entry | Only alternate Screen is mutated; native primary BlockDocument persists unchanged until return |
+
+### Architecture review limits
+
+- The above are **defined invariants and expected postconditions**, not executed
+  tests or measured performance.
+- A precise source-unit/BlockId annotation strategy, including same-row
+  overlaps, must be validated against the existing event ordering, HistoryStore
+  and screen mutation code. The proposed ADR deliberately rejects silent
+  guessing of this strategy in implementation.
+- The existing CommandBlockTimeline's 128-record cap is distinct from
+  retained terminal history. Metadata eviction must not delete still-retained
+  terminal content; old content must still render as a bounded unstructured
+  region when no longer individually indexed.
+- The proposed normalized Rust viewport and Metal batching must be
+  demonstrated to avoid N-per-Block Swift FFI calls and full card rebuilds.
+- Any non-author GO must be based on a review of these *specific* invariants,
+  then a separately measured production candidate. This research alone is
+  not a terminal-usability GO.
