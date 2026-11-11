@@ -125,7 +125,7 @@ Block semantic ownership.
   duplicate external dependencies and require legal consideration of AGPL
   licensing. **Architecture study is allowed; source copying is not planned.**
 - **Independent Block-native primary document (candidate):** best aligns
-  Seyal's native-Block product goal while preserving the Runtime/PTy/
+  Seyal's native-Block product goal while preserving the Runtime/PTY/
   Rust/Metal foundations; **not accepted until source-unit, VT and resource
   invariants are proven**.
 - **New PTY/VT/renderer per Block:** rejected; destroys shell continuity and
