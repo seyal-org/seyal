@@ -278,11 +278,6 @@ issue = 1467
 reason = "Pane region/divider/host projection stays one AppKit layout adapter; tip already ships 728 LOC on master with no Swift delta in #1467. Ratchet acknowledged_loc to the measured tip so silent headroom cannot hide further growth."
 issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 702
-issue = 1474
-reason = "LocalDisplayClient remains the cold-path Controller projection owner; #1474 projects Session-scope Submit as Available over host Busy for Trusted SSH without a second local client façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
