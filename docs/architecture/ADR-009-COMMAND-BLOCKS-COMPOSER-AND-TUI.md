@@ -6,6 +6,139 @@
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
 
+## Proposed amendment — Block-native primary content authority (#1480; NOT ACCEPTED)
+
+**Status: Proposed / architecture review only (2026-11-11).** This section is a
+review candidate and is **not normative** until a separate non-author-reviewed
+architecture PR is explicitly accepted. Until then, the **Accepted decision
+below and ADR-004/010/011/015 remain in force**. No implementation Issue, PR
+or benchmark may cite this proposal as authorization to change production
+terminal ownership. Source evidence and unanswered questions:
+[Block-native source review](../evidence/block-native-primary-screen-source-review-1480.md);
+[Architecture Issue #1480](https://github.com/seyal-org/seyal/issues/1480).
+
+### Problem and source-informed rationale
+
+Seyal is intended to be **Block-native**, with a bottom-anchored composer and
+independently navigable command/output Blocks. The accepted wording below
+currently forbids every Block from owning a terminal grid or copied content.
+In production that led to command `BlockTimeline` metadata referencing one
+canonical history stream while native Swift builds Block cards, restores scroll
+offsets and publishes separate Metal history/live-tail clips. That is a
+structural coordination burden, not proof that every observed usability defect
+is caused by Blocks.
+
+Warp's published implementation is useful **design evidence**, not a code base
+to copy: at
+[`warpdotdev/warp@2b2ed236`](https://github.com/warpdotdev/warp/tree/2b2ed236f087b47b463f1cd55598485dd7965338),
+`TerminalModel` distinguishes `BlockList` and `AltScreen`;
+`Block` owns prompt/command/output grids; `GridHandler` keeps mutable grid
+storage and compact scrollback; `BlockList` indexes Block heights and maps
+viewport coordinates. However, Warp's `update_blocks_and_sumtree` also
+rebuilds its whole height index in some paths, so neither its algorithms nor
+its retained memory policy are automatically appropriate for Seyal.
+
+### Candidate decision (to be accepted/rejected after evidence)
+
+For each `TerminalExecution`, keep **one persistent PTY/child**, **one Rust VT
+parser and canonical `TerminalState`**, and **one active input route**. Do
+**not** give each command Block a PTY, subprocess, parser, graphics renderer
+or independently authoritative terminal engine.
+
+Propose changing the *primary-screen content representation*, not adding a
+second shadow primary grid:
+
+```text
+TerminalExecution (Runtime-owned; one PTY, process group, lifecycle)
+  -> Parser + TerminalState (one Rust semantic/damage authority)
+       -> Primary: BlockDocument (one canonical content authority)
+            -> ordered content: CommandBlock or UnstructuredRegion
+            -> active mutable content; completed sealed/compact content
+            -> stable source/LineId anchors, selection, reflow, eviction
+            -> indexed Block heights + viewport anchoring (derived indexes)
+       -> Alternate: TUI screen (same TerminalState; canonical while active)
+       -> bounded damage and read-only render/IPC projections
+  -> Rust-owned compositor intent / viewport plan
+       -> macOS Metal (only visible regions/rows)
+       -> thin Swift: OS events, IME/AX, surfaces, GPU resource realization
+```
+
+The candidate `BlockDocument` is the **single** primary content model.
+Block-owned command/output content is canonical **within that document**:
+there must not be a conventional writable primary-screen grid maintained in
+parallel and reconciled after every command. Shell identity, environment,
+process control and terminal modes remain execution-wide. An unstructured
+primary region is the truthful fallback when command boundaries are
+unavailable; it must preserve bytes, cursor, selection, scroll and input
+correctness rather than invent command boundaries.
+
+`BlockTimeline` may index ownership/lifecycle for one execution, but it must
+not be a competing second truth about cells or output. Reconcile with
+ADR-010's canonical `HistoryStore`: content may move from an active region to
+immutable byte-bounded history segments by **ownership transfer**, retaining
+ADR-004/011 `LineId`, width/grapheme and hard/soft-wrap guarantees.
+No duplicated mutable history, post-hoc byte replay or second terminal
+state machine is permitted. These requirements are **unresolved design gates**
+until concrete source-unit/storage invariants and tests exist.
+
+Block ordering, visible-range lookup, height updates, scroll anchoring,
+selection/search coordinates and clip/render plan belong in **Rust** under
+ADR-015; one Pane compositor may render many Block regions. The viewport
+index must support incremental updates for ordinary output/focus/scroll
+instead of whole-transcript Card/height-tree rebuilds on each tick. Renderer
+buffers, glyph atlases and GPU pages are derived disposable resources, not
+Block semantic ownership.
+
+### Required adversarial proof before acceptance
+
+1. **VT correctness:** non-newline prompt/output, carriage-return progress
+   rewrite, backspace, CSI cursor-up/erase, clear, scroll regions, wraps,
+   Unicode, resize/reflow, foreground direct input, shell job control, and
+   trusted/missing/malformed/stale OSC 133 boundaries. Define exactly how
+   operations crossing Block boundaries preserve canonical terminal semantics.
+2. **Presentation/input:** supported shells present Blocks by default; TUI
+   alternate screen takes over cleanly; unsupported/untrusted shell and SSH
+   must remain usable with unstructured content; no hidden interactive Raw
+   screen below Flow. Existing DirectInput, Relay, focus and epoch fencing
+   survive. Mouse semantics follow actual terminal capability, not invented
+   cursor relocation.
+3. **Workspace/lifecycle:** multiple independent pane-local terminal tabs
+   and unfocused panes retain identity, scroll positions, output and input
+   isolation; detach/reconnect, child exit, recovery and pane switching do
+   not mutate a sibling or duplicate command content.
+4. **Scale/memory:** bounded active and retained content by per-execution and
+   aggregate byte budgets, including occluded/detached sessions. Benchmark
+   10k/100k/1M-line classes and 1/10/50/100 execution populations. Record
+   CPU, RSS, update cost, glyph/page cache and user-visible latency. Warp's
+   reported height-tree/memory scaling is a caution, not accepted proof.
+5. **Migration:** document a single-owner switch-over boundary from the old
+   primary/history representation. Experimental work is isolated and
+   non-mergeable. No production feature-flag fork or temporary competing
+   terminal engine; do not merge until exact-head terminal, UI, resource,
+   safety and independent review gates pass.
+
+### Alternatives and decision gate
+
+- **Keep current history-range cards:** minimal immediate churn, but does
+  not resolve the disputed Block content/layout ownership.
+- **Import Warp:** not selected; it would replace other Seyal foundations,
+  duplicate external dependencies and require legal consideration of AGPL
+  licensing. **Architecture study is allowed; source copying is not planned.**
+- **Independent Block-native primary document (candidate):** best aligns
+  Seyal's native-Block product goal while preserving the Runtime/PTy/
+  Rust/Metal foundations; **not accepted until source-unit, VT and resource
+  invariants are proven**.
+- **New PTY/VT/renderer per Block:** rejected; destroys shell continuity and
+  multiplies authority/resource complexity.
+
+**Acceptance procedure:** Resolve and record the above questions under #1480,
+obtain independent architecture review, explicitly accept this amendment in
+its own documentation PR, then reconcile ADR-004/010/011, SPEC-008, AGENTS.md
+and implementation readiness in separate scoped changes. Do not conflate
+this proposal with unmerged M003 PR #1478 or relax its NO-GO gates.
+
+---
+
 ## Decision
 
 Seyal's normal structured-shell presentation is **Flow/Blocks**. Each accepted
