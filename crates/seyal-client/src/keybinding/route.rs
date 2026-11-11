@@ -384,6 +384,8 @@ pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
         | WorkspaceCommandId::GotoOpen
+        | WorkspaceCommandId::ChromeToggleLeftPanel
+        | WorkspaceCommandId::ChromeToggleInspector
         | WorkspaceCommandId::AppCloseFocused
         | WorkspaceCommandId::WindowNew
         | WorkspaceCommandId::WindowClose

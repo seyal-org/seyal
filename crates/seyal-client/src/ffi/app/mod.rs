@@ -48,6 +48,7 @@ pub use pane_region::*;
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
     seyal_app_shortcut_enabled, seyal_app_shortcut_item, seyal_app_shortcut_title,
+    SeyalAppShortcutTitle,
 };
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,

@@ -398,8 +398,8 @@ fn chrome_toggles_project_builtin_key_equivalents_and_stable_ids() {
     let route = route_context_set(false, PresentationMode::Raw, false);
     let projection = project_shortcuts(&table, route);
     for (id, keys, ffi_id) in [
-        (WorkspaceCommandId::ChromeToggleLeftPanel, "cmd+0", 22),
-        (WorkspaceCommandId::ChromeToggleInspector, "cmd+opt+0", 23),
+        (WorkspaceCommandId::ChromeToggleLeftPanel, "cmd+0", 45),
+        (WorkspaceCommandId::ChromeToggleInspector, "cmd+opt+0", 46),
     ] {
         let item = item_for(id, &projection);
         assert_eq!(item.key_equivalent_notation.as_deref(), Some(keys));
