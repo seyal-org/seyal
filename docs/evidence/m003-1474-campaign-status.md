@@ -2,50 +2,50 @@
 
 **Date:** 2026-11-11  
 **Branch:** `mahboobmonnamd/issue/1474`  
-**PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474` until Done gates + independent review; do not merge without confirmation)  
-**Base:** `origin/master` @ `0122c5f2` (+ integrated #1365 / `crdileep82/issue/922`)
+**Head:** `727f1d62` (and successors on the same PR)  
+**PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
+**Base:** `origin/master`
 
 ## Functional deliverables matrix
 
 | Deliverable | Verdict | Notes |
 |---|---|---|
-| Terminal correctness | PASS (code) / PARTIAL (headed) | Gate 1 P0s + P1s landed: multipane Raw/TUI focus, unfocused alt-screen TUI, composer caret/hitTest, Metal prepare-on-frame, Raw scrollback clear on handle switch, sync Flow scroll latch + preserved document height, per-pane wheel eligibility, per-pane `integration_unsupported`, composer Tab swallow |
-| Blocks | PASS (code) / PARTIAL (headed) | Multipane Flow live; Rerun ABI 87 + seam projection; history-backed Copy pasteboard path landed |
-| Composer | PASS (code) | History + DirectInput (#1471) on base; Tab no longer inserts literal `\t` |
-| Workspace | PASS (code) / PARTIAL (multi-window live) | Splits/layouts/nav live; inactive NSWindows still placeholder (classified deferral) |
-| Pane-local tabs | PASS (code) / PARTIAL (docs) | #1382/#1470 on master; ADR-025 header still Proposed |
-| Presentation | PASS (code) / PARTIAL (DoD) | Blocks-default + TUI return; #867 headed tests updated for post-#1426 policy |
+| Terminal correctness | PASS (code) / PARTIAL (headed) | Gate 1 P0+P1 landed; XCUI attach still flaky under full `make ui-test` load |
+| Blocks | PASS (code) / PARTIAL (headed) | Rerun ABI 87 + history-backed Copy pasteboard path on head |
+| Composer | PASS (code) | History + DirectInput + Tab swallow (no literal `\t`) |
+| Workspace | PASS (code) / PARTIAL (multi-window live) | Splits/layouts/nav live; inactive NSWindows deferred |
+| Pane-local tabs | PASS (code) / PARTIAL (docs) | Shipped on master; ADR-025 still Proposed |
+| Presentation | PASS (code) | Blocks-default + TUI return |
 | Lifecycle | PASS (code) | W2b/W6/W7 + zero-window reopen on master |
-| Native UX | PASS (code) / PARTIAL (headed) | #1365 chrome toggles + #1010 Rerun/Copy seams on head |
-| Local settings | PASS (code) | TOML/theme/font/keybindings; #993 human sign-off still open |
-| Quality | PARTIAL | Structural-debt green after Copy/P1 land; headed Rerun/Copy/multipane matrix + independent review still open |
+| Native UX | PASS (code) / PARTIAL (headed) | Chrome toggles + Rerun/Copy seams |
+| Local settings | PASS (code) | #993 human sign-off still open |
+| Quality | PASS (local `make check` + CI) / PARTIAL (full headed) | Structural-debt green; CI `repository-policy` / `rust-and-harness-quality` / `native-macos-compile` success on PR head |
 
-## Work integrated from existing PRs
+## Landed on this PR
 
-| Source | Disposition |
-|---|---|
-| PR #1365 / `crdileep82/issue/922` | **Integrated** (fast-forward) — View-menu sidebar/inspector toggles |
-| PR #1286 / `mahboobmonnamd/issue/867` | **Adapted** — Raw palette tests rewritten for Blocks-default; TUI/reconnect headed coverage retained |
-| PR #1044 / `crdileep82/issue/1010` | **Integrated (adapted)** — Rerun ABI 87 + history-backed Copy pasteboard path (credit @crdileep82) |
-| PR #1359 / #1362 / #1366 | **Deferred** — ADR acceptance / duration / docs; not silent discard |
-| Closed-unmerged #1434 / #1458 | **Superseded** by #1448 / #1459 path |
+- Chrome toggles (#1365 / #922)
+- Blocks-default headed evidence adaptation (#867)
+- Block Rerun ABI 87 + Rust-owned action projection (#1010)
+- History-backed Block Copy (`history_text` / `block_copy` / FFI / pasteboard menu)
+- Gate 1 P0: multipane Raw/TUI focus, unfocused alt-screen TUI, composer hitTest/caret
+- Gate 1 P1: Metal prepare-when-empty, Raw scrollback clear on handle switch, sync Flow scroll latch + preserved document height, per-pane wheel eligibility, per-pane `integration_unsupported`, composer Tab swallow
+- Headed build unblockers: `target_generation` Bind field, XCUI element count query
 
 ## Explicit classifications
 
-- Simultaneous multi-window live Metal (`InactiveWindowPlaceholderView`): **deferred** with follow-up ownership — ADR-018/#936 scope is multi-live **per Tab**, not side-by-side live windows.
-- ADR-025 / SPEC-031 “Proposed” vs shipped code: **governance drift** — do not self-Accept ADR inside this implementation PR; track separate acceptance.
-- Formal #868/#869 freeze ledger: **classified** — land on the permanent production path already present on master; no parallel freeze branch required for this consolidated campaign; residual freeze bookkeeping is non-blocking documentation follow-up.
-- #993 product-owner config confirmation: **open** — human sign-off, not a code defect on this head.
+- Simultaneous multi-window live Metal: **deferred** (follow-up)
+- ADR-025 acceptance: **governance** (separate Architecture PR)
+- #868/#869 freeze ledger bookkeeping: **non-blocking docs follow-up**
+- #993 config confirmation: **human sign-off**
+- Full headed XCUI matrix: **PARTIAL** — partial run showed ~200 component/UI passes with intermittent XCUI attach crashes (`runningBackground` during `waitForUsablePty`); not sufficient to flip to `Closes #1474`
 
-## Remaining blockers for `Closes #1474`
+## Remaining before `Closes #1474`
 
 | Severity | Item |
 |---|---|
-| P1 | Headed Rerun/Copy/multipane matrix + XCUI evidence on this SHA |
+| P1 | Stable headed Rerun/Copy/multipane matrix evidence on this SHA |
 | P1 | Independent non-author review GO/CONDITIONAL/NO-GO |
-| P2 | `make check` + CI green confirmation on pushed head |
 | P2 | ADR-025 acceptance PR by non-author |
 | P2 | #993 product-owner config confirmation |
-| P2 | Multi-window simultaneous live content follow-up |
 
 **Do not merge without explicit product-owner confirmation.**
