@@ -1,7 +1,7 @@
 # M003 consolidated campaign status (#1474)
 
 **Date:** 2026-11-11  
-**Exact head:** `65b55a347a64934e3bf3d8f1d7526116c5db19f1`  
+**Exact head:** `b0824bd360d2e000048a15f5461c495f3fa2a13c` (docs tip; production/gates ≡ `65b55a347a64934e3bf3d8f1d7526116c5db19f1`)  
 **Branch:** `mahboobmonnamd/issue/1474`  
 **PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
 **Base:** `origin/master`  
