@@ -458,6 +458,8 @@ fn composer_history_is_fenced_and_never_submits() {
     })
     .unwrap();
     assert_eq!(root.snapshot().composer.unwrap().history_count, 1);
+    // Accept latches Busy until the next Runtime Available publish.
+    runtime_available(&mut root, 2);
 
     let mut stale = root.fence();
     stale.execution = Some(ExecutionId::from_bytes([0x99; 16]));

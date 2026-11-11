@@ -259,6 +259,16 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// Canonical retained ranges remain keyed by Pane + display handle for reuse.
   func activateTranscriptDisplayHandle(_ handle: UInt64) {
     guard handle != transcriptDisplayHandle else { return }
+    // Disconnect clears the live client handle to 0. Do not abandon the last
+    // Controller key or wipe Metal buffers while retained Flow history still
+    // maps to that handle — chrome must re-encode against the same keys
+    // (#1379 Defect B: history-instances=0 with AX body text).
+    if handle == 0,
+      transcriptDisplayHandle != 0,
+      historyRanges.keys.contains(where: { $0.displayHandle == transcriptDisplayHandle })
+    {
+      return
+    }
     transcriptDisplayHandle = handle
     // Drop Raw local-scrollback latch so a wiped history region cannot leave
     // drawsLiveGrid false and paint a blank pane after handle switch.

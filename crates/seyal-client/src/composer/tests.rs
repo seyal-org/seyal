@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn pane() -> PaneId {
     PaneId::from_bytes([0x11; 16])
@@ -295,6 +296,39 @@ fn accepted_result_clears_draft_only_for_matching_request_id() {
     assert!(snap.draft.is_empty());
     assert!(snap.pending_request_id.is_none());
     assert!(!snap.can_submit);
+    // Quiet-command gap: accept must not flash Available before Runtime Busy.
+    assert!(matches!(snap.mode, ComposerMode::Busy { .. }));
+}
+
+#[test]
+fn accepted_result_does_not_override_unsupported_eligibility() {
+    let pane = pane();
+    let mut state = ComposerState::new();
+    state
+        .apply(ComposerAction::EnsurePane { pane })
+        .expect("ensure");
+    let epoch = eligible(&mut state, pane, RuntimeComposerEligibility::Unsupported, 1);
+    state
+        .apply(ComposerAction::SetDraft {
+            pane,
+            text: "sleep 2".into(),
+            epoch,
+        })
+        .unwrap();
+    let epoch = state.snapshot(pane).unwrap().epoch;
+    let request_id = state
+        .apply(ComposerAction::Submit { pane, epoch })
+        .unwrap()
+        .expect("request");
+    state
+        .apply(ComposerAction::ApplyResult {
+            pane,
+            request_id,
+            accepted: true,
+        })
+        .unwrap();
+    let snap = state.snapshot(pane).unwrap();
+    assert_eq!(snap.mode, ComposerMode::Available);
 }
 
 #[test]
@@ -651,6 +685,7 @@ fn submit_accepted(state: &mut ComposerState, pane: PaneId, command: &str) {
             epoch,
         })
         .unwrap();
+    let epoch = state.snapshot(pane).unwrap().epoch;
     let request_id = state
         .apply(ComposerAction::Submit { pane, epoch })
         .unwrap()
@@ -662,6 +697,16 @@ fn submit_accepted(state: &mut ComposerState, pane: PaneId, command: &str) {
             accepted: true,
         })
         .unwrap();
+    // Accept latches Busy until Runtime republishes Available at the next
+    // prompt; history affordances require Available.
+    static NEXT_AVAILABLE: AtomicU64 = AtomicU64::new(100);
+    let revision = NEXT_AVAILABLE.fetch_add(1, Ordering::Relaxed);
+    eligible(
+        state,
+        pane,
+        RuntimeComposerEligibility::Available,
+        revision,
+    );
 }
 
 #[test]

@@ -245,6 +245,11 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             .completed,
             "a second completed Block must stay a separate card before exit"
         )
+        // Title/label can match the printf argument before history lands. Wait for
+        // body AX so disconnect cannot strand an empty card with no Metal source
+        // (#1379 Defect B race with fast exit).
+        waitForBlockBodyText(app, index: 0, text: "seyal-1171-exit-before", timeout: 8)
+        waitForBlockBodyText(app, index: 1, text: "seyal-1171-exit-second", timeout: 8)
 
         submitComposerCommand(app, "exit 7")
 

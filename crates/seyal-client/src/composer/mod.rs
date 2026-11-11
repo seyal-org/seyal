@@ -501,6 +501,24 @@ impl ComposerState {
                     }
                     composer.pending_is_relay = false;
                     composer.draft.clear();
+                    // Host apply can clear pending before the Runtime Busy
+                    // status frame is polled (quiet commands like `sleep` emit
+                    // no PTY bytes to wake the read source). Latch Busy while
+                    // the last published fact is still Available so AX/mode
+                    // cannot flash Available between accept and the next
+                    // eligibility publish. Unsupported stays Available by
+                    // design and must not be overridden here.
+                    if matches!(
+                        composer.runtime_eligibility.map(|(eligibility, _)| eligibility),
+                        Some(RuntimeComposerEligibility::Available) | None
+                    ) {
+                        let revision = composer
+                            .runtime_eligibility
+                            .map(|(_, revision)| revision.saturating_add(1))
+                            .unwrap_or(1);
+                        composer.runtime_eligibility =
+                            Some((RuntimeComposerEligibility::Busy, revision));
+                    }
                 }
                 composer.bump_epoch();
                 Ok(None)

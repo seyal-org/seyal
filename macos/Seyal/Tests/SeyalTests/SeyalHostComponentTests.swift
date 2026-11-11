@@ -3310,6 +3310,10 @@ final class SeyalHostComponentTests: XCTestCase {
             metalText.contains("Clear page keys with the wipe"),
             "disconnect retain wipe must clear historyRenderPageKeys before buffer drop (#1379 Defect B)"
         )
+        XCTAssertTrue(
+            metalText.contains("Do not abandon the last"),
+            "activateTranscriptDisplayHandle(0) must not wipe retained Controller history (#1379 Defect B)"
+        )
         // activateTranscriptDisplayHandle + disconnect retain both wipe buffers;
         // each path must clear page keys or shell-exit can geometry-only reuse.
         let pageKeyClears = metalText.components(separatedBy: "historyRenderPageKeys.removeAll").count - 1
@@ -3317,6 +3321,20 @@ final class SeyalHostComponentTests: XCTestCase {
             pageKeyClears,
             2,
             "handle-switch and disconnect retain must both clear historyRenderPageKeys"
+        )
+        XCTAssertTrue(
+            hostText.contains("return pane.inputSurface.transcriptDisplayHandle"),
+            "shell-exit must keep Block clip publishes on the last transcript handle (#1379 Defect B)"
+        )
+        let historySurface = sourceRoot.appendingPathComponent("MetalSurfaceView+History.swift")
+        let historySurfaceText = (try? String(contentsOf: historySurface, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            historySurfaceText.contains("Prefer the durable transcript handle"),
+            "retainedHistoryRange must resolve Controller-keyed rows after clientHandle clears"
+        )
+        XCTAssertTrue(
+            liveText.contains("retainedHistoryRange(blockID: region.id, displayHandle: region.displayHandle)"),
+            "setTranscriptFrame must re-encode via retainedHistoryRange after shell-exit"
         )
         XCTAssertTrue(
             hostText.contains("removeTranscriptRegions(except: retained)"),

@@ -36,7 +36,12 @@ extension ProductChromeHostView {
     private var activeBlockDisplayHandle: UInt64 {
         let bridge = pane.inputSurface.bridge
         let focusedHandle = bridge?.windowFocusedDisplayHandle ?? 0
-        return focusedHandle != 0 ? focusedHandle : bridge?.clientHandle ?? 0
+        if focusedHandle != 0 { return focusedHandle }
+        if let client = bridge?.clientHandle, client != 0 { return client }
+        // Shell-exit disconnect clears clientHandle. Keep publishing Block clips
+        // against the last transcript Controller so retained historyRanges
+        // re-encode into Metal instead of AX-only false-green (#1379 Defect B).
+        return pane.inputSurface.transcriptDisplayHandle
     }
 
     func setupTranscriptTopSpacer() {

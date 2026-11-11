@@ -28,7 +28,33 @@ extension MetalSurfaceView {
   }
 
   func retainedHistoryRange(blockID: UInt64, displayHandle: UInt64 = 0) -> NativeHistoryRange? {
-    historyRanges[PaneBlockKey(paneID: paneID, displayHandle: displayHandle, blockID: blockID)]
+    let exact = PaneBlockKey(paneID: paneID, displayHandle: displayHandle, blockID: blockID)
+    if let range = historyRanges[exact] {
+      return range
+    }
+    // Shell-exit clears the live bridge handle to 0 while historyRanges stay
+    // keyed by the prior Controller. Prefer the durable transcript handle,
+    // then a unique pane/block match so clear→exit can re-reveal floor-hidden
+    // bodies with real Metal ink (#1379 Defect B).
+    if transcriptDisplayHandle != 0, transcriptDisplayHandle != displayHandle,
+      let range = historyRanges[
+        PaneBlockKey(
+          paneID: paneID,
+          displayHandle: transcriptDisplayHandle,
+          blockID: blockID
+        )
+      ]
+    {
+      return range
+    }
+    let matches = historyRanges.filter {
+      $0.key.paneID == paneID && $0.key.blockID == blockID
+    }
+    if displayHandle == 0 {
+      let nonzero = matches.filter { $0.key.displayHandle != 0 }
+      if nonzero.count == 1 { return nonzero.first?.value }
+    }
+    return matches.count == 1 ? matches.first?.value : nil
   }
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {

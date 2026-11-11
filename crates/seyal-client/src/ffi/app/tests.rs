@@ -237,13 +237,18 @@ fn accepted_submit(handle: u64, command: &str) {
     draft.payload_len = command.len() as u32;
     assert_eq!(unsafe { seyal_app_apply(handle, &draft) }, 0);
     let mut submit = identity_fence(11, &snap);
-    submit.target_generation = composer.epoch;
+    submit.target_generation = seyal_app_composer(handle).epoch;
     assert_eq!(unsafe { seyal_app_apply(handle, &submit) }, 0);
     let pending = seyal_app_composer(handle);
     let mut result = identity_fence(12, &snap);
     result.target_execution_lo = pending.request_id;
     result.reserved = 1;
     assert_eq!(unsafe { seyal_app_apply(handle, &result) }, 0);
+    // Accept latches Busy; restore Available like the next trusted prompt.
+    static NEXT_AVAILABLE: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(100);
+    let revision = NEXT_AVAILABLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(relay_composer_status(handle, 1, revision), 0);
 }
 
 fn utf8(pointer: *const u8, len: u32) -> String {

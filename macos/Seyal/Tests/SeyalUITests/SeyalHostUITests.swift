@@ -1091,11 +1091,10 @@ final class SeyalHostUITests: XCTestCase {
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
         if editor.waitForExistence(timeout: 2), editor.firstMatch.isHittable {
             editor.firstMatch.click()
-            editor.firstMatch.typeText("sleep 2")
-            editor.firstMatch.typeKey("\r", modifierFlags: [])
+            // One typeText including Return avoids XCUI Activate gaps on typeKey.
+            editor.firstMatch.typeText("sleep 2\r")
         } else {
-            composer.firstMatch.typeText("sleep 2")
-            app.typeKey("\r", modifierFlags: [])
+            composer.firstMatch.typeText("sleep 2\r")
         }
         // Runtime publishes Busy at admission; the host only relays it.
         XCTAssertEqual(
@@ -1104,7 +1103,7 @@ final class SeyalHostUITests: XCTestCase {
                 timeout: 4
             ),
             .completed,
-            "composer stayed \(composer.value ?? "nil") while sleep 2 owned the shell"
+            "composer stayed \(composer.value ?? "nil") editor=\(editor.firstMatch.value ?? "nil") while sleep 2 owned the shell"
         )
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed during busy relay")
         // The next trusted prompt re-enables it, with the draft cleared by
@@ -1807,15 +1806,16 @@ final class SeyalHostUITests: XCTestCase {
         )
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         editor.firstMatch.click()
-        editor.firstMatch.typeText("sleep 8")
-        editor.firstMatch.typeKey("\r", modifierFlags: [])
+        // One typeText including Return: separate typeKey("\r") can be delayed
+        // 20s+ by XCUI interruption Activate on the product window (#1474).
+        editor.firstMatch.typeText("sleep 8\r")
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],
                 timeout: 6
             ),
             .completed,
-            "composer stayed \(composer.value ?? "nil") while sleep owned the shell"
+            "composer stayed \(composer.value ?? "nil") editor=\(editor.firstMatch.value ?? "nil") while sleep owned the shell"
         )
         XCTAssertTrue(execute.firstMatch.exists)
         XCTAssertFalse(execute.firstMatch.isEnabled, "busy must disable native execute")
