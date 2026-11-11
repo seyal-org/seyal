@@ -196,8 +196,11 @@ extension SecondaryLivePaneHost {
         publishBlockOutputFrame()
         if visibleIndex == 0 {
             // Empty/cleared canvas: never leave a blank scrollable transcript
-            // from a prior preserved document height (#1424).
+            // from a prior preserved document height or test/orphan spacers (#1424).
             clearPreservedDocumentHeight()
+            blocks.arrangedSubviews
+                .filter { $0 !== transcriptLeadingSpacer }
+                .forEach { $0.removeFromSuperview() }
             syncTranscriptDocumentSize()
             setTranscriptDocumentOffsetY(0)
             followingLiveEnd = true

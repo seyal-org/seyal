@@ -2340,6 +2340,9 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         var frameRequested = false
         surface.renderer.onNeedsCurrentFrame = { frameRequested = true }
+        // Offscreen unit surfaces stay invisible until attached; the in-flight
+        // gate still needs a visible renderer to exercise GPU deferral.
+        surface.renderer.setVisible(true)
         surface.renderer.setPresentationPlan(.flow())
         surface.renderer.requestPresent()
         XCTAssertTrue(surface.renderer.beginValidationFrameInFlight())
@@ -3469,8 +3472,8 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertEqual(
             historyText.components(separatedBy: "finishAddressedMutation(").count - 1,
-            2,
-            "initial and continuation requests must share the per-Controller failure boundary"
+            3,
+            "history request, truncated continuation, and addressed submitCommittedText share the per-Controller failure boundary"
         )
         let inputPath = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
         let inputText = (try? String(contentsOf: inputPath, encoding: .utf8)) ?? ""
