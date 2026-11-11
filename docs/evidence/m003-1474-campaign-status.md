@@ -1,12 +1,11 @@
 # M003 consolidated campaign status (#1474)
 
 **Date:** 2026-11-11  
-**Exact head (landed):** `78471ae0`  
-**Prior heads:** `12d7f9c2` → `48aaa5ef` → `891e8049` → `646129da` → `e433035a` → tip  
+**Exact head:** `f7c74535491731fc03868f0ea772bb11c47ad158` (docs tip; production code identical to `78471ae0`)  
 **Branch:** `mahboobmonnamd/issue/1474`  
 **PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
 **Base:** `origin/master`  
-**Claim:** `cursor-4b48e5f6bd1ab26e3db63940123a4194` VERIFIED (process-review #1478)
+**Claim:** implement #1474 VERIFIED (`cursor-e84b5c186ac438cee93e3b285c57532e`)
 
 ## Root cause (authoritative path)
 
@@ -24,51 +23,57 @@
 | Live-binding-only registry Block sync | ignore unselected tab Controllers |
 | Accept wait peeks `seyal_bridge_block_count_for` | sync only once Candidate-D records exist |
 | Session-scope Submit → Available | Trusted SSH prompt over host Busy (ADR-026) |
-| ComposerResult extracted | `ProductChromeHostView+ComposerResult.swift` (HostView ceiling ratchet 1074) |
+| ComposerResult extracted | `ProductChromeHostView+ComposerResult.swift` |
+| SSH XCUI paste submit | avoids `typeText` dropping `command` → `c` |
 
 ## Exact-head functional matrix
 
-Use DerivedData that includes `Seyal.app/Contents/Helpers/seyal-runtime` (e.g. `target/macos-ui-tests-gate23`).
+**One exclusive headed run** on DerivedData with Helpers/`seyal-runtime` installed + app/helper re-signed (`scripts/test-macos-ui.sh` ritual). Log: `/tmp/seyal-1474-matrix-signed.log`. Result bundle: `target/macos-ui-tests-matrix-signed.xcresult`. `** TEST EXECUTE SUCCEEDED **`.
 
 | Case | Verdict | Evidence |
 |---|---|---|
+| Busy AX + admission parity | **PASS** | matrix-signed 43.0s |
+| Alt-screen return → Flow hittable | **PASS** | matrix-signed 37.2s (fixtures under `temporaryDirectory`, not `/tmp`) |
+| GUI relaunch reconnect | **PASS** | matrix-signed 25.1s |
+| Real `less` TUI enter/exit | **PASS** | matrix-signed 24.8s |
+| Focus-churn scroll markers | **PASS** | matrix-signed 43.7s |
+| Pane-local terminal tab markers | **PASS** | matrix-signed 80.7s |
+| Vim TUI enter/exit → Flow | **PASS** | matrix-signed 20.9s |
+| Spawn-time SSH session Block | **PASS** | matrix-signed 95.5s |
+| Real `top` TUI | **PASS** | prior `/tmp/seyal-1474-matrix-go.log` 29.3s on `78471ae0` code |
 | Gate 1 Defect B / clear→exit / New shell | **PASS** | prior tip |
-| Alt-screen return → Flow hittable | **PASS** | prior |
-| GUI relaunch reconnect | **PASS** | prior |
-| Busy AX + admission parity | **PASS** | prior |
-| Pane-local terminal tab markers | **PASS** | `/tmp/seyal-1474-tabs-r23.log` (81.5s), `/tmp/seyal-1474-tabs-r24.log` (81.4s) |
-| Spawn-time SSH session Block + Available | **PASS** | `/tmp/seyal-1474-ssh-r10.log` (95.9s); paste submit on `78471ae0` |
-| nvim / tmux headed | **UNVERIFIED** | not re-run on this SHA |
-| Gate 4 perf (absolute budgets) | **CLASSIFIED** | see below |
-| `make check` | **PASS** | `/tmp/seyal-1474-make-check-tip.log` on `78471ae0` (pipefail) |
+| nvim headed (dedicated XCUI) | **UNVERIFIED** | no dedicated XCUI; vim TUI proxy **PASS** |
+| tmux headed (dedicated XCUI) | **UNVERIFIED** | no dedicated XCUI; `less`/`top`/`vim` TUI proxies **PASS** |
+| Gate 4 absolute CPU/RSS/Metal budgets | **CLASSIFIED** | deferred controlled-runner; see below |
+| `make check` | **PASS** | `/tmp/seyal-1474-make-check-tip-clean.log` on `f7c74535` |
 | Independent human review | **UNVERIFIED** | required before merge |
 
 ## Gate 1–4 rollup
 
 | Gate | Verdict | Notes |
 |---|---|---|
-| Gate 1 | **PASS** | Headed Metal ink (prior + tip) |
-| Gate 2 | **PASS (P0)** | Pane-local tabs green on tip; full Gate 2 suite not exhaustively re-run |
-| Gate 3 | **PASS (P1 SSH)** | Spawn-time SSH Available after host Block green; nvim/tmux still UNVERIFIED |
-| Gate 4 | **CLASSIFIED / CONDITIONAL** | `make check` green; absolute CPU/RSS/Metal product budgets remain `PLATFORM_LIMITED` / deferred to controlled Apple-Silicon runner per `docs/engineering/PERFORMANCE.md` (no silent reduction). Independent human review still required. |
+| Gate 1 | **PASS** | Headed Metal ink + lifecycle |
+| Gate 2 | **PASS** | P0 focus-churn + pane tabs green on one exclusive matrix |
+| Gate 3 | **PASS** | SSH + vim/less/top; nvim/tmux dedicated cases still UNVERIFIED |
+| Gate 4 | **CLASSIFIED / CONDITIONAL** | `make check` green; absolute product budgets `PLATFORM_LIMITED` / deferred per PERFORMANCE.md |
 
 ## Gate 4 classification (authority)
 
 Issue #1474 Gate 4 requires resource/latency/renderer evidence **or explicit classification**. Per `docs/engineering/PERFORMANCE.md`:
 
 - Absolute product budgets require a controlled Apple-Silicon runner with pinned hardware/OS/toolchain.
-- This developer host remains diagnostic / `performance_claim=false` class evidence.
-- Hot-path registry + benchmark **contracts** are enforced by `make check` (passed on tip).
-- Therefore Gate 4 absolute perf is **not claimed PASS**; it is **CLASSIFIED deferred** pending controlled-runner sign-off, without weakening merge contracts already in `make check`.
+- This developer host remains diagnostic / `performance_claim=false`.
+- Hot-path registry + benchmark **contracts** are enforced by `make check`.
+- Gate 4 absolute perf is **CLASSIFIED deferred**, not claimed PASS.
 
-## Remaining blockers (merge)
+## Remaining blockers (M003 **NO-GO** / merge)
 
 | Severity | Item |
 |---|---|
 | P0 | Independent human review + explicit product-owner merge confirmation |
-| P2 | nvim/tmux headed re-run on same SHA (optional matrix completeness) |
+| P2 | Dedicated nvim/tmux XCUI on same SHA (optional completeness; TUI proxies green) |
 | P2 | Controlled-runner Gate 4 absolute budgets |
 
 ## Recommendation
 
-**CONDITIONAL / NO-GO for merge** until human review GO and product-owner confirmation with the PR URL. Functional P0 pane-tabs and P1 SSH Available are green on this tip; Gate 4 absolute perf is explicitly classified deferred under PERFORMANCE.md — not silently skipped.
+**NO-GO for merge** until independent human review GO and product-owner confirmation with the PR URL. Functional P0/P1 headed matrix on this tip is green (`/tmp/seyal-1474-matrix-signed.log`); Gate 4 absolute perf remains explicitly classified deferred.
