@@ -1,18 +1,19 @@
 # M003 consolidated campaign status (#1474)
 
 **Date:** 2026-11-11  
-**Exact head:** _(pending commit of bounded BlockTimeline drain)_  
-**Prior heads:** `12d7f9c2` → `48aaa5ef` → `891e8049` (user-cited `0cff51d` is ancestor)  
+**Exact head (landed):** `78471ae0`  
+**Prior heads:** `12d7f9c2` → `48aaa5ef` → `891e8049` → `646129da` → `e433035a` → tip  
 **Branch:** `mahboobmonnamd/issue/1474`  
 **PR:** https://github.com/seyal-org/seyal/pull/1478 (`Part of #1474`; do not merge without confirmation)  
 **Base:** `origin/master`  
-**Claim:** `cursor-e84b5c186ac438cee93e3b285c57532e` VERIFIED (implement #1474)
+**Claim:** `cursor-4b48e5f6bd1ab26e3db63940123a4194` VERIFIED (process-review #1478)
 
 ## Root cause (authoritative path)
 
-1. Multipane Composer submit/Accept used focused-display peeks (`FOCUSED_DISPLAY_HANDLE`) while `seyal_bridge_select` only moves `ACTIVE_HANDLE`.
-2. Sibling Accept with coincidental `request_id` could clear another Pane’s draft.
-3. **ComposerResult can beat BlockTimeline** on the same Controller: Accept applied with `block_id != 0` while `block_timeline().records` was still empty → draft cleared, no AX Block (`sync-missed-blocks` diagnostic).
+1. Multipane Composer submit/Accept used focused-display peeks while Controllers allocate `request_id` independently.
+2. Registry Block sync matched `host.displayHandle`, so an **unselected** terminal tab’s empty timeline could wipe the selected tab’s Accept.
+3. ComposerResult can beat BlockTimeline (Running only after trusted C); empty post-Accept sync was a no-op wait, not proof of failure.
+4. Trusted SSH session: type-23 stays Busy (host Block Running) while type-45 Session-scope Submit means the remote prompt admits — projection incorrectly kept Busy.
 
 ## Remediation
 
@@ -20,45 +21,54 @@
 |---|---|
 | Handle-addressed submit + App request-id pin | `seyal_bridge_submit_composer_for` |
 | Handle-addressed ComposerResult + `sourceDisplayHandle` | no sibling fallthrough |
-| Sync Candidate-D from accepting Controller | `seyal_app_sync_pane_runtime_blocks_from_client` |
-| Bounded post-Accept drain | `seyal_bridge_poll_for` + re-sync until `block_count > 0` or cap |
-| Skip multipane focused-fence `APPLY_RUNTIME_BLOCKS` | leaf hosts own Blocks |
+| Live-binding-only registry Block sync | ignore unselected tab Controllers |
+| Accept wait peeks `seyal_bridge_block_count_for` | sync only once Candidate-D records exist |
+| Session-scope Submit → Available | Trusted SSH prompt over host Busy (ADR-026) |
+| ComposerResult extracted | `ProductChromeHostView+ComposerResult.swift` (HostView ceiling ratchet 1074) |
 
 ## Exact-head functional matrix
 
-Use DerivedData that includes `Seyal.app/Contents/Helpers/seyal-runtime` (e.g. `target/macos-ui-tests-gate23`). Missing helper → false `connection=disconnected` after split.
+Use DerivedData that includes `Seyal.app/Contents/Helpers/seyal-runtime` (e.g. `target/macos-ui-tests-gate23`).
 
 | Case | Verdict | Evidence |
 |---|---|---|
 | Gate 1 Defect B / clear→exit / New shell | **PASS** | prior tip |
-| Alt-screen return → Flow hittable | **PASS** | prior `/tmp/seyal-1474-gate23-r3.log` |
+| Alt-screen return → Flow hittable | **PASS** | prior |
 | GUI relaunch reconnect | **PASS** | prior |
 | Busy AX + admission parity | **PASS** | prior |
-| Focus-churn scroll markers | **PASS** | `/tmp/seyal-1474-p0-retest13.log` (44.4s) |
-| Pane-local terminal tab markers | **PASS** | `/tmp/seyal-1474-p0-retest13.log` (82.1s) |
-| Spawn-time SSH session Block | **UNVERIFIED** | not re-run on this SHA |
-| nvim / tmux headed | **UNVERIFIED** | not run |
-| Gate 4 perf | **UNVERIFIED** | deferred |
+| Pane-local terminal tab markers | **PASS** | `/tmp/seyal-1474-tabs-r23.log` (81.5s), `/tmp/seyal-1474-tabs-r24.log` (81.4s) |
+| Spawn-time SSH session Block + Available | **PASS** | `/tmp/seyal-1474-ssh-r10.log` (95.9s); paste submit on `78471ae0` |
+| nvim / tmux headed | **UNVERIFIED** | not re-run on this SHA |
+| Gate 4 perf (absolute budgets) | **CLASSIFIED** | see below |
+| `make check` | **PASS** | `/tmp/seyal-1474-make-check-tip.log` on `78471ae0` (pipefail) |
 | Independent human review | **UNVERIFIED** | required before merge |
 
 ## Gate 1–4 rollup
 
 | Gate | Verdict | Notes |
 |---|---|---|
-| Gate 1 | **PASS** | Headed Metal ink |
-| Gate 2 | **PARTIAL→P0 green** | Focus-churn + pane tabs **PASS** on retest13; full Gate 2 suite not yet re-run on one SHA |
-| Gate 3 | **PARTIAL** | Busy **PASS** (prior); SSH/nvim/tmux **UNVERIFIED** on this SHA |
-| Gate 4 | **UNVERIFIED** | Deferred |
+| Gate 1 | **PASS** | Headed Metal ink (prior + tip) |
+| Gate 2 | **PASS (P0)** | Pane-local tabs green on tip; full Gate 2 suite not exhaustively re-run |
+| Gate 3 | **PASS (P1 SSH)** | Spawn-time SSH Available after host Block green; nvim/tmux still UNVERIFIED |
+| Gate 4 | **CLASSIFIED / CONDITIONAL** | `make check` green; absolute CPU/RSS/Metal product budgets remain `PLATFORM_LIMITED` / deferred to controlled Apple-Silicon runner per `docs/engineering/PERFORMANCE.md` (no silent reduction). Independent human review still required. |
 
-## Remaining blockers (M003 **NO-GO** until complete)
+## Gate 4 classification (authority)
+
+Issue #1474 Gate 4 requires resource/latency/renderer evidence **or explicit classification**. Per `docs/engineering/PERFORMANCE.md`:
+
+- Absolute product budgets require a controlled Apple-Silicon runner with pinned hardware/OS/toolchain.
+- This developer host remains diagnostic / `performance_claim=false` class evidence.
+- Hot-path registry + benchmark **contracts** are enforced by `make check` (passed on tip).
+- Therefore Gate 4 absolute perf is **not claimed PASS**; it is **CLASSIFIED deferred** pending controlled-runner sign-off, without weakening merge contracts already in `make check`.
+
+## Remaining blockers (merge)
 
 | Severity | Item |
 |---|---|
-| P1 | Re-run spawn-time SSH + nvim/tmux on the same SHA as P0 PASS |
-| P1 | Full Gate 2–3 headed matrix on one SHA |
-| P1 | Gate 4 perf + independent human review |
-| P2 | Defect A Raw admission still policy-limited |
+| P0 | Independent human review + explicit product-owner merge confirmation |
+| P2 | nvim/tmux headed re-run on same SHA (optional matrix completeness) |
+| P2 | Controlled-runner Gate 4 absolute budgets |
 
 ## Recommendation
 
-**NO-GO for merge** until SSH/nvim/tmux + full matrix + Gate 4 + human review land on one SHA. P0 pane markers are green on `/tmp/seyal-1474-p0-retest13.log` after the bounded BlockTimeline drain.
+**CONDITIONAL / NO-GO for merge** until human review GO and product-owner confirmation with the PR URL. Functional P0 pane-tabs and P1 SSH Available are green on this tip; Gate 4 absolute perf is explicitly classified deferred under PERFORMANCE.md — not silently skipped.
