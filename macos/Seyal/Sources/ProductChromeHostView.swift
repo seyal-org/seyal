@@ -734,17 +734,32 @@ final class ProductChromeHostView: NSView {
                 // Runtime allocated a Block id, drain that Controller then sync
                 // so pane-local tab markers are not stuck empty (#1474).
                 if blockID != 0 {
+                    // ComposerResult can beat BlockTimeline on the same socket.
+                    // Bounded drain: progress each turn or stop (AGENTS.md).
                     var after = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
-                    if after.block_count == 0, client != 0 {
-                        _ = seyal_bridge_poll_for(client)
-                        host.invalidateProjectionCache()
-                        host.noteRegistryPolled(clientHandle: client)
-                        after = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
+                    if client != 0 {
+                        var turns = 0
+                        while after.block_count == 0, turns < 32 {
+                            let polled = seyal_bridge_poll_for(client)
+                            host.invalidateProjectionCache()
+                            host.noteRegistryPolled(clientHandle: client)
+                            after = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
+                            turns += 1
+                            if after.block_count > 0 { break }
+                            if polled < 0 { break }
+                            // Timeline may follow Accept by a few ms; bounded wait.
+                            if polled == 0 {
+                                Thread.sleep(forTimeInterval: 0.01)
+                            }
+                        }
                     }
                     if after.block_count == 0 {
                         host.blocks.setAccessibilityLabel(
-                            "sync-missed-blocks request=\(requestID) block=\(blockID)"
+                            "sync-missed-blocks request=\(requestID) block=\(blockID) "
+                                + "handle=\(client)"
                         )
+                    } else {
+                        host.blocks.setAccessibilityLabel(nil)
                     }
                 } else {
                     host.blocks.setAccessibilityLabel(
