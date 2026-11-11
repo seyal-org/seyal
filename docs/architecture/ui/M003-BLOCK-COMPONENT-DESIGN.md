@@ -27,7 +27,7 @@ C-BLOCK                       one Runtime Block over the Pane's TerminalExecutio
 │   └── C-BLOCK-SEAM          semantic seam, right-aligned  Seyal augmentation (AppKit)
 │       ├── C-SEAM-ACTIONS    Copy ▾ · Rerun · More          hover/focus only
 │       ├── C-SEAM-STATUS     running ◌ / success ✓ / failed ✕ / unknown ?
-│       └── C-SEAM-DURATION   elapsed time                   (#1043)
+│       └── C-SEAM-DURATION   completed elapsed time only    (#1043; #1354)
 ├── C-BLOCK-COMMAND           command line                  terminal truth (Metal)
 └── C-BLOCK-OUTPUT            output region                 terminal truth (Metal)
 ```
@@ -135,10 +135,12 @@ Swift renders and routes only (ADR-015). Pasteboard writes are the only OS side 
 | Rest | 1 pt `BlockBorderRest` | status (+duration) | Rest / Success / Failed |
 | Hover | 1 pt `BlockBorderHover` | actions + status | Hover / actions revealed |
 | Selected | 1.5 pt `BlockFocus` | actions + status | Focused / selected |
-| Running | as rest | `BlockFocus` spinner (+live duration) | Running |
+| Running | as rest | `BlockFocus` spinner only (no live elapsed) | Running |
 | Failed | as rest | ✕ `Danger` | Failed |
 
 Hover and selection changes are immediate. The only motion is the running spinner. Under Reduce Motion (the Rust-projected `reduce_motion` preference) the spinner is replaced by a static running glyph.
+
+`C-SEAM-DURATION` appears only for **completed** Blocks that expose a Runtime-measured `duration_ns` (#1043). Running Blocks show the spinner (or Reduce Motion glyph) and never invent or interpolate an elapsed value. That matches accepted ADR-009 2026-09-19 items 5–6 and SPEC-008 §5.4. The board's running "+live duration" cue is deferred out of M003 (#1354).
 
 ## 9. Intentional deviations
 
@@ -146,7 +148,8 @@ Hover and selection changes are immediate. The only motion is the running spinne
 - **Selected border uses board-blue `BlockFocus`, not purple shell `SeamFocus` / `Focus`.** The board's blue focus border (≈`#3b82f6`) is the value of the new `BlockFocus` role. The shell seam focus family stays purple. Block chrome must not alias its selected border to `SeamFocus` or `Focus`.
 - **No shortcut hints in the Copy menu.** The board shows ⌘C / ⇧⌘C / ⌥⌘C. `cmd+c` is reserved (SPEC-024 §4.2), and no Block copy command is bound.
 - **Staged features are not shown.** Filter, Search-in-Block, Pin, Collapse, Workflow promotion, Attach-as-context and the TUI placeholder are not rendered until their own Issues land. No disabled placeholder buttons.
-- Duration and context line are staged behind #1043 and #1042.
+- **No live running elapsed time.** The board shows `◌ 12.4s` while Running; accepted ADR-009 / SPEC-008 define duration only after trusted `D`. #1354 keeps M003 at spinner-only for Running and completed-only duration via #1043. A later milestone may reopen live running elapsed only with a new ADR/SPEC amendment.
+- Completed duration and context line are staged behind #1043 and #1042.
 
 ## 10. Unknowns and assumptions
 
@@ -170,6 +173,7 @@ The #1010 implementation PR must deliver this evidence. Test and attachment name
 #1015 correct Block ranges (done; PR #1019 merged)
       └─► #1010 Block chrome (this document)
 #1041 ADR-009 amendment ─► #1042 context line ─► remove staged command label
-#1043 duration ───────────────────────────────► C-SEAM-DURATION
+#1043 completed duration ─────────────────────► C-SEAM-DURATION (completed only)
+#1354 no live running elapsed (design aligned to ADR-009 / SPEC-008)
 follow-ups: filter/search · pin · collapse · workflow promotion · attach-as-context · TUI exception
 ```
