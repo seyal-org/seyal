@@ -194,6 +194,41 @@ pub unsafe extern "C" fn seyal_bridge_submit_composer(bytes: *const u8, len: u32
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
+/// Submit a ComposerCommand on one adopted Controller without retargeting the
+/// focused display route. Multipane / pane-local terminal tabs must pin the
+/// leaf's binding handle here — `seyal_bridge_select` alone does not change
+/// [`with_display_client`] routing (#1474 / #1424).
+///
+/// `request_id` should be ApplicationRoot's pending Submit id (0 = allocate on
+/// the Controller). Pinning keeps ComposerResult matched to the Pane (#1474).
+///
+/// # Safety
+/// Same byte contract as [`seyal_bridge_submit_composer`]. `handle` must be an
+/// adopted client on this thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn seyal_bridge_submit_composer_for(
+    handle: u64,
+    bytes: *const u8,
+    len: u32,
+    request_id: u64,
+) -> i32 {
+    if len == 0 || bytes.is_null() {
+        return -4;
+    }
+    let Ok(len) = usize::try_from(len) else {
+        return -11;
+    };
+    let bytes = unsafe { slice::from_raw_parts(bytes, len) };
+    let Ok(command) = str::from_utf8(bytes) else {
+        return -4;
+    };
+    let pinned = (request_id != 0).then_some(request_id);
+    with_client_mut(handle, |client| {
+        client.submit_composer_command_with_request_id(command, pinned)
+    })
+    .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
+}
+
 /// Submit one M001 logical terminal key. `kind` uses SPEC-006 key-kind values;
 /// only ControlAscii carries a nonzero `scalar`.
 #[unsafe(no_mangle)]

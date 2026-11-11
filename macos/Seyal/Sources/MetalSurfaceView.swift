@@ -806,8 +806,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     ) ?? -10
   }
 
-  func terminalSubmitComposerCommand(_ text: String) -> Int32 {
-    bridge?.submitComposerCommand(text) ?? -10
+  func terminalSubmitComposerCommand(_ text: String, requestID: UInt64 = 0) -> Int32 {
+    bridge?.submitComposerCommand(text, requestID: requestID) ?? -10
   }
 
   func terminalNextComposerRequestID() -> UInt64 {

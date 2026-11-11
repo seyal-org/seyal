@@ -2514,7 +2514,11 @@ final class SeyalPaneSplitUITests: XCTestCase {
         // focused presentation host + composer (#1424). Raw resting is cold
         // default (#1445), so latch Flow before requiring composer.
         app.ensureRunningForegroundForAttach()
-        let presentation = element(app, "seyal-pane-presentation-host")
+        // Prefer firstMatch: New Terminal briefly exposes more than one Metal
+        // surface with the same id before focus ownership retags (#1474).
+        let presentation = app.descendants(matching: .any)
+            .matching(identifier: "seyal-pane-presentation-host")
+            .firstMatch
         if presentation.waitForExistence(timeout: 2) {
             app.ensureFlowBlocksPresentation(timeout: timeout)
             XCTAssertTrue(
@@ -2545,7 +2549,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
             )
             return
         }
-        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)

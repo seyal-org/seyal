@@ -248,6 +248,14 @@ typedef struct SeyalCopiedText {
 SeyalCopiedText seyal_bridge_copied_text(void);
 int32_t seyal_bridge_copied_text_consume(void);
 int32_t seyal_bridge_submit_composer(const uint8_t *bytes, uint32_t len);
+/* ComposerCommand on one registry Controller without changing focus (#1474).
+ * request_id: ApplicationRoot pending id, or 0 to allocate on the Controller. */
+int32_t seyal_bridge_submit_composer_for(
+    uint64_t handle,
+    const uint8_t *bytes,
+    uint32_t len,
+    uint64_t request_id
+);
 int32_t seyal_bridge_request_history_range(
     uint64_t block_id,
     uint64_t start_line,
@@ -305,6 +313,8 @@ uint8_t seyal_bridge_history_range_consume_for_handle(
     uint64_t request_id
 );
 SeyalComposerResult seyal_bridge_composer_result(void);
+/* ComposerResult for one registry Controller without changing focus (#1474). */
+SeyalComposerResult seyal_bridge_composer_result_for(uint64_t handle);
 SeyalComposerStatus seyal_bridge_composer_status(void);
 SeyalComposerTarget seyal_bridge_composer_target(void);
 SeyalComposerTarget seyal_bridge_composer_target_for_handle(uint64_t handle);

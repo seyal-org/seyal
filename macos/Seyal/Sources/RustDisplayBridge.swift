@@ -556,10 +556,12 @@ final class RustDisplayBridge {
           // unfocused multipane Flow leaves receive completed Block bodies (#1424/#1426).
           self.publishHistoryRanges(forDisplayHandle: handle)
           self.onRegistryHandlePolled?(handle)
+          // Always publish this Controller's ComposerResult by handle so a
+          // focused-display lag cannot apply a sibling Accept (#1474).
+          self.publishComposerResult(forDisplayHandle: handle)
           if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
             self.runtimeBlockMetadata = self.currentBlockMetadata()
             self.publishHistoryRanges(forDisplayHandle: handle)
-            self.publishComposerResult()
             self.publishComposerStatus()
             let revision = seyal_bridge_block_timeline_revision()
             if revision != self.lastTimelineRevision {

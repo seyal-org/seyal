@@ -539,6 +539,17 @@ impl ApplicationRoot {
         self.pane_client_raws.get(&pane).copied()
     }
 
+    /// Pin this Pane's Controller after a handle-addressed Block sync so a
+    /// later shell reconcile cannot rebind to a stale tab client and wipe the
+    /// projected timeline (#1474 pane-local tabs / multipane Accept).
+    #[cfg(target_os = "macos")]
+    pub(crate) fn pin_pane_client_raw(&mut self, pane: PaneId, raw: u64) {
+        if raw == 0 || !self.pane_known(pane) {
+            return;
+        }
+        self.pane_client_raws.insert(pane, raw);
+    }
+
     /// Whether the pane's Controller still accepts a nonblocking poll (unrelated
     /// work continues during CreateTab attach).
     #[doc(hidden)]

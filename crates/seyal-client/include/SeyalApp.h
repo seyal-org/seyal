@@ -1134,6 +1134,12 @@ int32_t seyal_app_sync_pane_runtime_blocks(
     uint64_t handle,
     uint64_t pane_lo,
     uint64_t pane_hi);
+/* Sync from an explicit registry Controller (pane-local terminal tabs, #1474). */
+int32_t seyal_app_sync_pane_runtime_blocks_from_client(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    uint64_t client_handle);
 /* Apply ComposerResult to a Pane without focused fence (multipane leaf accept). */
 int32_t seyal_app_apply_composer_result_for_pane(
     uint64_t handle,

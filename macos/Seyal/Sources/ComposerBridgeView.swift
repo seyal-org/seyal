@@ -29,7 +29,8 @@ private final class ComposerTextView: NSTextView {
 /// Native IME/editor bridge only. Draft, submit, and C09 copy stay Rust-owned.
 @MainActor
 final class ComposerBridgeView: NSView, NSTextViewDelegate {
-    var onSubmitComposer: ((String) -> Int32)?
+    /// Second argument is ApplicationRoot's pending request id (0 if unknown).
+    var onSubmitComposer: ((String, UInt64) -> Int32)?
     var onSubmitRaw: ((String) -> Int32)?
     /// Rust accepted OpenComposerHistory; the host reconciles the overlay.
     var onHistoryOpened: (() -> Void)?
@@ -646,12 +647,25 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         // Keep pending_request_id until Runtime's ComposerResult is drained.
         // Optimistic accept cleared pending before Busy status arrived and let
         // a stale Submit→Available projection win on quiet commands (#1474).
-        var status = onSubmitComposer?(command) ?? -10
+        // Pin the AppRoot pending id onto the Controller so ComposerResult
+        // cannot be attributed across independently allocating clients (#1474).
+        let pendingRequestID = readComposer().request_id
+        var status = onSubmitComposer?(command, pendingRequestID) ?? -10
         if status == -12 {
             let payload = command.hasSuffix("\r") ? command : command + "\r"
             status = onSubmitRaw?(payload) ?? -10
         }
-        _ = status
+        if status != 0, pendingRequestID != 0 {
+            // Transport rejected the command; clear pending without wiping the
+            // draft so the user can retry (ApplyResult accepted=false).
+            if let lo = boundPaneLo, let hi = boundPaneHi {
+                _ = seyal_app_apply_composer_result_for_pane(
+                    appHandle, lo, hi, pendingRequestID, 0
+                )
+            } else {
+                applyComposerResult(requestID: pendingRequestID, accepted: false)
+            }
+        }
         reconcile()
     }
 

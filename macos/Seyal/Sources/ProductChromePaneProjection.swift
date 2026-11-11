@@ -95,7 +95,19 @@ extension ProductChromeHostView {
     func wireRegistryFrameRouting(focusedDisplayHandle: UInt64) {
         guard let bridge = pane.inputSurface.bridge else { return }
         bridge.onRegistryHandlePolled = { [weak self] displayHandle in
-            self?.centerColumn.secondaryHost(displayHandle: displayHandle)?.noteRegistryPolled()
+            guard let self else { return }
+            if let host = self.centerColumn.secondaryHost(displayHandle: displayHandle) {
+                host.noteRegistryPolled(clientHandle: displayHandle)
+                return
+            }
+            // Tab switches can leave host.displayHandle briefly stale while the
+            // shell binding already names the polled Controller (#1474).
+            for host in self.centerColumn.secondaryHosts
+            where host.liveBindingDisplayHandleForRegistry() == displayHandle {
+                // updateDisplayHandle syncs from the new Controller.
+                _ = host.updateDisplayHandle(displayHandle)
+                return
+            }
         }
         guard bridge.windowFocusedDisplayHandle != focusedDisplayHandle else { return }
         bridge.windowFocusedDisplayHandle = focusedDisplayHandle

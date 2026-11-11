@@ -182,7 +182,12 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitCommittedText(_ text: String) -> Int32 {
-    guard isConnected, selectPresentedClient() else {
+    guard isConnected else {
+      onStatusChanged()
+      return -10
+    }
+    let handle = submissionTargetDisplayHandle()
+    guard handle != 0 else {
       onStatusChanged()
       return -10
     }
@@ -192,7 +197,6 @@ extension RustDisplayBridge {
       return -14
     }
     let count = UInt32(byteCount)
-    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
     let result =
       text.utf8.withContiguousStorageIfAvailable { buffer -> Int32 in
         seyal_bridge_submit_utf8_for(handle, buffer.baseAddress, count)
@@ -200,7 +204,7 @@ extension RustDisplayBridge {
       ?? Array(text.utf8).withUnsafeBufferPointer { buffer in
         seyal_bridge_submit_utf8_for(handle, buffer.baseAddress, count)
       }
-    return finishMutation(result)
+    return finishAddressedMutation(result, forDisplayHandle: handle)
   }
 
   /// Empty paste is invalid (`-4`); UTF-8 above `MAX_INPUT_BYTES` is CommitTooLarge (`-14`).

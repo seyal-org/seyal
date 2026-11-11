@@ -167,7 +167,7 @@ final class SecondaryLivePaneHost: NSView {
         // this Pane's Controller. Pin window focus to `displayHandle` at the
         // submit boundary so a stale focused-handle after Pane/tab switches
         // cannot send Flow commands to a sibling timeline (#1474 / #1424).
-        composer.onSubmitComposer = { [weak self] command in
+        composer.onSubmitComposer = { [weak self] command, requestID in
             guard let self, let bridge = self.historyBridge else { return -10 }
             // Tab switches can update presentation AX before `displayHandle` is
             // refreshed; resolve the live binding handle at the submit boundary
@@ -181,7 +181,7 @@ final class SecondaryLivePaneHost: NSView {
             bridge.windowFocusedDisplayHandle = handle
             bridge.submissionDisplayHandleOverride = handle
             defer { bridge.submissionDisplayHandleOverride = priorOverride }
-            return bridge.submitComposerCommand(command)
+            return bridge.submitComposerCommand(command, requestID: requestID)
         }
         composer.onSubmitRaw = { [weak self] command in
             guard let self, let bridge = self.historyBridge else { return -10 }
@@ -454,7 +454,20 @@ final class SecondaryLivePaneHost: NSView {
 
     /// Called when the shared primary bridge polls this registry handle.
     func noteRegistryPolled() {
-        _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+        noteRegistryPolled(clientHandle: displayHandle)
+    }
+
+    /// Sync Candidate-D Blocks from an explicit Controller. After ComposerAccept
+    /// the source handle is authoritative even if `pane_client_raw` briefly
+    /// still names another terminal tab (#1474).
+    func noteRegistryPolled(clientHandle: UInt64) {
+        if clientHandle != 0 {
+            _ = seyal_app_sync_pane_runtime_blocks_from_client(
+                appHandle, paneLo, paneHi, clientHandle
+            )
+        } else {
+            _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+        }
         publishFrame()
         reconcileFlowPresentation()
     }
@@ -511,8 +524,8 @@ final class SecondaryLivePaneHost: NSView {
         rebuildBlocks()
     }
 
-    /// Test seam: force the next reconcile to rebuild Blocks from projection.
-    func invalidateProjectionCacheForTests() {
+    /// Force the next Flow reconcile to rebuild Block cards from projection.
+    func invalidateProjectionCache() {
         lastProjectionFingerprint = nil
         lastAppliedEligibility = nil
     }
@@ -706,9 +719,18 @@ final class SecondaryLivePaneHost: NSView {
         for index in 0..<paneCount {
             let binding = seyal_app_pane_binding(appHandle, UInt32(index))
             guard binding.pane_lo == paneLo, binding.pane_hi == paneHi else { continue }
-            return binding.display_handle
+            // A known Pane with no adopted client yet must not report 0 when the
+            // host still holds the prior Controller — tab select can briefly
+            // clear pane_client_raw before the replacement attach lands (#1474).
+            return binding.display_handle != 0 ? binding.display_handle : displayHandle
         }
         return displayHandle
+    }
+
+    /// Registry-poll seam: expose the live shell binding handle so a shared
+    /// bridge can route Candidate-D sync when `displayHandle` lags a tab select.
+    func liveBindingDisplayHandleForRegistry() -> UInt64 {
+        liveBindingDisplayHandle()
     }
 
     private func updateAvailabilityPresentation() {

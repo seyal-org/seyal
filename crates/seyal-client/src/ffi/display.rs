@@ -309,12 +309,9 @@ pub extern "C" fn seyal_bridge_history_range_consume_for_handle(
     .unwrap_or(0)
 }
 
-/// Copies the latest Runtime ComposerResult into a typed C value. No command
-/// text crosses this boundary; request ID is the only submission identity.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
-    with_display_client(|client| client.last_composer_result())
-        .flatten()
+fn composer_result_from_client(client: &LocalDisplayClient) -> SeyalComposerResult {
+    client
+        .last_composer_result()
         .map(|result| SeyalComposerResult {
             request_id: result.request_id,
             block_id: result.block_id,
@@ -327,6 +324,23 @@ pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
             },
             reserved: [0; 7],
         })
+        .unwrap_or_else(SeyalComposerResult::empty)
+}
+
+/// Copies the latest Runtime ComposerResult into a typed C value. No command
+/// text crosses this boundary; request ID is the only submission identity.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
+    with_display_client(composer_result_from_client).unwrap_or_else(SeyalComposerResult::empty)
+}
+
+/// ComposerResult for one adopted Controller without requiring the focused
+/// display route. Multipane must publish the polled/presented handle's result
+/// so a stale focused-display client cannot clear another Pane's pending
+/// request with a sibling's Accept (#1474 / #1424).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_composer_result_for(handle: u64) -> SeyalComposerResult {
+    super::with_client(handle, composer_result_from_client)
         .unwrap_or_else(SeyalComposerResult::empty)
 }
 

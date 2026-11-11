@@ -62,9 +62,16 @@ extension ProductChromeHostView {
 
     func installTimelineChangeHandler() {
         pane.inputSurface.onTimelineChanged = { [weak self] in
-            self?.projectRuntimeBlocks()
-            self?.reconcileChrome()
-            self?.refreshRunningBlockOutput()
+            guard let self else { return }
+            // Multipane leaf hosts sync Candidate-D Blocks via
+            // noteRegistryPolled on the owning Controller. APPLY_RUNTIME_BLOCKS
+            // through the focused fence can overwrite a pane timeline from the
+            // wrong active client after tab/focus churn (#1474 / #1424).
+            if self.centerColumn.secondaryHosts.isEmpty {
+                self.projectRuntimeBlocks()
+            }
+            self.reconcileChrome()
+            self.refreshRunningBlockOutput()
         }
     }
 

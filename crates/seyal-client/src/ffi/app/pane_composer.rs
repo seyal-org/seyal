@@ -411,6 +411,20 @@ pub extern "C" fn seyal_app_sync_pane_runtime_blocks(
     pane_lo: u64,
     pane_hi: u64,
 ) -> i32 {
+    seyal_app_sync_pane_runtime_blocks_from_client(handle, pane_lo, pane_hi, 0)
+}
+
+/// Like [`seyal_app_sync_pane_runtime_blocks`], but read the timeline from an
+/// explicit registry Controller. Pane-local terminal tabs must sync the
+/// Controller that accepted the ComposerCommand — not a stale `pane_client_raw`
+/// that still names a sibling tab (#1474).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_sync_pane_runtime_blocks_from_client(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+    client_handle: u64,
+) -> i32 {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let Some(state) = apps.get_mut(&handle) else {
@@ -423,9 +437,14 @@ pub extern "C" fn seyal_app_sync_pane_runtime_blocks(
         if !state.root.pane_known(pane) {
             return -2;
         }
-        let Some(raw) = state.root.pane_client_raw(pane) else {
-            // No client yet — not an error; host keeps prior composer state.
-            return 0;
+        let raw = if client_handle != 0 {
+            client_handle
+        } else {
+            let Some(raw) = state.root.pane_client_raw(pane) else {
+                // No client yet — not an error; host keeps prior composer state.
+                return 0;
+            };
+            raw
         };
         let Some(records) = crate::ffi::with_client(raw, |client| {
             client
@@ -437,6 +456,12 @@ pub extern "C" fn seyal_app_sync_pane_runtime_blocks(
         }) else {
             return -3;
         };
+        // Pin the Pane → Controller map to the timeline we just projected.
+        // Otherwise a post-Accept chrome reconcile can rebind `pane_client_raw`
+        // to a stale tab client and wipe the new Block on the next sync (#1474).
+        if client_handle != 0 {
+            state.root.pin_pane_client_raw(pane, raw);
+        }
         match state.root.apply_runtime_blocks_for_pane(pane, records) {
             Ok(()) => 0,
             Err(_) => -4,

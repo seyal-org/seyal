@@ -371,8 +371,9 @@ final class ProductChromeHostView: NSView {
         NSLayoutConstraint.activate(paneFollowsTranscript)
         applyShellChrome(seyal_app_chrome(pane.appHandle))
 
-        composer.onSubmitComposer = { [weak self] command in
-            self?.pane.inputSurface.terminalSubmitComposerCommand(command) ?? -10
+        composer.onSubmitComposer = { [weak self] command, requestID in
+            self?.pane.inputSurface.terminalSubmitComposerCommand(command, requestID: requestID)
+                ?? -10
         }
         composer.onSubmitRaw = { [weak self] command in
             self?.pane.inputSurface.terminalSubmitCommittedText(command) ?? -10
@@ -431,7 +432,9 @@ final class ProductChromeHostView: NSView {
             self.distributeComposerResult(
                 requestID: result.requestID,
                 accepted: accepted,
-                failureCode: accepted ? nil : result.code
+                failureCode: accepted ? nil : result.code,
+                sourceDisplayHandle: result.sourceDisplayHandle,
+                blockID: result.blockID
             )
             self.reconcileChrome()
         }
@@ -675,7 +678,9 @@ final class ProductChromeHostView: NSView {
     func distributeComposerResult(
         requestID: UInt64,
         accepted: Bool,
-        failureCode: NativeComposerResult.Code?
+        failureCode: NativeComposerResult.Code?,
+        sourceDisplayHandle: UInt64 = 0,
+        blockID: UInt64 = 0
     ) {
         if centerColumn.secondaryHosts.isEmpty {
             composer.applyComposerResult(requestID: requestID, accepted: accepted)
@@ -688,7 +693,24 @@ final class ProductChromeHostView: NSView {
         // hit-testing cannot submit through a hidden competing `seyal-composer`.
         composer.retirePrimaryAccessibilityIdentity()
         let appHandle = pane.appHandle
-        for host in centerColumn.secondaryHosts {
+        // Bind Accept to the Controller that produced it. Never fall through to
+        // a sibling that happens to share the same pending request_id (#1474
+        // pane-local tabs: Pane 2's Accept must not clear Pane 1's draft).
+        let hosts: [SecondaryLivePaneHost]
+        if sourceDisplayHandle != 0 {
+            guard let owner = centerColumn.secondaryHost(displayHandle: sourceDisplayHandle)
+                ?? centerColumn.secondaryHosts.first(where: {
+                    $0.liveBindingDisplayHandleForRegistry() == sourceDisplayHandle
+                })
+            else { return }
+            if owner.displayHandle != sourceDisplayHandle {
+                _ = owner.updateDisplayHandle(sourceDisplayHandle)
+            }
+            hosts = [owner]
+        } else {
+            hosts = centerColumn.secondaryHosts
+        }
+        for host in hosts {
             let snap = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
             guard snap.request_id == requestID, requestID != 0 else { continue }
             let applied = seyal_app_apply_composer_result_for_pane(
@@ -700,6 +722,25 @@ final class ProductChromeHostView: NSView {
             )
             guard applied == 0 else { continue }
             host.composer.reconcile()
+            // Accept can land before the next registry poll republishes the
+            // Candidate-D timeline. Force a pane-local sync from the producing
+            // Controller so XCUI sees the new Block without waiting on PTY wake
+            // (#1474).
+            if accepted {
+                let client = sourceDisplayHandle != 0 ? sourceDisplayHandle : host.displayHandle
+                host.invalidateProjectionCache()
+                host.noteRegistryPolled(clientHandle: client)
+                // BlockTimeline can settle one poll after ComposerResult. When
+                // Runtime allocated a Block id, sync again from that Controller
+                // so pane-local tab markers are not stuck empty (#1474).
+                if blockID != 0 {
+                    let after = seyal_app_composer_for_pane(appHandle, host.paneLo, host.paneHi)
+                    if after.block_count == 0 {
+                        host.invalidateProjectionCache()
+                        host.noteRegistryPolled(clientHandle: client)
+                    }
+                }
+            }
             if let failureCode {
                 host.composer.presentAdmissionFailure(failureCode)
             }

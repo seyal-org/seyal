@@ -1446,7 +1446,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotNil(host.preservedDocumentHeightConstraint)
         XCTAssertGreaterThan(host.transcriptDocumentOffsetY, 100)
 
-        host.invalidateProjectionCacheForTests()
+        host.invalidateProjectionCache()
         host.reconcileFlowPresentation()
         XCTAssertNil(
             host.preservedDocumentHeightConstraint,
@@ -3336,11 +3336,29 @@ final class SeyalHostComponentTests: XCTestCase {
             hostMainText.contains("seyal_app_apply_composer_result_for_pane"),
             "multipane ComposerResult must clear pending without stealing focus fence"
         )
+        XCTAssertTrue(
+            hostMainText.contains("Bind Accept to the Controller that produced it"),
+            "multipane Accept must not fall through to a sibling pending request_id"
+        )
         let bridgeFrame = sourceRoot.appendingPathComponent("RustDisplayBridge+Frame.swift")
         let bridgeFrameText = (try? String(contentsOf: bridgeFrame, encoding: .utf8)) ?? ""
         XCTAssertTrue(
             bridgeFrameText.contains("lastComposerResultRequestIDByHandle"),
             "ComposerResult dedup must be per-Controller handle for multipane"
+        )
+        XCTAssertTrue(
+            bridgeFrameText.contains("seyal_bridge_composer_result_for(handle)"),
+            "ComposerResult must read the owning Controller, not focused-display peek"
+        )
+        XCTAssertTrue(
+            bridgeFrameText.contains("sourceDisplayHandle: handle"),
+            "ComposerResult must carry the source Controller for multipane accept routing"
+        )
+        let bridgeInput = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
+        let bridgeInputText = (try? String(contentsOf: bridgeInput, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            bridgeInputText.contains("seyal_bridge_submit_composer_for(handle"),
+            "Composer submit must address the leaf Controller, not FOCUSED_DISPLAY_HANDLE"
         )
         XCTAssertTrue(
             hostMainText.contains("retirePrimaryAccessibilityIdentity"),

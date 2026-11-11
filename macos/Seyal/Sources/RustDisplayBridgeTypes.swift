@@ -206,6 +206,9 @@ struct NativeComposerResult: Equatable {
   let requestID: UInt64
   let blockID: UInt64
   let code: Code
+  /// Registry Controller that produced this result. Multipane must apply and
+  /// sync Blocks against this handle — never the focused-display client alone.
+  let sourceDisplayHandle: UInt64
 }
 
 /// Runtime-published composer eligibility, relayed verbatim to the Rust

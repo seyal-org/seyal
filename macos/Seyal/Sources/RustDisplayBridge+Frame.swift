@@ -196,13 +196,16 @@ extension RustDisplayBridge {
   }
 
   func publishComposerResult() {
-    guard isConnected, selectPresentedClient() else { return }
-    let handle: UInt64 = {
-      if submissionDisplayHandleOverride != 0 { return submissionDisplayHandleOverride }
-      if windowFocusedDisplayHandle != 0 { return windowFocusedDisplayHandle }
-      return clientHandle
-    }()
-    let result = seyal_bridge_composer_result()
+    publishComposerResult(forDisplayHandle: submissionTargetDisplayHandle())
+  }
+
+  /// Publish ComposerResult for an explicit registry Controller.
+  func publishComposerResult(forDisplayHandle handle: UInt64) {
+    guard isConnected, handle != 0 else { return }
+    // Read the presented Controller's result by handle. Focused-display peek
+    // mis-attributed a sibling Accept onto the focused Pane's pending id and
+    // cleared the draft with no local Block (#1474 pane-local tabs).
+    let result = seyal_bridge_composer_result_for(handle)
     let last = lastComposerResultRequestIDByHandle[handle] ?? 0
     guard result.request_id != 0, result.request_id != last else { return }
     lastComposerResultRequestIDByHandle[handle] = result.request_id
@@ -218,7 +221,8 @@ extension RustDisplayBridge {
       NativeComposerResult(
         requestID: result.request_id,
         blockID: result.block_id,
-        code: code
+        code: code,
+        sourceDisplayHandle: handle
       ))
   }
 }

@@ -12,12 +12,35 @@ use super::{
 
 impl LocalDisplayClient {
     pub fn submit_composer_command(&mut self, command: &str) -> Result<(), ClientError> {
+        self.submit_composer_command_with_request_id(command, None)
+    }
+
+    /// `request_id` from ApplicationRoot's pending Submit. Multipane Controllers
+    /// allocate independently; pinning the AppRoot id keeps ComposerResult
+    /// matched to the Pane that submitted (#1474).
+    pub fn submit_composer_command_with_request_id(
+        &mut self,
+        command: &str,
+        request_id: Option<u64>,
+    ) -> Result<(), ClientError> {
         self.require_controller()?;
         if !self.command_blocks_supported {
             return Err(ClientError::UnsupportedInteractiveCapability);
         }
-        let request_id = self.next_composer_request_id;
-        self.next_composer_request_id = request_id.checked_add(1).unwrap_or(1);
+        let request_id = match request_id.filter(|id| *id != 0) {
+            Some(id) => {
+                let next = id.checked_add(1).unwrap_or(1);
+                if next > self.next_composer_request_id {
+                    self.next_composer_request_id = next;
+                }
+                id
+            }
+            None => {
+                let id = self.next_composer_request_id;
+                self.next_composer_request_id = id.checked_add(1).unwrap_or(1);
+                id
+            }
+        };
         let command_ref = seyal_runtime::local_ipc::framing::ComposerCommandRef {
             attachment_id: self.attachment_id,
             request_id,
