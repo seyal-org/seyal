@@ -542,8 +542,17 @@ final class SecondaryLivePaneHost: NSView {
         let direct = panePublishesBlockScopedDirectInput
         surface.panePublishesBlockScopedDirectInput = direct
         guard inputOwned else { return }
-        if surface.bridge == nil, let historyBridge {
+        guard let historyBridge else { return }
+        if surface.bridge == nil {
             surface.bridge = historyBridge
+        }
+        // Key admission requires windowFocusedDisplayHandle == this pane's
+        // transcript handle. FOCUS_PANE can race ahead of chrome wiring; keep
+        // the borrowed bridge's focus selector aligned (#1476).
+        if displayHandle != 0,
+            historyBridge.windowFocusedDisplayHandle != displayHandle
+        {
+            historyBridge.windowFocusedDisplayHandle = displayHandle
         }
     }
 

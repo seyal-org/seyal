@@ -63,6 +63,9 @@ final class ProductChromeHostView: NSView {
     )
     var lastSnapshotGeneration: UInt64 = .max
     var lastEligibility: UInt16 = .max
+    /// Shell focus is independent of ApplicationRoot snapshot generation.
+    /// FOCUS_PANE must still rewire multipane hosts when generation is stable.
+    var lastFocusedPane = (lo: UInt64.max, hi: UInt64.max)
     var lastProjectedExecution = (lo: UInt64(0), hi: UInt64(0))
     var lastBlockCount: Int = 0
     /// Live-end follow for Flow transcript. New Blocks and async history-body
@@ -502,7 +505,22 @@ final class ProductChromeHostView: NSView {
             snapshot = seyal_app_snapshot(pane.appHandle)
         }
         let eligibilityChanged = snapshot.eligibility != lastEligibility
+        let shellBeforeEarlyReturn = seyal_app_shell(pane.appHandle)
+        let focusedPaneChanged =
+            shellBeforeEarlyReturn.focused_pane_lo != lastFocusedPane.lo
+            || shellBeforeEarlyReturn.focused_pane_hi != lastFocusedPane.hi
         if snapshot.generation == lastSnapshotGeneration && !eligibilityChanged {
+            // FOCUS_PANE is generation-stable. Without this, multipane keeps the
+            // prior windowFocusedDisplayHandle / inputOwned borrow and DirectInput
+            // keys fail after node→split→refocus (#1476 / #1467).
+            if focusedPaneChanged {
+                lastFocusedPane = (
+                    lo: shellBeforeEarlyReturn.focused_pane_lo,
+                    hi: shellBeforeEarlyReturn.focused_pane_hi
+                )
+                reconcilePaneHosts(paneCount: Int(shellBeforeEarlyReturn.pane_count))
+                routeFocus()
+            }
             composer.reconcile()
             applyComposerPlacement()
             sessionBootstrap.reconcile()
@@ -524,6 +542,7 @@ final class ProductChromeHostView: NSView {
         let chrome = seyal_app_chrome(pane.appHandle)
         applyShellChrome(chrome)
         let shell = seyal_app_shell(pane.appHandle)
+        lastFocusedPane = (lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
         applyLeftModeSwitcher(leftPanel: chrome.left_panel)
         createWorkspaceButton.isHidden = chrome.left_panel != 0
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
