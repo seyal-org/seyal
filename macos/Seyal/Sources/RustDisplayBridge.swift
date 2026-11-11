@@ -79,6 +79,8 @@ final class RustDisplayBridge {
   let onError: ErrorHandler
   var onStatusChanged: StatusHandler
   var onCopiedText: ((String) -> Void)?
+  /// Delivered when Rust finishes a Block pasteboard copy (#1010 / #1474).
+  var onHistoryCopy: ((UInt64, String) -> Void)?
   /// Notifies the multi-live host after a non-primary registry handle is polled
   /// (#936) so a secondary Metal surface can present without changing focus.
   var onRegistryHandlePolled: ((UInt64) -> Void)?

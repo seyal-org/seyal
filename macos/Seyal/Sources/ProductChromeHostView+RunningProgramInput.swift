@@ -85,6 +85,39 @@ extension ProductChromeHostView {
                 self.reconcileChrome()
             }
             : nil
+        configureBlockCopyActions(for: card, blockIndex: blockIndex)
+    }
+
+    /// Route Rust-projected Copy kinds through `seyal_app_request_block_copy`.
+    private func configureBlockCopyActions(for card: CommandBlockView, blockIndex: UInt32) {
+        let count = seyal_app_block_action_count(pane.appHandle, blockIndex)
+        var copyCommand = false
+        var copyOutput = false
+        var copyBoth = false
+        for actionIndex in 0..<count {
+            let row = seyal_app_block_action_row(pane.appHandle, blockIndex, actionIndex)
+            let placement = (row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK))
+                >> UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT)
+            guard placement == UInt16(SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU),
+                row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_ENABLED) != 0
+            else { continue }
+            switch UInt32(row.kind) {
+            case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND: copyCommand = true
+            case SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT: copyOutput = true
+            case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT: copyBoth = true
+            default: break
+            }
+        }
+        card.onCopyAction = { [weak self] kind in
+            guard let self else { return }
+            let accepted = seyal_app_request_block_copy(self.pane.appHandle, blockIndex, kind)
+            // Command-only (and empty-output) completes immediately; history-
+            // backed Output/Both publish again from the poll path when ready.
+            if accepted == 0 {
+                self.pane.inputSurface.bridge?.publishBlockCopy()
+            }
+        }
+        card.copyMenuEnabled = (copyCommand, copyOutput, copyBoth)
     }
 
     /// When Runtime publishes Flow DirectInput, route keys into the live Metal

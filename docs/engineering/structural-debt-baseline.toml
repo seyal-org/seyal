@@ -36,16 +36,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 853
+acknowledged_loc = 855
 issue = 1474
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 DirectInput borrow stays here while #1474 wires Candidate-D alternate-screen reconcile for unfocused Flow↔TUI without a second PTY/VT authority."
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 DirectInput borrow stays here while #1474 binds paneLo/paneHi into InteractiveMetalSurfaceView so unfocused Raw/TUI wheel scroll uses per-pane eligibility without a second PTY/VT authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 817
+acknowledged_loc = 793
 issue = 1474
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 DirectInput rebuild stays here while #1474 passes Block identity into the Running-program/Rerun seam without a second transcript authority."
-
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 DirectInput rebuild stays here while #1474 preserves mid-history scroll across stream rebuilds and routes Rerun/Copy seams; document sizing lives in +TranscriptLayout."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
 acknowledged_loc = 834
@@ -84,16 +83,21 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1128
+ceiling_loc = 1129
 issue = 1474
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 DirectInput snapshot bits remain here while #1474 moves block_row + quick-action rows into block_actions.rs and ratchets the ceiling down."
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 DirectInput snapshot bits remain here while #1474 re-exports seyal_app_request_block_copy from block_actions.rs without a second ABI façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/mod.rs"
-acknowledged_loc = 712
+acknowledged_loc = 721
 issue = 1474
-reason = "Composer target/mode projection stays one cold-path reducer; #1467 DirectInput remains here while #1474 exports block_actions / composer_admits_rerun from this module without a second composer authority (rustfmt wrap included)."
+reason = "Composer target/mode projection stays one cold-path reducer; #1467 DirectInput remains here while #1474 adds pane_integration_unsupported so Unsupported Raw resting cannot leak across Pane focus without a second composer authority."
 
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/display.rs"
+acknowledged_loc = 748
+issue = 1474
+reason = "Display FFI stays the thin Controller/history/prepared-frame seam; #1474 adds seyal_bridge_take_block_copy for history-backed Block pasteboard delivery without a second display client authority."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
 acknowledged_loc = 817
@@ -254,8 +258,7 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
 ceiling_loc = 1066
 issue = 1474
-responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1467/#1468 DirectInput reclaim stays here while #1474 routes multipane Raw/TUI keys to liveContent's primary surface instead of a hidden bridgeless host."
-
+responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1467/#1468 DirectInput reclaim stays here while #1474 keeps mid-history preservedDocumentHeight on the host and routes multipane Raw/TUI keys to liveContent."
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
 acknowledged_loc = 728
@@ -265,16 +268,15 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 752
-issue = 1467
-reason = "Local display-client protocol proofs stay one module; #1467 adds DirectInput projection coverage beside existing type-45 Submit/Relay/Unavailable fixtures rather than a second client test file."
+acknowledged_loc = 755
+issue = 1474
+reason = "Local display-client protocol proofs stay one module; #1467 DirectInput fixtures remain here while #1474 seeds pending/completed Block copy slots in the shared client fixture without a second local test file."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
-acknowledged_loc = 848
-issue = 1467
-reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 admit Flow Block-scoped DirectInput keys/IME, sticky ForegroundProgram ownership after Ctrl+C, and C0/deleteForward EOF while keeping empty-canvas mouse reports on Raw/TUI only. LOC includes the #1470 master merge into the DirectInput head."
-
+acknowledged_loc = 867
+issue = 1474
+reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 DirectInput stays here while #1474 binds optional paneLo/paneHi so unfocused Raw/TUI wheel/page scroll uses per-pane eligibility instead of the focused ApplicationRoot snapshot."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
 acknowledged_loc = 756

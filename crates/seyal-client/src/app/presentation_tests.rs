@@ -775,6 +775,58 @@ fn composer_eligibility_uses_flow_except_for_unsupported_fallback() {
 }
 
 #[test]
+fn unsupported_resting_does_not_leak_onto_a_flow_sibling() {
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    let source = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Unsupported),
+        revision: 1,
+        target: None,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+
+    root.apply(AppAction::SplitFocused {
+        axis: crate::shell::SplitAxis::Right,
+    })
+    .unwrap();
+    let sibling = root.snapshot().shell.focused_pane;
+    assert_ne!(sibling, source);
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(9, true, false),
+    })
+    .unwrap();
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Available),
+        revision: 1,
+        target: None,
+    })
+    .unwrap();
+    assert_eq!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Flow,
+        "Unsupported on the prior Pane must not force Raw onto the sibling"
+    );
+
+    root.apply(AppAction::FocusPane { id: source }).unwrap();
+    assert_eq!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Raw,
+        "returning focus restores the Unsupported Pane's own Raw resting"
+    );
+    root.apply(AppAction::FocusPane { id: sibling }).unwrap();
+    assert_eq!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Flow,
+        "focus back onto the Available sibling must not keep Raw from the sibling"
+    );
+}
+
+#[test]
 fn unbound_pane_cannot_select_raw() {
     let mut root = ApplicationRoot::new();
     assert_eq!(

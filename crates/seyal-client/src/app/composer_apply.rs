@@ -300,10 +300,12 @@ impl ApplicationRoot {
         {
             self.interactive_raw_target = None;
         }
-        if let Some(eligibility) = eligibility {
-            self.integration_unsupported = eligibility == RuntimeComposerEligibility::Unsupported;
+        if eligibility.is_some() {
             self.recompute_resting();
-            self.derive_presentation(self.alternate_screen)?;
+            // Only the focused Pane drives active presentation authority.
+            if fence.pane == self.focused_pane_id() {
+                self.derive_presentation(self.alternate_screen)?;
+            }
         }
         Ok(())
     }

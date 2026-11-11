@@ -136,6 +136,10 @@ impl ApplicationRoot {
     pub(super) fn recompute_resting(&mut self) {
         // Blocks-first: trusted sessions rest in Flow automatically. Raw is
         // reserved for the safe fallback when integration is unsupported.
+        // Derive from the focused Pane's ComposerState so a sibling's
+        // Unsupported relay cannot force Raw onto a Flow-capable Pane.
+        let focused = self.shell.snapshot().focused_pane;
+        self.integration_unsupported = self.composer.pane_integration_unsupported(focused);
         self.resting = if self.integration_unsupported {
             PresentationMode::Raw
         } else {

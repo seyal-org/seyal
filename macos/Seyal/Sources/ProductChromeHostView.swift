@@ -65,10 +65,10 @@ final class ProductChromeHostView: NSView {
     var lastEligibility: UInt16 = .max
     var lastProjectedExecution = (lo: UInt64(0), hi: UInt64(0))
     var lastBlockCount: Int = 0
-    /// Live-end follow for Flow transcript. New Blocks and async history-body
-    /// growth keep the viewport pinned only while the user was already at the
-    /// live end; intentional history scroll must not be yanked forward.
+    /// Follow live end only while the user was already pinned there.
     var followingLiveEnd = true
+    /// Mid-history document-height floor so rebuilds cannot collapse scroll.
+    var preservedDocumentHeightConstraint: NSLayoutConstraint?
     var isProgrammaticTranscriptScroll = false
     var isReconcilingChrome = false
     /// Nested product/timeline pulses during a rebuild must not drop TUI.

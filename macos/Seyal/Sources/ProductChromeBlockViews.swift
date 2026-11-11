@@ -82,6 +82,9 @@ final class CommandBlockView: NSView {
         }
     }
     var onRerun: (() -> Void)?
+    /// Rust-projected Copy menu kinds (#1010 / #1474). Host only dispatches.
+    var onCopyAction: ((UInt16) -> Void)?
+    var copyMenuEnabled: (command: Bool, output: Bool, both: Bool) = (false, false, false)
     /// Flow DirectInput: click the Running Block to focus Metal (#1468).
     var onRequestDirectInputFocus: (() -> Void)?
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
@@ -376,7 +379,9 @@ final class CommandBlockView: NSView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard canRequestSessionBootstrap || canInteractWithRunningProgram || canRerun else {
+        let hasCopy = copyMenuEnabled.command || copyMenuEnabled.output || copyMenuEnabled.both
+        guard canRequestSessionBootstrap || canInteractWithRunningProgram || canRerun || hasCopy
+        else {
             return super.menu(for: event)
         }
         let menu = NSMenu()
@@ -398,6 +403,33 @@ final class CommandBlockView: NSView {
             rerun.target = self
             menu.addItem(rerun)
         }
+        if copyMenuEnabled.command {
+            let item = NSMenuItem(
+                title: "Copy command",
+                action: #selector(copyCommandFromMenu),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
+        if copyMenuEnabled.output {
+            let item = NSMenuItem(
+                title: "Copy output",
+                action: #selector(copyOutputFromMenu),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
+        if copyMenuEnabled.both {
+            let item = NSMenuItem(
+                title: "Copy command + output",
+                action: #selector(copyBothFromMenu),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
         if canRequestSessionBootstrap {
         let enable = NSMenuItem(
             title: seyal_bridge_session_copy(4).map { String(cString: $0) } ?? "",
@@ -416,6 +448,18 @@ final class CommandBlockView: NSView {
 
     @objc private func rerunFromSeam() {
         onRerun?()
+    }
+
+    @objc private func copyCommandFromMenu() {
+        onCopyAction?(UInt16(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND))
+    }
+
+    @objc private func copyOutputFromMenu() {
+        onCopyAction?(UInt16(SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT))
+    }
+
+    @objc private func copyBothFromMenu() {
+        onCopyAction?(UInt16(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT))
     }
 
     @objc private func requestSessionBootstrapFromMenu() {

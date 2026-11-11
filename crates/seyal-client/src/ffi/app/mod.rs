@@ -44,6 +44,7 @@ use encode::{
 #[allow(unused_imports)] // C ABI exports; referenced from Swift via SeyalApp.h
 pub use block_actions::{
     seyal_app_block_action_count, seyal_app_block_action_row, seyal_app_block_row,
+    seyal_app_request_block_copy,
 };
 pub use block_projection::seyal_app_block_projection;
 pub use leave_offer_ffi::seyal_app_leave_offer;

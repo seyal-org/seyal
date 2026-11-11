@@ -2,8 +2,10 @@
 //!
 //! Rust owns the action set, order, labels, shortcut hints and availability
 //! (`composer::block_actions`); rows are encoded with the Block rows once per
-//! root generation. Copy pasteboard resolution lands with the history-backed
-//! path; this module projects actions and serves Rerun apply tests.
+//! root generation. Copy resolves history spans here and hands final UTF-8 to
+//! the host through `seyal_bridge_take_block_copy`.
+
+use crate::ffi::{error_code, with_display_client_mut};
 
 use super::encode::encode_block_rows;
 use super::{SeyalAppRow, APPS};
@@ -80,6 +82,48 @@ pub extern "C" fn seyal_app_block_action_row(
             .copied()
             .unwrap_or_else(SeyalAppRow::empty)
     })
+}
+
+/// Start a Rust-owned Block pasteboard copy (#1010 / #1474). `kind` is a
+/// `SEYAL_APP_BLOCK_ACTION_COPY_*` value. Final text arrives via
+/// `seyal_bridge_take_block_copy`. Returns 0 on accept, negative on refuse.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, kind: u16) -> i32 {
+    use crate::history_text::BlockCopyKind;
+    let Some(copy_kind) = BlockCopyKind::from_u16(kind) else {
+        return -6;
+    };
+    let prepared = APPS.with(|apps| {
+        let apps = apps.borrow();
+        let state = apps.get(&handle)?;
+        let snap = state.root.snapshot();
+        let composer = snap.composer?;
+        let block = composer.blocks.get(block_index as usize)?;
+        let output_range = if copy_kind == BlockCopyKind::Command {
+            None
+        } else if block.start_line == 0 {
+            return None;
+        } else {
+            match block.end_line {
+                None => Some((block.start_line, u64::MAX)),
+                Some(end) if end >= block.start_line => Some((block.start_line, end)),
+                Some(_) => None,
+            }
+        };
+        let bytes = block.id.to_bytes();
+        let block_id = u64::from_le_bytes(bytes[..8].try_into().ok()?);
+        if block_id == 0 {
+            return None;
+        }
+        Some((block_id, block.command.clone(), output_range))
+    });
+    let Some((block_id, command, output_range)) = prepared else {
+        return -4;
+    };
+    with_display_client_mut(|client| {
+        client.begin_block_copy(block_id, copy_kind, command, output_range)
+    })
+    .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
 #[cfg(test)]

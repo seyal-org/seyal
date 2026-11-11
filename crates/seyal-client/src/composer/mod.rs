@@ -677,6 +677,15 @@ impl ComposerState {
         })
     }
 
+    /// True when this Pane's latest Runtime eligibility is Unsupported.
+    /// Used by presentation resting so a sibling's Raw fallback cannot leak.
+    pub fn pane_integration_unsupported(&self, pane: PaneId) -> bool {
+        self.panes
+            .get(&pane)
+            .and_then(|composer| composer.runtime_eligibility)
+            .is_some_and(|(eligibility, _)| eligibility == RuntimeComposerEligibility::Unsupported)
+    }
+
     /// Sticky per-pane shell-exit latch (#1379 Defect B). Absent panes have not ended.
     pub fn execution_ended(&self, pane: PaneId) -> bool {
         self.panes

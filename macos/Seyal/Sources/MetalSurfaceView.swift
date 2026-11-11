@@ -260,6 +260,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   func activateTranscriptDisplayHandle(_ handle: UInt64) {
     guard handle != transcriptDisplayHandle else { return }
     transcriptDisplayHandle = handle
+    // Drop Raw local-scrollback latch so a wiped history region cannot leave
+    // drawsLiveGrid false and paint a blank pane after handle switch.
+    clearRawScrollbackFollowTail()
     lastTranscriptFrameRegions = nil
     historyRenderPageKeys.removeAll(keepingCapacity: true)
     renderer.removeHistoryRegions(except: [])

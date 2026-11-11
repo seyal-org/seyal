@@ -1085,6 +1085,11 @@ SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
  */
 uint32_t seyal_app_block_action_count(uint64_t handle, uint32_t block_index);
 SeyalAppRow seyal_app_block_action_row(uint64_t handle, uint32_t block_index, uint32_t action_index);
+/**
+ * Request a Rust-owned Block pasteboard copy. kind = SEYAL_APP_BLOCK_ACTION_COPY_*.
+ * Final text arrives via seyal_bridge_take_block_copy.
+ */
+int32_t seyal_app_request_block_copy(uint64_t handle, uint32_t block_index, uint16_t kind);
 SeyalAppRow seyal_app_block_row_for_pane(
     uint64_t handle,
     uint64_t pane_lo,

@@ -72,6 +72,19 @@ extension RustDisplayBridge {
     historyContinuations = historyContinuations.filter { $0.key.displayHandle != handle }
   }
 
+  /// Deliver a completed Rust-owned Block pasteboard string, if any (#1010 / #1474).
+  func publishBlockCopy() {
+    guard isConnected else { return }
+    let copy = seyal_bridge_take_block_copy()
+    guard copy.len > 0, let bytes = copy.utf8 else { return }
+    let text = String(
+      decoding: UnsafeBufferPointer(start: bytes, count: Int(copy.len)),
+      as: UTF8.self
+    )
+    onHistoryCopy?(copy.block_id, text)
+    onCopiedText?(text)
+  }
+
   /// Publish buffered history for the focused/presented Controller.
   func publishHistoryRanges() {
     let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle

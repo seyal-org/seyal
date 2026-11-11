@@ -61,6 +61,9 @@ extension RustDisplayBridge {
     // Geometry and keys already follow the focused Pane. The prepared frame
     // must too, without seyal_bridge_select moving this bridge's readiness fd.
     let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    // Ensure this handle's Metal instance buffer is current before reading
+    // cells; otherwise a focus/tab switch can briefly paint the prior pane.
+    guard seyal_bridge_ensure_prepared_for(handle) == 0 else { return nil }
     let frame = seyal_bridge_frame_for(handle)
     guard frame.cells != nil, frame.cell_count > 0 else { return nil }
     return frame

@@ -113,7 +113,9 @@ final class SecondaryLivePaneHost: NSView {
         surface = InteractiveMetalSurfaceView(
             frame: .zero,
             appHandle: appHandle,
-            paneID: String(format: "live-%016llx%016llx", paneHi, paneLo)
+            paneID: String(format: "live-%016llx%016llx", paneHi, paneLo),
+            paneLo: paneLo,
+            paneHi: paneHi
         )
         composer = ComposerBridgeView(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
         composer.boundDisplayHandle = displayHandle

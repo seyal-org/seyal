@@ -470,9 +470,10 @@ impl ApplicationRoot {
                 eligibility: Some(eligibility),
                 revision,
             });
-        self.integration_unsupported = eligibility == RuntimeComposerEligibility::Unsupported;
         self.recompute_resting();
-        if self.authority.is_some() {
+        // Resting/presentation track the focused Pane; do not let a recovery
+        // status for a sibling overwrite the active authority's mode.
+        if self.authority.is_some() && pane == self.focused_pane_id() {
             let _ = self.derive_presentation(self.alternate_screen);
         }
     }

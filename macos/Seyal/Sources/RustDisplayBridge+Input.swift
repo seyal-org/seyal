@@ -319,6 +319,7 @@ extension RustDisplayBridge {
       // Publish this poll source before selecting the focused presentation
       // client. Pane-local Block ids are only meaningful on their Controller.
       publishHistoryRanges(forDisplayHandle: polledHandle)
+      publishBlockCopy()
       _ = selectPresentedClient()
       publishComposerResult()
       publishComposerStatus()

@@ -446,6 +446,14 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             submit()
             return true
         }
+        // Composer is not shell authority (M001 §5.2): do not insert literal
+        // Tab/Backtab into the draft. Shell completion stays on the terminal
+        // surface until supported integration proves equivalent semantics.
+        if commandSelector == #selector(NSResponder.insertTab(_:))
+            || commandSelector == #selector(NSResponder.insertBacktab(_:))
+        {
+            return true
+        }
         return false
     }
 

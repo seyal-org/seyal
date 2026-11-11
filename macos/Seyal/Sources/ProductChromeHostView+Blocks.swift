@@ -3,15 +3,14 @@ import AppKit
 @MainActor
 extension ProductChromeHostView {
     @objc func transcriptDidScroll() {
-        guard !isProgrammaticTranscriptScroll else {
-            publishBlockOutputFrame()
-            return
+        // Latch follow-tail synchronously. Deferring lets a concurrent
+        // stream/history rebuild see a stale followingLiveEnd and yank scroll.
+        if !isProgrammaticTranscriptScroll {
+            followingLiveEnd = isNearLiveEnd()
         }
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isProgrammaticTranscriptScroll else { return }
-            self.followingLiveEnd = self.isNearLiveEnd()
-            self.publishBlockOutputFrame()
-            self.positionInlineComposerAtCurrentCursor()
+        publishBlockOutputFrame()
+        if !isProgrammaticTranscriptScroll {
+            positionInlineComposerAtCurrentCursor()
         }
     }
 
@@ -226,6 +225,7 @@ extension ProductChromeHostView {
         // churn does not yank intentional history scroll (#1379 / #1424 parity).
         let savedOffsetY = transcript.contentView.bounds.origin.y
         let savedFollowing = followingLiveEnd
+        let savedDocumentHeight = transcriptDocumentScrollHeight()
         let previousCards = blockCards
         blockCards.removeAll(keepingCapacity: true)
         let composer = seyal_app_composer(pane.appHandle)
@@ -346,15 +346,39 @@ extension ProductChromeHostView {
         // execution's cells under a reused Block id, while clear→exit can
         // still re-materialize pre-clear bodies.
         pane.inputSurface.removeTranscriptRegions(except: retained)
+        if visibleIndex == 0 {
+            clearPreservedDocumentHeight()
+        }
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         publishLiveTailBlocks()
+        if visibleIndex == 0 {
+            followingLiveEnd = true
+            lastBlockCount = 0
+            applyComposerPlacement()
+            return
+        }
         if savedFollowing {
+            clearPreservedDocumentHeight()
             scrollTranscriptToLiveEnd()
         } else {
             // Keep the reader's intentional history offset across rebuilds.
-            // Expand-only document sizing (syncTranscriptDocumentSize) keeps
-            // the prior document height as a floor for this restore.
+            // Preserve prior document extent so stream/history growth cannot
+            // collapse the scrollable range under a mid-history viewport.
+            let currentContentHeight = TranscriptDocumentSizing.contentHeight(
+                arrangedSubviews: blocks.arrangedSubviews,
+                leadingSpacer: transcriptLeadingSpacer,
+                spacing: blocks.spacing,
+                edgeInsets: blocks.edgeInsets
+            )
+            let viewportFloor = blockCards.isEmpty ? 0 : transcript.contentView.bounds.height
+            let currentDocumentMinimumHeight = max(max(currentContentHeight, viewportFloor), 1)
+            if savedDocumentHeight > currentDocumentMinimumHeight + 0.5 {
+                preserveDocumentHeight(savedDocumentHeight)
+            } else {
+                clearPreservedDocumentHeight()
+            }
+            syncTranscriptDocumentSize()
             isProgrammaticTranscriptScroll = true
             defer { isProgrammaticTranscriptScroll = false }
             let maxY = max(transcriptDocumentScrollHeight() - transcript.contentView.bounds.height, 0)
@@ -376,8 +400,7 @@ extension ProductChromeHostView {
             if self.followingLiveEnd {
                 self.scrollTranscriptToLiveEnd()
             }
-            self.publishBlockOutputFrame()
-        }
+            self.publishBlockOutputFrame()        }
     }
 
     func applyComposerPlacement() {
@@ -651,53 +674,6 @@ extension ProductChromeHostView {
         // live end so the newly submitted Block stays hittable.
         if followingLiveEnd {
             scrollTranscriptToLiveEnd()
-        }
-    }
-
-    /// AppKit scrolls with `documentView.frame`; `blocks.fittingSize` is the
-    /// authoritative content height once `layoutSubtreeIfNeeded()` has run
-    /// (every call site updates card heights before calling this). When at
-    /// least one real Block card is present, the document floors at the
-    /// scroll viewport height — never below it — so sparse Flow content
-    /// never under-fills the visible transcript area, while a
-    /// viewport-sized leading spacer (not a Block card) absorbs that slack
-    /// and pushes real Blocks down to hug the composer, Warp-style (#1426
-    /// follow-up). A genuinely empty canvas (no cards at all) must still
-    /// collapse toward zero rather than hold a blank scrollable viewport
-    /// (#1424); the viewport floor is skipped in that case so a cleared
-    /// transcript never regains a preserved/blank scroll extent. This
-    /// replaced an older "expand, never shrink" policy (#1379) that also
-    /// left a permanent dead zone below cards once content shrank after
-    /// growing tall; the viewport floor keeps the same anti-collapse intent
-    /// for non-empty content without that stale-gap regression.
-    func syncTranscriptDocumentSize() {
-        layoutSubtreeIfNeeded()
-        let fitted = blocks.fittingSize
-        // Measure the arranged cards themselves. NSStackView.fittingSize can
-        // retain the stretched document height after a previous tall stream;
-        // subtracting the spacer from that stale value leaves short Blocks
-        // stranded above the composer instead of bottom-docking them (#1426).
-        let hasCards = !blockCards.isEmpty
-        let contentHeight = hasCards
-            ? TranscriptDocumentSizing.contentHeight(
-                arrangedSubviews: blocks.arrangedSubviews,
-                leadingSpacer: transcriptLeadingSpacer,
-                spacing: blocks.spacing,
-                edgeInsets: blocks.edgeInsets
-            )
-            : 0
-        let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
-        let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
-        let height = max(contentHeight, viewportHeight, 1)
-        let spacerHeight = max(height - contentHeight, 0)
-        if abs(transcriptLeadingSpacerHeight.constant - spacerHeight) > 0.5 {
-            transcriptLeadingSpacerHeight.constant = spacerHeight
-            layoutSubtreeIfNeeded()
-        }
-        if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - height) > 0.5 {
-            blocks.setFrameSize(NSSize(width: width, height: height))
-            transcript.reflectScrolledClipView(transcript.contentView)
-            layoutSubtreeIfNeeded()
         }
     }
 
