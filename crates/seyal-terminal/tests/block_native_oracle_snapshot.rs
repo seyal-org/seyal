@@ -34,8 +34,11 @@ fn oracle_same_row_printf_then_overwrite_fingerprint() {
     let mut terminal = TerminalState::new(8, 2).unwrap();
     feed(&mut terminal, b"ABC");
     feed(&mut terminal, b"\rXYZ");
-    let fp = grid_fingerprint(&mut terminal, 8, 2);
-    assert!(fp.contains("XYZ"), "overwrite must win on the same row: {fp}");
+    let fp = grid_fingerprint(&terminal, 8, 2);
+    assert!(
+        fp.contains("XYZ"),
+        "overwrite must win on the same row: {fp}"
+    );
     assert_eq!(terminal.cell(0, 0).unwrap().character, 'X');
     assert_eq!(terminal.cell(1, 0).unwrap().character, 'Y');
     assert_eq!(terminal.cell(2, 0).unwrap().character, 'Z');

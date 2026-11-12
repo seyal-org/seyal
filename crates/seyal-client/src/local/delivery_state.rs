@@ -31,7 +31,7 @@ impl LocalDisplayClient {
         message_type: u16,
     ) -> Result<PresentationFrameDisposition, ClientError> {
         if !self.delivery_control_negotiated
-            || !matches!(message_type, 12 | 13 | 21 | 26 | 27 | 28 | 35)
+            || !matches!(message_type, 12 | 13 | 21 | 26 | 27 | 28 | 35 | 48)
         {
             return Ok(PresentationFrameDisposition::Legacy);
         }

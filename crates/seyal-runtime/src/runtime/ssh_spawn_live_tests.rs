@@ -171,11 +171,12 @@ fn composer_ssh_to_bash_trusts_session_blocks_without_enable_blocks() {
     );
     // After nested session Complete, host Block is still Running — writes must
     // rejoin the host output region (not unstructured).
-    assert!(host_running(&h, host), "host still Running after session Complete");
+    assert!(
+        host_running(&h, host),
+        "host still Running after session Complete"
+    );
     assert_eq!(
-        h.runtime.entries[&h.id]
-            .execution
-            .native_active_region(),
+        h.runtime.entries[&h.id].execution.native_active_region(),
         host_output,
         "session end must restore host active RegionId"
     );
@@ -393,9 +394,7 @@ fn remote_python_repl_session_regions_stay_distinct_from_host() {
     let host_output = host_rec.output_region.expect("host output");
     assert!(host_running(&h, host));
     assert_eq!(
-        h.runtime.entries[&h.id]
-            .execution
-            .native_active_region(),
+        h.runtime.entries[&h.id].execution.native_active_region(),
         host_output,
         "python session end must restore host RegionId"
     );
@@ -441,16 +440,11 @@ fn remote_python_repl_session_regions_stay_distinct_from_host() {
     h.pump_until(|runtime, id| {
         runtime.entries[&id].block_timeline.records().any(|record| {
             record.command == "python3 -i"
-                && matches!(
-                    record.lifecycle,
-                    CommandBlockLifecycle::Completed { .. }
-                )
+                && matches!(record.lifecycle, CommandBlockLifecycle::Completed { .. })
         })
     });
     assert_eq!(
-        h.runtime.entries[&h.id]
-            .execution
-            .native_active_region(),
+        h.runtime.entries[&h.id].execution.native_active_region(),
         host_output
     );
     assert_ne!(

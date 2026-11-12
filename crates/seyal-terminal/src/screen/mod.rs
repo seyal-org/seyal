@@ -4,6 +4,7 @@
 //! Canonical live cell *payload* is allocated only in
 //! `PrimaryBlockEngine` / `RegionStore` (ADR-009 native-Block target).
 
+mod history_seal;
 mod ops;
 mod resize;
 
@@ -106,6 +107,7 @@ impl Screen {
     }
 
     #[inline]
+    #[allow(dead_code)] // Resize/remap path retains mutable anchor access for ED2.
     pub(in crate::screen) fn cell_anchors_mut(&mut self) -> &mut [Option<crate::HistoryAnchor>] {
         &mut self.engine.store.grid_anchors
     }

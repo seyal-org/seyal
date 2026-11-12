@@ -3,9 +3,7 @@
 use super::attribution::{AttributionJournal, MarkerKind, PrimaryEvent, UnitVersion};
 use super::region_store::{CellLookup, RegionStore};
 use super::types::{BlockContent, BlockId, RegionId, RegionKind};
-use super::viewport::{
-    BlockContentRef, BlockViewportIndex, OnWindowRegionSpan, VisibleBlockSpan,
-};
+use super::viewport::{BlockContentRef, BlockViewportIndex, OnWindowRegionSpan, VisibleBlockSpan};
 use super::vt_window_map::VTWindowMap;
 use crate::{Cell, LineId, TerminalError};
 use std::collections::HashMap;
@@ -62,10 +60,7 @@ impl PrimaryBlockEngine {
     }
 
     fn restore_active_region(&mut self) {
-        self.active_region = self
-            .active_region_stack
-            .pop()
-            .unwrap_or(self.unstructured);
+        self.active_region = self.active_region_stack.pop().unwrap_or(self.unstructured);
     }
 
     fn map_full_window(
@@ -117,7 +112,10 @@ impl PrimaryBlockEngine {
 
     /// Open Block regions and direct subsequent VT writes into `output`.
     /// Reuses a provisional OSC-armed output region when present.
-    pub(crate) fn begin_block_output(&mut self, id: BlockId) -> Result<BlockContent, TerminalError> {
+    pub(crate) fn begin_block_output(
+        &mut self,
+        id: BlockId,
+    ) -> Result<BlockContent, TerminalError> {
         let header = self
             .store
             .alloc_region(RegionKind::PromptCommand, Some(id))?;
@@ -143,33 +141,40 @@ impl PrimaryBlockEngine {
             .ordered_ids()
             .iter()
             .filter_map(|id| {
-                self.blocks.iter().find(|block| block.id == *id).map(|block| {
-                    BlockContentRef {
+                self.blocks
+                    .iter()
+                    .find(|block| block.id == *id)
+                    .map(|block| BlockContentRef {
                         block_id: block.id,
                         header: block.header,
                         output: block.output,
-                    }
-                })
+                    })
             })
             .collect()
     }
 
-    /// Sealed spill cells for `region` as `(line_id, col, cell)`.
-    pub(crate) fn sealed_region_cells(
+    /// Sealed ownership rows for `region` (LineId + owned columns).
+    pub(crate) fn sealed_rows(
         &self,
         region: RegionId,
-    ) -> Vec<(LineId, u16, Cell)> {
-        self.store.sealed_region_cells(region)
+    ) -> &[crate::primary_blocks::types::SealedRow] {
+        self.store.sealed_rows(region)
     }
 
-    /// Seal one window row into RegionStore spill and index it on RegionGrids.
+    /// Sealed ownership row count for `region` (u16-saturated).
+    pub(crate) fn sealed_row_count(&self, region: RegionId) -> u16 {
+        self.store.sealed_row_count(region)
+    }
+
+    /// Index one window row's RegionId ownership onto RegionGrids (no cell copy).
+    /// HistoryStore remains the sole sealed payload owner (#1484 / ADR-009).
     pub(crate) fn seal_window_row_indexed(
         &mut self,
         row: u16,
         line_id: LineId,
     ) -> Result<(), TerminalError> {
-        let sealed = self.store.seal_window_row(row)?;
-        self.store.record_sealed_row(line_id, &sealed)
+        let columns = self.store.window_row_regions(row)?;
+        self.store.record_sealed_row_ownership(line_id, &columns)
     }
 
     /// Live window cells currently owned by `region` (col, row, cell).

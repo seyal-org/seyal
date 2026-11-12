@@ -1,14 +1,10 @@
-//! Cursor, edit, scroll, SGR, and history-seal mutations on the live Screen.
+//! Cursor, edit, scroll, and SGR mutations on the live Screen.
 
 use super::{SavedCursor, Screen};
 use crate::{
-    damage::Mutation,
-    grapheme_store::GraphemeStore,
-    history::{HistoryBreakAfter, HistoryLine},
-    line::LineIdAllocator,
-    Cell, CellRole, Color, LineId, Style, TerminalError,
+    damage::Mutation, grapheme_store::GraphemeStore, history::HistoryBreakAfter,
+    line::LineIdAllocator, Cell, CellRole, Color, Style, TerminalError,
 };
-use std::collections::HashMap;
 
 impl Screen {
     /// Clears a lead or continuation so no orphan half remains (SPEC-011 §7.3).
@@ -34,12 +30,9 @@ impl Screen {
         if lead.role == CellRole::Lead {
             Self::release_cell(lead, store);
             let width = lead.width.max(1);
-            let _ = self.engine.set_window_cell(
-                lead_col,
-                lead_row,
-                Cell::blank(self.pen.bg),
-                region,
-            );
+            let _ =
+                self.engine
+                    .set_window_cell(lead_col, lead_row, Cell::blank(self.pen.bg), region);
             self.engine.store.grid_anchors[lead_index] = None;
             if width >= 2 && lead_col + 1 < self.cols {
                 let cont = self.index(lead_col + 1, lead_row);
@@ -145,22 +138,16 @@ impl Screen {
         if width >= 2 {
             if col + 1 >= self.cols {
                 Self::release_cell(lead, store);
-                let _ = self.engine.set_window_cell(
-                    col,
-                    row,
-                    Cell::blank(self.pen.bg),
-                    region,
-                );
+                let _ = self
+                    .engine
+                    .set_window_cell(col, row, Cell::blank(self.pen.bg), region);
                 self.engine.store.grid_anchors[index] = None;
                 return Ok((mutation, soft_wrapped, col, row));
             }
             let cont_index = self.index(col + 1, row);
-            let _ = self.engine.set_window_cell(
-                col + 1,
-                row,
-                Cell::continuation(),
-                region,
-            );
+            let _ = self
+                .engine
+                .set_window_cell(col + 1, row, Cell::continuation(), region);
             self.engine.store.grid_anchors[cont_index] = None;
         }
         mutation = mutation.merge(Mutation::row(row));
@@ -191,12 +178,9 @@ impl Screen {
         if previous_width >= 2 && col + 1 < self.cols {
             let cont = self.index(col + 1, row);
             if self.engine.store.grid_cells[cont].role == CellRole::Continuation {
-                let _ = self.engine.set_window_cell(
-                    col + 1,
-                    row,
-                    Cell::blank(self.pen.bg),
-                    region,
-                );
+                let _ = self
+                    .engine
+                    .set_window_cell(col + 1, row, Cell::blank(self.pen.bg), region);
             }
         }
         // Release previous store via clear of current lead only if different id.
@@ -220,12 +204,9 @@ impl Screen {
         if lead.width >= 2 && col + 1 < self.cols {
             mutation = mutation.merge(self.clear_unit_at(col + 1, row, store));
             let cont_index = self.index(col + 1, row);
-            let _ = self.engine.set_window_cell(
-                col + 1,
-                row,
-                Cell::continuation(),
-                region,
-            );
+            let _ = self
+                .engine
+                .set_window_cell(col + 1, row, Cell::continuation(), region);
             self.engine.store.grid_anchors[cont_index] = None;
         }
         mutation.merge(Mutation::row(row))
@@ -339,9 +320,7 @@ impl Screen {
                     Self::release_cell(*cell, store);
                 }
                 self.engine.store.grid_cells[..=cursor_index].fill(blank);
-                let _ = self
-                    .engine
-                    .remint_linear_range(0, cursor_index + 1, region);
+                let _ = self.engine.remint_linear_range(0, cursor_index + 1, region);
                 Ok(Mutation::rows(0, self.cursor.row))
             }
             2 => self.erase_display_all(line_ids, store, blank),
@@ -398,9 +377,7 @@ impl Screen {
                     Self::release_cell(*cell, store);
                 }
                 self.engine.store.grid_cells[start + col..end].fill(blank);
-                let _ = self
-                    .engine
-                    .remint_linear_range(start + col, end, region);
+                let _ = self.engine.remint_linear_range(start + col, end, region);
             }
             1 => {
                 for cell in &self.engine.store.grid_cells[start..=start + col] {
@@ -699,9 +676,13 @@ impl Screen {
         for cell in &self.engine.store.grid_cells[start + cols - n..start + cols] {
             Self::release_cell(*cell, store);
         }
-        self.engine.store.grid_cells
+        self.engine
+            .store
+            .grid_cells
             .copy_within(insert_at..start + cols - n, insert_at + n);
-        self.engine.store.grid_anchors
+        self.engine
+            .store
+            .grid_anchors
             .copy_within(insert_at..start + cols - n, insert_at + n);
         let blank = Cell::blank(self.pen.bg);
         self.engine.store.grid_cells[insert_at..insert_at + n].fill(blank);
@@ -731,9 +712,13 @@ impl Screen {
         for cell in &self.engine.store.grid_cells[delete_at..delete_at + n] {
             Self::release_cell(*cell, store);
         }
-        self.engine.store.grid_cells
+        self.engine
+            .store
+            .grid_cells
             .copy_within(delete_at + n..start + cols, delete_at);
-        self.engine.store.grid_anchors
+        self.engine
+            .store
+            .grid_anchors
             .copy_within(delete_at + n..start + cols, delete_at);
         let blank = Cell::blank(self.pen.bg);
         self.engine.store.grid_cells[start + cols - n..start + cols].fill(blank);
@@ -809,8 +794,14 @@ impl Screen {
             let src = (top_i + n) * cols;
             let dst = top_i * cols;
             let len = keep * cols;
-            self.engine.store.grid_cells.copy_within(src..src + len, dst);
-            self.engine.store.grid_anchors.copy_within(src..src + len, dst);
+            self.engine
+                .store
+                .grid_cells
+                .copy_within(src..src + len, dst);
+            self.engine
+                .store
+                .grid_anchors
+                .copy_within(src..src + len, dst);
             self.line_ids
                 .copy_within(top_i + n..top_i + n + keep, top_i);
             self.row_breaks
@@ -833,7 +824,9 @@ impl Screen {
             self.row_breaks[row_index] = Some(HistoryBreakAfter::HardBreak);
         }
         let region = self.engine.unstructured_region();
-        let _ = self.engine.remint_linear_range(top_i * cols, (bottom_i + 1) * cols, region);
+        let _ = self
+            .engine
+            .remint_linear_range(top_i * cols, (bottom_i + 1) * cols, region);
         Ok(Mutation::rows(top, bottom))
     }
 
@@ -869,8 +862,14 @@ impl Screen {
             let src = top_i * cols;
             let len = keep * cols;
             let dst = (top_i + n) * cols;
-            self.engine.store.grid_cells.copy_within(src..src + len, dst);
-            self.engine.store.grid_anchors.copy_within(src..src + len, dst);
+            self.engine
+                .store
+                .grid_cells
+                .copy_within(src..src + len, dst);
+            self.engine
+                .store
+                .grid_anchors
+                .copy_within(src..src + len, dst);
             for row in (0..keep).rev() {
                 self.line_ids[top_i + row + n] = self.line_ids[top_i + row];
                 self.row_breaks[top_i + row + n] = self.row_breaks[top_i + row];
@@ -889,7 +888,9 @@ impl Screen {
             self.row_breaks[row_index] = Some(HistoryBreakAfter::HardBreak);
         }
         let region = self.engine.unstructured_region();
-        let _ = self.engine.remint_linear_range(top_i * cols, (bottom_i + 1) * cols, region);
+        let _ = self
+            .engine
+            .remint_linear_range(top_i * cols, (bottom_i + 1) * cols, region);
         Ok(Mutation::rows(top, bottom))
     }
 
@@ -902,7 +903,9 @@ impl Screen {
             let cell = self.engine.store.grid_cells[start + col];
             match cell.role {
                 CellRole::Lead if cell.width >= 2 => {
-                    if col + 1 >= cols || self.engine.store.grid_cells[start + col + 1].role != CellRole::Continuation
+                    if col + 1 >= cols
+                        || self.engine.store.grid_cells[start + col + 1].role
+                            != CellRole::Continuation
                     {
                         Self::release_cell(cell, store);
                         self.engine.store.grid_cells[start + col] = Cell::blank(self.pen.bg);
@@ -911,87 +914,14 @@ impl Screen {
                     }
                 }
                 CellRole::Continuation
-                    if col == 0 || self.engine.store.grid_cells[start + col - 1].role != CellRole::Lead =>
+                    if col == 0
+                        || self.engine.store.grid_cells[start + col - 1].role != CellRole::Lead =>
                 {
                     self.engine.store.grid_cells[start + col] = Cell::blank(self.pen.bg);
                 }
                 _ => {}
             }
             col += 1;
-        }
-    }
-
-    fn current_source_line_id(&self, row: u16) -> LineId {
-        let start = usize::from(row) * usize::from(self.cols);
-        let end = start + usize::from(self.cols);
-        self.engine.store.grid_anchors[start..end]
-            .iter()
-            .rev()
-            .flatten()
-            .next()
-            .map_or(self.line_ids[usize::from(row)], |anchor| anchor.line_id)
-    }
-
-    fn append_row_to_history(
-        &mut self,
-        row: usize,
-        fallback_break: HistoryBreakAfter,
-        store: &GraphemeStore,
-    ) {
-        // #1484: RegionGrid spill index; HistoryStore dual-seal DELETE for GO.
-        let line_id = self.line_ids.get(row).copied().unwrap_or(LineId(1));
-        let _ = self.engine.seal_window_row_indexed(row as u16, line_id);
-        let start = row * usize::from(self.cols);
-        let end = start + usize::from(self.cols);
-        let mut fragments: Vec<HistoryLine> = Vec::new();
-        for (col, cell) in self.engine.store.grid_cells[start..end].iter().enumerate() {
-            if cell.role != CellRole::Lead {
-                continue;
-            }
-            let anchor = self.engine.store.grid_anchors[start + col].unwrap_or(crate::HistoryAnchor {
-                line_id: self.line_ids[row],
-                unit_offset: fragments.len() as u32,
-            });
-            let mut fragment = HistoryLine::from_cells(
-                anchor.line_id,
-                HistoryBreakAfter::SoftWrap,
-                std::slice::from_ref(cell),
-                store,
-            );
-            fragment.start_offset = anchor.unit_offset;
-            if let Some(previous) = fragments.last_mut().filter(|previous| {
-                previous.line_id == fragment.line_id
-                    && previous
-                        .start_offset
-                        .saturating_add(u32::try_from(previous.units.len()).unwrap_or(u32::MAX))
-                        == fragment.start_offset
-            }) {
-                previous.units.extend(fragment.units);
-            } else {
-                fragments.push(fragment);
-            }
-        }
-        if fragments.is_empty() {
-            let line_id = self.line_ids[row];
-            self.history
-                .append_row(line_id, fallback_break, &self.engine.store.grid_cells[start..end], store);
-            self.source_breaks.remove(&line_id);
-            return;
-        }
-        let mut last_fragment = HashMap::new();
-        for (index, fragment) in fragments.iter().enumerate() {
-            last_fragment.insert(fragment.line_id, index);
-        }
-        for (line_id, index) in last_fragment {
-            fragments[index].break_after = self
-                .source_breaks
-                .get(&line_id)
-                .copied()
-                .unwrap_or(fallback_break);
-        }
-        for fragment in fragments {
-            self.source_breaks.remove(&fragment.line_id);
-            self.history.append_line(fragment);
         }
     }
 }

@@ -42,15 +42,15 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 823
+acknowledged_loc = 842
 issue = 1484
-reason = "Flow Blocks host owns NATIVE_REGIONS LiveTail clips and Rust total_height document floor (#1484 Phase D) beside PRIMARY_CLIP/HISTORY; AppKit card geometry retirement continues in the same Issue."
+reason = "Flow Blocks host owns on-window NATIVE LiveTail plus sealed NATIVE RegionId fetches (#1484 dual-seal DELETE) beside PRIMARY_CLIP; AppKit card geometry retirement continues in the same Issue."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/block_projection.rs"
-acknowledged_loc = 746
+acknowledged_loc = 856
 issue = 1484
-reason = "Block projection FFI remains the single Flow clip export; #1484 Phase D adds NATIVE_REGIONS emission for on-window RegionId clips beside PRIMARY_CLIP/HISTORY without a second projection authority."
+reason = "Block projection FFI remains the single Flow clip export; #1484 emits NATIVE_REGIONS for on-window and sealed off-window RegionId maps (reserved0=u16::MAX sentinel) without LineId HISTORY reconstruction when native records exist."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/display.rs"
@@ -138,9 +138,9 @@ reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests modu
 # surface so completed Flow Block spans cannot bleed after Raw clear.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/screen/ops.rs"
-acknowledged_loc = 997
+acknowledged_loc = 927
 issue = 1484
-reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen impl after the #1020 resize-planner extraction; #1484 routes print/overwrite/clear-unit through PrimaryBlockEngine window writes (UnitVersion + VTWindowMap), remints map generations after erase/scroll/ICH/DCH fills, and indexes sealed spill rows onto RegionGrids before HistoryStore LineId assembly without splitting Screen into a second VT authority. Spill-only sealed paint must ratchet this ceiling down when HISTORY dual-seal retires."
+reason = "Cursor/edit/scroll/SGR mutations stay one cohesive Screen impl after the #1020 resize-planner extraction; #1484 routes print/overwrite/clear-unit through PrimaryBlockEngine window writes and remints map generations after erase/scroll/ICH/DCH. HistoryStore seal + RegionGrid ownership indexing live in screen/history_seal.rs (ADR-009 one-transfer; dual-seal DELETE)."
 
 # #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
 # partitioned into print / execute / csi / osc siblings; all landed <= review_loc,
@@ -295,9 +295,9 @@ reason = "Composer admission, eligibility publish, and session Candidate/Offer c
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/terminal/tests.rs"
-acknowledged_loc = 723
+acknowledged_loc = 783
 issue = 1484
-reason = "TerminalState unit suite remains one VT/oracle module; #1484 adds native-Block UnitVersion overwrite, shell-boundary journal order, and same-read CommandStart region-arm proofs beside existing shell-integration event tests."
+reason = "TerminalState unit suite remains one VT/oracle module; #1484 adds native-Block UnitVersion overwrite, shell-boundary journal order, same-read CommandStart region-arm proofs, and HistoryStore-backed sealed RegionId cell resolution without spill dual-copy."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_overlay.rs"

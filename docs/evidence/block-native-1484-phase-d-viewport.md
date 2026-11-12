@@ -23,9 +23,15 @@
 - Print/overwrite use `write_at`; bulk erase/scroll mutate window then `remint_*`.
 - Nested host→session `active_region` restores host output on session Complete (stack + cancel pending arm) — validators that still cite unstructured reset are stale relative to this branch.
 
-## Next in Phase D / G5–G9 blockers
+## Landed (sealed NATIVE cutover continuation)
 
-- Emit NATIVE_REGIONS (or batched plan) for sealed off-window Blocks; then DELETE HistoryStore dual-seal + Flow HISTORY IPC.
+13. `SealedRow` is an ownership index (`line_id` + owned columns); HistoryStore is the sole sealed cell payload (ADR-009 one-transfer). Block seal no longer dual-copies into RegionStore spill pages.
+14. `NativeBlockRegions.sealed_rows` published on the wire; completed off-window Blocks project `NATIVE_REGIONS` with `reserved0 = u16::MAX` (sealed sentinel) and `reserved1 = sealed_rows`.
+15. Flow Swift: on-window NATIVE keeps LiveTail; sealed NATIVE fetches by `block_id` (Runtime serves RegionId-owned cells). Legacy `HISTORY` LineId reconstruction is not used when a native map entry exists.
+16. `live_block_wire_rows` never falls back to Swift LineId HISTORY assembly when a Block has native RegionIds.
+
+## Remaining Phase D / G5–G9 blockers
+
 - Prefer Rust `total_height` over AppKit card-sum once chrome heights are Rust-owned.
 - Headed macOS evidence that Flow cards bind RegionIds, not LineId ranges.
-- Selection/copy/scroll anchoring over RegionGrids.
+- Selection/copy/scroll anchoring over RegionGrids (chronological HistoryStore APIs retained).

@@ -326,13 +326,42 @@ extension SecondaryLivePaneHost {
         }
     }
 
+    /// Sealed NATIVE_REGIONS: reserved0 == UInt16.max (not a LiveTail clip).
+    private func isNativeSealedProjection(_ projection: SeyalAppBlockProjection) -> Bool {
+        projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+            && projection.reserved0 == UInt16.max
+            && projection.reserved1 > 0
+    }
+
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
-        // NATIVE_REGIONS paint via publishLiveTailBlocks (primary-frame clip);
-        // do not open per-Block history IPC.
+        // On-window NATIVE_REGIONS paints via publishLiveTailBlocks. Sealed
+        // NATIVE fetches RegionId-owned content by block_id (Runtime ignores
+        // LineId span authority). Legacy HISTORY LineId reconstruction is retired
+        // for native Blocks (#1484).
+        guard displayHandle != 0 else { return }
+        if isNativeSealedProjection(projection) {
+            let key = HistoryProjectionRequestKey(
+                displayHandle: displayHandle,
+                blockID: blockID,
+                startLine: 0,
+                endLine: 0
+            )
+            guard historyProjectionRequests.begin(key) else { return }
+            // start/end are ignored when Runtime resolves sealed RegionId cells.
+            let result = historyBridge?.requestHistoryRange(
+                forDisplayHandle: displayHandle,
+                startLine: 1,
+                endLine: 1,
+                blockID: blockID
+            ) ?? -10
+            if result != 0 {
+                historyProjectionRequests.retry(key)
+            }
+            return
+        }
         guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
               projection.start_line > 0,
-              projection.end_line >= projection.start_line,
-              displayHandle != 0
+              projection.end_line >= projection.start_line
         else { return }
         // Surfaces intentionally have bridge == nil; borrow the window bridge
         // and address this pane's Controller (#1424).
@@ -366,7 +395,9 @@ extension SecondaryLivePaneHost {
             endLine: range.endLine
         )
         guard !range.rows.isEmpty else {
-            historyProjectionRequests.retry(key)
+            // Native sealed fetches may complete empty after eviction; settle
+            // by block id so we do not hot-loop retries (#1484).
+            historyProjectionRequests.complete(key)
             return
         }
         historyProjectionRequests.receive(key, status: range.status)
@@ -406,13 +437,18 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
+            // Sealed NATIVE (reserved0 == UInt16.max) paints via RegionId content
+            // fetch — never LiveTail-clip the primary frame.
+            let nativeSealed = projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+                && projection.reserved0 == UInt16.max
             guard row.id_lo != 0,
                   projection.reserved1 > 0,
+                  !nativeSealed,
                   projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
                     || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
             else { continue }
-            // PRIMARY_CLIP: startLine is ViewportLineId. NATIVE_REGIONS: header
-            // RegionId (must be non-zero); firstRow/rowCount clip the primary frame.
+            // PRIMARY_CLIP: startLine is ViewportLineId. On-window NATIVE_REGIONS:
+            // header RegionId; firstRow/rowCount clip the primary frame.
             live[row.id_lo] = LiveTailClip(
                 startLine: max(projection.start_line, 1),
                 firstRow: projection.reserved0,
@@ -537,8 +573,14 @@ extension SecondaryLivePaneHost {
         let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
         let cellHeight = surface.terminalPresentationCellSize().height
         let rustFloor = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        let contentHeight = max(cardHeight, rustFloor)
-        let viewportHeight = hasCards || rustFloor > 0 ? transcript.contentView.bounds.height : 0
+        // Rust indexed height owns document size when cards + native regions
+        // publish (#1484 / ADR-009). Card-sum is legacy fallback. Cleared
+        // canvas (no cards) collapses even if a stale Rust floor remains.
+        let contentHeight: CGFloat = {
+            if !hasCards { return 0 }
+            return rustFloor > 0 ? rustFloor : cardHeight
+        }()
+        let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
         let spacers = TranscriptDocumentSizing.spacerHeights(

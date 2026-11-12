@@ -119,9 +119,7 @@ impl TerminalCore {
             ShellIntegrationEvent::PromptStarted { .. } => {
                 (MarkerKind::PromptStart, self.current_line())
             }
-            ShellIntegrationEvent::CommandStarted { line, .. } => {
-                (MarkerKind::CommandStart, *line)
-            }
+            ShellIntegrationEvent::CommandStarted { line, .. } => (MarkerKind::CommandStart, *line),
             ShellIntegrationEvent::CommandFinished { line, .. } => {
                 (MarkerKind::CommandFinished, *line)
             }
@@ -132,10 +130,7 @@ impl TerminalCore {
             .cell_anchor(cursor.col, cursor.row)
             .map(|anchor| u64::from(anchor.unit_offset))
             .unwrap_or(0);
-        let content_generation = self
-            .primary
-            .engine
-            .unit_generation_at(line, unit_offset);
+        let content_generation = self.primary.engine.unit_generation_at(line, unit_offset);
         let version = UnitVersion {
             line_id: line,
             unit_offset,
@@ -144,12 +139,8 @@ impl TerminalCore {
         if matches!(marker, MarkerKind::CommandStart) {
             let _ = self.primary.engine.arm_command_start_output();
         }
-        self.primary.engine.record_shell_boundary(
-            marker,
-            version,
-            cursor.col,
-            None,
-            true,
-        );
+        self.primary
+            .engine
+            .record_shell_boundary(marker, version, cursor.col, None, true);
     }
 }

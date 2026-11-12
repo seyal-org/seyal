@@ -82,23 +82,25 @@ impl Screen {
                 let row_start = usize::from(row) * usize::from(old_cols);
                 let break_after =
                     self.row_breaks[usize::from(row)].unwrap_or(HistoryBreakAfter::HardBreak);
-                let cells = &self.engine.store.grid_cells[row_start..row_start + usize::from(old_cols)];
+                let cells =
+                    &self.engine.store.grid_cells[row_start..row_start + usize::from(old_cols)];
                 let mut row_has_units = false;
                 for (col, cell) in cells.iter().enumerate() {
                     if cell.role != CellRole::Lead {
                         continue;
                     }
                     row_has_units = true;
-                    let anchor = self.engine.store.grid_anchors[row_start + col].unwrap_or_else(|| {
-                        let line_id = self.line_ids[usize::from(row)];
-                        let offset = source_offsets.entry(line_id).or_default();
-                        let anchor = crate::HistoryAnchor {
-                            line_id,
-                            unit_offset: *offset,
-                        };
-                        *offset = offset.saturating_add(1);
-                        anchor
-                    });
+                    let anchor =
+                        self.engine.store.grid_anchors[row_start + col].unwrap_or_else(|| {
+                            let line_id = self.line_ids[usize::from(row)];
+                            let offset = source_offsets.entry(line_id).or_default();
+                            let anchor = crate::HistoryAnchor {
+                                line_id,
+                                unit_offset: *offset,
+                            };
+                            *offset = offset.saturating_add(1);
+                            anchor
+                        });
                     let source_break = self
                         .source_breaks
                         .get(&anchor.line_id)

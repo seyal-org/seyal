@@ -700,7 +700,7 @@ fn print_overwrite_mints_unit_version_through_primary_engine() {
         .events()
         .iter()
         .filter_map(|event| match event {
-            PrimaryEvent::CellMutation { version, .. } => Some(version.clone()),
+            PrimaryEvent::CellMutation { version, .. } => Some(*version),
             _ => None,
         })
         .collect();
@@ -720,4 +720,64 @@ fn print_overwrite_mints_unit_version_through_primary_engine() {
         .expect("B overwrite");
     assert_eq!(first_col0.line_id, overwrite_col0.line_id);
     assert!(overwrite_col0.content_generation > first_col0.content_generation);
+}
+
+#[test]
+fn sealed_native_cells_resolve_from_history_store_without_spill() {
+    use crate::history::{HistoryBreakAfter, HistoryLine};
+    use crate::primary_blocks::types::BlockId;
+    use crate::{Cell, LineId, Style};
+
+    let mut terminal = TerminalState::new(4, 3).expect("terminal");
+    let block = terminal
+        .core
+        .primary
+        .engine
+        .open_block(BlockId(4))
+        .unwrap()
+        .clone();
+    let output = block.output.0;
+    for (col, ch) in [(0u16, 'H'), (1, 'i')] {
+        terminal
+            .core
+            .primary
+            .engine
+            .write_at(
+                col,
+                0,
+                Cell::lead_inline(ch, 1, Style::default()),
+                block.output,
+                LineId(1),
+                u64::from(col),
+            )
+            .unwrap();
+    }
+    let line_id = terminal.core.primary.line_id(0).unwrap_or(LineId(1));
+    terminal
+        .core
+        .primary
+        .engine
+        .seal_window_row_indexed(0, line_id)
+        .unwrap();
+    let row_cells = terminal.core.primary.cell_row(0).expect("row").to_vec();
+    let graphemes = crate::grapheme_store::GraphemeStore::default();
+    let line = HistoryLine::from_cells(
+        line_id,
+        HistoryBreakAfter::HardBreak,
+        &row_cells,
+        &graphemes,
+    );
+    terminal.core.primary.history_mut().append_line(line);
+
+    assert_eq!(
+        terminal.core.primary.engine.store.spill_page_count(),
+        0,
+        "no spill dual-copy"
+    );
+    let sealed = terminal.primary_sealed_region_cells(output);
+    assert!(
+        sealed.iter().any(|(_, _, cell)| cell.character == 'H'),
+        "HistoryStore-backed sealed paint must surface owned cells"
+    );
+    assert_eq!(terminal.primary_sealed_row_count(output), 1);
 }

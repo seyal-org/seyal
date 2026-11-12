@@ -154,10 +154,9 @@ impl LocalDisplayClient {
                         } else {
                             &frame[HEADER_LEN..]
                         };
-                        let map = seyal_runtime::local_ipc::framing::BlockNativeRegions::decode(
-                            payload,
-                        )
-                        .map_err(|_| ClientError::Protocol)?;
+                        let map =
+                            seyal_runtime::local_ipc::framing::BlockNativeRegions::decode(payload)
+                                .map_err(|_| ClientError::Protocol)?;
                         if map.revision >= self.block_native_regions.revision {
                             self.block_native_regions = map;
                             metadata_changed = true;

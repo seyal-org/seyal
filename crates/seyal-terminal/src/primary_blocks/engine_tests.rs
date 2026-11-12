@@ -1,7 +1,6 @@
 use super::*;
 use crate::{Cell, Style};
 
-
 #[test]
 fn engine_opens_block_with_owned_regions() {
     let mut engine = PrimaryBlockEngine::new(80, 24).unwrap();
@@ -268,6 +267,42 @@ fn live_region_cells_lists_only_owned_window_slots() {
     assert_eq!(cells[0].0, 1);
     assert_eq!(cells[0].2.character, 'Q');
     assert!(engine.live_region_cells(engine.unstructured_region()).len() >= 3);
+}
+
+#[test]
+fn seal_indexes_region_ownership_without_spill_dual_copy() {
+    let mut engine = PrimaryBlockEngine::new(4, 2).unwrap();
+    let block = engine.open_block(BlockId(9)).unwrap().clone();
+    engine
+        .write_at(
+            0,
+            0,
+            Cell::lead_inline('Z', 1, Style::default()),
+            block.output,
+            LineId(5),
+            0,
+        )
+        .unwrap();
+    engine
+        .write_at(
+            1,
+            0,
+            Cell::lead_inline('Y', 1, Style::default()),
+            block.output,
+            LineId(5),
+            1,
+        )
+        .unwrap();
+    engine.seal_window_row_indexed(0, LineId(5)).unwrap();
+    assert_eq!(engine.sealed_row_count(block.output), 1);
+    assert_eq!(
+        engine.store.spill_page_count(),
+        0,
+        "Block seal must not dual-copy cells into spill pages"
+    );
+    let rows = engine.sealed_rows(block.output);
+    assert_eq!(rows[0].line_id, LineId(5));
+    assert_eq!(rows[0].cols, vec![0, 1]);
 }
 
 #[test]

@@ -125,7 +125,10 @@ impl TerminalExecution {
 
     /// Runtime-accepted CommandStart: open Block output region for new VT writes.
     /// Returns `(header_region, output_region)`.
-    pub fn begin_native_block_output(&mut self, block_id: u64) -> Result<(u64, u64), TerminalError> {
+    pub fn begin_native_block_output(
+        &mut self,
+        block_id: u64,
+    ) -> Result<(u64, u64), TerminalError> {
         self.terminal.begin_native_block_output(block_id)
     }
 
@@ -168,6 +171,14 @@ impl TerminalExecution {
         region_id: u64,
     ) -> Vec<(seyal_terminal::LineId, u16, seyal_terminal::Cell)> {
         self.terminal.primary_sealed_region_cells(region_id)
+    }
+
+    pub fn primary_sealed_region_line_ids(&self, region_id: u64) -> Vec<seyal_terminal::LineId> {
+        self.terminal.primary_sealed_region_line_ids(region_id)
+    }
+
+    pub fn primary_sealed_row_count(&self, region_id: u64) -> u16 {
+        self.terminal.primary_sealed_row_count(region_id)
     }
 
     pub fn primary_visible_block_spans(

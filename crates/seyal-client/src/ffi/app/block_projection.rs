@@ -85,12 +85,13 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
                 PresentationMode::Flow
             }
         };
-        // Completed on-window Blocks: prefer NATIVE_REGIONS when Runtime pushed
-        // a row span so Metal paints from the primary frame (no history IPC).
-        // Off-window / missing map keep HISTORY. Running PRIMARY_CLIP needs
+        // Completed Blocks: prefer NATIVE_REGIONS whenever Runtime pushed a
+        // RegionId map entry. On-window uses LiveTail clips; sealed off-window
+        // uses reserved1 = sealed_rows and RegionId-keyed content fetch (no
+        // Swift LineId HISTORY reconstruction). Running PRIMARY_CLIP needs
         // ViewportLineIds from the Pane's owning client.
-        if !running {
-            if let Some(native) =
+        if !running
+            && let Some(native) =
                 with_fence_matched_client(fence.execution, fence.attachment, |client| {
                     client
                         .block_native_regions()
@@ -99,20 +100,30 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
                         .find(|record| {
                             let mut lo = [0u8; 8];
                             lo.copy_from_slice(&block.id.to_bytes()[..8]);
-                            record.block_id == u64::from_le_bytes(lo) && record.row_count > 0
+                            record.block_id == u64::from_le_bytes(lo)
+                                && (record.row_count > 0 || record.sealed_rows > 0)
                         })
-                        .map(|record| SeyalAppBlockProjection {
-                            kind: SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS,
-                            reserved0: record.first_row,
-                            reserved1: u32::from(record.row_count),
-                            start_line: record.header_region,
-                            end_line: record.output_region,
+                        .map(|record| {
+                            // reserved0 = u16::MAX marks sealed off-window paint
+                            // (not a LiveTail primary-frame clip). On-window keeps
+                            // first_row even when it is 0.
+                            let (reserved0, reserved1) = if record.row_count > 0 {
+                                (record.first_row, u32::from(record.row_count))
+                            } else {
+                                (u16::MAX, u32::from(record.sealed_rows))
+                            };
+                            SeyalAppBlockProjection {
+                                kind: SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS,
+                                reserved0,
+                                reserved1,
+                                start_line: record.header_region,
+                                end_line: record.output_region,
+                            }
                         })
                 })
                 .flatten()
-            {
-                return native;
-            }
+        {
+            return native;
         }
         let projection = if running {
             with_fence_matched_client(fence.execution, fence.attachment, |client| {
@@ -715,18 +726,18 @@ mod tests {
         crate::ffi::CLIENTS.with(|clients| {
             let mut clients = clients.borrow_mut();
             let client = clients.get_mut(&owner).unwrap();
-            client.block_native_regions =
-                seyal_runtime::local_ipc::framing::BlockNativeRegions {
-                    revision: 1,
-                    total_height: 3,
-                    records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
-                        block_id: 7,
-                        header_region: 100,
-                        output_region: 101,
-                        first_row: 2,
-                        row_count: 3,
-                    }],
-                };
+            client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+                revision: 1,
+                total_height: 3,
+                records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                    block_id: 7,
+                    header_region: 100,
+                    output_region: 101,
+                    first_row: 2,
+                    row_count: 3,
+                    sealed_rows: 0,
+                }],
+            };
         });
         crate::ffi::ACTIVE_HANDLE.with(|active| active.set(owner));
 
@@ -736,6 +747,102 @@ mod tests {
         assert_eq!(projection.end_line, 101);
         assert_eq!(projection.reserved0, 2);
         assert_eq!(projection.reserved1, 3);
+
+        crate::ffi::CLIENTS.with(|clients| {
+            clients.borrow_mut().remove(&owner);
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn sealed_off_window_blocks_project_native_regions_not_history() {
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let bind = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 1,
+            flags: FLAG_TARGET_CONTROLLER,
+            fence_pane_lo: snap.pane_lo,
+            fence_pane_hi: snap.pane_hi,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: snap.epoch,
+            target_execution_lo: 1,
+            target_execution_hi: 0,
+            target_attachment_lo: 2,
+            target_attachment_hi: 0,
+            target_generation: 1,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            state
+                .root
+                .apply(AppAction::SelectRestingPresentation {
+                    fence: state.root.fence(),
+                    raw: false,
+                })
+                .unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: Some(vec![RuntimeBlockRecord {
+                        id: BlockId::from_bytes({
+                            let mut bytes = [0u8; 16];
+                            bytes[..8].copy_from_slice(&11u64.to_le_bytes());
+                            bytes
+                        }),
+                        command: "seq 1 100".into(),
+                        start_line: 10,
+                        end_line: Some(40),
+                        running: false,
+                        exit_status: Some(0),
+                        canvas_floor: false,
+                        scope: seyal_protocol::framing::BlockScope::Local,
+                    }]),
+                })
+                .unwrap();
+        });
+
+        let owner = owned_client(1, 2, 3, vec![10, 11, 12]);
+        crate::ffi::CLIENTS.with(|clients| {
+            let mut clients = clients.borrow_mut();
+            let client = clients.get_mut(&owner).unwrap();
+            client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+                revision: 2,
+                total_height: 30,
+                records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                    block_id: 11,
+                    header_region: 200,
+                    output_region: 201,
+                    first_row: 0,
+                    row_count: 0,
+                    sealed_rows: 30,
+                }],
+            };
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(owner));
+
+        let projection = seyal_app_block_projection(handle, 0);
+        assert_eq!(projection.kind, SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS);
+        assert_eq!(projection.start_line, 200);
+        assert_eq!(projection.end_line, 201);
+        assert_eq!(projection.reserved0, u16::MAX, "sealed sentinel");
+        assert_eq!(projection.reserved1, 30);
+        assert_ne!(
+            projection.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY,
+            "sealed native Blocks must not reconstruct via LineId HISTORY"
+        );
 
         crate::ffi::CLIENTS.with(|clients| {
             clients.borrow_mut().remove(&owner);

@@ -69,6 +69,11 @@ pub(in crate::runtime) struct Entry {
     /// Monotonic revision for `BlockNativeRegions` publishes (timeline + display).
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) native_regions_revision: u64,
+    /// Last published native-regions content stamp (`total_height`, records).
+    /// Skips redundant after-display frames that would flood the control queue.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) published_native_regions_stamp:
+        Option<(u64, Vec<crate::local_ipc::framing::NativeBlockRegions>)>,
     /// The composer eligibility last published to attached clients, and the
     /// monotonic revision that fences it. `None` until the first publish.
     #[cfg(target_os = "macos")]

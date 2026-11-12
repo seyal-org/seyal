@@ -136,5 +136,7 @@ pub fn decode_presentation_envelope(
 }
 
 fn is_presentation_message(message_type: u16) -> bool {
-    matches!(message_type, 12 | 13 | 21 | 26 | 27 | 28 | 35)
+    // 12/13/27/28 display, 21 BlockTimeline, 26 reserved BlockState wire,
+    // 35 ViewportLineIds, 48 BlockNativeRegions (#1484).
+    matches!(message_type, 12 | 13 | 21 | 26 | 27 | 28 | 35 | 48)
 }

@@ -27,13 +27,15 @@ struct PageSlot {
 
 /// Bounded mutable page pool + region index.
 ///
-/// Sealed off-window Block cells live on spill pages (`page >= 1`) with their
-/// owning [`RegionId`]. HistoryStore LineId assembly remains only until Flow
-/// paints sealed spill via batched plans and HISTORY IPC is retired (#1484).
+/// Sealed off-window Block payload is transferred once into the shared
+/// HistoryStore (ADR-009). [`RegionGrid::sealed_rows`] retains only LineId +
+/// column ownership so Flow can paint by RegionId without a second cell copy.
+/// Spill `pages` remain available for non-Block scratch; Block seal must not
+/// dual-write cell payloads here (#1484).
 ///
 /// The active PTY window's canonical cell payload lives only in `grid_cells` /
 /// `grid_anchors` on [`WINDOW_PAGE`]. Generational `grid_gens` make window
-/// handles stale on overwrite. Spill `pages` are for off-window retention only.
+/// handles stale on overwrite.
 pub(crate) struct RegionStore {
     next_region: u64,
     next_spill_page: u64,
@@ -104,6 +106,11 @@ impl RegionStore {
 
     pub(crate) fn window_cols(&self) -> u16 {
         self.window_cols
+    }
+
+    /// Spill page count (0 when Block seal uses HistoryStore-only ownership).
+    pub(crate) fn spill_page_count(&self) -> usize {
+        self.pages.len()
     }
 
     pub(crate) fn window_rows(&self) -> u16 {
@@ -177,29 +184,6 @@ impl RegionStore {
         })
     }
 
-    /// Seal one live window row into spill pages, preserving per-cell RegionId.
-    /// Returns `(handle, region)` for every column. Does not clear the window;
-    /// callers remint/erase after retention as today.
-    pub(crate) fn seal_window_row(
-        &mut self,
-        row: u16,
-    ) -> Result<Vec<(CellHandle, RegionId)>, TerminalError> {
-        if row >= self.window_rows {
-            return Err(TerminalError::InvalidSize);
-        }
-        let mut sealed = Vec::with_capacity(usize::from(self.window_cols));
-        for col in 0..self.window_cols {
-            let idx = self
-                .window_index(col, row)
-                .ok_or(TerminalError::InvalidSize)?;
-            let cell = self.grid_cells[idx];
-            let region = self.grid_regions[idx];
-            let handle = self.alloc_spill_cell(cell, region)?;
-            sealed.push((handle, region));
-        }
-        Ok(sealed)
-    }
-
     pub(crate) fn spill_region(&self, handle: CellHandle) -> Option<RegionId> {
         if handle.page == WINDOW_PAGE {
             return self.grid_regions.get(handle.slot as usize).copied();
@@ -212,20 +196,22 @@ impl RegionStore {
             .map(|slot| slot.region)
     }
 
-    /// Attach one sealed window row's spill handles to their owning RegionGrids.
-    /// Groups consecutive columns by RegionId; marks regions PartiallySealed.
-    pub(crate) fn record_sealed_row(
+    /// Index one sealed window row's per-column RegionId ownership onto RegionGrids.
+    /// Does not copy cell payloads — HistoryStore is the sole sealed owner (#1484).
+    pub(crate) fn record_sealed_row_ownership(
         &mut self,
         line_id: LineId,
-        sealed: &[(CellHandle, RegionId)],
+        column_regions: &[(u16, RegionId)],
     ) -> Result<(), TerminalError> {
         use super::types::SealedRow;
         use std::collections::BTreeMap;
-        let mut by_region: BTreeMap<RegionId, Vec<CellHandle>> = BTreeMap::new();
-        for (handle, region) in sealed {
-            by_region.entry(*region).or_default().push(*handle);
+        let mut by_region: BTreeMap<RegionId, Vec<u16>> = BTreeMap::new();
+        for (col, region) in column_regions {
+            by_region.entry(*region).or_default().push(*col);
         }
-        for (region, handles) in by_region {
+        for (region, mut cols) in by_region {
+            cols.sort_unstable();
+            cols.dedup();
             let grid = self
                 .regions
                 .iter_mut()
@@ -234,7 +220,7 @@ impl RegionStore {
             if grid.line_spine.last().copied() != Some(line_id) {
                 grid.line_spine.push(line_id);
             }
-            grid.sealed_rows.push(SealedRow { line_id, handles });
+            grid.sealed_rows.push(SealedRow { line_id, cols });
             if grid.state == RegionState::Writable {
                 grid.state = RegionState::PartiallySealed;
             }
@@ -242,23 +228,34 @@ impl RegionStore {
         Ok(())
     }
 
-    /// Chronological sealed spill cells for one region (col-major within each row).
-    pub(crate) fn sealed_region_cells(
+    /// Capture live-window RegionId per column for `row` (no spill copy).
+    pub(crate) fn window_row_regions(
         &self,
-        region: RegionId,
-    ) -> Vec<(LineId, u16, Cell)> {
-        let Some(grid) = self.region(region) else {
-            return Vec::new();
-        };
-        let mut out = Vec::new();
-        for row in &grid.sealed_rows {
-            for (col, handle) in row.handles.iter().enumerate() {
-                if let CellLookup::Live(cell) = self.get(*handle) {
-                    out.push((row.line_id, col as u16, cell));
-                }
-            }
+        row: u16,
+    ) -> Result<Vec<(u16, RegionId)>, TerminalError> {
+        if row >= self.window_rows {
+            return Err(TerminalError::InvalidSize);
         }
-        out
+        let mut out = Vec::with_capacity(usize::from(self.window_cols));
+        for col in 0..self.window_cols {
+            let idx = self
+                .window_index(col, row)
+                .ok_or(TerminalError::InvalidSize)?;
+            out.push((col, self.grid_regions[idx]));
+        }
+        Ok(out)
+    }
+
+    /// Sealed ownership rows for one region (LineId + owned columns).
+    pub(crate) fn sealed_rows(&self, region: RegionId) -> &[super::types::SealedRow] {
+        self.region(region)
+            .map(|grid| grid.sealed_rows.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Number of sealed ownership rows for one region (u16-saturated).
+    pub(crate) fn sealed_row_count(&self, region: RegionId) -> u16 {
+        u16::try_from(self.sealed_rows(region).len()).unwrap_or(u16::MAX)
     }
 
     /// Write a live window cell in place; bumps generation and records region.
@@ -396,7 +393,11 @@ impl RegionStore {
         })
     }
 
-    pub(crate) fn note_line(&mut self, region: RegionId, line: LineId) -> Result<(), TerminalError> {
+    pub(crate) fn note_line(
+        &mut self,
+        region: RegionId,
+        line: LineId,
+    ) -> Result<(), TerminalError> {
         let grid = self
             .regions
             .iter_mut()
@@ -418,12 +419,8 @@ impl RegionStore {
 
     /// Paint every window slot with `default_region` and generation 1.
     pub(crate) fn paint_window_region(&mut self, default_region: RegionId) {
-        for region in &mut self.grid_regions {
-            *region = default_region;
-        }
-        for generation in &mut self.grid_gens {
-            *generation = 1;
-        }
+        self.grid_regions.fill(default_region);
+        self.grid_gens.fill(1);
     }
 }
 
@@ -455,10 +452,20 @@ mod tests {
             .unwrap();
         store.paint_window_region(region);
         let h1 = store
-            .write_window(0, 0, Cell::lead_inline('A', 1, crate::Style::default()), region)
+            .write_window(
+                0,
+                0,
+                Cell::lead_inline('A', 1, crate::Style::default()),
+                region,
+            )
             .unwrap();
         let h2 = store
-            .write_window(0, 0, Cell::lead_inline('B', 1, crate::Style::default()), region)
+            .write_window(
+                0,
+                0,
+                Cell::lead_inline('B', 1, crate::Style::default()),
+                region,
+            )
             .unwrap();
         assert_eq!(store.grid_cells[0].character, 'B');
         assert!(matches!(
@@ -484,42 +491,47 @@ mod tests {
     }
 
     #[test]
-    fn seal_window_row_preserves_per_cell_region_on_spill() {
+    fn sealed_row_ownership_indexes_columns_without_spill_copy() {
         let mut store = RegionStore::with_window(3, 1).unwrap();
-        let unstructured = store
-            .alloc_region(RegionKind::Unstructured, None)
-            .unwrap();
+        let unstructured = store.alloc_region(RegionKind::Unstructured, None).unwrap();
         let output = store
             .alloc_region(RegionKind::Output, Some(BlockId(3)))
             .unwrap();
         store.paint_window_region(unstructured);
         store
-            .write_window(0, 0, Cell::lead_inline('A', 1, crate::Style::default()), output)
+            .write_window(
+                0,
+                0,
+                Cell::lead_inline('A', 1, crate::Style::default()),
+                output,
+            )
             .unwrap();
         store
-            .write_window(1, 0, Cell::lead_inline('B', 1, crate::Style::default()), output)
+            .write_window(
+                1,
+                0,
+                Cell::lead_inline('B', 1, crate::Style::default()),
+                output,
+            )
             .unwrap();
-        let sealed = store.seal_window_row(0).unwrap();
-        assert_eq!(sealed.len(), 3);
-        assert_eq!(sealed[0].1, output);
-        assert_eq!(sealed[1].1, output);
-        assert_eq!(sealed[2].1, unstructured);
-        assert_ne!(sealed[0].0.page, WINDOW_PAGE);
-        match store.get(sealed[0].0) {
-            CellLookup::Live(cell) => assert_eq!(cell.character, 'A'),
-            other => panic!("expected live spill cell, got {other:?}"),
-        }
-        assert_eq!(store.spill_region(sealed[0].0), Some(output));
-        assert_eq!(store.spill_region(sealed[2].0), Some(unstructured));
-        store.record_sealed_row(LineId(9), &sealed).unwrap();
+        let columns = store.window_row_regions(0).unwrap();
+        assert_eq!(columns.len(), 3);
+        assert_eq!(columns[0].1, output);
+        assert_eq!(columns[1].1, output);
+        assert_eq!(columns[2].1, unstructured);
+        store
+            .record_sealed_row_ownership(LineId(9), &columns)
+            .unwrap();
         let grid = store.region(output).unwrap();
         assert_eq!(grid.state, RegionState::PartiallySealed);
         assert_eq!(grid.sealed_rows.len(), 1);
         assert_eq!(grid.sealed_rows[0].line_id, LineId(9));
-        assert_eq!(grid.sealed_rows[0].handles.len(), 2);
-        let cells = store.sealed_region_cells(output);
-        assert_eq!(cells.len(), 2);
-        assert_eq!(cells[0].2.character, 'A');
-        assert_eq!(cells[1].2.character, 'B');
+        assert_eq!(grid.sealed_rows[0].cols, vec![0, 1]);
+        assert_eq!(store.sealed_row_count(output), 1);
+        assert_eq!(
+            store.spill_page_count(),
+            0,
+            "ownership index must not allocate spill pages"
+        );
     }
 }

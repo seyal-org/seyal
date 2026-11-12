@@ -21,8 +21,9 @@ fn pack_terminal_color(color: Color) -> u32 {
     }
 }
 
-/// Prefer RegionStore-owned live window cells, then sealed spill cells (#1484).
-/// Falls back to LineId history-range assembly when neither is present.
+/// Prefer RegionStore-owned live window cells, then HistoryStore-backed sealed
+/// cells filtered by RegionId ownership (#1484). When the Block has native
+/// RegionIds, never fall back to Swift LineId-span HISTORY assembly.
 fn live_block_wire_rows(
     entry: &super::super::Entry,
     block_id: u64,
@@ -60,21 +61,38 @@ fn live_block_wire_rows(
         ));
     }
     let sealed = entry.execution.primary_sealed_region_cells(output);
-    if sealed.is_empty() {
-        return None;
+    if !sealed.is_empty() {
+        let mut by_line: std::collections::BTreeMap<u64, Vec<(u16, _)>> =
+            std::collections::BTreeMap::new();
+        for (line_id, col, cell) in sealed {
+            by_line.entry(line_id.0).or_default().push((col, cell));
+        }
+        return Some(pad_wire_rows(
+            by_line
+                .into_iter()
+                .map(|(line, owned)| (LineId(line), owned)),
+            cols_n,
+            max_lines,
+        ));
     }
-    let mut by_line: std::collections::BTreeMap<u64, Vec<(u16, _)>> =
-        std::collections::BTreeMap::new();
-    for (line_id, col, cell) in sealed {
-        by_line.entry(line_id.0).or_default().push((col, cell));
+    // Ownership index present but column filter missed (compacted history):
+    // assemble from HistoryStore using Runtime-owned LineIds only — never the
+    // Swift request span.
+    let line_ids = entry.execution.primary_sealed_region_line_ids(output);
+    if line_ids.is_empty() {
+        return Some(Vec::new());
     }
-    Some(pad_wire_rows(
-        by_line
-            .into_iter()
-            .map(|(line, owned)| (LineId(line), owned)),
-        cols_n,
-        max_lines,
-    ))
+    let start = line_ids[0];
+    let end = *line_ids.last().unwrap_or(&start);
+    let Ok(rows) = terminal.primary_history_wire_range(start, end, max_lines, 0) else {
+        return Some(Vec::new());
+    };
+    let wanted: std::collections::BTreeSet<_> = line_ids.into_iter().collect();
+    Some(
+        rows.into_iter()
+            .filter(|(id, _)| wanted.contains(id))
+            .collect(),
+    )
 }
 
 fn pad_wire_rows(
@@ -421,51 +439,10 @@ impl Runtime {
     }
 
     /// Publish BlockId → RegionId map (+ on-window row spans) to peers that
-    /// negotiated the capability. Bumps `native_regions_revision` so display
-    /// and timeline publishes stay ordered.
+    /// negotiated the capability. Bumps `native_regions_revision` only when
+    /// content changes so display-tick republish cannot flood the control queue.
     pub(in crate::runtime) fn publish_block_native_regions(&mut self, execution_id: ExecutionId) {
-        let Some(entry) = self.entries.get_mut(&execution_id) else {
-            return;
-        };
-        entry.native_regions_revision = entry.native_regions_revision.saturating_add(1);
-        let revision = entry.native_regions_revision;
-        let on_window: std::collections::HashMap<u64, (u16, u16)> = entry
-            .execution
-            .primary_on_window_region_spans()
-            .into_iter()
-            .map(|span| (span.block_id.0, (span.first_row, span.row_count)))
-            .collect();
-        let records: Vec<NativeBlockRegions> = entry
-            .block_timeline
-            .records()
-            .filter_map(|record| {
-                let (first_row, row_count) = on_window
-                    .get(&record.id.raw())
-                    .copied()
-                    .unwrap_or((0, 0));
-                Some(NativeBlockRegions {
-                    block_id: record.id.raw(),
-                    header_region: record.header_region?,
-                    output_region: record.output_region?,
-                    first_row,
-                    row_count,
-                })
-            })
-            .collect();
-        if records.is_empty() {
-            return;
-        }
-        let total_height = entry.execution.primary_viewport_total_height();
-        let map = BlockNativeRegions {
-            revision,
-            total_height,
-            records,
-        };
-        let Ok(payload) = map.try_encode() else {
-            return;
-        };
-        let frame = framing::encode_frame(MessageType::BlockNativeRegions, &payload);
-        let targets = self
+        let targets: Vec<(u64, _)> = self
             .local_ipc
             .as_ref()
             .map(|state| {
@@ -494,8 +471,64 @@ impl Runtime {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        if targets.is_empty() {
+            return;
+        }
+
+        let frame = {
+            let Some(entry) = self.entries.get_mut(&execution_id) else {
+                return;
+            };
+            let on_window: std::collections::HashMap<u64, (u16, u16)> = entry
+                .execution
+                .primary_on_window_region_spans()
+                .into_iter()
+                .map(|span| (span.block_id.0, (span.first_row, span.row_count)))
+                .collect();
+            let records: Vec<NativeBlockRegions> = entry
+                .block_timeline
+                .records()
+                .filter_map(|record| {
+                    let (first_row, row_count) =
+                        on_window.get(&record.id.raw()).copied().unwrap_or((0, 0));
+                    let output_region = record.output_region?;
+                    let sealed_rows = entry.execution.primary_sealed_row_count(output_region);
+                    Some(NativeBlockRegions {
+                        block_id: record.id.raw(),
+                        header_region: record.header_region?,
+                        output_region,
+                        first_row,
+                        row_count,
+                        sealed_rows,
+                    })
+                })
+                .collect();
+            if records.is_empty() {
+                return;
+            }
+            let total_height = entry.execution.primary_viewport_total_height();
+            let stamp = (total_height, records.clone());
+            if entry.published_native_regions_stamp.as_ref() == Some(&stamp) {
+                return;
+            }
+            // Stamp before enqueue so display-tick pressure cannot retry-flood the
+            // control queue; a dropped frame recovers on the next content change.
+            entry.native_regions_revision = entry.native_regions_revision.saturating_add(1);
+            let revision = entry.native_regions_revision;
+            entry.published_native_regions_stamp = Some(stamp);
+            let map = BlockNativeRegions {
+                revision,
+                total_height,
+                records,
+            };
+            let Ok(payload) = map.try_encode() else {
+                return;
+            };
+            framing::encode_frame(MessageType::BlockNativeRegions, &payload)
+        };
         for (token, attachment_id) in targets {
-            let _ = self.send_attachment_after_display_frame(token, attachment_id, frame.clone());
+            let _ =
+                self.try_send_attachment_after_display_frame(token, attachment_id, frame.clone());
         }
     }
 }

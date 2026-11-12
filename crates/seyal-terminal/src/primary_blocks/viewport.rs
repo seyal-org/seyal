@@ -193,9 +193,7 @@ mod tests {
                 store.note_line(header, LineId(i as u64 + 1)).unwrap();
             }
             for i in 0..*output_lines {
-                store
-                    .note_line(output, LineId(100 + i as u64))
-                    .unwrap();
+                store.note_line(output, LineId(100 + i as u64)).unwrap();
             }
             let _ = RegionState::Writable;
             blocks.push(BlockContent {

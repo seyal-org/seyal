@@ -1,10 +1,15 @@
 //! Canonical native-Block primary storage (#1484 / ADR-009).
 //!
-//! `RegionStore` is the sole physical allocator of primary cells and retained
-//! source units. The live PTY window payload lives only on window page 0
+//! Live PTY window payload lives only on RegionStore window page 0
 //! (`grid_cells` / `grid_anchors`); `VTWindowMap` holds non-owning generational
-//! handles into that page. Block timeline metadata remains Runtime-owned;
-//! this module stores RegionGrid content keyed by Runtime-issued BlockIds.
+//! handles into that page. Sealed off-window payload transfers once into the
+//! shared HistoryStore; RegionGrid `sealed_rows` index LineId + column
+//! ownership only. Block timeline metadata remains Runtime-owned.
+//!
+//! Internal helpers remain reachable for tests and the remaining G5–G9 cutover
+//! (selection/copy hit-testing, viewport plans); allow unused until those
+//! call sites land in this same Issue.
+#![allow(dead_code)]
 //!
 //! Production `Screen` no longer owns a parallel `Vec<Cell>` — print/overwrite
 //! and clear-unit go through `PrimaryBlockEngine::write_at` /

@@ -5507,8 +5507,9 @@ final class SeyalHostComponentTests: XCTestCase {
     func testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC() throws {
         // #1484 Phase D: on-window completed Blocks use NATIVE_REGIONS → LiveTailClip.
         let sourceRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+            .deletingLastPathComponent() // SeyalTests/
+            .deletingLastPathComponent() // Tests/
+            .deletingLastPathComponent() // Seyal/
             .appendingPathComponent("Sources", isDirectory: true)
         let chrome = try String(
             contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift"),
@@ -5528,6 +5529,11 @@ final class SeyalHostComponentTests: XCTestCase {
                     && text.contains("publishLiveTailBlocks"),
                 "NATIVE_REGIONS must feed the batched LiveTail path"
             )
+            XCTAssertTrue(
+                text.contains("reserved0 == UInt16.max")
+                    && text.contains("isNativeSealedProjection"),
+                "sealed NATIVE_REGIONS must use the reserved0==UInt16.max sentinel"
+            )
             let applyRange = text.range(of: "func applyBlockOutputProjection")
             XCTAssertNotNil(applyRange)
             if let applyRange {
@@ -5535,13 +5541,16 @@ final class SeyalHostComponentTests: XCTestCase {
                     ?? text.endIndex
                 let body = text[applyRange.lowerBound..<applyEnd]
                 XCTAssertTrue(
-                    body.contains("SEYAL_APP_BLOCK_PROJECTION_HISTORY"),
-                    "history IPC remains only for HISTORY projections"
+                    body.contains("isNativeSealedProjection"),
+                    "sealed NATIVE must gate RegionId-keyed content fetch"
                 )
-                XCTAssertFalse(
-                    body.contains("SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS")
-                        && body.contains("requestHistoryRange"),
-                    "NATIVE_REGIONS must not open per-Block history IPC"
+                XCTAssertTrue(
+                    body.contains("SEYAL_APP_BLOCK_PROJECTION_HISTORY"),
+                    "LineId HISTORY IPC remains only for HISTORY projections"
+                )
+                XCTAssertTrue(
+                    body.contains("requestHistoryRange"),
+                    "HISTORY and sealed-NATIVE content fetch share requestHistoryRange wire"
                 )
             }
         }

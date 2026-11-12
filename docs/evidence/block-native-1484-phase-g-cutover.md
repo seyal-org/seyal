@@ -1,36 +1,31 @@
 # Phase G — Cutover / perf / release (#1484)
 
 - **Branch:** `mahboobmonnamd/issue/1484`
-- **GO status:** **NO-GO** (mandatory gates incomplete)
+- **GO status:** **NO-GO** (headed XCUI + independent merge review incomplete)
 
-## Landed this turn (supporting G1–G7, not closing them)
+## Landed (supporting G1–G7, not closing them)
 
 1. Nested host/session `active_region` stack restore + DropPending cancel arm.
 2. Live PTY: SSH host/session RegionId isolation + restore; remote python `-c`/`-i`; local nvim alternate-screen; tmux `-V` regions.
-3. Sealed spill indexed on RegionGrids (`record_sealed_row` / `sealed_region_cells`); Runtime history paint prefers sealed spill before LineId HISTORY. HistoryStore dual-seal DELETE only after NATIVE sealed paint ([Cleanup dual-seal HISTORY path](0b6e8dad-262b-4c24-a691-1f013d6c1911)).
-4. Headed `make build` SUCCESS; Swift `activeBlockDisplayHandle` fix for Rust total_height floor.
-5. Structural-debt ratchet PASS after cohesion bound updates.
+3. **Dual-seal DELETE:** HistoryStore is sole sealed cell payload; RegionGrid `SealedRow` indexes LineId + owned columns only (no spill cell copy). NATIVE sealed paint projects off-window Blocks via `sealed_rows` + RegionId-keyed fetch (no Swift LineId HISTORY reconstruction when native map present).
+4. **Type-48 presentation envelope:** `BlockNativeRegions` is a presentation message under `CAP_ATTACHMENT_DELIVERY_CONTROL`. Missing allowlist previously closed LocalDisplayClient connections on every native-regions publish (ffi_misuse + headed attach). Fixed in `presentation.rs` / client `delivery_state.rs`.
+5. **Native-regions publish coalesce:** stamp `(total_height, records)` before enqueue; best-effort `try_send_attachment_after_display_frame` so optional metadata cannot tear down the socket under queue pressure.
+6. Rust `total_height` owns Flow/Blocks document height when cards exist; cleared canvas (no cards) still collapses (#1424).
+7. `make check` PASS on sealed cutover + type-48 fix (exact local head after rustfmt).
 
 ## Remaining DELETE / cutover (blocks G5/G9)
 
-- HistoryStore dual sealed payload beside RegionStore spill.
-- Off-window HISTORY IPC / AppKit card-sum authority.
-- Selection/copy over RegionGrids.
+- Selection/copy hit-testing over RegionGrids (HistoryStore chronological APIs retained).
+- Raw scrollback remains HistoryStore LineId IPC by design (`correlationBlockID = UInt64.max`).
+- Sealed NATIVE still uses `requestHistoryRange(block_id:)` as the content fetch wire; Runtime resolves RegionId ownership — not Swift LineId span assembly. Further wire rename is non-blocking.
 
 ## Remaining evidence (blocks G6–G10)
 
-- Full headed XCUI matrix (SSH+REPL+AI CLI multipane scroll/composer/clear/mouse/focus/resize/reconnect).
-- `make check` / `make test` / `make bench` exact-head ledger.
-- Performance budgets at frozen ceilings.
-- Independent human review + owner merge authorization.
+- Full headed XCUI matrix (SSH+REPL+AI CLI multipane scroll/composer/clear/mouse/focus/resize/reconnect) on an unoccluded Space.
+- `make test` / `make bench` exact-head ledger after Swift document-height + static-source test fixes.
+- Performance budgets at frozen ceilings (G9).
+- Fresh independent architecture / cleanup / rendering review against the sealed cutover commit + owner merge authorization.
 
-Computer-use interactive submit twice reached `recovery exhausted` while Runtime helper stayed alive — treat as headed defect to triage under G6/G10; do not declare GO.
+## Headed / UI notes (do not declare GO)
 
-## Headed XCUI (exact local head)
-
-- `testLocalPythonDoesNotShowSSHSetupPromptAndBlockStaysBottomDocked` — **FAIL**: Python running Block AX (`seyal-block-*` + label) never appeared within 12s.
-- `testHighVolumeComposerOutputStaysOnFlowBlocks` — **FAIL**: Cmd+Enter did not latch Flow from Raw resting (`IsolatedHostedRuntime.swift:90`).
-- `testComposerSubmitAndHostShortcutsStayOnFlowBlocks` — **FAIL**: same Flow latch.
-- `testApplicationLaunchesOnePaneHost` — **FAIL**: assert reported crash while waiting for PTY; XCUI state was `runningBackgroundSuspended` (3) not a new DiagnosticReports crash. Suite ran with occluded/off-Space windows — re-run on an unoccluded Space before blaming product.
-
-These are merge-blocking G6/G10 evidence gaps on this branch until re-proven on a clean headed Space; do not declare GO.
+Prior headed failures (Flow Cmd+Enter latch, Python Block AX, launch suspended) remain merge-blocking until re-proven. Component static source path for `testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC` was wrong (`Tests/Sources` vs `Seyal/Sources`) and is corrected.

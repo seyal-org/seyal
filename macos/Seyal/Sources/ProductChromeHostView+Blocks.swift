@@ -561,10 +561,26 @@ extension ProductChromeHostView {
         publishBlockOutputFrame()
     }
 
-    /// Completed Blocks request history only when off-window. On-window native
-    /// Regions paint via LiveTail primary-frame clips; running Blocks use
-    /// PRIMARY_CLIP. The host never invents a history end.
+    /// Sealed NATIVE_REGIONS: reserved0 == UInt16.max (not a LiveTail clip).
+    private func isNativeSealedProjection(_ projection: SeyalAppBlockProjection) -> Bool {
+        projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+            && projection.reserved0 == UInt16.max
+            && projection.reserved1 > 0
+    }
+
+    /// On-window NATIVE paints via LiveTail. Sealed NATIVE fetches RegionId-owned
+    /// content by block_id (Runtime ignores LineId span authority). Legacy
+    /// HISTORY LineId reconstruction remains only for non-native Blocks (#1484).
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
+        if isNativeSealedProjection(projection) {
+            // start/end ignored when Runtime resolves sealed RegionId cells.
+            _ = pane.inputSurface.requestHistoryRange(
+                startLine: 1,
+                endLine: 1,
+                blockID: blockID
+            )
+            return
+        }
         guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
               projection.start_line > 0,
               projection.end_line >= projection.start_line
@@ -589,8 +605,11 @@ extension ProductChromeHostView {
         for index in 0..<Int(composer.block_count) {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
+            let nativeSealed = projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+                && projection.reserved0 == UInt16.max
             guard row.id_lo != 0,
                   projection.reserved1 > 0,
+                  !nativeSealed,
                   projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
                     || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
             else { continue }
@@ -687,12 +706,17 @@ extension ProductChromeHostView {
                 edgeInsets: blocks.edgeInsets
             )
             : 0
-        // Rust indexed height is a floor (#1484); card chrome can still win.
+        // Rust indexed height owns document size when cards + native regions
+        // are present (#1484 / ADR-009). Card-sum is legacy fallback. A cleared
+        // canvas (no cards) collapses regardless of a stale Rust floor (#1424).
         let rustRows = seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         let rustFloor = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        let contentHeight = max(cardHeight, rustFloor)
-        let viewportHeight = hasCards || rustFloor > 0 ? transcript.contentView.bounds.height : 0
+        let contentHeight: CGFloat = {
+            if !hasCards { return 0 }
+            return rustFloor > 0 ? rustFloor : cardHeight
+        }()
+        let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let height = max(contentHeight, viewportHeight, 1)
         let spacerHeight = max(height - contentHeight, 0)

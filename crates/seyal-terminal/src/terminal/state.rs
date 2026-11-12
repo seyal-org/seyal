@@ -257,7 +257,10 @@ impl TerminalState {
     /// After Runtime accepts a trusted CommandStart, direct subsequent primary
     /// VT writes into a Block-owned output region (ADR-009 native Blocks).
     /// Returns `(header_region, output_region)`.
-    pub fn begin_native_block_output(&mut self, block_id: u64) -> Result<(u64, u64), TerminalError> {
+    pub fn begin_native_block_output(
+        &mut self,
+        block_id: u64,
+    ) -> Result<(u64, u64), TerminalError> {
         use crate::primary_blocks::types::BlockId;
         self.core
             .primary
@@ -297,25 +300,81 @@ impl TerminalState {
     }
 
     /// Live primary-window cells for one RegionId (bounded to current VT window).
-    pub fn primary_live_region_cells(
-        &self,
-        region_id: u64,
-    ) -> Vec<(u16, u16, crate::Cell)> {
+    pub fn primary_live_region_cells(&self, region_id: u64) -> Vec<(u16, u16, crate::Cell)> {
         self.core
             .primary
             .engine
             .live_region_cells(crate::RegionId(region_id))
     }
 
-    /// Sealed spill cells for one RegionId as `(line_id, col, cell)`.
+    /// Sealed LineIds owned by one RegionId (HistoryStore holds cell payload).
+    pub fn primary_sealed_region_line_ids(&self, region_id: u64) -> Vec<crate::LineId> {
+        self.core
+            .primary
+            .engine
+            .sealed_rows(crate::RegionId(region_id))
+            .iter()
+            .map(|row| row.line_id)
+            .collect()
+    }
+
+    /// Sealed ownership row count for one RegionId (u16-saturated).
+    pub fn primary_sealed_row_count(&self, region_id: u64) -> u16 {
+        self.core
+            .primary
+            .engine
+            .sealed_row_count(crate::RegionId(region_id))
+    }
+
+    /// Sealed cells for one RegionId as `(line_id, col, cell)`.
+    ///
+    /// Payload comes from HistoryStore (sole sealed owner). Column filter uses
+    /// the RegionGrid ownership index recorded at seal time; when the stored
+    /// history presentation is compacted (Lead units only), owned columns are
+    /// matched by enumeration order among Lead cells.
     pub fn primary_sealed_region_cells(
         &self,
         region_id: u64,
     ) -> Vec<(crate::LineId, u16, crate::Cell)> {
-        self.core
-            .primary
-            .engine
-            .sealed_region_cells(crate::RegionId(region_id))
+        use crate::CellRole;
+        let region = crate::RegionId(region_id);
+        let sealed = self.core.primary.engine.sealed_rows(region);
+        let mut out = Vec::new();
+        for row in sealed {
+            let Ok(lines) = self.primary_history_range(row.line_id, row.line_id, 1) else {
+                continue;
+            };
+            for (line_id, cells) in lines {
+                if cells.is_empty() {
+                    continue;
+                }
+                // Prefer direct window-column indexing when history retained a
+                // full-width row; otherwise map owned cols onto Lead order.
+                let full_width =
+                    cells.len() >= usize::from(self.core.primary.engine.store.window_cols().max(1));
+                if full_width {
+                    for &col in &row.cols {
+                        if let Some(cell) = cells.get(usize::from(col))
+                            && cell.role != CellRole::Empty
+                        {
+                            out.push((line_id, col, *cell));
+                        }
+                    }
+                } else {
+                    let leads: Vec<(usize, &crate::Cell)> = cells
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, cell)| cell.role == CellRole::Lead)
+                        .collect();
+                    for (owned_i, &col) in row.cols.iter().enumerate() {
+                        if let Some((_, cell)) = leads.get(owned_i) {
+                            out.push((line_id, col, **cell));
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Indexed Flow viewport: Blocks intersecting `[y, y + window_rows)`.
@@ -324,10 +383,7 @@ impl TerminalState {
         y: u64,
         window_rows: u32,
     ) -> Vec<crate::VisibleBlockSpan> {
-        self.core
-            .primary
-            .engine
-            .visible_block_spans(y, window_rows)
+        self.core.primary.engine.visible_block_spans(y, window_rows)
     }
 
     /// Total presentation-row height of the indexed Block list.

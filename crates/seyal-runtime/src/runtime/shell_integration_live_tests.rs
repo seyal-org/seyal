@@ -79,10 +79,7 @@ fn spawn(label: &str, user_rc: &str, program: Option<(&str, &[&str])>) -> Harnes
         .clear_environment()
         .env("HOME", &home)
         // Include Homebrew so headed-app matrix tools (nvim/tmux/python) resolve.
-        .env(
-            "PATH",
-            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-        )
+        .env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
         .env("HISTFILE", home.join(".zsh_history"))
         .env("LANG", "C")
         .env("TERM", "xterm-256color")
@@ -791,9 +788,13 @@ fn multi_line_is_one_block_via_bracketed_paste_and_refused_without_it() {
 
 #[test]
 fn nvim_alternate_screen_keeps_native_regions_and_restores_primary() {
-    let nvim = ["/opt/homebrew/bin/nvim", "/usr/local/bin/nvim", "/usr/bin/nvim"]
-        .into_iter()
-        .find(|path| Path::new(path).is_file());
+    let nvim = [
+        "/opt/homebrew/bin/nvim",
+        "/usr/local/bin/nvim",
+        "/usr/bin/nvim",
+    ]
+    .into_iter()
+    .find(|path| Path::new(path).is_file());
     let Some(nvim) = nvim else {
         eprintln!("skipped: nvim not available");
         return;
@@ -829,9 +830,7 @@ fn nvim_alternate_screen_keeps_native_regions_and_restores_primary() {
             && runtime.entries[&id].integration == IntegrationState::AtPrompt
     });
     let (nvim_lifecycle, nvim_header) = {
-        let completed = h
-            .runtime
-            .entries[&h.id]
+        let completed = h.runtime.entries[&h.id]
             .block_timeline
             .records()
             .find(|record| record.command.contains("nvim"))
@@ -848,9 +847,7 @@ fn nvim_alternate_screen_keeps_native_regions_and_restores_primary() {
         ComposerAdmission::Accepted(_)
     ));
     h.wait_block_completed(1);
-    let after = h
-        .runtime
-        .entries[&h.id]
+    let after = h.runtime.entries[&h.id]
         .block_timeline
         .records()
         .find(|record| record.command == "echo after-nvim")
@@ -863,9 +860,13 @@ fn nvim_alternate_screen_keeps_native_regions_and_restores_primary() {
 fn tmux_version_block_opens_distinct_native_regions() {
     // Attach/detach alternate-screen remains a headed G7 gate. This live PTY
     // proof covers native RegionId ownership for a real tmux binary invocation.
-    let tmux = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
-        .into_iter()
-        .find(|path| Path::new(path).is_file());
+    let tmux = [
+        "/opt/homebrew/bin/tmux",
+        "/usr/local/bin/tmux",
+        "/usr/bin/tmux",
+    ]
+    .into_iter()
+    .find(|path| Path::new(path).is_file());
     let Some(tmux) = tmux else {
         eprintln!("skipped: tmux not available");
         return;
@@ -886,9 +887,7 @@ fn tmux_version_block_opens_distinct_native_regions() {
         })
     });
     let (tmux_header, tmux_output) = {
-        let tmux_rec = h
-            .runtime
-            .entries[&h.id]
+        let tmux_rec = h.runtime.entries[&h.id]
             .block_timeline
             .records()
             .find(|record| record.command.contains("tmux"))
@@ -913,9 +912,7 @@ fn tmux_version_block_opens_distinct_native_regions() {
                 )
         })
     });
-    let after = h
-        .runtime
-        .entries[&h.id]
+    let after = h.runtime.entries[&h.id]
         .block_timeline
         .records()
         .find(|record| record.command == "echo after-tmux")

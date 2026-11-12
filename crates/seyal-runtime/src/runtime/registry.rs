@@ -318,6 +318,8 @@ impl Runtime {
             #[cfg(target_os = "macos")]
             native_regions_revision: 0,
             #[cfg(target_os = "macos")]
+            published_native_regions_stamp: None,
+            #[cfg(target_os = "macos")]
             published_composer_eligibility: None,
             #[cfg(target_os = "macos")]
             composer_status_revision: 0,

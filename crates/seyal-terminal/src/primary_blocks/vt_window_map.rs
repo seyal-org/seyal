@@ -61,9 +61,7 @@ impl VTWindowMap {
 
     pub(crate) fn handle_at(&self, col: u16, row: u16) -> Option<(CellHandle, RegionId)> {
         let idx = self.index(col, row)?;
-        self.cells[idx]
-            .as_ref()
-            .map(|m| (m.handle, m.region))
+        self.cells[idx].as_ref().map(|m| (m.handle, m.region))
     }
 
     pub(crate) fn resolve(
@@ -83,9 +81,7 @@ impl VTWindowMap {
         handle: CellHandle,
     ) -> Result<(), TerminalError> {
         let idx = self.index(col, row).ok_or(TerminalError::InvalidSize)?;
-        let entry = self.cells[idx]
-            .as_mut()
-            .ok_or(TerminalError::InvalidSize)?;
+        let entry = self.cells[idx].as_mut().ok_or(TerminalError::InvalidSize)?;
         entry.handle = handle;
         Ok(())
     }
@@ -123,9 +119,6 @@ mod tests {
         let (lookup, _) = map.resolve(&store, 0, 0).unwrap();
         assert!(matches!(lookup, CellLookup::Live(_)));
         // Old handle must not resolve through the map anymore.
-        assert!(matches!(
-            store.get(handle),
-            CellLookup::Stale(_)
-        ));
+        assert!(matches!(store.get(handle), CellLookup::Stale(_)));
     }
 }

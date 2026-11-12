@@ -21,6 +21,9 @@ pub struct NativeBlockRegions {
     /// Contiguous on-window row count for `output_region` (0 = off-window /
     /// sealed; client must not invent primary-frame clips).
     pub row_count: u16,
+    /// Sealed ownership rows for `output_region` (HistoryStore-backed). Zero
+    /// when the Block has no sealed content yet.
+    pub sealed_rows: u16,
 }
 
 /// Bounded replacement map for one attached execution.
@@ -58,7 +61,8 @@ impl BlockNativeRegions {
             out.extend_from_slice(&record.output_region.to_le_bytes());
             out.extend_from_slice(&record.first_row.to_le_bytes());
             out.extend_from_slice(&record.row_count.to_le_bytes());
-            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&record.sealed_rows.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
             if out.len() > crate::framing::MAX_FRAME_PAYLOAD as usize {
                 return Err(FramingError::OversizedPayload);
             }
@@ -109,7 +113,9 @@ impl BlockNativeRegions {
                 u64::from_le_bytes(bytes[offset + 16..offset + 24].try_into().unwrap());
             let first_row = u16::from_le_bytes(bytes[offset + 24..offset + 26].try_into().unwrap());
             let row_count = u16::from_le_bytes(bytes[offset + 26..offset + 28].try_into().unwrap());
-            if u32::from_le_bytes(bytes[offset + 28..offset + 32].try_into().unwrap()) != 0 {
+            let sealed_rows =
+                u16::from_le_bytes(bytes[offset + 28..offset + 30].try_into().unwrap());
+            if u16::from_le_bytes(bytes[offset + 30..offset + 32].try_into().unwrap()) != 0 {
                 return Err(FramingError::MalformedPayload);
             }
             if block_id == 0 || header_region == 0 || output_region == 0 {
@@ -124,6 +130,7 @@ impl BlockNativeRegions {
                 output_region,
                 first_row,
                 row_count,
+                sealed_rows,
             });
             offset += Self::RECORD_LEN;
         }
@@ -151,6 +158,7 @@ mod tests {
                     output_region: 3,
                     first_row: 4,
                     row_count: 5,
+                    sealed_rows: 0,
                 },
                 NativeBlockRegions {
                     block_id: 4,
@@ -158,6 +166,7 @@ mod tests {
                     output_region: 6,
                     first_row: 0,
                     row_count: 0,
+                    sealed_rows: 9,
                 },
             ],
         };
@@ -175,6 +184,7 @@ mod tests {
                 output_region: 2,
                 first_row: 0,
                 row_count: 0,
+                sealed_rows: 0,
             }],
         };
         assert!(map.try_encode().is_err());
@@ -191,6 +201,7 @@ mod tests {
                 output_region: 3,
                 first_row: 7,
                 row_count: 0,
+                sealed_rows: 0,
             }],
         };
         assert!(map.try_encode().is_err());
