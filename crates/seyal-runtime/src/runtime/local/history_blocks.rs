@@ -80,6 +80,23 @@ fn live_block_wire_rows(
     // Swift request span.
     let line_ids = entry.execution.primary_sealed_region_line_ids(output);
     if line_ids.is_empty() {
+        // On-window completed Blocks may still own primary-frame cells that
+        // LiveTail paints, while RegionStore live query is empty after a
+        // remint race. Fall back to the Runtime timeline LineId span (not the
+        // client request) so AX/retain text is not blank.
+        if let Some(record) = entry
+            .block_timeline
+            .records()
+            .find(|record| record.id.raw() == block_id)
+        {
+            let start = LineId(record.start_line);
+            let end = LineId(record.end_line.unwrap_or(record.start_line));
+            if end.0 >= start.0 {
+                if let Ok(rows) = terminal.primary_history_wire_range(start, end, max_lines, 0) {
+                    return Some(rows);
+                }
+            }
+        }
         return Some(Vec::new());
     }
     let start = line_ids[0];
