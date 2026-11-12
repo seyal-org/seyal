@@ -1165,11 +1165,19 @@ final class SeyalPaneSplitUITests: XCTestCase {
             "\(secondaryBlock.identifier)-body"
         ].firstMatch
         XCTAssertTrue(secondaryBody.waitForExistence(timeout: 8))
+        // Busy dock or DirectInput-hidden dock both prove the inactive Pane
+        // stayed on Flow/Blocks (not Raw) while the stream runs (#1466).
         let runningComposer = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "seyal-composer-", "busy")
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND (value == %@ OR value == %@)",
+                "seyal-composer-",
+                "busy",
+                "hidden"
+            )
         ).firstMatch
         XCTAssertTrue(
-            runningComposer.waitForExistence(timeout: 5),
+            runningComposer.waitForExistence(timeout: 5)
+                || element(app, "seyal-secondary-blocks").exists,
             "the inactive pane remains in Blocks while its command is still running"
         )
         let inactiveStreamScreenshot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
@@ -2523,6 +2531,19 @@ final class SeyalPaneSplitUITests: XCTestCase {
         // cannot steal synthetic input after a Pane focus change.
         let focusedComposer = element(app, "seyal-composer")
         XCTAssertTrue(focusedComposer.waitForExistence(timeout: 8), "focused composer missing")
+        // After a Pane focus switch the dock can exist while still Busy/attaching.
+        // Paste+execute against a non-Available composer creates no Block.
+        let available = NSPredicate(format: "value == %@", "available")
+        let becameAvailable = expectation(
+            for: available,
+            evaluatedWith: focusedComposer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [becameAvailable], timeout: 12),
+            .completed,
+            "focused composer never became available; value=\(focusedComposer.value ?? "nil")"
+        )
         let editor = focusedComposer.descendants(matching: .any)
             .matching(identifier: "seyal-composer-editor")
             .firstMatch

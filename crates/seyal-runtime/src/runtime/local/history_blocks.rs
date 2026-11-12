@@ -91,10 +91,10 @@ fn live_block_wire_rows(
         {
             let start = LineId(record.start_line);
             let end = LineId(record.end_line.unwrap_or(record.start_line));
-            if end.0 >= start.0 {
-                if let Ok(rows) = terminal.primary_history_wire_range(start, end, max_lines, 0) {
-                    return Some(rows);
-                }
+            if end.0 >= start.0
+                && let Ok(rows) = terminal.primary_history_wire_range(start, end, max_lines, 0)
+            {
+                return Some(rows);
             }
         }
         return Some(Vec::new());
