@@ -233,12 +233,14 @@ final class CommandBlockView: NSView {
         setAccessibilityValue(traits.joined(separator: ", "))
     }
 
-    private static func accessibilitySummary(for text: String, limit: Int = 240) -> String {
+    private static func accessibilitySummary(for text: String, limit: Int = 480) -> String {
         guard text.count > limit else { return text }
         // Keep both command onset and the live/completed tail available to
         // assistive technology. A tail-only summary made it impossible to
-        // verify the first output line after a long Block completed.
-        let prefixCount = limit / 10
+        // verify the first output line after a long Block completed; a tiny
+        // prefix (limit/10) also dropped early numbered stream lines under
+        // multipane NATIVE retain (#1484 / #1426).
+        let prefixCount = max(limit / 4, 96)
         let separator = "…\n"
         let suffixCount = max(limit - prefixCount - separator.count, 0)
         return String(text.prefix(prefixCount)) + separator + String(text.suffix(suffixCount))
