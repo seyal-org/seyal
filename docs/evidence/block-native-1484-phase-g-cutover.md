@@ -29,3 +29,12 @@
 ## Headed / UI notes (do not declare GO)
 
 Prior headed failures (Flow Cmd+Enter latch, Python Block AX, launch suspended) remain merge-blocking until re-proven. Component static source path for `testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC` was wrong (`Tests/Sources` vs `Seyal/Sources`) and is corrected.
+
+## Exact-head ledger (d511f406 + follow-up)
+
+- `make check`: PASS (pre-push sealed cutover + type-48).
+- `make bench`: PASS on `d511f406`.
+- `make test`: FAIL — 33 UI/component failures on the build that treated Rust
+  `total_height` as exclusive document size (clipped Block bodies). Follow-up
+  restores Rust as a **floor** under `max(cardHeight, rustFloor)` while keeping
+  cleared-canvas collapse. Re-run headed/component suites before GO.

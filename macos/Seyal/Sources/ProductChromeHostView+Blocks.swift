@@ -706,15 +706,16 @@ extension ProductChromeHostView {
                 edgeInsets: blocks.edgeInsets
             )
             : 0
-        // Rust indexed height owns document size when cards + native regions
-        // are present (#1484 / ADR-009). Card-sum is legacy fallback. A cleared
-        // canvas (no cards) collapses regardless of a stale Rust floor (#1424).
+        // Rust indexed height is a document floor when native regions publish
+        // (#1484 / ADR-009). Card chrome may still win so painted bodies are
+        // never clipped by an under-counted row index. Cleared canvas (no
+        // cards) collapses regardless of a stale Rust floor (#1424).
         let rustRows = seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         let rustFloor = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
         let contentHeight: CGFloat = {
             if !hasCards { return 0 }
-            return rustFloor > 0 ? rustFloor : cardHeight
+            return max(cardHeight, rustFloor)
         }()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
