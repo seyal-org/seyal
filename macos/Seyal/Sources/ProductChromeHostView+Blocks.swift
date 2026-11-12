@@ -568,12 +568,13 @@ extension ProductChromeHostView {
             && projection.reserved1 > 0
     }
 
-    /// On-window NATIVE paints via LiveTail. Sealed NATIVE fetches RegionId-owned
-    /// content by block_id (Runtime ignores LineId span authority). Legacy
-    /// HISTORY LineId reconstruction remains only for non-native Blocks (#1484).
+    /// On-window NATIVE paints via LiveTail and still fetches RegionId-owned
+    /// cells by block_id for AX/retain text (Runtime ignores LineId spans).
+    /// Sealed NATIVE uses the same RegionId fetch. Legacy HISTORY LineId
+    /// reconstruction remains only for non-native Blocks (#1484).
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
-        if isNativeSealedProjection(projection) {
-            // start/end ignored when Runtime resolves sealed RegionId cells.
+        if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
+            // start/end ignored when Runtime resolves RegionId-owned cells.
             _ = pane.inputSurface.requestHistoryRange(
                 startLine: 1,
                 endLine: 1,

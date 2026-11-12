@@ -341,12 +341,12 @@ extension SecondaryLivePaneHost {
     }
 
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
-        // On-window NATIVE_REGIONS paints via publishLiveTailBlocks. Sealed
-        // NATIVE fetches RegionId-owned content by block_id (Runtime ignores
-        // LineId span authority). Legacy HISTORY LineId reconstruction is retired
-        // for native Blocks (#1484).
+        // On-window NATIVE paints via LiveTail and still fetches RegionId-owned
+        // cells by block_id for AX/retain text. Sealed NATIVE uses the same
+        // RegionId fetch. Legacy HISTORY LineId reconstruction is retired for
+        // native Blocks (#1484).
         guard displayHandle != 0 else { return }
-        if isNativeSealedProjection(projection) {
+        if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
             let key = HistoryProjectionRequestKey(
                 displayHandle: displayHandle,
                 blockID: blockID,
@@ -354,7 +354,7 @@ extension SecondaryLivePaneHost {
                 endLine: 0
             )
             guard historyProjectionRequests.begin(key) else { return }
-            // start/end are ignored when Runtime resolves sealed RegionId cells.
+            // start/end are ignored when Runtime resolves RegionId-owned cells.
             let result = historyBridge?.requestHistoryRange(
                 forDisplayHandle: displayHandle,
                 startLine: 1,
