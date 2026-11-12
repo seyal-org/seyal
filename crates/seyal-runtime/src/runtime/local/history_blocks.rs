@@ -42,30 +42,26 @@ fn live_block_wire_rows(
                 .find(|block| block.block_id.0 == block_id)
                 .map(|block| block.output.0)
         })?;
-    let live = entry.execution.primary_live_region_cells(output);
     let terminal = entry.execution.terminal();
     let cols_n = terminal.cols();
-    if !live.is_empty() {
-        let mut by_row: std::collections::BTreeMap<u16, Vec<(u16, _)>> =
-            std::collections::BTreeMap::new();
-        for (col, row, cell) in live {
-            by_row.entry(row).or_default().push((col, cell));
-        }
-        return Some(pad_wire_rows(
-            by_row.into_iter().map(|(row, owned)| {
-                let line_id = terminal.line_id(row).unwrap_or(LineId(1));
-                (line_id, owned)
-            }),
-            cols_n,
-            max_lines,
-        ));
-    }
+    // Merge sealed HistoryStore rows with any still-on-window live cells.
+    // Returning live alone dropped every scrolled-off sealed line from
+    // AX/retain after a long stream completed (#1484 multipane).
     let sealed = entry.execution.primary_sealed_region_cells(output);
-    if !sealed.is_empty() {
+    let live = entry.execution.primary_live_region_cells(output);
+    if !sealed.is_empty() || !live.is_empty() {
         let mut by_line: std::collections::BTreeMap<u64, Vec<(u16, _)>> =
             std::collections::BTreeMap::new();
         for (line_id, col, cell) in sealed {
             by_line.entry(line_id.0).or_default().push((col, cell));
+        }
+        for (col, row, cell) in live {
+            let line_id = terminal.line_id(row).unwrap_or(LineId(1));
+            let owned = by_line.entry(line_id.0).or_default();
+            // On-window cells win over the sealed ownership snapshot for the
+            // same LineId/column (last-writer VT authority).
+            owned.retain(|(existing_col, _)| *existing_col != col);
+            owned.push((col, cell));
         }
         return Some(pad_wire_rows(
             by_line
