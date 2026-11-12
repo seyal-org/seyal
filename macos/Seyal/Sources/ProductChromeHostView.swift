@@ -538,8 +538,15 @@ final class ProductChromeHostView: NSView {
             // durable presentation host. The legacy single-pane transcript
             // must not publish a second AX copy of the focused Pane's Blocks.
             clearLegacyTranscriptProjectionForMultipane()
+            // Demote the legacy dock composer so XCUI `seyal-composer` resolves
+            // to the focused SecondaryLivePaneHost editor (#1484 sibling submit).
+            composer.setAccessibilityIdentifier("seyal-legacy-multipane-composer")
+            composer.isHidden = true
         } else if !direct {
+            composer.setAccessibilityIdentifier("seyal-composer")
             rebuildBlocks()
+        } else {
+            composer.setAccessibilityIdentifier("seyal-composer")
         }
         applyTranscriptPresentation(snapshot)
         composer.reconcile()

@@ -334,17 +334,25 @@ extension SecondaryLivePaneHost {
     }
 
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
-        // On-window NATIVE paints via LiveTail and still fetches RegionId-owned
-        // cells by block_id for AX/retain text. Sealed NATIVE uses the same
-        // RegionId fetch. Legacy HISTORY LineId reconstruction is retired for
-        // native Blocks (#1484).
+        // On-window NATIVE / PRIMARY_CLIP paints via LiveTail and still fetches
+        // RegionId-owned cells by block_id for AX/retain text. Sealed NATIVE
+        // uses the same RegionId fetch. Legacy HISTORY LineId reconstruction
+        // is retired for native Blocks (#1484).
         guard displayHandle != 0 else { return }
-        if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
+        let nativeOrLiveTail =
+            projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+            || (projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+                && projection.reserved1 > 0)
+        if nativeOrLiveTail {
+
+            // Include reserved0/reserved1 so stream growth and seal transitions
+            // reopen the settled book instead of freezing AX at the first
+            // Complete snapshot (#1484 / #1426).
             let key = HistoryProjectionRequestKey(
                 displayHandle: displayHandle,
                 blockID: blockID,
-                startLine: 0,
-                endLine: 0
+                startLine: UInt64(projection.reserved0),
+                endLine: UInt64(max(projection.reserved1, 1))
             )
             guard historyProjectionRequests.begin(key) else { return }
             // start/end are ignored when Runtime resolves RegionId-owned cells.

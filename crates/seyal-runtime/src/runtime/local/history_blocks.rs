@@ -29,10 +29,11 @@ fn live_block_wire_rows(
     block_id: u64,
     max_lines: usize,
 ) -> Option<Vec<(LineId, Vec<HistoryWireCell>)>> {
-    let output = entry
+    let record = entry
         .block_timeline
         .records()
-        .find(|record| record.id.raw() == block_id)
+        .find(|record| record.id.raw() == block_id);
+    let output = record
         .and_then(|record| record.output_region)
         .or_else(|| {
             entry
@@ -49,12 +50,35 @@ fn live_block_wire_rows(
     // AX/retain after a long stream completed (#1484 multipane).
     let sealed = entry.execution.primary_sealed_region_cells(output);
     let live = entry.execution.primary_live_region_cells(output);
+    let timeline_seed = || -> Vec<(LineId, Vec<HistoryWireCell>)> {
+        let Some(record) = record else {
+            return Vec::new();
+        };
+        let start = LineId(record.start_line);
+        let end = LineId(record.end_line.unwrap_or(record.start_line));
+        if end.0 < start.0 {
+            return Vec::new();
+        }
+        terminal
+            .primary_history_wire_range(start, end, max_lines, 0)
+            .unwrap_or_else(|_| Vec::new())
+    };
     if !sealed.is_empty() || !live.is_empty() {
-        let mut by_line: std::collections::BTreeMap<u64, Vec<(u16, _)>> =
+        let mut by_line: std::collections::BTreeMap<u64, Vec<(u16, Cell)>> =
             std::collections::BTreeMap::new();
         for (line_id, col, cell) in sealed {
             by_line.entry(line_id.0).or_default().push((col, cell));
         }
+        // No sealed ownership yet (nothing scrolled) while live RegionId maps
+        // are already sparse after prompt remint: seed HistoryStore rows from
+        // the Runtime timeline LineId span before overlaying live cells so
+        // early stream lines survive (#1484 / #1426).
+        let seeded_from_timeline = by_line.is_empty();
+        let mut wire_rows = if seeded_from_timeline {
+            timeline_seed()
+        } else {
+            Vec::new()
+        };
         for (col, row, cell) in live {
             let line_id = terminal.line_id(row).unwrap_or(LineId(1));
             let owned = by_line.entry(line_id.0).or_default();
@@ -63,13 +87,42 @@ fn live_block_wire_rows(
             owned.retain(|(existing_col, _)| *existing_col != col);
             owned.push((col, cell));
         }
-        return Some(pad_wire_rows(
-            by_line
-                .into_iter()
-                .map(|(line, owned)| (LineId(line), owned)),
-            cols_n,
-            max_lines,
-        ));
+        if !by_line.is_empty() {
+            let live_and_sealed = pad_wire_rows(
+                by_line
+                    .into_iter()
+                    .map(|(line, owned)| (LineId(line), owned)),
+                cols_n,
+                max_lines,
+            );
+            if seeded_from_timeline && !wire_rows.is_empty() {
+                // Timeline seed holds the full Block span; live overlay wins on
+                // colliding LineIds so the reminted prompt row stays current.
+                let mut merged: std::collections::BTreeMap<u64, Vec<HistoryWireCell>> =
+                    wire_rows.into_iter().map(|(id, row)| (id.0, row)).collect();
+                for (id, row) in live_and_sealed {
+                    merged.insert(id.0, row);
+                }
+                return Some(
+                    merged
+                        .into_iter()
+                        .map(|(id, row)| (LineId(id), row))
+                        .take(if max_lines == 0 {
+                            usize::MAX
+                        } else {
+                            max_lines
+                        })
+                        .collect(),
+                );
+            }
+            return Some(live_and_sealed);
+        }
+        if !wire_rows.is_empty() {
+            if max_lines > 0 && wire_rows.len() > max_lines {
+                wire_rows.truncate(max_lines);
+            }
+            return Some(wire_rows);
+        }
     }
     // Ownership index present but column filter missed (compacted history):
     // assemble from HistoryStore using Runtime-owned LineIds only — never the
@@ -80,20 +133,8 @@ fn live_block_wire_rows(
         // LiveTail paints, while RegionStore live query is empty after a
         // remint race. Fall back to the Runtime timeline LineId span (not the
         // client request) so AX/retain text is not blank.
-        if let Some(record) = entry
-            .block_timeline
-            .records()
-            .find(|record| record.id.raw() == block_id)
-        {
-            let start = LineId(record.start_line);
-            let end = LineId(record.end_line.unwrap_or(record.start_line));
-            if end.0 >= start.0
-                && let Ok(rows) = terminal.primary_history_wire_range(start, end, max_lines, 0)
-            {
-                return Some(rows);
-            }
-        }
-        return Some(Vec::new());
+        let rows = timeline_seed();
+        return Some(rows);
     }
     let start = line_ids[0];
     let end = *line_ids.last().unwrap_or(&start);

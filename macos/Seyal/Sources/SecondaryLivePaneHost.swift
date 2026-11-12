@@ -156,13 +156,14 @@ final class SecondaryLivePaneHost: NSView {
         composer.onEnsureFocused = { [weak self] in
             self?.onFocus?()
         }
-        // Bridgeless surfaces borrow the window bridge; submit must still reach
-        // the focused Controller so Flow commands and TUI entry work (#1424).
+        // Bridgeless surfaces borrow the window bridge; pin this leaf's
+        // Controller so a stale windowFocusedDisplayHandle cannot admit the
+        // command onto a sibling execution (#1484 / #1426 multipane).
         composer.onSubmitComposer = { [weak self] command in
-            self?.historyBridge?.submitComposerCommand(command) ?? -10
+            self?.submitComposerCommandPinned(command) ?? -10
         }
         composer.onSubmitRaw = { [weak self] command in
-            self?.historyBridge?.submitCommittedText(command) ?? -10
+            self?.submitCommittedTextPinned(command) ?? -10
         }
         composer.onCommandConsumed = { [weak self] in
             self?.reconcileFlowPresentation()
@@ -425,6 +426,71 @@ final class SecondaryLivePaneHost: NSView {
         _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
         publishFrame()
         reconcileFlowPresentation()
+    }
+
+    /// Prefer the live shell binding's Controller over a stale host cache so
+    /// focus churn cannot submit onto a sibling execution (#1484 / #1426).
+    func resolvedSubmissionDisplayHandle() -> UInt64 {
+        let shell = seyal_app_shell(appHandle)
+        for index in 0..<Int(shell.pane_count) {
+            let binding = seyal_app_pane_binding(appHandle, UInt32(index))
+            if binding.pane_lo == paneLo, binding.pane_hi == paneHi, binding.display_handle != 0 {
+                if binding.display_handle != displayHandle {
+                    _ = updateDisplayHandle(binding.display_handle)
+                }
+                return binding.display_handle
+            }
+        }
+        return displayHandle
+    }
+
+    /// Submit through this pane's display handle, then sync that pane's
+    /// Runtime Block timeline into ApplicationRoot so the card appears without
+    /// waiting for the next registry poll (#1484 sibling admission).
+    @discardableResult
+    func submitComposerCommandPinned(_ command: String) -> Int32 {
+        guard let bridge = historyBridge else { return -10 }
+        onFocus?()
+        let handle = resolvedSubmissionDisplayHandle()
+        let priorOverride = bridge.submissionDisplayHandleOverride
+        let priorFocused = bridge.windowFocusedDisplayHandle
+        if handle != 0 {
+            bridge.submissionDisplayHandleOverride = handle
+            bridge.windowFocusedDisplayHandle = handle
+        }
+        let status = bridge.submitComposerCommand(command)
+        bridge.submissionDisplayHandleOverride = priorOverride
+        bridge.windowFocusedDisplayHandle = priorFocused
+        if status == 0 {
+            // Drain this Controller so BlockTimeline / ComposerResult land before
+            // the XCUI Block-existence wait samples an empty pane projection.
+            if handle != 0 {
+                _ = bridge.selectDisplayHandle(handle)
+                _ = seyal_bridge_poll_for(handle)
+                bridge.publishHistoryRanges(forDisplayHandle: handle)
+            }
+            _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+            lastProjectionFingerprint = nil
+            reconcileFlowPresentation()
+        }
+        return status
+    }
+
+    @discardableResult
+    func submitCommittedTextPinned(_ command: String) -> Int32 {
+        guard let bridge = historyBridge else { return -10 }
+        onFocus?()
+        let handle = resolvedSubmissionDisplayHandle()
+        let priorOverride = bridge.submissionDisplayHandleOverride
+        let priorFocused = bridge.windowFocusedDisplayHandle
+        if handle != 0 {
+            bridge.submissionDisplayHandleOverride = handle
+            bridge.windowFocusedDisplayHandle = handle
+        }
+        let status = bridge.submitCommittedText(command)
+        bridge.submissionDisplayHandleOverride = priorOverride
+        bridge.windowFocusedDisplayHandle = priorFocused
+        return status
     }
 
     /// Focus / host-binding path: input ownership + composer chrome only.
