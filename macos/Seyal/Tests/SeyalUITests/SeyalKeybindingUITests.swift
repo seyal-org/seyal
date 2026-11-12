@@ -252,21 +252,26 @@ final class SeyalKeybindingUITests: XCTestCase {
 
     private func assertFlowChromeExists(in app: XCUIApplication, timeout: TimeInterval = 8) {
         app.ensureFlowBlocksPresentation(timeout: timeout)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
         XCTAssertTrue(
-            composer.waitForExistence(timeout: timeout),
+            blocks.waitForExistence(timeout: timeout),
             "keybinding XCUI must stay on Flow/Blocks"
         )
-        XCTAssertTrue(blocks.waitForExistence(timeout: timeout))
         XCTAssertTrue(transcript.waitForExistence(timeout: timeout))
+        XCTAssertGreaterThan(transcript.firstMatch.frame.height, 120)
     }
 
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
         assertFlowChromeExists(in: app, timeout: timeout)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
-        XCTAssertTrue(composer.firstMatch.isHittable, "composer must stay hittable on Flow")
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        if composer.exists {
+            let value = composer.value as? String ?? ""
+            XCTAssertTrue(
+                composer.isHittable || value == "busy" || value == "hidden" || value == "relay",
+                "composer AX must stay a Flow dock state when present; value=\(value)"
+            )
+        }
     }
 
     private func waitBriefly(_ seconds: TimeInterval) {

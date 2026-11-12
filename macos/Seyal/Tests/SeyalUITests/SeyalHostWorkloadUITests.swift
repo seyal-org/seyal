@@ -859,17 +859,24 @@ final class SeyalHostWorkloadUITests: XCTestCase {
 
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
         app.ensureFlowBlocksPresentation(timeout: timeout)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
-        XCTAssertTrue(
-            composer.waitForExistence(timeout: timeout),
-            "XCUI must stay on Flow/Blocks; composer missing — UI looks like a normal terminal"
-        )
-        XCTAssertTrue(composer.firstMatch.isHittable, "XCUI must keep composer hittable")
-        XCTAssertTrue(blocks.waitForExistence(timeout: 5), "XCUI must keep seyal-blocks")
+        XCTAssertTrue(blocks.waitForExistence(timeout: timeout), "XCUI must keep seyal-blocks on Flow")
         XCTAssertTrue(transcript.waitForExistence(timeout: 5), "XCUI must keep the transcript")
-        XCTAssertGreaterThan(transcript.firstMatch.frame.height, 120, "transcript must remain a full Flow surface")
+        XCTAssertGreaterThan(
+            transcript.firstMatch.frame.height,
+            120,
+            "transcript must remain a full Flow surface"
+        )
+        // Busy / Block-scoped DirectInput may hide the dock; Blocks stay the oracle.
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        if composer.exists {
+            let value = composer.value as? String ?? ""
+            XCTAssertTrue(
+                composer.isHittable || value == "busy" || value == "hidden" || value == "relay",
+                "composer AX must stay a Flow dock state when present; value=\(value)"
+            )
+        }
         XCTAssertTrue(
             app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
             "Core Terminal left panel stays visible alongside Flow composer/Blocks (#922)"

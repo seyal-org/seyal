@@ -1347,19 +1347,10 @@ final class SeyalHostUITests: XCTestCase {
     /// screen, or a Raw-only launch, looks like a normal terminal and is a fail.
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
         app.ensureFlowBlocksPresentation(timeout: timeout)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
         XCTAssertTrue(
-            composer.waitForExistence(timeout: timeout),
-            "XCUI must run as Flow/Blocks; composer missing — UI looks like a normal terminal"
-        )
-        XCTAssertTrue(
-            composer.firstMatch.isHittable,
-            "XCUI must run as Flow/Blocks; composer not hittable — UI looks like a normal terminal"
-        )
-        XCTAssertTrue(
-            blocks.waitForExistence(timeout: 5),
+            blocks.waitForExistence(timeout: timeout),
             "XCUI must run as Flow/Blocks; seyal-blocks missing — UI looks like a normal terminal"
         )
         XCTAssertTrue(
@@ -1371,6 +1362,15 @@ final class SeyalHostUITests: XCTestCase {
             120,
             "Flow transcript must fill the Pane; a short or hidden transcript is a raw-terminal launch"
         )
+        // Busy / DirectInput may retract the dock; Blocks remain the Flow oracle.
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        if composer.exists {
+            let value = composer.value as? String ?? ""
+            XCTAssertTrue(
+                composer.isHittable || value == "busy" || value == "hidden" || value == "relay",
+                "composer AX must stay a Flow dock state when present; value=\(value)"
+            )
+        }
         XCTAssertTrue(
             app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
             "Core Terminal left panel stays visible alongside Flow composer/Blocks (#922)"

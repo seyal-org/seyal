@@ -343,14 +343,24 @@ final class SeyalHostHistoryUITests: XCTestCase {
 
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
         app.ensureFlowBlocksPresentation(timeout: timeout)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
-        XCTAssertTrue(composer.waitForExistence(timeout: timeout), "history XCUI must stay on Flow/Blocks")
-        XCTAssertTrue(composer.firstMatch.isHittable, "history XCUI must keep composer hittable")
-        XCTAssertTrue(blocks.waitForExistence(timeout: 5), "history XCUI must keep seyal-blocks")
+        XCTAssertTrue(blocks.waitForExistence(timeout: timeout), "history XCUI must keep seyal-blocks")
         XCTAssertTrue(transcript.waitForExistence(timeout: 5), "history XCUI must keep the transcript")
-        XCTAssertGreaterThan(transcript.firstMatch.frame.height, 120, "transcript must remain a full Flow surface")
+        XCTAssertGreaterThan(
+            transcript.firstMatch.frame.height,
+            120,
+            "transcript must remain a full Flow surface"
+        )
+        // Composer dock may retract under Busy / DirectInput while still on Flow.
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        if composer.exists {
+            let value = composer.value as? String ?? ""
+            XCTAssertTrue(
+                composer.isHittable || value == "busy" || value == "hidden" || value == "relay",
+                "history composer AX must stay a Flow dock state when present; value=\(value)"
+            )
+        }
     }
 
     private func resizeFrontWindow(_ app: XCUIApplication, dx: CGFloat, dy: CGFloat) {
