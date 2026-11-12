@@ -1,40 +1,35 @@
 # Phase G — Cutover / perf / release (#1484)
 
 - **Branch:** `mahboobmonnamd/issue/1484`
-- **GO status:** **NO-GO** (headed XCUI + independent merge review incomplete)
+- **HEAD:** `f37277cb`
+- **PR:** https://github.com/seyal-org/seyal/pull/1485
+- **GO status:** **NO-GO** (full headed matrix + Flow latch + merge review incomplete)
 
 ## Landed (supporting G1–G7, not closing them)
 
 1. Nested host/session `active_region` stack restore + DropPending cancel arm.
 2. Live PTY: SSH host/session RegionId isolation + restore; remote python `-c`/`-i`; local nvim alternate-screen; tmux `-V` regions.
-3. **Dual-seal DELETE:** HistoryStore is sole sealed cell payload; RegionGrid `SealedRow` indexes LineId + owned columns only (no spill cell copy). NATIVE sealed paint projects off-window Blocks via `sealed_rows` + RegionId-keyed fetch (no Swift LineId HISTORY reconstruction when native map present).
-4. **Type-48 presentation envelope:** `BlockNativeRegions` is a presentation message under `CAP_ATTACHMENT_DELIVERY_CONTROL`. Missing allowlist previously closed LocalDisplayClient connections on every native-regions publish (ffi_misuse + headed attach). Fixed in `presentation.rs` / client `delivery_state.rs`.
-5. **Native-regions publish coalesce:** stamp `(total_height, records)` before enqueue; best-effort `try_send_attachment_after_display_frame` so optional metadata cannot tear down the socket under queue pressure.
-6. Rust `total_height` owns Flow/Blocks document height when cards exist; cleared canvas (no cards) still collapses (#1424).
-7. `make check` PASS on sealed cutover + type-48 fix (exact local head after rustfmt).
+3. **Dual-seal DELETE:** HistoryStore is sole sealed cell payload; RegionGrid `SealedRow` indexes LineId + owned columns only (no spill cell copy).
+4. **Type-48 presentation envelope** under delivery control (fixes LocalDisplayClient disconnect on native-regions publish).
+5. Native-regions publish coalesce + stamp only after successful enqueue.
+6. Rust `total_height` is document **floor** (`max(cardHeight, rustFloor)`); cleared canvas collapses (#1424).
+7. Pane projection prefers `NATIVE_REGIONS` (parity with focused fence); on-window NATIVE RegionId-fetches AX/retain text; timeline LineId fallback when live/sealed queries empty.
+8. `make check` PASS; `make bench` PASS.
 
-## Remaining DELETE / cutover (blocks G5/G9)
+## Exact-head headed samples (after paint fixes)
 
-- Selection/copy hit-testing over RegionGrids (HistoryStore chronological APIs retained).
-- Raw scrollback remains HistoryStore LineId IPC by design (`correlationBlockID = UInt64.max`).
-- Sealed NATIVE still uses `requestHistoryRange(block_id:)` as the content fetch wire; Runtime resolves RegionId ownership — not Swift LineId span assembly. Further wire rename is non-blocking.
+| Case | Result |
+|------|--------|
+| `testClearThenExitKeepsPaintedBlockBodies` | PASS |
+| `testSplitStartsEmptyPaneWithoutCopyingSourceBlocks` | PASS |
+| `testEmptyProjectionClearsPreservedTranscriptHeight` | PASS |
+| `testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC` | PASS |
+| `testRunningSeqLiveTailStaysOnFlowBlocks` | FAIL — Cmd+Enter Flow latch |
 
-## Remaining evidence (blocks G6–G10)
+## Remaining (blocks G5–G10)
 
-- Full headed XCUI matrix (SSH+REPL+AI CLI multipane scroll/composer/clear/mouse/focus/resize/reconnect) on an unoccluded Space.
-- `make test` / `make bench` exact-head ledger after Swift document-height + static-source test fixes.
-- Performance budgets at frozen ceilings (G9).
-- Fresh independent architecture / cleanup / rendering review against the sealed cutover commit + owner merge authorization.
-
-## Headed / UI notes (do not declare GO)
-
-Prior headed failures (Flow Cmd+Enter latch, Python Block AX, launch suspended) remain merge-blocking until re-proven. Component static source path for `testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC` was wrong (`Tests/Sources` vs `Seyal/Sources`) and is corrected.
-
-## Exact-head ledger (d511f406 + follow-up)
-
-- `make check`: PASS (pre-push sealed cutover + type-48).
-- `make bench`: PASS on `d511f406`.
-- `make test`: FAIL — 33 UI/component failures on the build that treated Rust
-  `total_height` as exclusive document size (clipped Block bodies). Follow-up
-  restores Rust as a **floor** under `max(cardHeight, rustFloor)` while keeping
-  cleared-canvas collapse. Re-run headed/component suites before GO.
+- Selection/copy/search over RegionGrids (HistoryStore chronological APIs retained).
+- Full headed XCUI matrix on current HEAD (composer busy, multipane suite, SSH, Flow latch).
+- Re-run full `make test` on current HEAD.
+- G9 frozen perf ceilings under VALID host.
+- Owner merge authorization after independent human review.
