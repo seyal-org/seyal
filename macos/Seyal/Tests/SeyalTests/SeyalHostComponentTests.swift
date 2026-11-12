@@ -5530,8 +5530,7 @@ final class SeyalHostComponentTests: XCTestCase {
                 "NATIVE_REGIONS must feed the batched LiveTail path"
             )
             XCTAssertTrue(
-                text.contains("reserved0 == UInt16.max")
-                    && text.contains("isNativeSealedProjection"),
+                text.contains("reserved0 == UInt16.max"),
                 "sealed NATIVE_REGIONS must use the reserved0==UInt16.max sentinel"
             )
             let applyRange = text.range(of: "func applyBlockOutputProjection")
@@ -5541,8 +5540,8 @@ final class SeyalHostComponentTests: XCTestCase {
                     ?? text.endIndex
                 let body = text[applyRange.lowerBound..<applyEnd]
                 XCTAssertTrue(
-                    body.contains("isNativeSealedProjection"),
-                    "sealed NATIVE must gate RegionId-keyed content fetch"
+                    body.contains("SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS"),
+                    "NATIVE must RegionId-fetch content (sealed and on-window)"
                 )
                 XCTAssertTrue(
                     body.contains("SEYAL_APP_BLOCK_PROJECTION_HISTORY"),

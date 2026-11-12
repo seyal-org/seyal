@@ -74,6 +74,11 @@ pub(in crate::runtime) struct Entry {
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) published_native_regions_stamp:
         Option<(u64, Vec<crate::local_ipc::framing::NativeBlockRegions>)>,
+    /// Attachments that already received the current native-regions stamp.
+    /// Late/secondary pane attaches must still receive type-48 even when the
+    /// content stamp is unchanged (#1484 multipane).
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) published_native_regions_attachments: HashSet<AttachmentId>,
     /// The composer eligibility last published to attached clients, and the
     /// monotonic revision that fences it. `None` until the first publish.
     #[cfg(target_os = "macos")]

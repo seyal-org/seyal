@@ -232,6 +232,31 @@ fn block_timeline(revision: u64) -> Vec<u8> {
     )
 }
 
+fn block_native_regions(revision: u64) -> Vec<u8> {
+    encode_frame(
+        MessageType::BlockNativeRegions,
+        &BlockNativeRegions {
+            revision,
+            total_height: 0,
+            records: Vec::new(),
+        }
+        .encode(),
+    )
+}
+
+#[test]
+fn block_native_regions_is_deferred_control_during_resync_scan() {
+    let attachment_id = AttachmentId::from_bytes([11; 16]);
+    let frame = block_native_regions(1);
+    assert!(
+        matches!(
+            classify_resync_scan_frame(&frame, attachment_id, false).unwrap(),
+            ResyncScanFrame::DeferredControl
+        ),
+        "type-48 BlockNativeRegions must not fail attach/resync as Protocol"
+    );
+}
+
 #[test]
 fn malformed_initial_snapshot_requests_resync_then_converges_transactionally() {
     let (client, mut server) = UnixStream::pair().expect("unix stream pair");

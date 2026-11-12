@@ -333,13 +333,6 @@ extension SecondaryLivePaneHost {
         }
     }
 
-    /// Sealed NATIVE_REGIONS: reserved0 == UInt16.max (not a LiveTail clip).
-    private func isNativeSealedProjection(_ projection: SeyalAppBlockProjection) -> Bool {
-        projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
-            && projection.reserved0 == UInt16.max
-            && projection.reserved1 > 0
-    }
-
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
         // On-window NATIVE paints via LiveTail and still fetches RegionId-owned
         // cells by block_id for AX/retain text. Sealed NATIVE uses the same

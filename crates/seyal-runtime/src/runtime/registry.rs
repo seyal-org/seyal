@@ -320,6 +320,8 @@ impl Runtime {
             #[cfg(target_os = "macos")]
             published_native_regions_stamp: None,
             #[cfg(target_os = "macos")]
+            published_native_regions_attachments: HashSet::new(),
+            #[cfg(target_os = "macos")]
             published_composer_eligibility: None,
             #[cfg(target_os = "macos")]
             composer_status_revision: 0,

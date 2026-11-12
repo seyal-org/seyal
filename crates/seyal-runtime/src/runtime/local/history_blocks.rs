@@ -458,6 +458,8 @@ impl Runtime {
     /// Publish BlockId → RegionId map (+ on-window row spans) to peers that
     /// negotiated the capability. Bumps `native_regions_revision` only when
     /// content changes so display-tick republish cannot flood the control queue.
+    /// Late attaches still receive the current stamp even when content is
+    /// unchanged (per-attachment delivery set; #1484 multipane).
     pub(in crate::runtime) fn publish_block_native_regions(&mut self, execution_id: ExecutionId) {
         let targets: Vec<(u64, _)> = self
             .local_ipc
@@ -492,7 +494,7 @@ impl Runtime {
             return;
         }
 
-        let (stamp, frame) = {
+        let (stamp, frame, content_changed, pending) = {
             let Some(entry) = self.entries.get_mut(&execution_id) else {
                 return;
             };
@@ -525,13 +527,29 @@ impl Runtime {
             }
             let total_height = entry.execution.primary_viewport_total_height();
             let stamp = (total_height, records.clone());
-            if entry.published_native_regions_stamp.as_ref() == Some(&stamp) {
+            let content_changed = entry.published_native_regions_stamp.as_ref() != Some(&stamp);
+            let pending: Vec<(u64, _)> = if content_changed {
+                targets
+            } else {
+                targets
+                    .into_iter()
+                    .filter(|(_, attachment)| {
+                        !entry
+                            .published_native_regions_attachments
+                            .contains(attachment)
+                    })
+                    .collect()
+            };
+            if pending.is_empty() {
                 return;
             }
-            // Tentative next revision; commit stamp+revision only after enqueue
-            // succeeds so capacity drops / late attaches can retry unchanged
-            // content without burning revision or flooding the control queue.
-            let revision = entry.native_regions_revision.saturating_add(1);
+            // New content bumps revision; late attaches reuse the committed
+            // revision so clients that already hold it stay coalesced.
+            let revision = if content_changed {
+                entry.native_regions_revision.saturating_add(1)
+            } else {
+                entry.native_regions_revision.max(1)
+            };
             let map = BlockNativeRegions {
                 revision,
                 total_height,
@@ -543,17 +561,29 @@ impl Runtime {
             (
                 stamp,
                 framing::encode_frame(MessageType::BlockNativeRegions, &payload),
+                content_changed,
+                pending,
             )
         };
-        let mut delivered = false;
-        for (token, attachment_id) in targets {
-            delivered |=
-                self.try_send_attachment_after_display_frame(token, attachment_id, frame.clone());
+        let mut delivered_attachments = Vec::new();
+        for (token, attachment_id) in pending {
+            if self.try_send_attachment_after_display_frame(token, attachment_id, frame.clone()) {
+                delivered_attachments.push(attachment_id);
+            }
         }
-        if delivered {
-            if let Some(entry) = self.entries.get_mut(&execution_id) {
+        if delivered_attachments.is_empty() {
+            return;
+        }
+        if let Some(entry) = self.entries.get_mut(&execution_id) {
+            if content_changed {
                 entry.native_regions_revision = entry.native_regions_revision.saturating_add(1);
                 entry.published_native_regions_stamp = Some(stamp);
+                entry.published_native_regions_attachments.clear();
+            }
+            for attachment_id in delivered_attachments {
+                entry
+                    .published_native_regions_attachments
+                    .insert(attachment_id);
             }
         }
     }
