@@ -475,7 +475,7 @@ impl Runtime {
             return;
         }
 
-        let frame = {
+        let (stamp, frame) = {
             let Some(entry) = self.entries.get_mut(&execution_id) else {
                 return;
             };
@@ -511,11 +511,10 @@ impl Runtime {
             if entry.published_native_regions_stamp.as_ref() == Some(&stamp) {
                 return;
             }
-            // Stamp before enqueue so display-tick pressure cannot retry-flood the
-            // control queue; a dropped frame recovers on the next content change.
-            entry.native_regions_revision = entry.native_regions_revision.saturating_add(1);
-            let revision = entry.native_regions_revision;
-            entry.published_native_regions_stamp = Some(stamp);
+            // Tentative next revision; commit stamp+revision only after enqueue
+            // succeeds so capacity drops / late attaches can retry unchanged
+            // content without burning revision or flooding the control queue.
+            let revision = entry.native_regions_revision.saturating_add(1);
             let map = BlockNativeRegions {
                 revision,
                 total_height,
@@ -524,11 +523,21 @@ impl Runtime {
             let Ok(payload) = map.try_encode() else {
                 return;
             };
-            framing::encode_frame(MessageType::BlockNativeRegions, &payload)
+            (
+                stamp,
+                framing::encode_frame(MessageType::BlockNativeRegions, &payload),
+            )
         };
+        let mut delivered = false;
         for (token, attachment_id) in targets {
-            let _ =
+            delivered |=
                 self.try_send_attachment_after_display_frame(token, attachment_id, frame.clone());
+        }
+        if delivered {
+            if let Some(entry) = self.entries.get_mut(&execution_id) {
+                entry.native_regions_revision = entry.native_regions_revision.saturating_add(1);
+                entry.published_native_regions_stamp = Some(stamp);
+            }
         }
     }
 }

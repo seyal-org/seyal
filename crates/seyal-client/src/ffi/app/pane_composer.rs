@@ -20,7 +20,7 @@ use crate::LocalDisplayClient;
 
 use super::block_projection::{
     SeyalAppBlockProjection, SEYAL_APP_BLOCK_PROJECTION_HISTORY,
-    SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
+    SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
 };
 use super::decode::runtime_block_from_command;
 use super::encode::{
@@ -356,6 +356,40 @@ pub extern "C" fn seyal_app_block_projection_for_pane(
         }
         let execution = state.root.pane_execution_id(pane);
         let client_raw = state.root.pane_client_raw(pane);
+        // Parity with focused `seyal_app_block_projection` (#1484): completed
+        // Blocks prefer NATIVE_REGIONS from this Pane's client map so secondary
+        // Flow leaves never fall back to Swift LineId HISTORY when native.
+        if !running
+            && let Some(native) = with_pane_matched_client(execution, client_raw, |client| {
+                client
+                    .block_native_regions()
+                    .records
+                    .iter()
+                    .find(|record| {
+                        let mut lo = [0u8; 8];
+                        lo.copy_from_slice(&block.id.to_bytes()[..8]);
+                        record.block_id == u64::from_le_bytes(lo)
+                            && (record.row_count > 0 || record.sealed_rows > 0)
+                    })
+                    .map(|record| {
+                        let (reserved0, reserved1) = if record.row_count > 0 {
+                            (record.first_row, u32::from(record.row_count))
+                        } else {
+                            (u16::MAX, u32::from(record.sealed_rows))
+                        };
+                        SeyalAppBlockProjection {
+                            kind: SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS,
+                            reserved0,
+                            reserved1,
+                            start_line: record.header_region,
+                            end_line: record.output_region,
+                        }
+                    })
+            })
+            .flatten()
+        {
+            return native;
+        }
         let projection = if running {
             with_pane_matched_client(execution, client_raw, |client| {
                 match project_block_output_until(
