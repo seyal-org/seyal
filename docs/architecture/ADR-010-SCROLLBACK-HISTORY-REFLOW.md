@@ -8,6 +8,14 @@
 - **Depends on:** ADR-004, ADR-007; concrete text-unit payload depends on #684
 - **Scope:** M002 retained primary history, resize reflow, selection/search anchor seam, and future cold-history persistence boundary
 
+## 2026-11-12 accepted native Block-region history clarification (#1480 / #1482)
+
+The accepted target architecture in [ADR-009](ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md) makes Block prompt/command/output regions **canonical content owners**, not merely history-range annotations. ADR-010's **one retained-history authority remains mandatory**: one `RegionStore` / shared immutable `HistoryStore` segment allocator per execution, one source-order chronological retained-history view, and no second writable raw transcript or copied per-Block historical payload. Block-owned `RegionGrid` records refer to their own canonical source runs by `BlockId` and `RegionId`; canonical cell/source-unit bytes reside only once in the shared allocator.
+
+Mutable cells are sealed **only when no longer writable through the terminal's primary VT window** (scroll-off/approved ED2 semantics), never merely when a command is marked Completed. `LineId`, unit offsets, hard/soft wrap lineage, grapheme width, selection/search/copy anchors, stable reflow, explicit eviction and per-execution/aggregate byte budgets remain unchanged. An old Block index may be evicted without discarding still-retained terminal content. Read-only history projection is allowed; multiple canonical history engines are not.
+
+This is an accepted **storage-owner migration target**; until the single-authority cutover is proven, the current `Screen` + `HistoryStore` implementation remains authoritative. See [native storage contract](../evidence/block-native-storage-contract-1480.md) and [G1–G10 gates](../evidence/block-native-acceptance-matrix-1480.md). No terminal-usability or performance superiority is claimed by acceptance.
+
 ## Decision requested
 
 Seyal will replace M001's temporary visual-row scrollback with a **canonical retained primary-history stream owned by the same `TerminalState`**, stored as a mutable append tail plus compact immutable **byte-targeted segments**.

@@ -4,6 +4,14 @@
 - **Date:** 2026-08-24
 - **Issue:** #38
 
+## 2026-11-12 accepted native Block-region clarification (#1480 / #1482)
+
+The product owner accepted native Block-owned primary content as Seyal's **target architecture** after merging PR #1481. The original “one canonical VT/grid/state instance” prohibits **multiple competing terminal engines or shadow primary screens**, not multiple independently addressable **RegionGrids inside a single terminal state**.
+
+Under that target, one `TerminalExecution` keeps exactly one PTY, parser, global VT cursor/mode/width authority, damage generation and `TerminalState`. Its primary `PrimaryBlockEngine` owns ordered Block and Unstructured RegionGrids through one physical `RegionStore`; a **non-owning** `VTWindowMap` maps the single PTY-sized screen coordinate space to those canonical cell handles. No independent Block parser, cursor/mode state, PTY, child process or second writable conventional primary grid is allowed. Alternate-screen semantics remain exclusive. Block lifecycle changes never override real VT cursor/erase/scroll/margin operations.
+
+The existing M001 `Screen.cells` implementation remains the **current shipping authority** until a single-owner production cutover passes differential VT and memory conformance; this amendment does not authorize a parallel second primary screen. The accepted design and G1–G10 release evidence are tracked by [ADR-009](ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md) and [native-Block acceptance matrix](../evidence/block-native-acceptance-matrix-1480.md). Product GO is not implied by design acceptance.
+
 ## Context
 
 M001 requires the first permanent Seyal-owned VT implementation. The Runtime will eventually route PTY bytes into one authoritative `TerminalState`, then derive damage/projection for native clients. A GUI-owned parser, a second grid, or a temporary emulator would violate the accepted foundation architecture.

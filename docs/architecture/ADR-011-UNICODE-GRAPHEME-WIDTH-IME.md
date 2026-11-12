@@ -8,6 +8,10 @@
 - **Coordinates with:** accepted ADR-010 / #685 retained-history/reflow architecture
 - **Scope:** M002 Unicode decoding, grapheme identity, terminal width, wide-cell occupation, derived projection/shaping, and macOS IME ownership
 
+## 2026-11-12 native Block storage compatibility (#1482)
+
+ADR-009's accepted `PrimaryBlockEngine` may contain multiple canonical Block-owned RegionGrids, but remains **one TerminalState Unicode/width authority**. The `RegionStore` and `VTWindowMap` must preserve canonical grapheme lead/continuation occupation and reclaimable bounded payloads across cross-Block overwrites, shared-row source spans, scroll, reflow, ED2 and alternate-screen transitions. Block-local layout/Metal shaping and IME preedit stay derived/non-authoritative. No second grapheme engine, text transcript or independent width policy may be introduced. The existing implementation continues until tested cutover; see [G1–G10 gates](../evidence/block-native-acceptance-matrix-1480.md).
+
 ## Decision requested
 
 Seyal will make the existing authoritative `TerminalState` the sole owner of Unicode terminal semantics. Incoming PTY bytes remain a byte stream; UTF-8 decoding produces Unicode scalar events, terminal controls remain separate events, and the terminal mutation layer incrementally maintains the active grapheme and its terminal-cell occupation.
