@@ -1118,13 +1118,14 @@ final class SeyalHostComponentTests: XCTestCase {
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
 
-        // Reproduce the post-⌘D defect: hidden liveContent composer still owns
-        // first responder after chrome reconcile with unchanged eligibility.
-        XCTAssertTrue(view.composer.focusEditor())
+        // Multipane demotes the legacy liveContent dock (`isHidden`); AppKit
+        // will not accept focusEditor() on that dock. Reproduce the post-⌘D
+        // defect by forcing FR onto its editor when possible, then prove
+        // routeFocus recovers to the visible pane-owned composer (#1484).
         let hiddenEditor = try XCTUnwrap(
             accessibilityChild(view.composer, identifier: "seyal-composer-editor")
         )
-        XCTAssertTrue(window.firstResponder === hiddenEditor)
+        _ = window.makeFirstResponder(hiddenEditor)
 
         view.routeFocus()
         let ownedHost = try XCTUnwrap(
@@ -1193,7 +1194,62 @@ final class SeyalHostComponentTests: XCTestCase {
 
         XCTAssertTrue(summary.contains("AXSTREAM-001"))
         XCTAssertTrue(summary.contains("AXSTREAM-100"))
-        XCTAssertLessThanOrEqual(summary.count, 240)
+        // Production AX budget is 480 chars (onset + tail); keep XCUI tree walks
+        // bounded while still proving first/last line retention (#1484).
+        XCTAssertLessThanOrEqual(summary.count, 480)
+
+        // Space-padded terminal rows must not burn the AX budget before middle
+        // stream markers (RunningFlow secondary retain).
+        let padded = (1...12).map { String(format: "stream1426 %02d", $0).padding(toLength: 80, withPad: " ", startingAt: 0) }
+            .joined(separator: "\n") + "\n" + "stream1426 COMPLETE".padding(toLength: 80, withPad: " ", startingAt: 0)
+        card.setBodyTranscript(padded)
+        let paddedSummary = try XCTUnwrap(transcript.accessibilityLabel() as? String)
+        XCTAssertTrue(paddedSummary.contains("stream1426 01"))
+        XCTAssertTrue(paddedSummary.contains("stream1426 09"))
+        XCTAssertTrue(paddedSummary.contains("stream1426 COMPLETE"))
+        XCTAssertLessThanOrEqual(paddedSummary.count, 480)
+        XCTAssertFalse(paddedSummary.contains("  "), "trimmed AX text must not keep row padding gaps")
+    }
+
+    @MainActor
+    func testAccessibilityTranscriptKeepsFirstAndNewestTailFromPaddedRows() throws {
+        func paddedRow(_ text: String) -> [NativeHistoryRange.Cell] {
+            let chars = Array(text.padding(toLength: 80, withPad: " ", startingAt: 0))
+            return chars.map { NativeHistoryRange.Cell(scalar: $0.unicodeScalars.first!.value, foreground: 0, background: 0, flags: 0) }
+        }
+        let rows = (1...100).map { paddedRow(String(format: "MP0-%03d", $0)) }
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 100,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: rows
+        )
+        let summary = range.accessibilityTranscript()
+        XCTAssertTrue(summary.hasPrefix("MP0-001") || summary.contains("MP0-001"))
+        XCTAssertTrue(summary.contains("MP0-077"))
+        XCTAssertTrue(summary.contains("MP0-100"))
+        XCTAssertFalse(summary.contains("  "))
+        XCTAssertLessThanOrEqual(summary.count, 480)
+
+        let siblingLines = (1...24).map { String(format: "splitstream1426 %02d", $0) }
+            + ["splitstream1426 COMPLETE"]
+        let siblingRows = siblingLines.map { line -> [NativeHistoryRange.Cell] in
+            Array(line).map {
+                NativeHistoryRange.Cell(scalar: $0.unicodeScalars.first!.value, foreground: 0, background: 0, flags: 0)
+            }
+        }
+        let sibling = NativeHistoryRange(
+            startLine: 1,
+            endLine: UInt64(siblingRows.count),
+            blockID: 2,
+            requestID: 2,
+            revision: 1,
+            rows: siblingRows
+        )
+        let siblingText = sibling.accessibilityTranscript()
+        XCTAssertEqual(siblingText, siblingLines.joined(separator: "\n"))
     }
 
     /// #1424: focus ownership updates must not recreate Block views or scroll.
@@ -2249,6 +2305,32 @@ final class SeyalHostComponentTests: XCTestCase {
         let surface = MetalSurfaceView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 200),
             paneID: "pane-deferred-history-presentation"
+        )
+        // Seed a visible live grid so beginValidationFrameInFlight can hold the
+        // single in-flight slot (Flow requires instanceBuffer; invisible
+        // surfaces coalesce updates as .deferred).
+        surface.renderer.setVisible(true)
+        var liveCell = SeyalPreparedCell()
+        liveCell.scalar = UInt32(ascii: "A")
+        liveCell.foreground = 0xffff_ffff
+        liveCell.background = 0xff10_0d0b
+        var liveDamage = DamageMask()
+        liveDamage.mark(row: 0)
+        XCTAssertEqual(
+            try [liveCell].withUnsafeBufferPointer { buffer in
+                try surface.renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        fullRebuild: true,
+                        damage: liveDamage
+                    ),
+                    backingScale: 1
+                )
+            },
+            .updated
         )
         let range = NativeHistoryRange(
             startLine: 1,

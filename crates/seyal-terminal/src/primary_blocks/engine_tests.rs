@@ -335,3 +335,43 @@ fn journal_overflow_keeps_cell_and_falls_back_to_unstructured() {
     assert_eq!(engine.store.grid_cells[1].character, 'B');
     assert_eq!(engine.active_region(), engine.unstructured_region());
 }
+
+#[test]
+fn production_journal_overflow_keeps_block_active_region() {
+    let mut engine = PrimaryBlockEngine::new(4, 1).unwrap();
+    engine.journal = AttributionJournal::production(1);
+    let block = engine.begin_block_output(BlockId(9)).unwrap();
+    let region = block.output;
+    engine
+        .write_at(
+            0,
+            0,
+            Cell::lead_inline('A', 1, Style::default()),
+            region,
+            LineId(1),
+            0,
+        )
+        .unwrap();
+    engine
+        .write_at(
+            1,
+            0,
+            Cell::lead_inline('B', 1, Style::default()),
+            region,
+            LineId(1),
+            1,
+        )
+        .unwrap();
+    assert!(engine.journal.overflowed());
+    assert_eq!(engine.store.grid_cells[1].character, 'B');
+    assert_eq!(
+        engine.active_region(),
+        region,
+        "production journal overflow must retain Block ownership"
+    );
+    assert_eq!(
+        engine.journal.events().len(),
+        1,
+        "production overflow refuses the new event without dropping priors"
+    );
+}

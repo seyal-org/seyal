@@ -458,18 +458,34 @@ final class SecondaryLivePaneHost: NSView {
             bridge.submissionDisplayHandleOverride = handle
             bridge.windowFocusedDisplayHandle = handle
         }
-        let status = bridge.submitComposerCommand(command)
+        // Pane-scoped Runtime admission — not FOCUSED_DISPLAY_HANDLE (#1484).
+        let status = bridge.submitComposerCommand(command, forDisplayHandle: handle)
         bridge.submissionDisplayHandleOverride = priorOverride
         bridge.windowFocusedDisplayHandle = priorFocused
         if status == 0 {
-            // Drain this Controller so BlockTimeline / ComposerResult land before
-            // the XCUI Block-existence wait samples an empty pane projection.
+            // Bounded drain until this pane's BlockTimeline admits a new Block
+            // (ComposerResult Accept is not Block presence).
+            let beforeCount = Int(seyal_app_composer_for_pane(appHandle, paneLo, paneHi).block_count)
             if handle != 0 {
                 _ = bridge.selectDisplayHandle(handle)
-                _ = seyal_bridge_poll_for(handle)
-                bridge.publishHistoryRanges(forDisplayHandle: handle)
+                for _ in 0..<64 {
+                    _ = seyal_bridge_poll_for(handle)
+                    bridge.publishHistoryRanges(forDisplayHandle: handle)
+                    _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+                    // Keep the pane host rebuild path warm for the primary
+                    // Controller (original pane) which previously only refreshed
+                    // on poll result==1 (#1484).
+                    bridge.onRegistryHandlePolled?(handle)
+                    let afterCount = Int(
+                        seyal_app_composer_for_pane(appHandle, paneLo, paneHi).block_count
+                    )
+                    if afterCount > beforeCount {
+                        break
+                    }
+                }
+            } else {
+                _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
             }
-            _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
             lastProjectionFingerprint = nil
             reconcileFlowPresentation()
         }

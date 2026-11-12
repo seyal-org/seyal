@@ -294,6 +294,12 @@ impl TerminalState {
         self.core.primary.engine.journal.overflowed()
     }
 
+    /// True when journal overflow must end Block VT ownership (F06 fault-inject
+    /// only). Production ring overflow keeps the active Block region (#1484).
+    pub fn attribution_journal_fail_closed_overflow(&self) -> bool {
+        self.core.primary.engine.journal.fail_closed_on_overflow()
+    }
+
     /// Direct BlockId → RegionId content handles for Flow (no history-range assembly).
     pub fn primary_block_content_refs(&self) -> Vec<crate::BlockContentRef> {
         self.core.primary.engine.block_content_refs()
@@ -318,12 +324,76 @@ impl TerminalState {
             .collect()
     }
 
-    /// Sealed ownership row count for one RegionId (u16-saturated).
-    pub fn primary_sealed_row_count(&self, region_id: u64) -> u16 {
+    /// Sealed ownership row count for one RegionId (u32-saturated).
+    pub fn primary_sealed_row_count(&self, region_id: u64) -> u32 {
         self.core
             .primary
             .engine
             .sealed_row_count(crate::RegionId(region_id))
+    }
+
+    /// Number of sealed ownership rows recorded for one RegionId.
+    pub fn primary_sealed_rows_len(&self, region_id: u64) -> usize {
+        self.core
+            .primary
+            .engine
+            .sealed_rows(crate::RegionId(region_id))
+            .len()
+    }
+
+    /// Visit sealed rows owned by one RegionId in ownership order as
+    /// `(line_id, owned (col, cell))`; `visit` returns `false` to stop.
+    /// Payload comes from HistoryStore (sole sealed owner); each row is a
+    /// binary-searched point lookup, never a linear history walk. Compacted
+    /// history (Lead units only) maps owned columns by Lead enumeration order.
+    pub fn primary_visit_sealed_region_rows(
+        &self,
+        region_id: u64,
+        visit: impl FnMut(crate::LineId, &[(u16, crate::Cell)]) -> bool,
+    ) {
+        self.primary_visit_sealed_region_rows_from(region_id, 0, visit);
+    }
+
+    /// Like [`Self::primary_visit_sealed_region_rows`], starting at sealed-row
+    /// index `start_index` so callers can O(1)-jump whole skipped pages (#1484).
+    pub fn primary_visit_sealed_region_rows_from(
+        &self,
+        region_id: u64,
+        start_index: usize,
+        mut visit: impl FnMut(crate::LineId, &[(u16, crate::Cell)]) -> bool,
+    ) {
+        use crate::CellRole;
+        let history = self.core.primary.history();
+        let window_cols = usize::from(self.core.primary.engine.store.window_cols().max(1));
+        let mut owned: Vec<(u16, crate::Cell)> = Vec::new();
+        let sealed = self.core.primary.engine.sealed_rows(crate::RegionId(region_id));
+        for row in sealed.iter().skip(start_index) {
+            if history.range_intersects_evicted(row.line_id, row.line_id) {
+                continue;
+            }
+            let Some(entry) = history
+                .entries_from(row.line_id)
+                .next()
+                .filter(|entry| entry.line_id() == row.line_id)
+            else {
+                continue;
+            };
+            let cells = entry.presentation_cells();
+            owned.clear();
+            if cells.len() >= window_cols {
+                // Keep Empty cells — filtering them dropped whole sealed rows
+                // whose owned columns were blank-padded spaces (#1484 MP0).
+                owned.extend(row.cols.iter().filter_map(|&col| {
+                    cells.get(usize::from(col)).map(|cell| (col, *cell))
+                }));
+            } else {
+                let leads = cells.iter().filter(|cell| cell.role == CellRole::Lead);
+                owned.extend(row.cols.iter().zip(leads).map(|(&col, cell)| (col, *cell)));
+            }
+            if !owned.is_empty() && !visit(row.line_id, &owned) {
+                return;
+            }
+        }
     }
 
     /// Sealed cells for one RegionId as `(line_id, col, cell)`.
@@ -336,44 +406,11 @@ impl TerminalState {
         &self,
         region_id: u64,
     ) -> Vec<(crate::LineId, u16, crate::Cell)> {
-        use crate::CellRole;
-        let region = crate::RegionId(region_id);
-        let sealed = self.core.primary.engine.sealed_rows(region);
         let mut out = Vec::new();
-        for row in sealed {
-            let Ok(lines) = self.primary_history_range(row.line_id, row.line_id, 1) else {
-                continue;
-            };
-            for (line_id, cells) in lines {
-                if cells.is_empty() {
-                    continue;
-                }
-                // Prefer direct window-column indexing when history retained a
-                // full-width row; otherwise map owned cols onto Lead order.
-                let full_width =
-                    cells.len() >= usize::from(self.core.primary.engine.store.window_cols().max(1));
-                if full_width {
-                    for &col in &row.cols {
-                        if let Some(cell) = cells.get(usize::from(col))
-                            && cell.role != CellRole::Empty
-                        {
-                            out.push((line_id, col, *cell));
-                        }
-                    }
-                } else {
-                    let leads: Vec<(usize, &crate::Cell)> = cells
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, cell)| cell.role == CellRole::Lead)
-                        .collect();
-                    for (owned_i, &col) in row.cols.iter().enumerate() {
-                        if let Some((_, cell)) = leads.get(owned_i) {
-                            out.push((line_id, col, **cell));
-                        }
-                    }
-                }
-            }
-        }
+        self.primary_visit_sealed_region_rows(region_id, |line_id, owned| {
+            out.extend(owned.iter().map(|&(col, cell)| (line_id, col, cell)));
+            true
+        });
         out
     }
 
@@ -389,6 +426,13 @@ impl TerminalState {
     /// Total presentation-row height of the indexed Block list.
     pub fn primary_viewport_total_height(&self) -> u64 {
         self.core.primary.engine.viewport_total_height()
+    }
+
+    pub fn primary_viewport_block_height(&self, block_id: u64) -> u32 {
+        self.core
+            .primary
+            .engine
+            .viewport_height_of(crate::BlockId(block_id))
     }
 
     /// Contiguous live-window output spans for each Block (row_count 0 = off-window).

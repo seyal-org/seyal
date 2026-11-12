@@ -11,7 +11,9 @@ use std::collections::HashMap;
 /// Production journal capacity: enough for one full 16 KiB reactor read.
 /// Exact sizing is refined with mutation-density measurements; this floor
 /// keeps overflow unreachable under normal F05 production testing.
-pub(crate) const PRODUCTION_ATTRIBUTION_JOURNAL_CAPACITY: usize = 16 * 1024;
+/// Production journal covers one reactor read (16 KiB) plus marker/rewrite
+/// margin so tall bursts do not hit capacity on the trusted path (#1484 F05/F06).
+pub(crate) const PRODUCTION_ATTRIBUTION_JOURNAL_CAPACITY: usize = 64 * 1024;
 
 pub(crate) struct PrimaryBlockEngine {
     pub(crate) store: RegionStore,
@@ -162,7 +164,7 @@ impl PrimaryBlockEngine {
     }
 
     /// Sealed ownership row count for `region` (u16-saturated).
-    pub(crate) fn sealed_row_count(&self, region: RegionId) -> u16 {
+    pub(crate) fn sealed_row_count(&self, region: RegionId) -> u32 {
         self.store.sealed_row_count(region)
     }
 
@@ -248,24 +250,31 @@ impl PrimaryBlockEngine {
     }
 
     /// Replace the live window grid after a prepared resize commit.
+    ///
+    /// `regions` must match `cells`/`anchors` length. Callers that reflow the
+    /// primary window must thread RegionId ownership through resize — resetting
+    /// to unstructured and leaving glyphs orphaned blanks Block AX (#1484).
     pub(crate) fn replace_window_grid(
         &mut self,
         cols: u16,
         rows: u16,
         cells: Vec<crate::Cell>,
         anchors: Vec<Option<crate::HistoryAnchor>>,
+        regions: Vec<RegionId>,
     ) -> Result<(), TerminalError> {
         self.store.reset_window(cols, rows, self.unstructured)?;
         self.store.grid_cells = cells;
         self.store.grid_anchors = anchors;
-        // Generations/regions were reset by reset_window; keep length match if
-        // caller already sized cells to cols*rows.
         let expected = usize::from(cols)
             .checked_mul(usize::from(rows))
             .ok_or(TerminalError::InvalidSize)?;
-        if self.store.grid_cells.len() != expected || self.store.grid_anchors.len() != expected {
+        if self.store.grid_cells.len() != expected
+            || self.store.grid_anchors.len() != expected
+            || regions.len() != expected
+        {
             return Err(TerminalError::InvalidSize);
         }
+        self.store.grid_regions = regions;
         self.window = VTWindowMap::new(cols, rows)?;
         Self::map_full_window(&self.store, &mut self.window, cols, rows)?;
         self.unit_generations.clear();
@@ -312,11 +321,18 @@ impl PrimaryBlockEngine {
             })
             .is_err()
         {
-            // F06: overflow classifies unresolved ownership as Unstructured;
-            // cell payload is already written and must not be dropped.
-            self.pending_output = None;
-            self.active_region_stack.clear();
-            self.active_region = self.unstructured;
+            match self.journal.policy() {
+                // F06 fault-inject: classify unresolved ownership as Unstructured.
+                super::attribution::JournalOverflowPolicy::FaultInject => {
+                    self.pending_output = None;
+                    self.active_region_stack.clear();
+                    self.active_region = self.unstructured;
+                }
+                // Production: cell already written under the Block region; the
+                // refused journal admission must not forge StreamSequence nor
+                // force-clear VT ownership (#1484 F05/F06).
+                super::attribution::JournalOverflowPolicy::ProductionUnreachable => {}
+            }
         }
         Ok(version)
     }
@@ -328,6 +344,10 @@ impl PrimaryBlockEngine {
 
     pub(crate) fn viewport_total_height(&self) -> u64 {
         self.viewport.total_height()
+    }
+
+    pub(crate) fn viewport_height_of(&self, block_id: BlockId) -> u32 {
+        self.viewport.height_of(block_id).unwrap_or(0)
     }
 
     fn refresh_viewport_height_for_region(&mut self, region: RegionId) {
@@ -419,6 +439,33 @@ impl PrimaryBlockEngine {
         Ok(())
     }
 
+    /// Remint generations/VTWindowMap after a bulk cell move, keeping each
+    /// slot's existing RegionId (#1484: scroll/ICH/DCH must not wipe Block ownership).
+    pub(crate) fn remint_linear_range_retain_regions(
+        &mut self,
+        start_idx: usize,
+        end_idx: usize,
+    ) -> Result<(), TerminalError> {
+        let cols = usize::from(self.store.window_cols());
+        if cols == 0 || end_idx > self.store.grid_cells.len() || start_idx > end_idx {
+            return Err(TerminalError::InvalidSize);
+        }
+        let fallback = self.unstructured_region();
+        for idx in start_idx..end_idx {
+            let region = self
+                .store
+                .grid_regions
+                .get(idx)
+                .copied()
+                .unwrap_or(fallback);
+            let handle = self.store.bump_window_slot(idx, region)?;
+            let col = (idx % cols) as u16;
+            let row = (idx / cols) as u16;
+            self.window.set(col, row, handle, region)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn live_cell(&self, col: u16, row: u16) -> Option<(Cell, RegionId)> {
         let (lookup, region) = self.window.resolve(&self.store, col, row)?;
         match lookup {
@@ -439,7 +486,7 @@ impl PrimaryBlockEngine {
         token_accepted: bool,
     ) {
         let sequence = self.journal.next_sequence();
-        let _ = self.journal.push(PrimaryEvent::ShellBoundaryCandidate {
+        let _ = self.journal.push_shell_boundary(PrimaryEvent::ShellBoundaryCandidate {
             sequence,
             marker,
             block,

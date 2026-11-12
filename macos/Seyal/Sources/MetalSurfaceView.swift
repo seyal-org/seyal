@@ -270,6 +270,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     renderer.requestPresent()
   }
 
+  /// Bind the Controller handle on first transcript publish without wiping
+  /// already-retained HISTORY pages (#1484 blank Metal / AX-only bodies).
+  func ensureTranscriptDisplayHandle(_ handle: UInt64) {
+    guard handle != 0, transcriptDisplayHandle == 0 else { return }
+    transcriptDisplayHandle = handle
+  }
+
   var terminalExecutionIdentity: String? {
     guard terminalBridgeIsConnected, let bridge, bridge.selectPresentedClient() else { return nil }
     return Self.identityString((

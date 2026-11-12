@@ -2086,9 +2086,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         // Verify every numbered line in each owning Block and exactly one AX
         // Block per unique token, detecting both lost output and pane bleed.
-        // The Block AX summary retains the newest 240 characters. With these
-        // short unique markers, rows 77...100 fit in that tail, including the
-        // line lost by the headed focus-churn run at 62c10894.
+        // The Block AX summary keeps the first line plus the newest lines that
+        // fit in a 480-character budget. With these short unique markers, rows
+        // 77...100 fit in that tail, including the line lost by the headed
+        // focus-churn run at 62c10894.
         for (index, marker) in markers.enumerated() {
             let matchingBlocks = app.descendants(matching: .any).matching(
                 NSPredicate(
@@ -2132,7 +2133,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
                     + "composer=\(composer.frame) body=\(body.frame) scroll=\(scroll.frame)"
             )
             let bodyText = "\(body.label) \(body.value ?? "")"
-            // The AX summary intentionally exposes only the newest 240
+            // The AX summary keeps onset plus the newest tail within 480
             // characters, so full-history retention is asserted by the
             // Runtime history projection and earlier smaller-stream tests.
             // Here verify the complete visible tail after focus churn.

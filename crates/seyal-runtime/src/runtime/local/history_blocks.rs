@@ -1,4 +1,4 @@
-use seyal_exec::{Cell, CellRole, Color, HistoryRangeError, HistoryWireCell, LineId};
+use seyal_exec::{Color, HistoryRangeError, LineId};
 
 use crate::{
     local_ipc::framing::{
@@ -9,6 +9,7 @@ use crate::{
     ExecutionId,
 };
 
+use super::native_block_rows::native_block_wire_rows;
 use super::super::Runtime;
 
 fn pack_terminal_color(color: Color) -> u32 {
@@ -19,187 +20,6 @@ fn pack_terminal_color(color: Color) -> u32 {
             0x0200_0000 | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
         }
     }
-}
-
-/// Prefer RegionStore-owned live window cells, then HistoryStore-backed sealed
-/// cells filtered by RegionId ownership (#1484). When the Block has native
-/// RegionIds, never fall back to Swift LineId-span HISTORY assembly.
-fn live_block_wire_rows(
-    entry: &super::super::Entry,
-    block_id: u64,
-    max_lines: usize,
-) -> Option<Vec<(LineId, Vec<HistoryWireCell>)>> {
-    let record = entry
-        .block_timeline
-        .records()
-        .find(|record| record.id.raw() == block_id);
-    let output = record
-        .and_then(|record| record.output_region)
-        .or_else(|| {
-            entry
-                .execution
-                .primary_block_content_refs()
-                .into_iter()
-                .find(|block| block.block_id.0 == block_id)
-                .map(|block| block.output.0)
-        })?;
-    let terminal = entry.execution.terminal();
-    let cols_n = terminal.cols();
-    // Merge sealed HistoryStore rows with any still-on-window live cells.
-    // Returning live alone dropped every scrolled-off sealed line from
-    // AX/retain after a long stream completed (#1484 multipane).
-    let sealed = entry.execution.primary_sealed_region_cells(output);
-    let live = entry.execution.primary_live_region_cells(output);
-    let timeline_seed = || -> Vec<(LineId, Vec<HistoryWireCell>)> {
-        let Some(record) = record else {
-            return Vec::new();
-        };
-        let start = LineId(record.start_line);
-        let end = LineId(record.end_line.unwrap_or(record.start_line));
-        if end.0 < start.0 {
-            return Vec::new();
-        }
-        terminal
-            .primary_history_wire_range(start, end, max_lines, 0)
-            .unwrap_or_else(|_| Vec::new())
-    };
-    if !sealed.is_empty() || !live.is_empty() {
-        let mut by_line: std::collections::BTreeMap<u64, Vec<(u16, Cell)>> =
-            std::collections::BTreeMap::new();
-        for (line_id, col, cell) in sealed {
-            by_line.entry(line_id.0).or_default().push((col, cell));
-        }
-        // No sealed ownership yet (nothing scrolled) while live RegionId maps
-        // are already sparse after prompt remint: seed HistoryStore rows from
-        // the Runtime timeline LineId span before overlaying live cells so
-        // early stream lines survive (#1484 / #1426).
-        let seeded_from_timeline = by_line.is_empty();
-        let mut wire_rows = if seeded_from_timeline {
-            timeline_seed()
-        } else {
-            Vec::new()
-        };
-        for (col, row, cell) in live {
-            let line_id = terminal.line_id(row).unwrap_or(LineId(1));
-            let owned = by_line.entry(line_id.0).or_default();
-            // On-window cells win over the sealed ownership snapshot for the
-            // same LineId/column (last-writer VT authority).
-            owned.retain(|(existing_col, _)| *existing_col != col);
-            owned.push((col, cell));
-        }
-        if !by_line.is_empty() {
-            let live_and_sealed = pad_wire_rows(
-                by_line
-                    .into_iter()
-                    .map(|(line, owned)| (LineId(line), owned)),
-                cols_n,
-                max_lines,
-            );
-            if seeded_from_timeline && !wire_rows.is_empty() {
-                // Timeline seed holds the full Block span; live overlay wins on
-                // colliding LineIds so the reminted prompt row stays current.
-                let mut merged: std::collections::BTreeMap<u64, Vec<HistoryWireCell>> =
-                    wire_rows.into_iter().map(|(id, row)| (id.0, row)).collect();
-                for (id, row) in live_and_sealed {
-                    merged.insert(id.0, row);
-                }
-                return Some(
-                    merged
-                        .into_iter()
-                        .map(|(id, row)| (LineId(id), row))
-                        .take(if max_lines == 0 {
-                            usize::MAX
-                        } else {
-                            max_lines
-                        })
-                        .collect(),
-                );
-            }
-            return Some(live_and_sealed);
-        }
-        if !wire_rows.is_empty() {
-            if max_lines > 0 && wire_rows.len() > max_lines {
-                wire_rows.truncate(max_lines);
-            }
-            return Some(wire_rows);
-        }
-    }
-    // Ownership index present but column filter missed (compacted history):
-    // assemble from HistoryStore using Runtime-owned LineIds only — never the
-    // Swift request span.
-    let line_ids = entry.execution.primary_sealed_region_line_ids(output);
-    if line_ids.is_empty() {
-        // On-window completed Blocks may still own primary-frame cells that
-        // LiveTail paints, while RegionStore live query is empty after a
-        // remint race. Fall back to the Runtime timeline LineId span (not the
-        // client request) so AX/retain text is not blank.
-        let rows = timeline_seed();
-        return Some(rows);
-    }
-    let start = line_ids[0];
-    let end = *line_ids.last().unwrap_or(&start);
-    let Ok(rows) = terminal.primary_history_wire_range(start, end, max_lines, 0) else {
-        return Some(Vec::new());
-    };
-    let wanted: std::collections::BTreeSet<_> = line_ids.into_iter().collect();
-    Some(
-        rows.into_iter()
-            .filter(|(id, _)| wanted.contains(id))
-            .collect(),
-    )
-}
-
-fn pad_wire_rows(
-    rows: impl IntoIterator<Item = (LineId, Vec<(u16, Cell)>)>,
-    cols_n: u16,
-    max_lines: usize,
-) -> Vec<(LineId, Vec<HistoryWireCell>)> {
-    let mut out = Vec::new();
-    for (line_id, mut owned) in rows {
-        if max_lines > 0 && out.len() >= max_lines {
-            break;
-        }
-        owned.sort_by_key(|(col, _)| *col);
-        let mut wire = Vec::with_capacity(usize::from(cols_n));
-        let mut next_col = 0u16;
-        for (col, cell) in owned {
-            while next_col < col {
-                wire.push(HistoryWireCell {
-                    text: " ".into(),
-                    width: 1,
-                    style: Default::default(),
-                    continuation: false,
-                });
-                next_col = next_col.saturating_add(1);
-            }
-            match cell.role {
-                CellRole::Continuation => wire.push(HistoryWireCell {
-                    text: String::new(),
-                    width: 0,
-                    style: cell.style,
-                    continuation: true,
-                }),
-                CellRole::Lead | CellRole::Empty => wire.push(HistoryWireCell {
-                    text: cell.character.to_string(),
-                    width: cell.width.max(1),
-                    style: cell.style,
-                    continuation: false,
-                }),
-            }
-            next_col = col.saturating_add(1);
-        }
-        while next_col < cols_n {
-            wire.push(HistoryWireCell {
-                text: " ".into(),
-                width: 1,
-                style: Default::default(),
-                continuation: false,
-            });
-            next_col = next_col.saturating_add(1);
-        }
-        out.push((line_id, wire));
-    }
-    out
 }
 
 impl Runtime {
@@ -237,9 +57,19 @@ impl Runtime {
         };
         let max_lines = usize::from(request.max_lines);
         let revision = entry.execution.terminal().damage_generation();
-        let rows = if let Some(live_rows) = live_block_wire_rows(entry, request.block_id, max_lines)
-        {
-            live_rows
+        // Native-addressed fetches (block_id != 0) never fall through to a
+        // LineId span — that masks RegionId ownership holes (#1484). Legacy
+        // HISTORY reconstruction remains only for unscoped LineId requests.
+        let (rows, more_rows) = if request.block_id != 0 {
+            match native_block_wire_rows(
+                entry,
+                request.block_id,
+                max_lines,
+                request.start_unit,
+            ) {
+                Some(page) => page,
+                None => (Vec::new(), false),
+            }
         } else {
             match entry.execution.terminal().primary_history_wire_range(
                 LineId(request.start_line),
@@ -247,7 +77,11 @@ impl Runtime {
                 max_lines,
                 request.start_unit,
             ) {
-                Ok(rows) => rows,
+                Ok(rows) => {
+                    // VT caps at max_lines; a full window may have more in-range rows.
+                    let more = max_lines > 0 && rows.len() == max_lines;
+                    (rows, more)
+                }
                 Err(HistoryRangeError::Unrepresentable) => {
                     self.send_error(
                         token,
@@ -281,9 +115,6 @@ impl Runtime {
                 }
             }
         };
-        // VT already caps at max_lines. A full window means more in-range
-        // retained rows may remain — report Truncated so clients can continue.
-        let hit_line_cap = max_lines > 0 && rows.len() == max_lines;
         let source_rows = rows.into_iter().map(|(line_id, cells)| {
             (
                 line_id.0,
@@ -310,7 +141,7 @@ impl Runtime {
             usize::try_from(request.max_cells).unwrap_or(0),
             sidecar.len(),
         );
-        let truncated = budget_truncated || hit_line_cap || pack_truncated;
+        let truncated = budget_truncated || more_rows || pack_truncated;
         let mut snapshot = framing::HistoryRangeSnapshot {
             request_id: request.request_id,
             block_id: request.block_id,
@@ -562,7 +393,23 @@ impl Runtime {
             if records.is_empty() {
                 return;
             }
-            let total_height = entry.execution.primary_viewport_total_height();
+            // Canvas floor (#1424): omit floored Blocks from indexed height so
+            // Swift cannot recreate dead scroll space after local clear.
+            let total_height = match entry.block_timeline.canvas_floor() {
+                Some(floor) => entry
+                    .block_timeline
+                    .records()
+                    .filter(|record| record.id.raw() > floor.raw())
+                    .map(|record| {
+                        u64::from(
+                            entry
+                                .execution
+                                .primary_viewport_block_height(record.id.raw()),
+                        )
+                    })
+                    .sum(),
+                None => entry.execution.primary_viewport_total_height(),
+            };
             let stamp = (total_height, records.clone());
             let content_changed = entry.published_native_regions_stamp.as_ref() != Some(&stamp);
             let pending: Vec<(u64, _)> = if content_changed {

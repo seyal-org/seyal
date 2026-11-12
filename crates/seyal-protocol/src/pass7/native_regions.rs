@@ -22,8 +22,9 @@ pub struct NativeBlockRegions {
     /// sealed; client must not invent primary-frame clips).
     pub row_count: u16,
     /// Sealed ownership rows for `output_region` (HistoryStore-backed). Zero
-    /// when the Block has no sealed content yet.
-    pub sealed_rows: u16,
+    /// when the Block has no sealed content yet. Wire width is u32 (#1484:
+    /// u16 saturated at 65_535 and broke 100k/1M Flow height / AX books).
+    pub sealed_rows: u32,
 }
 
 /// Bounded replacement map for one attached execution.
@@ -62,7 +63,6 @@ impl BlockNativeRegions {
             out.extend_from_slice(&record.first_row.to_le_bytes());
             out.extend_from_slice(&record.row_count.to_le_bytes());
             out.extend_from_slice(&record.sealed_rows.to_le_bytes());
-            out.extend_from_slice(&0u16.to_le_bytes());
             if out.len() > crate::framing::MAX_FRAME_PAYLOAD as usize {
                 return Err(FramingError::OversizedPayload);
             }
@@ -114,10 +114,7 @@ impl BlockNativeRegions {
             let first_row = u16::from_le_bytes(bytes[offset + 24..offset + 26].try_into().unwrap());
             let row_count = u16::from_le_bytes(bytes[offset + 26..offset + 28].try_into().unwrap());
             let sealed_rows =
-                u16::from_le_bytes(bytes[offset + 28..offset + 30].try_into().unwrap());
-            if u16::from_le_bytes(bytes[offset + 30..offset + 32].try_into().unwrap()) != 0 {
-                return Err(FramingError::MalformedPayload);
-            }
+                u32::from_le_bytes(bytes[offset + 28..offset + 32].try_into().unwrap());
             if block_id == 0 || header_region == 0 || output_region == 0 {
                 return Err(FramingError::MalformedPayload);
             }

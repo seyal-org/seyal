@@ -49,7 +49,8 @@ pub(crate) struct RegionStore {
     /// Source anchors parallel to `grid_cells`.
     pub(crate) grid_anchors: Vec<Option<HistoryAnchor>>,
     grid_gens: Vec<u32>,
-    grid_regions: Vec<RegionId>,
+    /// Per-window-slot RegionId ownership; must move with cells on scroll/ICH/DCH.
+    pub(crate) grid_regions: Vec<RegionId>,
 }
 
 impl RegionStore {
@@ -253,9 +254,9 @@ impl RegionStore {
             .unwrap_or(&[])
     }
 
-    /// Number of sealed ownership rows for one region (u16-saturated).
-    pub(crate) fn sealed_row_count(&self, region: RegionId) -> u16 {
-        u16::try_from(self.sealed_rows(region).len()).unwrap_or(u16::MAX)
+    /// Number of sealed ownership rows for one region (u32-saturated).
+    pub(crate) fn sealed_row_count(&self, region: RegionId) -> u32 {
+        u32::try_from(self.sealed_rows(region).len()).unwrap_or(u32::MAX)
     }
 
     /// Write a live window cell in place; bumps generation and records region.

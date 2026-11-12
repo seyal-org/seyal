@@ -99,7 +99,6 @@ extension SecondaryLivePaneHost {
                 state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
-            card.setOutputLines(lines, cellHeight: cellHeight)
             card.canRequestSessionBootstrap = blockID != 0 && blockID == requestableSessionHost
             card.onRequestSessionBootstrap = card.canRequestSessionBootstrap
                 ? { [weak self, sessionDisplayHandle, blockID, sessionRevision = sessionSurface.revision] in
@@ -163,17 +162,17 @@ extension SecondaryLivePaneHost {
             card.onSelect = { [weak self] _ in
                 self?.onFocus?()
             }
+            let heightLines = lines
             if blockID != 0,
                let retainedRange = surface.retainedHistoryRange(
                    blockID: blockID,
                    displayHandle: displayHandle
                ) {
-                card.setBodyTranscript(retainedRange.transcriptText)
-                card.setOutputLines(
-                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
-                    cellHeight: surface.terminalPresentationCellSize().height
-                )
+                // Transcript text is AX/retain only; height stays on Rust
+                // projection reserved1 (sealed-aware) (#1484).
+                card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
@@ -302,18 +301,20 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
-            card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
+            let heightLines = outputLineCount(projection: projection)
             if let retainedRange = surface.retainedHistoryRange(
                 blockID: row.id_lo,
                 displayHandle: displayHandle
             ) {
-                card.setBodyTranscript(retainedRange.transcriptText)
-                card.setOutputLines(
-                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
-                    cellHeight: cellHeight
-                )
+                card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
-            applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail (#1484).
+            if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+                || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
+            {
+                applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
+            }
         }
         syncTranscriptDocumentSize()
     }
@@ -334,20 +335,12 @@ extension SecondaryLivePaneHost {
     }
 
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
-        // On-window NATIVE / PRIMARY_CLIP paints via LiveTail and still fetches
-        // RegionId-owned cells by block_id for AX/retain text. Sealed NATIVE
-        // uses the same RegionId fetch. Legacy HISTORY LineId reconstruction
-        // is retired for native Blocks (#1484).
+        // Sealed/completed NATIVE fetches RegionId-owned cells for AX/retain.
+        // Running PRIMARY_CLIP paints via LiveTail only — mid-stream history
+        // walks starve the reactor on tall Blocks (#1484 100k / multipane).
+        // Include reserved0/reserved1 so seal transitions reopen the book.
         guard displayHandle != 0 else { return }
-        let nativeOrLiveTail =
-            projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
-            || (projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
-                && projection.reserved1 > 0)
-        if nativeOrLiveTail {
-
-            // Include reserved0/reserved1 so stream growth and seal transitions
-            // reopen the settled book instead of freezing AX at the first
-            // Complete snapshot (#1484 / #1426).
+        if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
             let key = HistoryProjectionRequestKey(
                 displayHandle: displayHandle,
                 blockID: blockID,
@@ -402,21 +395,31 @@ extension SecondaryLivePaneHost {
             startLine: range.startLine,
             endLine: range.endLine
         )
+        let minimumRows = nativeProjectionMinimumRows(blockID: range.blockID)
         guard !range.rows.isEmpty else {
             // Native sealed fetches may complete empty after eviction; settle
             // by block id so we do not hot-loop retries (#1484).
             historyProjectionRequests.complete(key)
             return
         }
-        historyProjectionRequests.receive(key, status: range.status)
+        historyProjectionRequests.receive(
+            key,
+            status: range.status,
+            deliveredRows: range.rows.count,
+            minimumRows: minimumRows
+        )
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
-            card.setBodyTranscript(range.transcriptText)
-            card.setOutputLines(
-                CommandBlockView.visibleOutputLineCount(range.transcriptText),
-                cellHeight: cellHeight
-            )
+            card.setBodyTranscript(range.accessibilityTranscript())
+            card.setOutputLines(max(minimumRows ?? 1, 1), cellHeight: cellHeight)
+        }
+        if range.status == 0,
+           let minimumRows,
+           range.rows.count < minimumRows,
+           let projection = nativeProjection(blockID: range.blockID)
+        {
+            applyBlockOutputProjection(blockID: range.blockID, projection: projection)
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()
@@ -425,6 +428,40 @@ extension SecondaryLivePaneHost {
         if followingLiveEnd {
             scrollTranscriptToLiveEnd()
         }
+    }
+
+    func nativeProjection(blockID: UInt64) -> SeyalAppBlockProjection? {
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        for index in 0..<Int(composerSnap.block_count) {
+            let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
+            guard row.id_lo == blockID else { continue }
+            let projection = seyal_app_block_projection_for_pane(
+                appHandle, paneLo, paneHi, UInt32(index)
+            )
+            guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) else {
+                return nil
+            }
+            return projection
+        }
+        return nil
+    }
+
+    func nativeProjectionMinimumRows(blockID: UInt64) -> Int? {
+        guard let projection = nativeProjection(blockID: blockID) else { return nil }
+        return max(Int(projection.reserved1), 1)
+    }
+
+    func hasRunningPrimaryClip() -> Bool {
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        for index in 0..<Int(composerSnap.block_count) {
+            let projection = seyal_app_block_projection_for_pane(
+                appHandle, paneLo, paneHi, UInt32(index)
+            )
+            if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP) {
+                return true
+            }
+        }
+        return false
     }
 
     func publishLiveTailBlocks() {
@@ -445,18 +482,15 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
-            // Sealed NATIVE (reserved0 == UInt16.max) paints via RegionId content
-            // fetch — never LiveTail-clip the primary frame.
-            let nativeSealed = projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
-                && projection.reserved0 == UInt16.max
+            // Completed NATIVE paints via RegionId HISTORY retain only — do not
+            // dual-paint LiveTail after completion (#1484 100k OCR / MP0).
+            let nativeCompleted =
+                projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
             guard row.id_lo != 0,
                   projection.reserved1 > 0,
-                  !nativeSealed,
+                  !nativeCompleted,
                   projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
-                    || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
             else { continue }
-            // PRIMARY_CLIP: startLine is ViewportLineId. On-window NATIVE_REGIONS:
-            // header RegionId; firstRow/rowCount clip the primary frame.
             live[row.id_lo] = LiveTailClip(
                 startLine: max(projection.start_line, 1),
                 firstRow: projection.reserved0,
@@ -520,13 +554,22 @@ extension SecondaryLivePaneHost {
                 let visibleBody = card.body.convert(surface.bounds, from: surface)
                     .intersection(card.body.bounds)
                 let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
-                let firstVisibleRow = HistoryRenderWindow.firstVisibleRow(
-                    documentBounds: card.body.bounds,
-                    visibleBounds: visibleBody,
-                    isFlipped: card.body.isFlipped,
-                    cellHeight: cellHeight
+                // Viewport intersection only — never the full tall card height.
+                let visibleRowCount = max(
+                    Int((max(visibleBody.height, 1) / cellHeight).rounded(.up)),
+                    1
                 )
-                let visibleRowCount = Int((visibleBody.height / cellHeight).rounded(.up))
+                let firstVisibleRow: Int
+                if followingLiveEnd {
+                    firstVisibleRow = max(range.rows.count - visibleRowCount, 0)
+                } else {
+                    firstVisibleRow = HistoryRenderWindow.firstVisibleRow(
+                        documentBounds: card.body.bounds,
+                        visibleBounds: visibleBody,
+                        isFlipped: card.body.isFlipped,
+                        cellHeight: cellHeight
+                    )
+                }
                 historyRows = HistoryRenderWindow(
                     totalRows: range.rows.count,
                     firstVisibleRow: firstVisibleRow,
@@ -580,14 +623,20 @@ extension SecondaryLivePaneHost {
         let cardHeight = transcriptCardsContentHeight()
         let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
         let cellHeight = surface.terminalPresentationCellSize().height
-        let rustFloor = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        // Rust indexed height is a document floor when native regions publish
-        // (#1484 / ADR-009). Card chrome may still win so painted bodies are
-        // never clipped by an under-counted row index. Cleared canvas (no
-        // cards) collapses even if a stale Rust floor remains (#1424).
+        let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
+        let cardCount = CGFloat(blockCards.count)
+        let chromePerCard: CGFloat = 22 + 4 + 1
+        let stackSpacing = blocks.spacing * max(cardCount - 1, 0)
+        let chrome = cardCount * chromePerCard + stackSpacing
+            + blocks.edgeInsets.top + blocks.edgeInsets.bottom
+        // Rust indexed row height owns sealed Flow content. While Running,
+        // keep the document on card/LiveTail heights so tall streams cannot
+        // expand the secondary leaf every sealed row (#1484).
         let contentHeight: CGFloat = {
             if !hasCards { return 0 }
-            return max(cardHeight, rustFloor)
+            if hasRunningPrimaryClip() { return cardHeight }
+            if rustBody > 0 { return rustBody + chrome }
+            return cardHeight
         }()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)

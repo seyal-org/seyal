@@ -295,7 +295,6 @@ extension ProductChromeHostView {
                 state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
-            card.setOutputLines(lines, cellHeight: cellHeight)
             card.setAccessibilityIdentifier("seyal-block-\(visibleIndex)")
             card.setBodyAccessibilityIdentifier("seyal-block-\(visibleIndex)-body")
             card.canRequestSessionBootstrap = blockID != 0 && blockID == requestableSessionHost
@@ -311,17 +310,18 @@ extension ProductChromeHostView {
                 : nil
             configureRunningProgramInteraction(for: card, blockID: blockID, flags: row.flags)
             visibleIndex += 1
+            var heightLines = lines
             if blockID != 0,
                let retainedRange = pane.inputSurface.retainedHistoryRange(
                    blockID: blockID,
                    displayHandle: activeBlockDisplayHandle
                ) {
-                card.setBodyTranscript(retainedRange.transcriptText)
-                card.setOutputLines(
-                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
-                    cellHeight: pane.inputSurface.terminalPresentationCellSize().height
-                )
+                // Transcript text is AX/retain only. Card height stays on the
+                // Rust projection (reserved1 now carries sealed count) so a
+                // short retain cannot collapse the body (#1484).
+                card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
             let idHi = row.id_hi
@@ -554,38 +554,70 @@ extension ProductChromeHostView {
                     || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS),
                   let card = blockCards[row.id_lo]
             else { continue }
-            card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
+            let heightLines = outputLineCount(projection: projection)
+            if let retainedRange = pane.inputSurface.retainedHistoryRange(
+                blockID: row.id_lo,
+                displayHandle: activeBlockDisplayHandle
+            ) {
+                card.setBodyTranscript(retainedRange.accessibilityTranscript())
+            }
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail and
+            // must not refill HISTORY on every frame (#1484 100k).
+            if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
+                applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
+            }
         }
         syncTranscriptDocumentSize()
         positionInlineComposerAtCurrentCursor()
         publishBlockOutputFrame()
     }
 
-    /// On-window NATIVE / PRIMARY_CLIP paints via LiveTail and still fetches
-    /// RegionId-owned cells by block_id for AX/retain text (Runtime ignores
-    /// LineId spans). Sealed NATIVE uses the same RegionId fetch. Legacy
-    /// HISTORY LineId reconstruction remains only for non-native Blocks (#1484).
+    /// Sealed NATIVE fetches RegionId-owned cells by block_id for AX/retain
+    /// (Runtime ignores LineId spans). Running PRIMARY_CLIP paints via LiveTail
+    /// only — fetching history while output is still growing re-walks every
+    /// sealed row on the reactor and starves PTY completion (#1484 100k).
+    /// Legacy HISTORY LineId reconstruction remains only for non-native Blocks.
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
-        if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
-            || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
-        {
+        guard activeBlockDisplayHandle != 0 else { return }
+        if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
+            let key = HistoryProjectionRequestKey(
+                displayHandle: activeBlockDisplayHandle,
+                blockID: blockID,
+                startLine: UInt64(projection.reserved0),
+                endLine: UInt64(max(projection.reserved1, 1))
+            )
+            guard historyProjectionRequests.begin(key) else { return }
             // start/end ignored when Runtime resolves RegionId-owned cells.
-            _ = pane.inputSurface.requestHistoryRange(
+            let result = pane.inputSurface.requestHistoryRange(
                 startLine: 1,
                 endLine: 1,
                 blockID: blockID
             )
+            if result != 0 {
+                historyProjectionRequests.retry(key)
+            }
             return
         }
         guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
               projection.start_line > 0,
               projection.end_line >= projection.start_line
         else { return }
-        _ = pane.inputSurface.requestHistoryRange(
+        let key = HistoryProjectionRequestKey(
+            displayHandle: activeBlockDisplayHandle,
+            blockID: blockID,
+            startLine: projection.start_line,
+            endLine: projection.end_line
+        )
+        guard historyProjectionRequests.begin(key) else { return }
+        let result = pane.inputSurface.requestHistoryRange(
             startLine: projection.start_line,
             endLine: projection.end_line,
             blockID: blockID
         )
+        if result != 0 {
+            historyProjectionRequests.retry(key)
+        }
     }
 
     func publishLiveTailBlocks() {
@@ -601,13 +633,15 @@ extension ProductChromeHostView {
         for index in 0..<Int(composer.block_count) {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
-            let nativeSealed = projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
-                && projection.reserved0 == UInt16.max
+            // Completed NATIVE Blocks paint via RegionId HISTORY retain only.
+            // Keeping LiveTail on after completion dual-paints the onset over
+            // the sealed tail and blanks OCR live-end checks (#1484 100k).
+            let nativeCompleted =
+                projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
             guard row.id_lo != 0,
                   projection.reserved1 > 0,
-                  !nativeSealed,
+                  !nativeCompleted,
                   projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
-                    || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
             else { continue }
             live[row.id_lo] = LiveTailClip(
                 startLine: max(projection.start_line, 1),
@@ -643,17 +677,41 @@ extension ProductChromeHostView {
         case .primary:
             break
         }
+        let bookKey = HistoryProjectionRequestKey(
+            displayHandle: range.sourceDisplayHandle == 0
+                ? activeBlockDisplayHandle : range.sourceDisplayHandle,
+            blockID: range.blockID,
+            startLine: range.startLine,
+            endLine: range.endLine
+        )
+        let minimumRows = nativeProjectionMinimumRows(blockID: range.blockID)
+        if range.rows.isEmpty {
+            historyProjectionRequests.complete(bookKey)
+            return
+        }
+        historyProjectionRequests.receive(
+            bookKey,
+            status: range.status,
+            deliveredRows: range.rows.count,
+            minimumRows: minimumRows
+        )
         pane.inputSurface.retainHistoryRange(range)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         guard range.sourceDisplayHandle == 0
             || range.sourceDisplayHandle == activeBlockDisplayHandle
         else { return }
         if let card = blockCards[range.blockID], !range.rows.isEmpty {
-            card.setBodyTranscript(range.transcriptText)
-            card.setOutputLines(
-                CommandBlockView.visibleOutputLineCount(range.transcriptText),
-                cellHeight: cellHeight
-            )
+            // Prefer Runtime projection height; transcript text is AX/retain.
+            card.setBodyTranscript(range.accessibilityTranscript())
+            let heightLines = max(nativeProjectionMinimumRows(blockID: range.blockID) ?? 0, 1)
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
+        }
+        if range.status == 0,
+           let minimumRows,
+           range.rows.count < minimumRows,
+           let projection = nativeProjection(blockID: range.blockID)
+        {
+            applyBlockOutputProjection(blockID: range.blockID, projection: projection)
         }
         // Paint with Auto Layout sizes first, then expand the document frame.
         // setFrameSize-before-publish can yield zero-height clips that wipe Metal
@@ -668,6 +726,36 @@ extension ProductChromeHostView {
         if followingLiveEnd {
             scrollTranscriptToLiveEnd()
         }
+    }
+
+    func nativeProjection(blockID: UInt64) -> SeyalAppBlockProjection? {
+        let composer = seyal_app_composer(pane.appHandle)
+        for index in 0..<Int(composer.block_count) {
+            let row = seyal_app_block_row(pane.appHandle, UInt32(index))
+            guard row.id_lo == blockID else { continue }
+            let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
+            guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) else {
+                return nil
+            }
+            return projection
+        }
+        return nil
+    }
+
+    func nativeProjectionMinimumRows(blockID: UInt64) -> Int? {
+        guard let projection = nativeProjection(blockID: blockID) else { return nil }
+        return max(Int(projection.reserved1), 1)
+    }
+
+    func hasRunningPrimaryClip() -> Bool {
+        let composer = seyal_app_composer(pane.appHandle)
+        for index in 0..<Int(composer.block_count) {
+            let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
+            if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP) {
+                return true
+            }
+        }
+        return false
     }
 
     /// AppKit scrolls with `documentView.frame`; `blocks.fittingSize` is the
@@ -687,6 +775,17 @@ extension ProductChromeHostView {
     /// growing tall; the viewport floor keeps the same anti-collapse intent
     /// for non-empty content without that stale-gap regression.
     func syncTranscriptDocumentSize() {
+        // Mirror Secondary: when the user was already at the live end, keep the
+        // viewport pinned across Running→sealed height jumps so OCR/live-end
+        // paint sees the Block tail, not the onset (#1484 100k).
+        let shouldFollowLiveEnd = followingLiveEnd
+        isProgrammaticTranscriptScroll = true
+        defer {
+            isProgrammaticTranscriptScroll = false
+            if shouldFollowLiveEnd {
+                scrollTranscriptToLiveEnd()
+            }
+        }
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
         // Measure the arranged cards themselves. NSStackView.fittingSize can
@@ -702,16 +801,26 @@ extension ProductChromeHostView {
                 edgeInsets: blocks.edgeInsets
             )
             : 0
-        // Rust indexed height is a document floor when native regions publish
-        // (#1484 / ADR-009). Card chrome may still win so painted bodies are
-        // never clipped by an under-counted row index. Cleared canvas (no
-        // cards) collapses regardless of a stale Rust floor (#1424).
+        // Rust indexed row height is the sole Flow content authority when the
+        // native map publishes (#1484 / ADR-015). Per-card chrome (header/gap/
+        // seam) is a fixed derived inset, not AppKit transcript line counts.
+        // Cleared canvas (no cards) collapses regardless of a stale Rust floor (#1424).
         let rustRows = seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
-        let rustFloor = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
+        let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
+        let cardCount = CGFloat(blockCards.count)
+        let chromePerCard: CGFloat = 22 + 4 + 1 // header + body gap + seam
+        let stackSpacing = blocks.spacing * max(cardCount - 1, 0)
+        let chrome = cardCount * chromePerCard + stackSpacing
+            + blocks.edgeInsets.top + blocks.edgeInsets.bottom
         let contentHeight: CGFloat = {
             if !hasCards { return 0 }
-            return max(cardHeight, rustFloor)
+            // While a Block is still Running, card heights track the on-window
+            // LiveTail clip. Expanding the document to the full Rust indexed
+            // height every frame starves AtPrompt/Available on tall streams (#1484).
+            if hasRunningPrimaryClip() { return cardHeight }
+            if rustBody > 0 { return rustBody + chrome }
+            return cardHeight
         }()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
@@ -783,13 +892,36 @@ extension ProductChromeHostView {
                 let visibleBody = card.body.convert(surface.bounds, from: surface)
                     .intersection(card.body.bounds)
                 let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
-                let firstVisibleRow = HistoryRenderWindow.firstVisibleRow(
+                // Viewport intersection only — never the full tall card height,
+                // or live-end math collapses to firstVisibleRow=0 (#1484 OCR).
+                let visibleRowCount = max(
+                    Int((max(visibleBody.height, 1) / cellHeight).rounded(.up)),
+                    1
+                )
+                // Tail-pin to the last non-blank retained row. Trailing blank
+                // padding after M003-TAIL-ROW pushed the true tail above the
+                // prepared page while AX summary (which strips blanks) still
+                // exposed it (#1484 100k OCR).
+                let geometryFirst = HistoryRenderWindow.firstVisibleRow(
                     documentBounds: card.body.bounds,
                     visibleBounds: visibleBody,
                     isFlipped: card.body.isFlipped,
                     cellHeight: cellHeight
                 )
-                let visibleRowCount = Int((visibleBody.height / cellHeight).rounded(.up))
+                var lastContentRow = range.rows.count
+                while lastContentRow > 0 {
+                    let row = range.rows[lastContentRow - 1]
+                    let blank = row.allSatisfy {
+                        ($0.scalar == 0 || $0.scalar == 32) && $0.graphemeUtf8.isEmpty
+                    }
+                    if !blank { break }
+                    lastContentRow -= 1
+                }
+                let tailFirst = max(lastContentRow - visibleRowCount, 0)
+                let firstVisibleRow =
+                    (followingLiveEnd || isNearLiveEnd(tolerance: 128))
+                    ? max(geometryFirst, tailFirst)
+                    : geometryFirst
                 historyRows = HistoryRenderWindow(
                     totalRows: range.rows.count,
                     firstVisibleRow: firstVisibleRow,
@@ -834,10 +966,19 @@ extension ProductChromeHostView {
     func scrollTranscriptToLiveEnd() {
         isProgrammaticTranscriptScroll = true
         defer { isProgrammaticTranscriptScroll = false }
+        layoutSubtreeIfNeeded()
         let visible = transcript.contentView.bounds.height
         let y = max(transcriptDocumentScrollHeight() - visible, 0)
         transcript.contentView.scroll(to: NSPoint(x: 0, y: y))
         transcript.reflectScrolledClipView(transcript.contentView)
+        // Second pass after scroll/layout so sealed height + spacer settle
+        // before headed OCR samples the live end (#1484 100k).
+        layoutSubtreeIfNeeded()
+        let settledY = max(transcriptDocumentScrollHeight() - visible, 0)
+        if abs(settledY - y) > 0.5 {
+            transcript.contentView.scroll(to: NSPoint(x: 0, y: settledY))
+            transcript.reflectScrolledClipView(transcript.contentView)
+        }
         followingLiveEnd = true
     }
 

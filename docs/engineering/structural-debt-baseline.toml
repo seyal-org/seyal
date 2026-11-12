@@ -36,15 +36,21 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 c
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 848
-issue = 1467
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
+acknowledged_loc = 930
+issue = 1484
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1484 pins sibling composer submit to the live display handle, drains BlockTimeline admission after submit, and keeps per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 842
+acknowledged_loc = 860
 issue = 1484
-reason = "Flow Blocks host owns on-window NATIVE LiveTail plus sealed NATIVE RegionId fetches (#1484 dual-seal DELETE) beside PRIMARY_CLIP; AppKit card geometry retirement continues in the same Issue."
+reason = "Flow Blocks host owns on-window NATIVE LiveTail plus sealed NATIVE RegionId fetches (#1484 dual-seal DELETE) beside PRIMARY_CLIP; Rust indexed height is the sole document content height, with retained RegionId row counts flooring sealed card body height when live reserved1 is still a short clip."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
+acknowledged_loc = 703
+issue = 1484
+reason = "Chrome actions remain the thin FOCUS_PANE / split / tab adapter; #1484 forces multipane reconcile after FOCUS_PANE so windowFocusedDisplayHandle and composer AX ownership cannot stay stale across sibling submit."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/block_projection.rs"
@@ -138,9 +144,9 @@ reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests modu
 # surface so completed Flow Block spans cannot bleed after Raw clear.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/screen/ops.rs"
-acknowledged_loc = 927
+acknowledged_loc = 976
 issue = 1484
-reason = "Cursor/edit/scroll/SGR mutations stay one cohesive Screen impl after the #1020 resize-planner extraction; #1484 routes print/overwrite/clear-unit through PrimaryBlockEngine window writes and remints map generations after erase/scroll/ICH/DCH. HistoryStore seal + RegionGrid ownership indexing live in screen/history_seal.rs (ADR-009 one-transfer; dual-seal DELETE)."
+reason = "Cursor/edit/scroll/SGR mutations stay one cohesive Screen impl after the #1020 resize-planner extraction; #1484 preserves Block RegionId on kept scroll/ICH/DCH slots (remint blanks only) so live_region_cells survive window shifts without timeline LineId seed."
 
 # #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
 # partitioned into print / execute / csi / osc siblings; all landed <= review_loc,
@@ -262,11 +268,14 @@ acknowledged_loc = 996
 issue = 1413
 reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1413 adds InvalidWorkspaceRoot/DuplicateWorkspace errors for ADR-028 CreateWorkspace while create/bind ops live in workspace_ops.rs."
 
-[[exception]]
+# ProductChromeHostView.swift dropped under 1000 LOC after #1484 focus
+# extraction to ProductChromeHostView+Focus.swift; exception removed.
+
+[[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1064
-issue = 1467
-responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1467/#1468 add per-pane Block-scoped DirectInput dock retraction and post-REPL Available reclaim on that same host rather than a second chrome authority."
+acknowledged_loc = 940
+issue = 1484
+reason = "Chrome façade stays one cold-path AppKit host for pane reconcile and multipane dock demote; #1484 extracted focus/DirectInput routing to ProductChromeHostView+Focus.swift so this file remains under 1000 LOC without a second chrome authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
@@ -295,9 +304,9 @@ reason = "Composer admission, eligibility publish, and session Candidate/Offer c
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/terminal/tests.rs"
-acknowledged_loc = 783
+acknowledged_loc = 902
 issue = 1484
-reason = "TerminalState unit suite remains one VT/oracle module; #1484 adds native-Block UnitVersion overwrite, shell-boundary journal order, same-read CommandStart region-arm proofs, and HistoryStore-backed sealed RegionId cell resolution without spill dual-copy."
+reason = "TerminalState unit suite remains one VT/oracle module; #1484 adds scroll remint RegionId retention and resize reflow RegionId retention proofs beside native-Block overwrite / seal-without-spill coverage."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_overlay.rs"

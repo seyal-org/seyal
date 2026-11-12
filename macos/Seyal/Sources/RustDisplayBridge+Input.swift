@@ -91,18 +91,43 @@ extension RustDisplayBridge {
       onStatusChanged()
       return -10
     }
+    return submitComposerCommand(text, forDisplayHandle: 0)
+  }
+
+  /// Pane-scoped submit: when `handle != 0`, routes to that Controller instead
+  /// of process-wide `FOCUSED_DISPLAY_HANDLE` (#1484 / G8).
+  @discardableResult
+  func submitComposerCommand(_ text: String, forDisplayHandle handle: UInt64) -> Int32 {
+    guard isConnected else {
+      onStatusChanged()
+      return -10
+    }
+    if handle == 0 {
+      guard selectPresentedClient() else {
+        onStatusChanged()
+        return -10
+      }
+    }
     let byteCount = text.utf8.count
     guard byteCount <= Int(UInt32.max) else {
       onStatusChanged()
       return -14
     }
     let count = UInt32(byteCount)
-    let result =
+    let result: Int32 =
       text.utf8.withContiguousStorageIfAvailable { buffer -> Int32 in
-        seyal_bridge_submit_composer(buffer.baseAddress, count)
+        if handle != 0 {
+          seyal_bridge_submit_composer_for(handle, buffer.baseAddress, count)
+        } else {
+          seyal_bridge_submit_composer(buffer.baseAddress, count)
+        }
       }
       ?? Array(text.utf8).withUnsafeBufferPointer { buffer in
-        seyal_bridge_submit_composer(buffer.baseAddress, count)
+        if handle != 0 {
+          seyal_bridge_submit_composer_for(handle, buffer.baseAddress, count)
+        } else {
+          seyal_bridge_submit_composer(buffer.baseAddress, count)
+        }
       }
     return finishMutation(result)
   }
@@ -331,12 +356,13 @@ extension RustDisplayBridge {
         lastTimelineRevision = revision
         onTimeline()
       }
+      // Always notify the primary Controller host after a successful poll —
+      // matching auxiliary sources. Gating on result==1 dropped Block AX on
+      // the original pane when poll returned 0 after metadata-only frames
+      // (#1484 sibling submit on refocused original).
+      onRegistryHandlePolled?(clientHandle)
       if result == 1 {
         publishCurrentFrame()
-        // The primary read source is this bridge's own Controller. Auxiliary
-        // sources skip that handle, so an unfocused Pane that still owns it
-        // would otherwise keep the AX grid from host creation.
-        onRegistryHandlePolled?(clientHandle)
         armAuxiliaryReadSources()
         armProvisioningWakeupSource()
         continue

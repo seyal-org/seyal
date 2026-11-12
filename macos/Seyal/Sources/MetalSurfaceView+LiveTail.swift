@@ -10,8 +10,15 @@ extension MetalSurfaceView {
     }
     let displayHandles = Set(frame.regions.map(\.displayHandle).filter { $0 != 0 })
     guard displayHandles.count <= 1 else { return }
-    if let displayHandle = displayHandles.first, displayHandle != transcriptDisplayHandle {
-      return
+    // Allow the first addressed publish to bind this surface's transcript
+    // handle without wiping retained HISTORY; a hard mismatch still drops
+    // the frame so multipane surfaces cannot paint another Controller (#1484).
+    if let displayHandle = displayHandles.first {
+      if transcriptDisplayHandle == 0 {
+        ensureTranscriptDisplayHandle(displayHandle)
+      } else if displayHandle != transcriptDisplayHandle {
+        return
+      }
     }
     // #1379: a transient empty region publish (zero-height Block bodies during
     // document-size sync) must not filter away retained history paint and leave

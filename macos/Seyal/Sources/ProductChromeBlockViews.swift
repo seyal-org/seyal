@@ -1,5 +1,79 @@
 import AppKit
 
+/// Shared AX budget for Block body transcripts: keep the first line plus the
+/// newest lines that fit. 480 is the smallest limit that still exposes the
+/// full split-sibling acceptance body once padding is trimmed (#1484).
+enum BlockAccessibilityText {
+    static let limit = 480
+
+    static func trimTrailingPadding(_ line: String) -> String {
+        var end = line.endIndex
+        while end > line.startIndex {
+            let previous = line.index(before: end)
+            let scalar = line[previous]
+            if scalar != " " && scalar != "\0" { break }
+            end = previous
+        }
+        return String(line[..<end])
+    }
+
+    /// First line + newest-tail within `limit`. `line(i)` is 0-based.
+    static func summary(lineCount: Int, limit: Int = limit, line: (Int) -> String) -> String {
+        guard lineCount > 0 else { return "" }
+        let first = line(0)
+        if lineCount == 1 {
+            return first.count <= limit ? first : String(first.prefix(limit))
+        }
+        // Phase 1: collect newest lines while the whole text still fits.
+        var tail: [String] = []
+        var used = first.count
+        var reachedStart = false
+        for index in stride(from: lineCount - 1, through: 1, by: -1) {
+            let text = line(index)
+            let next = used + 1 + text.count
+            if next > limit { break }
+            tail.insert(text, at: 0)
+            used = next
+            if index == 1 {
+                reachedStart = true
+            }
+        }
+        if reachedStart {
+            return ([first] + tail).joined(separator: "\n")
+        }
+        // Phase 2: elide the middle — keep a short onset head and newest tail.
+        let separator = "\n…\n"
+        let head = String(first.prefix(max(limit / 4, 1)))
+        var budget = limit - head.count - separator.count
+        if budget <= 0 {
+            return String(first.prefix(limit))
+        }
+        while !tail.isEmpty {
+            let joined = tail.joined(separator: "\n")
+            if joined.count <= budget { break }
+            tail.removeFirst()
+        }
+        if tail.isEmpty {
+            let newest = line(lineCount - 1)
+            if newest.count <= budget {
+                return head + separator + newest
+            }
+            return head + separator + String(newest.suffix(budget))
+        }
+        // Prefer filling leftover budget with more newest lines when phase-1
+        // stopped early because of the full-text reserve.
+        var nextIndex = lineCount - 1 - tail.count
+        while nextIndex >= 1 {
+            let text = line(nextIndex)
+            let joinedCost = text.count + 1 + tail.joined(separator: "\n").count
+            if joinedCost > budget { break }
+            tail.insert(text, at: 0)
+            nextIndex -= 1
+        }
+        return head + separator + tail.joined(separator: "\n")
+    }
+}
+
 final class TranscriptClipView: NSClipView {
     override var isFlipped: Bool { true }
 }
@@ -233,17 +307,22 @@ final class CommandBlockView: NSView {
         setAccessibilityValue(traits.joined(separator: ", "))
     }
 
-    private static func accessibilitySummary(for text: String, limit: Int = 2_048) -> String {
-        guard text.count > limit else { return text }
-        // Keep both command onset and the live/completed tail available to
-        // assistive technology. A tail-only summary made it impossible to
-        // verify the first output line after a long Block completed; a tiny
-        // prefix (limit/10) also dropped early numbered stream lines under
-        // multipane NATIVE retain (#1484 / #1426).
-        let prefixCount = max(limit / 3, 256)
-        let separator = "…\n"
-        let suffixCount = max(limit - prefixCount - separator.count, 0)
-        return String(text.prefix(prefixCount)) + separator + String(text.suffix(suffixCount))
+    /// Bound AX payloads so tall Block bodies do not stall XCUI tree walks,
+    /// while still exposing command onset and the live/completed tail (#1484).
+    /// Trailing cell padding is stripped per line first so short streamed
+    /// markers remain discoverable inside the budget (terminal rows are often
+    /// space-padded to the full grid width).
+    private static func accessibilitySummary(for text: String, limit: Int = BlockAccessibilityText.limit) -> String {
+        let trimmedLines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            BlockAccessibilityText.trimTrailingPadding(String(line))
+        }
+        // Drop trailing blank rows so COMPLETE/tail markers stay in budget.
+        var end = trimmedLines.count
+        while end > 0 && trimmedLines[end - 1].isEmpty {
+            end -= 1
+        }
+        let lines = Array(trimmedLines.prefix(end))
+        return BlockAccessibilityText.summary(lineCount: lines.count, limit: limit) { lines[$0] }
     }
 
     override func layout() {

@@ -155,6 +155,10 @@ impl TerminalExecution {
         self.terminal.attribution_journal_overflowed()
     }
 
+    pub fn attribution_journal_fail_closed_overflow(&self) -> bool {
+        self.terminal.attribution_journal_fail_closed_overflow()
+    }
+
     pub fn primary_block_content_refs(&self) -> Vec<seyal_terminal::BlockContentRef> {
         self.terminal.primary_block_content_refs()
     }
@@ -177,7 +181,7 @@ impl TerminalExecution {
         self.terminal.primary_sealed_region_line_ids(region_id)
     }
 
-    pub fn primary_sealed_row_count(&self, region_id: u64) -> u16 {
+    pub fn primary_sealed_row_count(&self, region_id: u64) -> u32 {
         self.terminal.primary_sealed_row_count(region_id)
     }
 
@@ -191,6 +195,10 @@ impl TerminalExecution {
 
     pub fn primary_viewport_total_height(&self) -> u64 {
         self.terminal.primary_viewport_total_height()
+    }
+
+    pub fn primary_viewport_block_height(&self, block_id: u64) -> u32 {
+        self.terminal.primary_viewport_block_height(block_id)
     }
 
     pub fn primary_on_window_region_spans(&self) -> Vec<seyal_terminal::OnWindowRegionSpan> {

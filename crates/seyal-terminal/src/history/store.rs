@@ -62,6 +62,31 @@ impl HistoryStore {
             .chain(self.tail.iter().map(HistoryLineRef::Tail))
     }
 
+    /// Retained entries with `line_id >= id`, in LineId order. Positioned by
+    /// binary search over the LineId-ascending segments/tail so sealed Region
+    /// lookups are not an O(history) walk from the oldest line (#1484).
+    pub(crate) fn entries_from(&self, id: LineId) -> impl Iterator<Item = HistoryLineRef<'_>> {
+        let first_segment = self
+            .segments
+            .partition_point(|segment| segment.lines.last().is_some_and(|line| line.line_id < id));
+        let first_line = self
+            .segments
+            .get(first_segment)
+            .map_or(0, |segment| segment.lines.partition_point(|line| line.line_id < id));
+        let first_tail = self.tail.partition_point(|line| line.line_id < id);
+        self.segments
+            .iter()
+            .skip(first_segment)
+            .enumerate()
+            .flat_map(move |(index, segment)| {
+                let skip = if index == 0 { first_line } else { 0 };
+                segment.lines[skip..]
+                    .iter()
+                    .map(move |line| HistoryLineRef::Sealed(segment, line))
+            })
+            .chain(self.tail[first_tail..].iter().map(HistoryLineRef::Tail))
+    }
+
     pub(crate) fn resident_bytes(&self) -> usize {
         self.resident_bytes
     }

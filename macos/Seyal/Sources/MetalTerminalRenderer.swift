@@ -499,7 +499,12 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             origin: SIMD2<Float>(Float(region.origin.x), Float(region.origin.y)),
             clip: region.clip
         )
-        needsPresent = instanceBuffer != nil || !presentationPlan.drawsLiveGrid
+        // Completed NATIVE Blocks may have no live grid (`instanceBuffer == nil`
+        // while `drawsLiveGrid` is still true). History alone must still arm
+        // present or OCR sees a blank body with AX text (#1484 100k).
+        needsPresent = instanceBuffer != nil
+            || !historyRegions.isEmpty
+            || !presentationPlan.drawsLiveGrid
     }
 
     func flushDeferredHistoryPrepares() {

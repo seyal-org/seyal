@@ -29,9 +29,20 @@ struct HistoryProjectionRequestBook {
         settled.insert(key)
     }
 
-    mutating func receive(_ key: HistoryProjectionRequestKey, status: UInt32) {
+    mutating func receive(
+        _ key: HistoryProjectionRequestKey,
+        status: UInt32,
+        deliveredRows: Int? = nil,
+        minimumRows: Int? = nil
+    ) {
         switch status {
         case 0:
+            // NATIVE books key endLine to sealed/content row count. A short
+            // Complete must stay retryable so sealed growth can reopen (#1484).
+            if let deliveredRows, let minimumRows, minimumRows > 0, deliveredRows < minimumRows {
+                retry(key)
+                return
+            }
             complete(key)
         case 1:
             // Truncated history is still being continued by RustDisplayBridge.

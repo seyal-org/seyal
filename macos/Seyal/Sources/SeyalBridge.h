@@ -248,6 +248,8 @@ typedef struct SeyalCopiedText {
 SeyalCopiedText seyal_bridge_copied_text(void);
 int32_t seyal_bridge_copied_text_consume(void);
 int32_t seyal_bridge_submit_composer(const uint8_t *bytes, uint32_t len);
+/* Pane-scoped composer submit (does not use FOCUSED_DISPLAY_HANDLE) (#1484). */
+int32_t seyal_bridge_submit_composer_for(uint64_t handle, const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_request_history_range(
     uint64_t block_id,
     uint64_t start_line,

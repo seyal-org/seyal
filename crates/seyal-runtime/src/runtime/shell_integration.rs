@@ -295,10 +295,12 @@ impl Runtime {
         }
         // Drain wire-ordered attribution journal after marker dispatch so the
         // bounded VT journal cannot retain events across observe turns (#1484).
+        // Production overflow refuses new admissions and keeps Block ownership;
+        // only F06 fault-inject fail-closed ends the active output region.
         if let Some(entry) = self.entries.get_mut(&id) {
-            let overflowed = entry.execution.attribution_journal_overflowed();
+            let fail_closed = entry.execution.attribution_journal_fail_closed_overflow();
             let _ = entry.execution.drain_attribution_journal();
-            if overflowed {
+            if fail_closed {
                 entry.execution.end_native_block_output();
             }
         }

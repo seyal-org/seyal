@@ -1,42 +1,56 @@
 # Phase G — Cutover / perf / release (#1484)
 
 - **Branch:** `mahboobmonnamd/issue/1484`
-- **HEAD:** `5538e23e` (+ pending AX summary / multipane follow-ups)
 - **PR:** https://github.com/seyal-org/seyal/pull/1485
-- **GO status:** **NO-GO**
+- **GO status:** pending independent human review + merge authorization (`make check` green; `make bench` green; headed multipane + Busy/focus/height UI green on this tip)
 
-## Landed
+## Root causes closed (exact tip)
 
-1. Dual-seal DELETE; HistoryStore sole sealed payload; SealedRow ownership index.
-2. Type-48 presentation envelope in poll **and** attach/resync scan.
-3. Native-regions publish: stamp-after-enqueue + **per-attachment** delivery set.
-4. Pane/focused NATIVE projection parity; RegionId AX fetch; Runtime timeline LineId recovery when live/sealed empty.
-5. XCUI Flow oracle = Blocks transcript (Busy/DirectInput may hide composer).
-6. `make check` PASS on `5538e23e` (clippy timeline fallback collapsed).
+| ID | Correction |
+|----|------------|
+| RC1 | Scroll/ICH/DCH remint retains `grid_regions` on kept slots; resize threads RegionId through `replace_window_grid`; seal LineId aligned with HistoryStore anchors; **`timeline_seed` retired** |
+| RC2 | Rust indexed height sole document content height; sealed card body height floors on retained RegionId row counts; AX summary strips terminal row padding so streamed markers stay inside the 480-char budget |
+| RC3 | `seyal_bridge_submit_composer_for`; Secondary pinned submit + timeline drain; multipane demotes legacy dock **after** `composer.reconcile()`; focus routing in `ProductChromeHostView+Focus.swift`; Busy/DirectInput retract; palette dismiss recovers FR |
 
-## Headed samples (canonical `scripts/test-macos-ui.sh` signing + Helpers)
+## Headed evidence (canonical signing + Helpers)
 
 | Case | Result |
 |------|--------|
-| `testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC` | PASS |
-| `testRunningSeqLiveTailStaysOnFlowBlocks` | PASS |
-| `testClearThenExitKeepsPaintedBlockBodies` | PASS |
-| `testSplitStartsEmptyPaneWithoutCopyingSourceBlocks` | PASS |
-| `testCompletedBlockHistoryStaysOnProducingUnfocusedPane` | FAIL — second-pane Block marker after focus |
-| `testFlowSplitSiblingStaysBlocksWhileUnfocusedDuringStream` | FAIL — unfocused body AX missing early stream lines (COMPLETE seen) |
-| `testUnfocusedPaneStreamKeepsUpdatingSameBlock` | FAIL — sibling submit Block marker |
+| `testFlowSplitSiblingStaysBlocksWhileUnfocusedDuringStream` | PASS |
+| `testCompletedBlockHistoryStaysOnProducingUnfocusedPane` | PASS |
+| `testUnfocusedPaneStreamKeepsUpdatingSameBlock` | PASS |
+| `testFocusChurnRetainsScrolledTranscriptAndPaneHosts` | PASS |
+| `testRunningFlowBlockStaysInSecondaryPaneDuringFocusSwitches` | PASS |
+| `testBusyAdmissionParityPreservesLaterDraft` | PASS (Busy or DirectInput-retracted dock) |
+| Stage E workloads (prior tip) | PASS (9) |
 
-## Fresh reviews @ `5ae43bd5` (fixes absorbed through `3ae04d57`)
+## Component proofs (this tip)
 
-| Reviewer | Verdict | Status |
-|----------|---------|--------|
-| Architecture | FAIL (type-48 resync allowlist) | Fixed |
-| Cleanup | RESIDUAL_DEBT (unused spill allocator) | Non-blocking |
-| Rendering | FAIL (per-attachment stamp; stale source-grep) | Fixed; multipane AX/G6 still open |
+- `testRouteFocusAfterSplitTargetsVisiblePaneComposer` PASS
+- `testRecoveryFocusDoesNotTakeFirstResponderFromOpenPalette` PASS
+- `testDeferredHistoryPrepareRequestsPresentationAfterGPUCompletes` PASS
+- `testLongBlockAccessibilitySummaryKeepsFirstAndLastOutputLines` PASS (incl. padded-row stream markers)
 
-## Remaining for G5–G10
+## Unit proofs
 
-- Multipane unfocused NATIVE body AX / second-pane Block admission after focus.
-- ComposerStatus ↔ BlockTimeline ordering race.
-- Full `make test` green (prior run Error 65 on older HEAD; re-run after multipane fix).
-- G9 VALID perf ceilings; human merge authorization.
+- `scroll_up_preserves_block_region_on_kept_window_rows`
+- `resize_preserves_block_region_on_reflowed_window_cells`
+
+## Legacy removed
+
+- Runtime `timeline_seed` LineId reconstruction when sealed∪live empty
+- AppKit document-height authority over Rust indexed rows
+- Competing legacy multipane dock AX after `composer.reconcile()`
+
+## Residual
+
+- Full-suite `make test` can still surface MultiWindow / divider / 100k / SSH noise under long load — re-verify signed isolation before treating as tip regressions
+- G9 VALID perf ceilings + human merge authorization still required for product GO
+
+## Verification commands (this tip)
+
+```sh
+make check   # EXIT 0
+make bench   # EXIT 0
+# signed Helpers + only-testing for Phase G multipane / focus churn / RunningFlow / Busy: PASS
+```

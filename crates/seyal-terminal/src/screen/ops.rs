@@ -684,11 +684,28 @@ impl Screen {
             .store
             .grid_anchors
             .copy_within(insert_at..start + cols - n, insert_at + n);
+        self.engine
+            .store
+            .grid_regions
+            .copy_within(insert_at..start + cols - n, insert_at + n);
         let blank = Cell::blank(self.pen.bg);
         self.engine.store.grid_cells[insert_at..insert_at + n].fill(blank);
         self.engine.store.grid_anchors[insert_at..insert_at + n].fill(None);
         let region = self.engine.unstructured_region();
-        let _ = self.engine.remint_linear_range(start, start + cols, region);
+        // Remint only inserted blanks as unstructured; shifted cells keep RegionId.
+        let _ = self
+            .engine
+            .remint_linear_range(insert_at, insert_at + n, region);
+        if insert_at > start {
+            let _ = self
+                .engine
+                .remint_linear_range_retain_regions(start, insert_at);
+        }
+        if insert_at + n < start + cols {
+            let _ = self
+                .engine
+                .remint_linear_range_retain_regions(insert_at + n, start + cols);
+        }
         self.sanitize_row(row, store);
         Mutation::row(row)
     }
@@ -720,11 +737,20 @@ impl Screen {
             .store
             .grid_anchors
             .copy_within(delete_at + n..start + cols, delete_at);
+        self.engine
+            .store
+            .grid_regions
+            .copy_within(delete_at + n..start + cols, delete_at);
         let blank = Cell::blank(self.pen.bg);
         self.engine.store.grid_cells[start + cols - n..start + cols].fill(blank);
         self.engine.store.grid_anchors[start + cols - n..start + cols].fill(None);
         let region = self.engine.unstructured_region();
-        let _ = self.engine.remint_linear_range(start, start + cols, region);
+        let _ = self
+            .engine
+            .remint_linear_range_retain_regions(start, start + cols - n);
+        let _ = self
+            .engine
+            .remint_linear_range(start + cols - n, start + cols, region);
         self.sanitize_row(row, store);
         Mutation::row(row)
     }
@@ -802,6 +828,10 @@ impl Screen {
                 .store
                 .grid_anchors
                 .copy_within(src..src + len, dst);
+            self.engine
+                .store
+                .grid_regions
+                .copy_within(src..src + len, dst);
             self.line_ids
                 .copy_within(top_i + n..top_i + n + keep, top_i);
             self.row_breaks
@@ -809,6 +839,8 @@ impl Screen {
         }
 
         let blank = Cell::blank(self.pen.bg);
+        let blank_start = (bottom_i + 1 - n) * cols;
+        let blank_end = (bottom_i + 1) * cols;
         for row in 0..n {
             let row_index = bottom_i + 1 - n + row;
             let row_start = row_index * cols;
@@ -823,10 +855,16 @@ impl Screen {
             self.line_ids[row_index] = line_ids.allocate()?;
             self.row_breaks[row_index] = Some(HistoryBreakAfter::HardBreak);
         }
+        // Kept slots retain Block RegionIds; only newly blanked rows go unstructured.
         let region = self.engine.unstructured_region();
+        if keep > 0 {
+            let _ = self
+                .engine
+                .remint_linear_range_retain_regions(top_i * cols, blank_start);
+        }
         let _ = self
             .engine
-            .remint_linear_range(top_i * cols, (bottom_i + 1) * cols, region);
+            .remint_linear_range(blank_start, blank_end, region);
         Ok(Mutation::rows(top, bottom))
     }
 
@@ -870,6 +908,10 @@ impl Screen {
                 .store
                 .grid_anchors
                 .copy_within(src..src + len, dst);
+            self.engine
+                .store
+                .grid_regions
+                .copy_within(src..src + len, dst);
             for row in (0..keep).rev() {
                 self.line_ids[top_i + row + n] = self.line_ids[top_i + row];
                 self.row_breaks[top_i + row + n] = self.row_breaks[top_i + row];
@@ -877,6 +919,8 @@ impl Screen {
         }
 
         let blank = Cell::blank(self.pen.bg);
+        let blank_start = top_i * cols;
+        let blank_end = (top_i + n) * cols;
         for row in 0..n {
             let row_index = top_i + row;
             let row_start = row_index * cols;
@@ -890,7 +934,12 @@ impl Screen {
         let region = self.engine.unstructured_region();
         let _ = self
             .engine
-            .remint_linear_range(top_i * cols, (bottom_i + 1) * cols, region);
+            .remint_linear_range(blank_start, blank_end, region);
+        if keep > 0 {
+            let _ = self
+                .engine
+                .remint_linear_range_retain_regions(blank_end, (bottom_i + 1) * cols);
+        }
         Ok(Mutation::rows(top, bottom))
     }
 

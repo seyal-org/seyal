@@ -138,8 +138,9 @@ pub use errors::{
 pub use input::{
     seyal_bridge_copied_text, seyal_bridge_copied_text_consume, seyal_bridge_mouse_cell,
     seyal_bridge_propose_geometry, seyal_bridge_retry_resize, seyal_bridge_submit_composer,
-    seyal_bridge_submit_host_search, seyal_bridge_submit_host_selection, seyal_bridge_submit_key,
-    seyal_bridge_submit_mouse, seyal_bridge_submit_paste, seyal_bridge_submit_utf8,
+    seyal_bridge_submit_composer_for, seyal_bridge_submit_host_search,
+    seyal_bridge_submit_host_selection, seyal_bridge_submit_key, seyal_bridge_submit_mouse,
+    seyal_bridge_submit_paste, seyal_bridge_submit_utf8,
 };
 #[allow(unused_imports)]
 pub use launch_policy::{
@@ -186,7 +187,7 @@ pub(crate) fn set_focused_display_handle(handle: u64) {
     FOCUSED_DISPLAY_HANDLE.with(|focused| focused.set(handle));
 }
 
-fn focused_display_handle_if_live() -> u64 {
+pub(crate) fn focused_display_handle_if_live() -> u64 {
     let focused = FOCUSED_DISPLAY_HANDLE.with(Cell::get);
     if focused != 0 && with_client(focused, |_| ()).is_some() {
         focused
@@ -445,8 +446,8 @@ mod adversarial_ffi_misuse_tests {
     use super::{
         seyal_bridge_adopt_handle, seyal_bridge_disconnect_handle, seyal_bridge_frame,
         seyal_bridge_poll, seyal_bridge_select, seyal_bridge_set_runtime_dir,
-        seyal_bridge_submit_composer, seyal_bridge_submit_paste, seyal_bridge_submit_utf8,
-        SeyalPreparedFrame,
+        seyal_bridge_submit_composer, seyal_bridge_submit_composer_for, seyal_bridge_submit_paste,
+        seyal_bridge_submit_utf8, SeyalPreparedFrame,
     };
 
     #[test]
@@ -471,6 +472,10 @@ mod adversarial_ffi_misuse_tests {
     fn submit_composer_rejects_null_or_empty() {
         assert_eq!(unsafe { seyal_bridge_submit_composer(ptr::null(), 0) }, -4);
         assert_eq!(unsafe { seyal_bridge_submit_composer(ptr::null(), 3) }, -4);
+        assert_eq!(
+            unsafe { seyal_bridge_submit_composer_for(0, ptr::null(), 0) },
+            -4
+        );
     }
 
     #[test]

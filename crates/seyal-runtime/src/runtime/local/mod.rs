@@ -27,6 +27,7 @@ mod delivery;
 mod display_publish;
 mod disposition;
 mod history_blocks;
+mod native_block_rows;
 mod ingress;
 mod listener;
 mod provisioning;

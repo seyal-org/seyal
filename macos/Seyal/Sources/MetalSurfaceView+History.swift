@@ -18,17 +18,36 @@ extension MetalSurfaceView {
   }
 
   func retainHistoryRange(_ range: NativeHistoryRange) {
-    historyRanges[
-      PaneBlockKey(
+    // Key under the reply handle and under 0 so transcript publishes that use
+    // either activeBlockDisplayHandle or a legacy 0 handle still find the
+    // retain (blank Metal bodies with AX text — #1484 100k OCR).
+    let handles: [UInt64] = range.sourceDisplayHandle == 0
+      ? [0]
+      : [range.sourceDisplayHandle, 0]
+    for handle in handles {
+      let key = PaneBlockKey(
         paneID: paneID,
-        displayHandle: range.sourceDisplayHandle,
+        displayHandle: handle,
         blockID: range.blockID
       )
-    ] = range
+      // Monotonic retain: a shorter Complete must never erase a richer body for
+      // the same Pane/Block (four-pane MP0 short on-window overwrite — #1484).
+      if let existing = historyRanges[key], existing.rows.count > range.rows.count {
+        continue
+      }
+      historyRanges[key] = range
+    }
   }
 
   func retainedHistoryRange(blockID: UInt64, displayHandle: UInt64 = 0) -> NativeHistoryRange? {
-    historyRanges[PaneBlockKey(paneID: paneID, displayHandle: displayHandle, blockID: blockID)]
+    let exact = PaneBlockKey(paneID: paneID, displayHandle: displayHandle, blockID: blockID)
+    if let range = historyRanges[exact] { return range }
+    if displayHandle != 0 {
+      return historyRanges[PaneBlockKey(paneID: paneID, displayHandle: 0, blockID: blockID)]
+    }
+    return historyRanges.first(where: {
+      $0.key.paneID == paneID && $0.key.blockID == blockID
+    })?.value
   }
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {

@@ -139,7 +139,11 @@ impl LocalDisplayClient {
                         }
                         .map_err(|_| ClientError::Protocol)?;
                         if timeline.revision >= self.block_timeline.revision {
-                            metadata_changed = timeline.revision > self.block_timeline.revision;
+                            // OR-assign: a later same-revision frame in this
+                            // poll must not clear an earlier metadata bump
+                            // (e.g. type-48 native regions) or primary drain
+                            // skips onRegistryHandlePolled (#1484 original pane).
+                            metadata_changed |= timeline.revision > self.block_timeline.revision;
                             let retained =
                                 timeline.records.iter().map(|record| record.id).collect();
                             self.purge_history_for_blocks(&retained);

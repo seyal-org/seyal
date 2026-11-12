@@ -1,7 +1,14 @@
 //! Ordered attribution journal (StreamSequence + UnitVersion).
 //!
-//! Production capacity must cover one full reactor read (16 KiB). Artificially
-//! smaller capacities are F06 fault-injection only and are exempt from F05.
+//! Production capacity must cover one full reactor read plus marker/rewrite
+//! margin. When a burst still exceeds that window, production refuses the new
+//! event (no silent drops of prior markers/mutations — F06) and keeps Block VT
+//! ownership; the refused write stays on the active region without forged
+//! journal admission (F05). Artificially smaller capacities are F06
+//! fault-injection only (exempt F05): overflow classifies unresolved ownership
+//! as Unstructured.
+
+use std::collections::VecDeque;
 
 use super::types::{BlockId, CellHandle, RegionId};
 use crate::LineId;
@@ -57,7 +64,7 @@ pub(crate) enum JournalOverflowPolicy {
 pub(crate) struct AttributionJournal {
     next_sequence: u64,
     capacity: usize,
-    events: Vec<PrimaryEvent>,
+    events: VecDeque<PrimaryEvent>,
     policy: JournalOverflowPolicy,
     overflowed: bool,
 }
@@ -67,7 +74,7 @@ impl AttributionJournal {
         Self {
             next_sequence: 1,
             capacity,
-            events: Vec::with_capacity(capacity),
+            events: VecDeque::with_capacity(capacity),
             policy: JournalOverflowPolicy::ProductionUnreachable,
             overflowed: false,
         }
@@ -77,7 +84,7 @@ impl AttributionJournal {
         Self {
             next_sequence: 1,
             capacity,
-            events: Vec::with_capacity(capacity),
+            events: VecDeque::with_capacity(capacity),
             policy: JournalOverflowPolicy::FaultInject,
             overflowed: false,
         }
@@ -92,9 +99,32 @@ impl AttributionJournal {
     pub(crate) fn push(&mut self, event: PrimaryEvent) -> Result<(), ()> {
         if self.events.len() >= self.capacity {
             self.overflowed = true;
+            // Both policies refuse the new event and retain prior journal
+            // contents. FaultInject callers fail-closed ownership; production
+            // callers keep Block ownership without silent marker/event drops.
             return Err(());
         }
-        self.events.push(event);
+        self.events.push_back(event);
+        Ok(())
+    }
+
+    /// Admit a shell boundary when at capacity by dropping oldest CellMutation
+    /// events only. ShellBoundaryCandidate entries are never dropped (F06).
+    pub(crate) fn push_shell_boundary(&mut self, event: PrimaryEvent) -> Result<(), ()> {
+        debug_assert!(matches!(event, PrimaryEvent::ShellBoundaryCandidate { .. }));
+        while self.events.len() >= self.capacity {
+            match self.events.front() {
+                Some(PrimaryEvent::CellMutation { .. }) => {
+                    self.overflowed = true;
+                    self.events.pop_front();
+                }
+                _ => {
+                    self.overflowed = true;
+                    return Err(());
+                }
+            }
+        }
+        self.events.push_back(event);
         Ok(())
     }
 
@@ -106,11 +136,20 @@ impl AttributionJournal {
         self.policy
     }
 
-    pub(crate) fn drain(&mut self) -> Vec<PrimaryEvent> {
-        std::mem::take(&mut self.events)
+    /// F06 fault-inject: overflow must fail-closed to Unstructured. Production
+    /// overflow refuses journal admission but must not end Block ownership (#1484).
+    pub(crate) fn fail_closed_on_overflow(&self) -> bool {
+        self.overflowed && matches!(self.policy, JournalOverflowPolicy::FaultInject)
     }
 
-    pub(crate) fn events(&self) -> &[PrimaryEvent] {
+    pub(crate) fn drain(&mut self) -> Vec<PrimaryEvent> {
+        // Clear the sticky flag after Runtime has observed this window so a
+        // single tall burst cannot re-trigger fail-closed on every later turn.
+        self.overflowed = false;
+        self.events.drain(..).collect()
+    }
+
+    pub(crate) fn events(&self) -> &VecDeque<PrimaryEvent> {
         &self.events
     }
 }

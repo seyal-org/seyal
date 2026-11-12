@@ -194,6 +194,36 @@ pub unsafe extern "C" fn seyal_bridge_submit_composer(bytes: *const u8, len: u32
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
+/// Submit a composer command on a named Controller handle (pane-scoped).
+///
+/// Multipane must not route sibling submit through process-wide
+/// `FOCUSED_DISPLAY_HANDLE` alone (#1484 / G8).
+///
+/// # Safety
+/// Same byte contract as [`seyal_bridge_submit_composer`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn seyal_bridge_submit_composer_for(
+    handle: u64,
+    bytes: *const u8,
+    len: u32,
+) -> i32 {
+    if handle == 0 || len == 0 || bytes.is_null() {
+        return -4;
+    }
+    let Ok(len) = usize::try_from(len) else {
+        return -11;
+    };
+    let bytes = unsafe { slice::from_raw_parts(bytes, len) };
+    let Ok(command) = str::from_utf8(bytes) else {
+        return -4;
+    };
+    // Also claim FOCUSED_DISPLAY_HANDLE for this Controller so any concurrent
+    // focused-path readers during drain match pane-scoped admission (#1484 G8).
+    super::set_focused_display_handle(handle);
+    with_client_mut(handle, |client| client.submit_composer_command(command))
+        .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
+}
+
 /// Submit one M001 logical terminal key. `kind` uses SPEC-006 key-kind values;
 /// only ControlAscii carries a nonzero `scalar`.
 #[unsafe(no_mangle)]

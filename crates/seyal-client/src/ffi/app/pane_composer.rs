@@ -373,9 +373,12 @@ pub extern "C" fn seyal_app_block_projection_for_pane(
                     })
                     .map(|record| {
                         let (reserved0, reserved1) = if record.row_count > 0 {
-                            (record.first_row, u32::from(record.row_count))
+                            (
+                                record.first_row,
+                                u32::from(record.row_count).max(record.sealed_rows),
+                            )
                         } else {
-                            (u16::MAX, u32::from(record.sealed_rows))
+                            (u16::MAX, record.sealed_rows)
                         };
                         SeyalAppBlockProjection {
                             kind: SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS,
