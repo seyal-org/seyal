@@ -318,7 +318,8 @@ extension SecondaryLivePaneHost {
                 return 1
             }
             return Int(min(projection.end_line - projection.start_line + 1, 512))
-        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP):
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
+             UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS):
             return max(Int(projection.reserved1), 1)
         default:
             return 1
@@ -326,6 +327,8 @@ extension SecondaryLivePaneHost {
     }
 
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
+        // NATIVE_REGIONS paint via publishLiveTailBlocks (primary-frame clip);
+        // do not open per-Block history IPC.
         guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
               projection.start_line > 0,
               projection.end_line >= projection.start_line,
@@ -404,12 +407,14 @@ extension SecondaryLivePaneHost {
                 UInt32(index)
             )
             guard row.id_lo != 0,
-                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
-                  projection.start_line > 0,
-                  projection.reserved1 > 0
+                  projection.reserved1 > 0,
+                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+                    || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
             else { continue }
+            // PRIMARY_CLIP: startLine is ViewportLineId. NATIVE_REGIONS: header
+            // RegionId (must be non-zero); firstRow/rowCount clip the primary frame.
             live[row.id_lo] = LiveTailClip(
-                startLine: projection.start_line,
+                startLine: max(projection.start_line, 1),
                 firstRow: projection.reserved0,
                 rowCount: UInt16(min(projection.reserved1, UInt32(UInt16.max)))
             )
@@ -528,8 +533,12 @@ extension SecondaryLivePaneHost {
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
         let hasCards = !blockCards.isEmpty
-        let contentHeight = transcriptCardsContentHeight()
-        let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
+        let cardHeight = transcriptCardsContentHeight()
+        let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
+        let cellHeight = surface.terminalPresentationCellSize().height
+        let rustFloor = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
+        let contentHeight = max(cardHeight, rustFloor)
+        let viewportHeight = hasCards || rustFloor > 0 ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
         let spacers = TranscriptDocumentSizing.spacerHeights(

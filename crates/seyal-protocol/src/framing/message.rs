@@ -11,9 +11,9 @@ use super::payload::{
 };
 use super::presentation::{ResumeDelivery, SuspendDelivery};
 use super::{
-    BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus, ComposerTarget,
-    HistoryRangeRequest, HistoryRangeSnapshot, ResizeRequest, ResizeResult, SessionConsent,
-    SessionOffer, SessionStatus, TerminalKey, TerminalKeyV2, ViewportLineIds,
+    BlockNativeRegions, BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus,
+    ComposerTarget, HistoryRangeRequest, HistoryRangeSnapshot, ResizeRequest, ResizeResult,
+    SessionConsent, SessionOffer, SessionStatus, TerminalKey, TerminalKeyV2, ViewportLineIds,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +86,8 @@ pub enum MessageType {
     MintWorkspaceRequest = 46,
     /// ADR-028 interim: mint-workspace result.
     MintWorkspaceResult = 47,
+    /// #1484: Runtime→client BlockId → RegionId map (`CAP_NATIVE_BLOCK_REGIONS`).
+    BlockNativeRegions = 48,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -136,6 +138,7 @@ impl MessageType {
             45 => Self::ComposerTarget,
             46 => Self::MintWorkspaceRequest,
             47 => Self::MintWorkspaceResult,
+            48 => Self::BlockNativeRegions,
             _ => return None,
         })
     }
@@ -189,6 +192,7 @@ pub enum Message<'a> {
     ComposerTarget(ComposerTarget),
     MintWorkspaceRequest(MintWorkspaceRequest),
     MintWorkspaceResult(MintWorkspaceResult),
+    BlockNativeRegions(BlockNativeRegions),
 }
 
 pub fn decode_message<'a>(
@@ -274,6 +278,9 @@ pub fn decode_message<'a>(
         }
         MessageType::MintWorkspaceResult => {
             Message::MintWorkspaceResult(MintWorkspaceResult::decode(payload)?)
+        }
+        MessageType::BlockNativeRegions => {
+            Message::BlockNativeRegions(BlockNativeRegions::decode(payload)?)
         }
     })
 }

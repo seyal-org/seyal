@@ -60,7 +60,7 @@ impl Screen {
             // column-only resize cannot eat scrollback spacers.
             let last_content_row = (0..old_rows).rev().find(|row| {
                 let start = usize::from(*row) * usize::from(old_cols);
-                self.cells[start..start + usize::from(old_cols)]
+                self.engine.store.grid_cells[start..start + usize::from(old_cols)]
                     .iter()
                     .any(|cell| cell.role != CellRole::Empty)
             });
@@ -82,14 +82,14 @@ impl Screen {
                 let row_start = usize::from(row) * usize::from(old_cols);
                 let break_after =
                     self.row_breaks[usize::from(row)].unwrap_or(HistoryBreakAfter::HardBreak);
-                let cells = &self.cells[row_start..row_start + usize::from(old_cols)];
+                let cells = &self.engine.store.grid_cells[row_start..row_start + usize::from(old_cols)];
                 let mut row_has_units = false;
                 for (col, cell) in cells.iter().enumerate() {
                     if cell.role != CellRole::Lead {
                         continue;
                     }
                     row_has_units = true;
-                    let anchor = self.cell_anchors[row_start + col].unwrap_or_else(|| {
+                    let anchor = self.engine.store.grid_anchors[row_start + col].unwrap_or_else(|| {
                         let line_id = self.line_ids[usize::from(row)];
                         let offset = source_offsets.entry(line_id).or_default();
                         let anchor = crate::HistoryAnchor {
@@ -298,9 +298,9 @@ impl Screen {
                 let new_start = usize::from(row) * usize::from(cols);
                 let count = usize::from(copy_cols);
                 next[new_start..new_start + count]
-                    .copy_from_slice(&self.cells[old_start..old_start + count]);
+                    .copy_from_slice(&self.engine.store.grid_cells[old_start..old_start + count]);
                 next_anchors[new_start..new_start + count]
-                    .copy_from_slice(&self.cell_anchors[old_start..old_start + count]);
+                    .copy_from_slice(&self.engine.store.grid_anchors[old_start..old_start + count]);
                 next_breaks[usize::from(row)] = self.row_breaks[usize::from(row)];
                 next_line_ids[usize::from(row)] = Some(self.line_ids[usize::from(row)]);
                 if cols < old_cols {
@@ -397,7 +397,7 @@ impl Screen {
             .filter(|cell| cell.role == CellRole::Lead)
             .map(|cell| cell.store_id)
             .collect::<HashSet<_>>();
-        for cell in &self.cells {
+        for cell in &self.engine.store.grid_cells {
             if cell.role == CellRole::Lead && !retained_store_ids.contains(&cell.store_id) {
                 Self::release_cell(*cell, store);
             }
@@ -410,8 +410,14 @@ impl Screen {
         let was_full_screen = self.region_is_full_screen();
         self.cols = prepared.cols;
         self.rows = prepared.rows;
-        self.cells = prepared.cells;
-        self.cell_anchors = prepared.cell_anchors;
+        self.engine
+            .replace_window_grid(
+                prepared.cols,
+                prepared.rows,
+                prepared.cells,
+                prepared.cell_anchors,
+            )
+            .expect("prepared resize geometry is validated");
         self.line_ids = prepared.line_ids;
         self.row_breaks = prepared.row_breaks;
         self.source_breaks = prepared.source_breaks;

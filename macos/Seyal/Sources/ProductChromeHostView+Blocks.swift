@@ -525,7 +525,8 @@ extension ProductChromeHostView {
                 return 1
             }
             return Int(min(projection.end_line - projection.start_line + 1, 512))
-        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP):
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
+             UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS):
             // Rust-owned row slice height (not the full prepared viewport).
             return max(Int(projection.reserved1), 1)
         default:
@@ -549,7 +550,8 @@ extension ProductChromeHostView {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
             guard row.id_lo != 0,
-                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
+                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+                    || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS),
                   let card = blockCards[row.id_lo]
             else { continue }
             card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
@@ -559,8 +561,9 @@ extension ProductChromeHostView {
         publishBlockOutputFrame()
     }
 
-    /// Completed Blocks request their trusted history span. Running Blocks
-    /// draw the prepared primary frame; the host never invents a history end.
+    /// Completed Blocks request history only when off-window. On-window native
+    /// Regions paint via LiveTail primary-frame clips; running Blocks use
+    /// PRIMARY_CLIP. The host never invents a history end.
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
         guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
               projection.start_line > 0,
@@ -587,12 +590,12 @@ extension ProductChromeHostView {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
             guard row.id_lo != 0,
-                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
-                  projection.start_line > 0,
-                  projection.reserved1 > 0
+                  projection.reserved1 > 0,
+                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+                    || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
             else { continue }
             live[row.id_lo] = LiveTailClip(
-                startLine: projection.start_line,
+                startLine: max(projection.start_line, 1),
                 firstRow: projection.reserved0,
                 rowCount: UInt16(min(projection.reserved1, UInt32(UInt16.max)))
             )
@@ -676,7 +679,7 @@ extension ProductChromeHostView {
         // subtracting the spacer from that stale value leaves short Blocks
         // stranded above the composer instead of bottom-docking them (#1426).
         let hasCards = !blockCards.isEmpty
-        let contentHeight = hasCards
+        let cardHeight = hasCards
             ? TranscriptDocumentSizing.contentHeight(
                 arrangedSubviews: blocks.arrangedSubviews,
                 leadingSpacer: transcriptLeadingSpacer,
@@ -684,7 +687,12 @@ extension ProductChromeHostView {
                 edgeInsets: blocks.edgeInsets
             )
             : 0
-        let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
+        // Rust indexed height is a floor (#1484); card chrome can still win.
+        let rustRows = seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle)
+        let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
+        let rustFloor = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
+        let contentHeight = max(cardHeight, rustFloor)
+        let viewportHeight = hasCards || rustFloor > 0 ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let height = max(contentHeight, viewportHeight, 1)
         let spacerHeight = max(height - contentHeight, 0)

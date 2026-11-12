@@ -5,6 +5,7 @@
 mod command_blocks;
 mod composer;
 mod history;
+mod native_regions;
 mod resize;
 mod session_bootstrap;
 mod terminal_key;
@@ -27,6 +28,9 @@ pub use history::{
     HISTORY_CELL_WIDTH_MASK, HISTORY_CELL_WIDTH_SHIFT, MAX_HISTORY_GRAPHEME_BYTES,
     MAX_HISTORY_RANGE_BYTES, MAX_HISTORY_RANGE_CELLS, MAX_HISTORY_RANGE_LINES,
     MAX_HISTORY_SIDECAR_BYTES,
+};
+pub use native_regions::{
+    BlockNativeRegions, NativeBlockRegions, CAP_NATIVE_BLOCK_REGIONS, MAX_NATIVE_REGION_RECORDS,
 };
 pub use resize::{ResizeRequest, ResizeResult, ResizeResultCode, CAP_CORRELATED_RESIZE};
 pub use session_bootstrap::{

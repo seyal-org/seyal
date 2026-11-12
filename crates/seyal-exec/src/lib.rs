@@ -42,7 +42,7 @@ pub use reactor::{
 pub use readiness::Readiness;
 pub use seyal_terminal::{
     apply_host_mouse_gesture, encode_mouse_report, mouse_event_admitted, mouse_takes_host_override,
-    CellRole, Color, CopyModeMotion, HistoryRangeError, HistoryWireCell, HostPresentationEvent,
+    Cell, CellRole, Color, CopyModeMotion, HistoryRangeError, HistoryWireCell, HostPresentationEvent,
     LineId, ModeState, MouseEventKind, MouseReport, MouseReporting, PasteError,
     PresentationPayload, ProtocolReply, SessionShellKind, ShellIntegrationEvent,
     ShellIntegrationToken, VisualPos, HISTORY_PER_EXECUTION_DERIVED_INDEX_CAP,

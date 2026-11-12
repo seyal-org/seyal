@@ -18,6 +18,7 @@ mod modes;
 mod mouse;
 mod parser;
 mod presentation;
+mod primary_blocks;
 mod protocol_reply;
 mod screen;
 mod selection;
@@ -43,6 +44,10 @@ pub use history::{
     HISTORY_RUNTIME_DERIVED_INDEX_CAP, HISTORY_SEGMENT_PAYLOAD_TARGET, HISTORY_TAIL_PAYLOAD_LIMIT,
 };
 pub use line::LineId;
+pub use primary_blocks::{
+    BlockContentRef, BlockId, CellHandle, MarkerKind, OnWindowRegionSpan, PrimaryEvent, RegionId,
+    StreamSequence, UnitVersion, VisibleBlockSpan,
+};
 pub use modes::{ModeState, MouseReporting};
 pub use mouse::{
     apply_host_mouse_gesture, encode_mouse_report, mouse_event_admitted, mouse_takes_host_override,

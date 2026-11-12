@@ -9,7 +9,8 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::{empty_cache, DisplayKind},
     local_ipc::framing::{
-        Attach, Attached, BlockTimeline, CreateExecutionRequest, CreateExecutionResult,
+        Attach, Attached, BlockNativeRegions, BlockTimeline, CreateExecutionRequest,
+        CreateExecutionResult,
         CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader, MessageType, Resync,
         Role, TerminateExecutionRequest, TerminateExecutionResult, CAP_COMMAND_BLOCKS, HEADER_LEN,
     },
@@ -819,6 +820,11 @@ impl LocalDisplayClient {
             resize_failure: None,
             block_timeline: BlockTimeline {
                 revision: 0,
+                records: Vec::new(),
+            },
+            block_native_regions: BlockNativeRegions {
+                revision: 0,
+                total_height: 0,
                 records: Vec::new(),
             },
             command_blocks_supported,

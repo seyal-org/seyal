@@ -1,9 +1,10 @@
-use seyal_exec::{Color, HistoryRangeError, LineId};
+use seyal_exec::{Cell, CellRole, Color, HistoryRangeError, HistoryWireCell, LineId};
 
 use crate::{
     local_ipc::framing::{
-        self, BlockTimeline, CommandBlock, CommandBlockState, ErrorCode, MessageType,
-        CAP_COMMAND_BLOCKS, CAP_SESSION_BOOTSTRAP,
+        self, BlockNativeRegions, BlockTimeline, CommandBlock, CommandBlockState, ErrorCode,
+        MessageType, NativeBlockRegions, CAP_COMMAND_BLOCKS, CAP_NATIVE_BLOCK_REGIONS,
+        CAP_SESSION_BOOTSTRAP,
     },
     ExecutionId,
 };
@@ -18,6 +19,115 @@ fn pack_terminal_color(color: Color) -> u32 {
             0x0200_0000 | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
         }
     }
+}
+
+/// Prefer RegionStore-owned live window cells, then sealed spill cells (#1484).
+/// Falls back to LineId history-range assembly when neither is present.
+fn live_block_wire_rows(
+    entry: &super::super::Entry,
+    block_id: u64,
+    max_lines: usize,
+) -> Option<Vec<(LineId, Vec<HistoryWireCell>)>> {
+    let output = entry
+        .block_timeline
+        .records()
+        .find(|record| record.id.raw() == block_id)
+        .and_then(|record| record.output_region)
+        .or_else(|| {
+            entry
+                .execution
+                .primary_block_content_refs()
+                .into_iter()
+                .find(|block| block.block_id.0 == block_id)
+                .map(|block| block.output.0)
+        })?;
+    let live = entry.execution.primary_live_region_cells(output);
+    let terminal = entry.execution.terminal();
+    let cols_n = terminal.cols();
+    if !live.is_empty() {
+        let mut by_row: std::collections::BTreeMap<u16, Vec<(u16, _)>> =
+            std::collections::BTreeMap::new();
+        for (col, row, cell) in live {
+            by_row.entry(row).or_default().push((col, cell));
+        }
+        return Some(pad_wire_rows(
+            by_row.into_iter().map(|(row, owned)| {
+                let line_id = terminal.line_id(row).unwrap_or(LineId(1));
+                (line_id, owned)
+            }),
+            cols_n,
+            max_lines,
+        ));
+    }
+    let sealed = entry.execution.primary_sealed_region_cells(output);
+    if sealed.is_empty() {
+        return None;
+    }
+    let mut by_line: std::collections::BTreeMap<u64, Vec<(u16, _)>> =
+        std::collections::BTreeMap::new();
+    for (line_id, col, cell) in sealed {
+        by_line.entry(line_id.0).or_default().push((col, cell));
+    }
+    Some(pad_wire_rows(
+        by_line
+            .into_iter()
+            .map(|(line, owned)| (LineId(line), owned)),
+        cols_n,
+        max_lines,
+    ))
+}
+
+fn pad_wire_rows(
+    rows: impl IntoIterator<Item = (LineId, Vec<(u16, Cell)>)>,
+    cols_n: u16,
+    max_lines: usize,
+) -> Vec<(LineId, Vec<HistoryWireCell>)> {
+    let mut out = Vec::new();
+    for (line_id, mut owned) in rows {
+        if max_lines > 0 && out.len() >= max_lines {
+            break;
+        }
+        owned.sort_by_key(|(col, _)| *col);
+        let mut wire = Vec::with_capacity(usize::from(cols_n));
+        let mut next_col = 0u16;
+        for (col, cell) in owned {
+            while next_col < col {
+                wire.push(HistoryWireCell {
+                    text: " ".into(),
+                    width: 1,
+                    style: Default::default(),
+                    continuation: false,
+                });
+                next_col = next_col.saturating_add(1);
+            }
+            match cell.role {
+                CellRole::Continuation => wire.push(HistoryWireCell {
+                    text: String::new(),
+                    width: 0,
+                    style: cell.style,
+                    continuation: true,
+                }),
+                CellRole::Lead | CellRole::Empty => wire.push(HistoryWireCell {
+                    text: cell.character.to_string(),
+                    width: cell.width.max(1),
+                    style: cell.style,
+                    continuation: false,
+                }),
+            }
+            next_col = col.saturating_add(1);
+        }
+        while next_col < cols_n {
+            wire.push(HistoryWireCell {
+                text: " ".into(),
+                width: 1,
+                style: Default::default(),
+                continuation: false,
+            });
+            next_col = next_col.saturating_add(1);
+        }
+        out.push((line_id, wire));
+    }
+    out
 }
 
 impl Runtime {
@@ -55,43 +165,48 @@ impl Runtime {
         };
         let max_lines = usize::from(request.max_lines);
         let revision = entry.execution.terminal().damage_generation();
-        let rows = match entry.execution.terminal().primary_history_wire_range(
-            LineId(request.start_line),
-            LineId(request.end_line),
-            max_lines,
-            request.start_unit,
-        ) {
-            Ok(rows) => rows,
-            Err(HistoryRangeError::Unrepresentable) => {
-                self.send_error(
-                    token,
-                    ErrorCode::DisplayUnavailable,
-                    MessageType::HistoryRangeRequest as u16,
-                );
-                return;
-            }
-            Err(HistoryRangeError::Stale) => {
-                let snapshot = framing::HistoryRangeSnapshot {
-                    request_id: request.request_id,
-                    block_id: request.block_id,
-                    revision,
-                    status: framing::HistoryRangeStatus::Stale,
-                    rows: Vec::new(),
-                    sidecar: Vec::new(),
-                };
-                let Ok(payload) = snapshot.try_encode() else {
+        let rows = if let Some(live_rows) = live_block_wire_rows(entry, request.block_id, max_lines)
+        {
+            live_rows
+        } else {
+            match entry.execution.terminal().primary_history_wire_range(
+                LineId(request.start_line),
+                LineId(request.end_line),
+                max_lines,
+                request.start_unit,
+            ) {
+                Ok(rows) => rows,
+                Err(HistoryRangeError::Unrepresentable) => {
                     self.send_error(
                         token,
-                        ErrorCode::CapacityExceeded,
+                        ErrorCode::DisplayUnavailable,
                         MessageType::HistoryRangeRequest as u16,
                     );
                     return;
-                };
-                let _ = self.send_mandatory_frame(
-                    token,
-                    framing::encode_frame(MessageType::HistoryRangeSnapshot, &payload),
-                );
-                return;
+                }
+                Err(HistoryRangeError::Stale) => {
+                    let snapshot = framing::HistoryRangeSnapshot {
+                        request_id: request.request_id,
+                        block_id: request.block_id,
+                        revision,
+                        status: framing::HistoryRangeStatus::Stale,
+                        rows: Vec::new(),
+                        sidecar: Vec::new(),
+                    };
+                    let Ok(payload) = snapshot.try_encode() else {
+                        self.send_error(
+                            token,
+                            ErrorCode::CapacityExceeded,
+                            MessageType::HistoryRangeRequest as u16,
+                        );
+                        return;
+                    };
+                    let _ = self.send_mandatory_frame(
+                        token,
+                        framing::encode_frame(MessageType::HistoryRangeSnapshot, &payload),
+                    );
+                    return;
+                }
             }
         };
         // VT already caps at max_lines. A full window means more in-range
@@ -301,6 +416,86 @@ impl Runtime {
                 legacy_frame.clone()
             };
             let _ = self.send_attachment_after_display_frame(token, attachment_id, frame);
+        }
+        self.publish_block_native_regions(execution_id);
+    }
+
+    /// Publish BlockId → RegionId map (+ on-window row spans) to peers that
+    /// negotiated the capability. Bumps `native_regions_revision` so display
+    /// and timeline publishes stay ordered.
+    pub(in crate::runtime) fn publish_block_native_regions(&mut self, execution_id: ExecutionId) {
+        let Some(entry) = self.entries.get_mut(&execution_id) else {
+            return;
+        };
+        entry.native_regions_revision = entry.native_regions_revision.saturating_add(1);
+        let revision = entry.native_regions_revision;
+        let on_window: std::collections::HashMap<u64, (u16, u16)> = entry
+            .execution
+            .primary_on_window_region_spans()
+            .into_iter()
+            .map(|span| (span.block_id.0, (span.first_row, span.row_count)))
+            .collect();
+        let records: Vec<NativeBlockRegions> = entry
+            .block_timeline
+            .records()
+            .filter_map(|record| {
+                let (first_row, row_count) = on_window
+                    .get(&record.id.raw())
+                    .copied()
+                    .unwrap_or((0, 0));
+                Some(NativeBlockRegions {
+                    block_id: record.id.raw(),
+                    header_region: record.header_region?,
+                    output_region: record.output_region?,
+                    first_row,
+                    row_count,
+                })
+            })
+            .collect();
+        if records.is_empty() {
+            return;
+        }
+        let total_height = entry.execution.primary_viewport_total_height();
+        let map = BlockNativeRegions {
+            revision,
+            total_height,
+            records,
+        };
+        let Ok(payload) = map.try_encode() else {
+            return;
+        };
+        let frame = framing::encode_frame(MessageType::BlockNativeRegions, &payload);
+        let targets = self
+            .local_ipc
+            .as_ref()
+            .map(|state| {
+                state
+                    .connections
+                    .iter()
+                    .flat_map(|(&token, meta)| {
+                        if meta.client_capabilities & CAP_NATIVE_BLOCK_REGIONS == 0 {
+                            return Vec::new();
+                        }
+                        state
+                            .attachments
+                            .attachments_on_connection(token)
+                            .into_iter()
+                            .filter(|attachment| {
+                                state.attachments.execution_of(*attachment).ok()
+                                    == Some(execution_id)
+                                    && state.attachments.delivery_of(*attachment).ok()
+                                        == Some(
+                                            crate::local_ipc::attachment::DeliveryState::Delivering,
+                                        )
+                            })
+                            .map(|attachment| (token, attachment))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for (token, attachment_id) in targets {
+            let _ = self.send_attachment_after_display_frame(token, attachment_id, frame.clone());
         }
     }
 }

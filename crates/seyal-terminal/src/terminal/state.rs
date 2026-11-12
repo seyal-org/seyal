@@ -254,6 +254,92 @@ impl TerminalState {
         self.core.shell_events.pop_front()
     }
 
+    /// After Runtime accepts a trusted CommandStart, direct subsequent primary
+    /// VT writes into a Block-owned output region (ADR-009 native Blocks).
+    /// Returns `(header_region, output_region)`.
+    pub fn begin_native_block_output(&mut self, block_id: u64) -> Result<(u64, u64), TerminalError> {
+        use crate::primary_blocks::types::BlockId;
+        self.core
+            .primary
+            .engine
+            .begin_block_output(BlockId(block_id))
+            .map(|block| (block.header.0, block.output.0))
+    }
+
+    /// After CommandFinished / ambiguity, end the innermost Block output region
+    /// (restoring a nested outer region when present).
+    pub fn end_native_block_output(&mut self) {
+        self.core.primary.engine.end_block_output();
+    }
+
+    /// Drop a provisional CommandStart arm that never became a Block.
+    pub fn cancel_pending_native_output(&mut self) {
+        self.core.primary.engine.cancel_pending_output();
+    }
+
+    /// Current VT write ownership region (native Block output or unstructured).
+    pub fn native_active_region(&self) -> u64 {
+        self.core.primary.engine.active_region().0
+    }
+
+    /// Drain ordered attribution events for one Runtime observe turn.
+    pub fn drain_attribution_journal(&mut self) -> Vec<crate::PrimaryEvent> {
+        self.core.primary.engine.journal.drain()
+    }
+
+    pub fn attribution_journal_overflowed(&self) -> bool {
+        self.core.primary.engine.journal.overflowed()
+    }
+
+    /// Direct BlockId → RegionId content handles for Flow (no history-range assembly).
+    pub fn primary_block_content_refs(&self) -> Vec<crate::BlockContentRef> {
+        self.core.primary.engine.block_content_refs()
+    }
+
+    /// Live primary-window cells for one RegionId (bounded to current VT window).
+    pub fn primary_live_region_cells(
+        &self,
+        region_id: u64,
+    ) -> Vec<(u16, u16, crate::Cell)> {
+        self.core
+            .primary
+            .engine
+            .live_region_cells(crate::RegionId(region_id))
+    }
+
+    /// Sealed spill cells for one RegionId as `(line_id, col, cell)`.
+    pub fn primary_sealed_region_cells(
+        &self,
+        region_id: u64,
+    ) -> Vec<(crate::LineId, u16, crate::Cell)> {
+        self.core
+            .primary
+            .engine
+            .sealed_region_cells(crate::RegionId(region_id))
+    }
+
+    /// Indexed Flow viewport: Blocks intersecting `[y, y + window_rows)`.
+    pub fn primary_visible_block_spans(
+        &self,
+        y: u64,
+        window_rows: u32,
+    ) -> Vec<crate::VisibleBlockSpan> {
+        self.core
+            .primary
+            .engine
+            .visible_block_spans(y, window_rows)
+    }
+
+    /// Total presentation-row height of the indexed Block list.
+    pub fn primary_viewport_total_height(&self) -> u64 {
+        self.core.primary.engine.viewport_total_height()
+    }
+
+    /// Contiguous live-window output spans for each Block (row_count 0 = off-window).
+    pub fn primary_on_window_region_spans(&self) -> Vec<crate::OnWindowRegionSpan> {
+        self.core.primary.engine.on_window_region_spans()
+    }
+
     /// Transfers one bounded, untrusted host-presentation event (OSC title/CWD/hyperlink).
     /// Embedders must treat payloads as display-only input, never as host authority.
     pub fn take_host_presentation_event(&mut self) -> Option<HostPresentationEvent> {

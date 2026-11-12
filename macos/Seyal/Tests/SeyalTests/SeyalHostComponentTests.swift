@@ -37,6 +37,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalAppBlockProjection>.size, 24)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED), 0)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY), 1)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS), 3)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP), 2)
         let emptySpan = seyal_app_block_span(handle, 0)
         XCTAssertEqual(emptySpan.start_line, 0)
@@ -5501,6 +5502,49 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(unbound.end_line, 0)
         XCTAssertEqual(unbound.reserved0, 0)
         XCTAssertEqual(unbound.reserved1, 0)
+    }
+
+    func testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC() throws {
+        // #1484 Phase D: on-window completed Blocks use NATIVE_REGIONS → LiveTailClip.
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let chrome = try String(
+            contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift"),
+            encoding: .utf8
+        )
+        let flow = try String(
+            contentsOf: sourceRoot.appendingPathComponent("SecondaryLivePaneHost+Flow.swift"),
+            encoding: .utf8
+        )
+        for text in [chrome, flow] {
+            XCTAssertTrue(
+                text.contains("SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS"),
+                "Flow hosts must recognize NATIVE_REGIONS"
+            )
+            XCTAssertTrue(
+                text.contains("NATIVE_REGIONS")
+                    && text.contains("publishLiveTailBlocks"),
+                "NATIVE_REGIONS must feed the batched LiveTail path"
+            )
+            let applyRange = text.range(of: "func applyBlockOutputProjection")
+            XCTAssertNotNil(applyRange)
+            if let applyRange {
+                let applyEnd = text[applyRange.lowerBound...].range(of: "\n    func ")?.lowerBound
+                    ?? text.endIndex
+                let body = text[applyRange.lowerBound..<applyEnd]
+                XCTAssertTrue(
+                    body.contains("SEYAL_APP_BLOCK_PROJECTION_HISTORY"),
+                    "history IPC remains only for HISTORY projections"
+                )
+                XCTAssertFalse(
+                    body.contains("SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS")
+                        && body.contains("requestHistoryRange"),
+                    "NATIVE_REGIONS must not open per-Block history IPC"
+                )
+            }
+        }
     }
 
     @MainActor

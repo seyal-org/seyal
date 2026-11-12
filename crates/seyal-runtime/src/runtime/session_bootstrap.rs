@@ -565,6 +565,17 @@ fn apply_session_effects(entry: &mut Entry, event: IntegrationEvent) -> bool {
                     .start_session(pending.block_id, pending.command, line.0, host)
                     .is_ok()
                 {
+                    // Same native RegionId open as the local trusted path (#1484).
+                    if let Ok((header, output)) = entry
+                        .execution
+                        .begin_native_block_output(pending.block_id.raw())
+                    {
+                        let _ = entry.block_timeline.set_native_regions(
+                            pending.block_id,
+                            header,
+                            output,
+                        );
+                    }
                     entry.session_runtime.integration = entry
                         .session_runtime
                         .integration
@@ -574,8 +585,10 @@ fn apply_session_effects(entry: &mut Entry, event: IntegrationEvent) -> bool {
             }
             Effect::DropPending => {
                 entry.session_runtime.pending = None;
+                entry.execution.cancel_pending_native_output();
             }
             Effect::Complete(block_id, exit, line) => {
+                entry.execution.end_native_block_output();
                 changed |=
                     super::shell_integration::complete_timeline_block(entry, block_id, exit, line);
             }

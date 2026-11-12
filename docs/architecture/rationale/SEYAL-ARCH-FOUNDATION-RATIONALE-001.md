@@ -73,15 +73,24 @@ Future ADRs that change a foundation rule should cite the relevant `R-xxx` recor
 
 ## Blocks, TUI and history
 
-### R-006 — Blocks do not own PTYs or terminal grids
+### R-006 — Blocks do not own independent PTY/VT engines
 
-**Decision:** Blocks are execution/history metadata and presentation structure.
+**Decision:** Block **timeline** metadata remains Runtime/workspace structure keyed by
+`ExecutionId`. Accepted ADR-009 native-Block target (#1480 / #1482) allows Blocks to
+own RegionGrid **content** inside one `PrimaryBlockEngine` / `RegionStore` with a
+non-owning `VTWindowMap`. Blocks still must not own an independent PTY, parser,
+mode/cursor engine, child, renderer, or copied transcript.
 
-**Why:** a command boundary is semantic metadata over one terminal stream; creating a terminal per Block would break raw-mode continuity and explode memory.
+**Why:** a command boundary is semantic structure over one terminal stream; creating a
+terminal engine per Block would break raw-mode continuity and explode memory. RegionGrids
+inside one VT authority preserve structured UX without a second engine.
 
-**Failure prevented:** Warp-like structured UX accidentally becoming many terminal engines.
+**Failure prevented:** Warp-like structured UX accidentally becoming many terminal engines;
+also forbids treating history-range cards as the permanent content model once native
+Blocks are cut over.
 
-**Reopen only if:** a future Block represents a genuinely separate execution, in which case it references a separate `ExecutionId` explicitly.
+**Reopen only if:** a future Block represents a genuinely separate execution, in which
+case it references a separate `ExecutionId` explicitly.
 
 ### R-007 — Alternate-screen/TUI remains raw terminal state
 

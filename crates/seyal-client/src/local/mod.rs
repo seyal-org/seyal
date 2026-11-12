@@ -21,11 +21,11 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::DisplayCache,
     local_ipc::framing::{
-        encode_frame, BlockTimeline, ComposerEligibility, ComposerResult, ComposerResultCode,
-        ComposerStatus, ComposerTarget, ComposerTargetMode, CreateExecutionResult, ErrorCode,
-        ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot, Lifecycle, MessageType, Role,
-        SessionOffer, SessionOverlayWire, SessionStatus, TerminateExecutionResult, HEADER_LEN,
-        MAX_FRAME_PAYLOAD,
+        encode_frame, BlockNativeRegions, BlockTimeline, ComposerEligibility, ComposerResult,
+        ComposerResultCode, ComposerStatus, ComposerTarget, ComposerTargetMode,
+        CreateExecutionResult, ErrorCode, ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot,
+        Lifecycle, MessageType, Role, SessionOffer, SessionOverlayWire, SessionStatus,
+        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::BlockState,
     AttachmentId, ExecutionId,
@@ -146,6 +146,8 @@ pub struct LocalDisplayClient {
     pub(crate) input_failure: Option<InputAdmissionFailure>,
     pub(crate) resize_failure: Option<ResizeFailure>,
     pub(crate) block_timeline: BlockTimeline,
+    /// Latest native Block RegionId map (#1484). Empty until Runtime publishes.
+    pub(crate) block_native_regions: BlockNativeRegions,
     pub(crate) command_blocks_supported: bool,
     pub(crate) last_composer_result: Option<ComposerResult>,
     /// Latest Runtime-published composer eligibility for this attachment
@@ -284,6 +286,10 @@ impl LocalDisplayClient {
 
     /// Read-only, bounded Runtime metadata. The terminal display cache remains
     /// independent and authoritative for cells/pixels.
+    pub fn block_native_regions(&self) -> &BlockNativeRegions {
+        &self.block_native_regions
+    }
+
     pub fn block_timeline(&self) -> &BlockTimeline {
         &self.block_timeline
     }
@@ -606,6 +612,11 @@ fn reconstruction_probe_client_with_stream(
         resize_failure: None,
         block_timeline: BlockTimeline {
             revision: 0,
+            records: Vec::new(),
+        },
+        block_native_regions: BlockNativeRegions {
+            revision: 0,
+            total_height: 0,
             records: Vec::new(),
         },
         command_blocks_supported: false,

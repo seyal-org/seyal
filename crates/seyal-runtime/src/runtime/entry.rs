@@ -66,6 +66,9 @@ pub(in crate::runtime) struct Entry {
     pub(in crate::runtime) block_timeline: CommandBlockTimeline,
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) block_revision: u64,
+    /// Monotonic revision for `BlockNativeRegions` publishes (timeline + display).
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) native_regions_revision: u64,
     /// The composer eligibility last published to attached clients, and the
     /// monotonic revision that fences it. `None` until the first publish.
     #[cfg(target_os = "macos")]

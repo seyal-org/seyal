@@ -293,6 +293,15 @@ impl Runtime {
             };
             changed |= self.dispatch_shell_integration_event(id, event)?;
         }
+        // Drain wire-ordered attribution journal after marker dispatch so the
+        // bounded VT journal cannot retain events across observe turns (#1484).
+        if let Some(entry) = self.entries.get_mut(&id) {
+            let overflowed = entry.execution.attribution_journal_overflowed();
+            let _ = entry.execution.drain_attribution_journal();
+            if overflowed {
+                entry.execution.end_native_block_output();
+            }
+        }
         let session_alternate = {
             let entry = self
                 .entries
@@ -689,16 +698,27 @@ pub(super) fn apply_local_integration_event(entry: &mut Entry, event: Integratio
                     .start(pending.block_id, pending.command, line.0)
                     .is_ok()
                 {
+                    if let Ok((header, output)) = entry
+                        .execution
+                        .begin_native_block_output(pending.block_id.raw())
+                    {
+                        let _ = entry.block_timeline.set_native_regions(
+                            pending.block_id,
+                            header,
+                            output,
+                        );
+                    }
                     entry.integration = entry.integration.block_started(pending.block_id);
                     changed = true;
                 }
-                // On failure the shell is still usable; no stale Running state
-                // is published and the state stays Running(none).
             }
             Effect::DropPending => {
                 entry.pending_composer = None;
+                // Provisional OSC arm may have redirected writes; restore outer.
+                entry.execution.cancel_pending_native_output();
             }
             Effect::Complete(block_id, exit, line) => {
+                entry.execution.end_native_block_output();
                 changed |= complete_timeline_block(entry, block_id, exit, line);
             }
         }

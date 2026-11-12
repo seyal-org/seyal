@@ -3,6 +3,7 @@
 use super::super::state::{SessionShellKind, ShellIntegrationEvent, ShellIntegrationToken};
 use super::TerminalCore;
 use crate::presentation::{parse_osc_presentation, HostPresentationEvent};
+use crate::primary_blocks::attribution::{MarkerKind, UnitVersion};
 use crate::LineId;
 
 impl TerminalCore {
@@ -108,6 +109,47 @@ impl TerminalCore {
             self.record_deferred();
             return;
         }
+        self.journal_shell_boundary(&event);
         self.shell_events.push_back(event);
+    }
+
+    fn journal_shell_boundary(&mut self, event: &ShellIntegrationEvent) {
+        let cursor = self.primary.cursor(self.modes.cursor_visible);
+        let (marker, line) = match event {
+            ShellIntegrationEvent::PromptStarted { .. } => {
+                (MarkerKind::PromptStart, self.current_line())
+            }
+            ShellIntegrationEvent::CommandStarted { line, .. } => {
+                (MarkerKind::CommandStart, *line)
+            }
+            ShellIntegrationEvent::CommandFinished { line, .. } => {
+                (MarkerKind::CommandFinished, *line)
+            }
+            ShellIntegrationEvent::Readiness { .. } => return,
+        };
+        let unit_offset = self
+            .primary
+            .cell_anchor(cursor.col, cursor.row)
+            .map(|anchor| u64::from(anchor.unit_offset))
+            .unwrap_or(0);
+        let content_generation = self
+            .primary
+            .engine
+            .unit_generation_at(line, unit_offset);
+        let version = UnitVersion {
+            line_id: line,
+            unit_offset,
+            content_generation,
+        };
+        if matches!(marker, MarkerKind::CommandStart) {
+            let _ = self.primary.engine.arm_command_start_output();
+        }
+        self.primary.engine.record_shell_boundary(
+            marker,
+            version,
+            cursor.col,
+            None,
+            true,
+        );
     }
 }

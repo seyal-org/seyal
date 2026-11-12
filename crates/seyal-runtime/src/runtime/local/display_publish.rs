@@ -260,6 +260,11 @@ impl Runtime {
                     state.published.remove(&execution_id);
                 }
             }
+            if encode_ok {
+                // Keep on-window RegionId row spans aligned with the primary
+                // frame as scroll/damage moves ownership (#1484 Phase D).
+                self.publish_block_native_regions(execution_id);
+            }
         }
     }
 

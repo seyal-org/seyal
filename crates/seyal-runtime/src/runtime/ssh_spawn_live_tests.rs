@@ -130,6 +130,56 @@ fn composer_ssh_to_bash_trusts_session_blocks_without_enable_blocks() {
         })
     });
 
+    // #1484: host Local and nested Session Blocks must own distinct RegionIds.
+    let timeline = &h.runtime.entries[&h.id].block_timeline;
+    let host_rec = timeline
+        .records()
+        .find(|record| record.id.raw() == host)
+        .expect("ssh host record");
+    let session_rec = timeline
+        .records()
+        .find(|record| record.command == "echo spawn-ok" && record.scope == BlockScope::Session)
+        .expect("session record");
+    assert!(
+        host_rec.header_region.is_some() && host_rec.output_region.is_some(),
+        "host Block must open native regions"
+    );
+    assert!(
+        session_rec.header_region.is_some() && session_rec.output_region.is_some(),
+        "session Block must open native regions"
+    );
+    assert_ne!(
+        host_rec.output_region, session_rec.output_region,
+        "host and session must not claim the same output RegionId"
+    );
+    assert_ne!(
+        host_rec.header_region, session_rec.header_region,
+        "host and session must not claim the same header RegionId"
+    );
+    let host_output = host_rec.output_region.expect("host output region");
+    let refs = h.runtime.entries[&h.id]
+        .execution
+        .primary_block_content_refs();
+    assert!(
+        refs.iter().any(|block| block.block_id.0 == host),
+        "host BlockContent must exist in PrimaryBlockEngine"
+    );
+    assert!(
+        refs.iter()
+            .any(|block| block.block_id.0 == session_rec.id.raw()),
+        "session BlockContent must exist in PrimaryBlockEngine"
+    );
+    // After nested session Complete, host Block is still Running — writes must
+    // rejoin the host output region (not unstructured).
+    assert!(host_running(&h, host), "host still Running after session Complete");
+    assert_eq!(
+        h.runtime.entries[&h.id]
+            .execution
+            .native_active_region(),
+        host_output,
+        "session end must restore host active RegionId"
+    );
+
     h.pump_until(|runtime, id| {
         runtime.entries[&id].session_runtime.integration == IntegrationState::AtPrompt
     });
@@ -251,6 +301,166 @@ fn unsupported_remote_shell_waits_unheld_and_host_exit_revokes_s() {
     h.pump_until(|runtime, id| runtime.entries[&id].integration == IntegrationState::AtPrompt);
     assert_eq!(h.runtime.entries[&h.id].session, SessionOverlay::None);
     assert!(h.runtime.entries[&h.id].session_runtime.secret.is_none());
+
+    // Return to local shell: a new Local Block must open fresh RegionIds.
+    let host_output_before = h.runtime.entries[&h.id]
+        .block_timeline
+        .records()
+        .find(|record| record.id.raw() == host)
+        .and_then(|record| record.output_region);
+    assert!(matches!(
+        fenced_submit(&mut h, "echo back-local"),
+        ComposerAdmission::Accepted(_)
+    ));
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id].block_timeline.records().any(|record| {
+            record.command == "echo back-local"
+                && record.scope == BlockScope::Local
+                && matches!(
+                    record.lifecycle,
+                    CommandBlockLifecycle::Completed {
+                        exit_status: Some(0)
+                    }
+                )
+        })
+    });
+    let local_rec = h.runtime.entries[&h.id]
+        .block_timeline
+        .records()
+        .find(|record| record.command == "echo back-local")
+        .expect("local return record");
+    assert!(local_rec.header_region.is_some() && local_rec.output_region.is_some());
+    if let Some(host_output) = host_output_before {
+        assert_ne!(
+            local_rec.output_region,
+            Some(host_output),
+            "post-SSH local Block must not reuse the host output RegionId"
+        );
+    }
+}
+
+#[test]
+fn remote_python_repl_session_regions_stay_distinct_from_host() {
+    let Some(bash) = bash_with_read_n() else {
+        eprintln!("skipped: spawn-time bash delivery needs bash >= 4.1 on this host");
+        return;
+    };
+    let mut h = spawn_ssh("spawn-py", bash);
+    let host = submit_ssh(&mut h);
+    h.pump_until(|runtime, id| {
+        matches!(runtime.entries[&id].session, SessionOverlay::Trusted { .. })
+            && runtime.entries[&id].session_runtime.integration == IntegrationState::AtPrompt
+    });
+    assert!(host_running(&h, host));
+
+    // One-shot remote python (session Block). Interactive -i uses DirectInput
+    // after the host Block opens; region ownership rules are the same.
+    assert!(matches!(
+        fenced_submit(&mut h, "python3 -c \"print('py-ok')\""),
+        ComposerAdmission::Accepted(_)
+    ));
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id].block_timeline.records().any(|record| {
+            record.command.contains("python3")
+                && record.scope == BlockScope::Session
+                && record.trust == BlockTrust::SessionTrusted
+                && record.host_block == Some(host)
+                && matches!(
+                    record.lifecycle,
+                    CommandBlockLifecycle::Completed {
+                        exit_status: Some(0)
+                    }
+                )
+        })
+    });
+    let text = h.text();
+    assert!(
+        text.contains("py-ok"),
+        "remote python output missing:\n{text}"
+    );
+
+    let timeline = &h.runtime.entries[&h.id].block_timeline;
+    let host_rec = timeline
+        .records()
+        .find(|record| record.id.raw() == host)
+        .expect("host");
+    let py_rec = timeline
+        .records()
+        .find(|record| record.command.contains("python3") && record.scope == BlockScope::Session)
+        .expect("python session");
+    assert_ne!(host_rec.output_region, py_rec.output_region);
+    assert_ne!(host_rec.header_region, py_rec.header_region);
+    let host_output = host_rec.output_region.expect("host output");
+    assert!(host_running(&h, host));
+    assert_eq!(
+        h.runtime.entries[&h.id]
+            .execution
+            .native_active_region(),
+        host_output,
+        "python session end must restore host RegionId"
+    );
+
+    // Interactive REPL: open python -i, print, exit; regions must stay distinct.
+    assert!(matches!(
+        fenced_submit(&mut h, "python3 -i"),
+        ComposerAdmission::Accepted(_)
+    ));
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id].block_timeline.records().any(|record| {
+            record.command == "python3 -i"
+                && record.scope == BlockScope::Session
+                && matches!(record.lifecycle, CommandBlockLifecycle::Running)
+        })
+    });
+    let repl_output = h.runtime.entries[&h.id]
+        .block_timeline
+        .records()
+        .find(|record| record.command == "python3 -i")
+        .and_then(|record| record.output_region)
+        .expect("repl output region");
+    assert_ne!(repl_output, host_output);
+    h.runtime
+        .input_ingress(h.id)
+        .expect("ingress")
+        .try_submit(b"print('repl-live')\n".to_vec())
+        .expect("repl print");
+    h.pump_until(|runtime, id| {
+        (0..24).any(|row| {
+            runtime.entries[&id]
+                .execution
+                .terminal()
+                .row_text(row)
+                .is_some_and(|row| row.contains("repl-live"))
+        })
+    });
+    h.runtime
+        .input_ingress(h.id)
+        .expect("ingress")
+        .try_submit(b"exit()\n".to_vec())
+        .expect("repl exit");
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id].block_timeline.records().any(|record| {
+            record.command == "python3 -i"
+                && matches!(
+                    record.lifecycle,
+                    CommandBlockLifecycle::Completed { .. }
+                )
+        })
+    });
+    assert_eq!(
+        h.runtime.entries[&h.id]
+            .execution
+            .native_active_region(),
+        host_output
+    );
+    assert_ne!(
+        h.runtime.entries[&h.id]
+            .block_timeline
+            .records()
+            .find(|record| record.command == "python3 -i")
+            .and_then(|record| record.output_region),
+        Some(host_output)
+    );
 }
 
 #[test]

@@ -142,7 +142,8 @@ impl Runtime {
                 | CAP_EXECUTION_PROVISIONING
                 | framing::CAP_VIEWPORT_LINE_IDS
                 | framing::CAP_ATTACHMENT_DELIVERY_CONTROL
-                | framing::CAP_SESSION_BOOTSTRAP)
+                | framing::CAP_SESSION_BOOTSTRAP
+                | framing::CAP_NATIVE_BLOCK_REGIONS)
             != 0
             || (hello.client_capabilities & framing::CAP_SESSION_BOOTSTRAP != 0
                 && hello.client_capabilities & CAP_COMMAND_BLOCKS == 0)
@@ -167,7 +168,8 @@ impl Runtime {
                 | CAP_EXECUTION_PROVISIONING
                 | framing::CAP_VIEWPORT_LINE_IDS
                 | framing::CAP_ATTACHMENT_DELIVERY_CONTROL
-                | framing::CAP_SESSION_BOOTSTRAP,
+                | framing::CAP_SESSION_BOOTSTRAP
+                | framing::CAP_NATIVE_BLOCK_REGIONS,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };

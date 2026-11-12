@@ -123,6 +123,7 @@ pub use display::{
     seyal_bridge_request_history_range_for, seyal_bridge_session_consent,
     seyal_bridge_session_copy, seyal_bridge_session_request_for_handle,
     seyal_bridge_session_surface, seyal_bridge_session_surface_for_handle,
+    seyal_bridge_native_regions_total_height, seyal_bridge_native_regions_total_height_for,
     seyal_bridge_viewport_start_line_id, seyal_bridge_viewport_start_line_id_for,
     seyal_bridge_wants_write, seyal_bridge_wants_write_for,
 };

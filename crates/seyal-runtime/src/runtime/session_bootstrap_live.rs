@@ -261,6 +261,19 @@ fn nested_zsh_bootstrap_trusts_session_blocks_and_ignores_forgeries() {
                 )
         })
     });
+    let timeline = &h.runtime.entries[&h.id].block_timeline;
+    let host_rec = timeline
+        .records()
+        .find(|record| record.id == host_id)
+        .expect("host record");
+    let session_rec = timeline
+        .records()
+        .find(|record| record.command == "echo session-ok" && record.scope == BlockScope::Session)
+        .expect("session record");
+    assert!(host_rec.header_region.is_some() && host_rec.output_region.is_some());
+    assert!(session_rec.header_region.is_some() && session_rec.output_region.is_some());
+    assert_ne!(host_rec.output_region, session_rec.output_region);
+    assert_ne!(host_rec.header_region, session_rec.header_region);
     assert!(
         h.runtime.entries[&h.id]
             .block_timeline

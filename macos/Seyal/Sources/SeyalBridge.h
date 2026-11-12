@@ -350,6 +350,9 @@ SeyalPreparedFrame seyal_bridge_frame_for(uint64_t handle);
 /* Paired ViewportLineIds[0] for Raw presentation scroll (#1442); 0 if unpaired. */
 uint64_t seyal_bridge_viewport_start_line_id(void);
 uint64_t seyal_bridge_viewport_start_line_id_for(uint64_t handle);
+/* Indexed Flow transcript height from BlockNativeRegions (#1484); 0 if unpublished. */
+uint64_t seyal_bridge_native_regions_total_height(void);
+uint64_t seyal_bridge_native_regions_total_height_for(uint64_t handle);
 int32_t seyal_bridge_ensure_prepared_for(uint64_t handle);
 uint64_t seyal_bridge_block_timeline_revision(void);
 uint64_t seyal_bridge_next_composer_request_id(void);

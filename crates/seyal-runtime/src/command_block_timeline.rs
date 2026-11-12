@@ -56,6 +56,9 @@ pub(crate) struct CommandBlockRecord {
     pub(crate) trust: BlockTrust,
     /// Host Block this session Block is nested under. `None` for local Blocks.
     pub(crate) host_block: Option<u64>,
+    /// Native RegionGrid ids inside TerminalState (#1484). Not yet on wire.
+    pub(crate) header_region: Option<u64>,
+    pub(crate) output_region: Option<u64>,
 }
 
 /// Bounded, append-only logical timeline for one `ExecutionId`.
@@ -106,9 +109,26 @@ impl CommandBlockTimeline {
             scope: BlockScope::Local,
             trust: BlockTrust::LocalTrusted,
             host_block: None,
+            header_region: None,
+            output_region: None,
         });
         debug_assert!(self.encoded_len() <= MAX_FRAME_PAYLOAD as usize);
         Ok(())
+    }
+
+    /// Attach native RegionGrid ids after TerminalState opens Block content.
+    pub(crate) fn set_native_regions(
+        &mut self,
+        id: CommandBlockId,
+        header_region: u64,
+        output_region: u64,
+    ) -> bool {
+        let Some(record) = self.records.iter_mut().find(|record| record.id == id) else {
+            return false;
+        };
+        record.header_region = Some(header_region);
+        record.output_region = Some(output_region);
+        true
     }
 
     /// Session Block nested under `host_block`. Trust is presentation-only.
@@ -418,5 +438,36 @@ mod tests {
                 Err(other) => panic!("unexpected error: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn set_native_regions_attaches_header_and_output_ids() {
+        let mut timeline = CommandBlockTimeline::default();
+        let id = timeline.allocate_id().unwrap();
+        timeline.start(id, "pwd".into(), 3).unwrap();
+        assert!(timeline.set_native_regions(id, 11, 12));
+        let record = timeline.records().find(|r| r.id == id).unwrap();
+        assert_eq!(record.header_region, Some(11));
+        assert_eq!(record.output_region, Some(12));
+        assert!(!timeline.set_native_regions(CommandBlockId::from_raw(999), 1, 2));
+    }
+
+    #[test]
+    fn host_and_session_native_regions_stay_distinct() {
+        let mut timeline = CommandBlockTimeline::default();
+        let host = timeline.allocate_id().unwrap();
+        timeline.start(host, "ssh host".into(), 1).unwrap();
+        assert!(timeline.set_native_regions(host, 10, 11));
+        let session = timeline.allocate_id().unwrap();
+        timeline
+            .start_session(session, "echo remote".into(), 5, host.raw())
+            .unwrap();
+        assert!(timeline.set_native_regions(session, 20, 21));
+        let host_rec = timeline.records().find(|r| r.id == host).unwrap();
+        let session_rec = timeline.records().find(|r| r.id == session).unwrap();
+        assert_eq!(session_rec.scope, BlockScope::Session);
+        assert_eq!(session_rec.host_block, Some(host.raw()));
+        assert_ne!(host_rec.header_region, session_rec.header_region);
+        assert_ne!(host_rec.output_region, session_rec.output_region);
     }
 }

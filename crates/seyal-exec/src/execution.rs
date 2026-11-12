@@ -2,7 +2,7 @@ use std::{collections::VecDeque, time::Duration};
 
 use seyal_terminal::{
     HostPresentationEvent, LineId, PreparedResize, ProtocolReply, ShellIntegrationEvent,
-    TerminalState, MAX_PROTOCOL_REPLIES,
+    TerminalError, TerminalState, MAX_PROTOCOL_REPLIES,
 };
 
 use crate::{
@@ -121,6 +121,69 @@ impl TerminalExecution {
     /// canonical VT parser. No terminal cells or parser state leave here.
     pub fn take_shell_integration_event(&mut self) -> Option<ShellIntegrationEvent> {
         self.terminal.take_shell_integration_event()
+    }
+
+    /// Runtime-accepted CommandStart: open Block output region for new VT writes.
+    /// Returns `(header_region, output_region)`.
+    pub fn begin_native_block_output(&mut self, block_id: u64) -> Result<(u64, u64), TerminalError> {
+        self.terminal.begin_native_block_output(block_id)
+    }
+
+    /// CommandFinished / fallback: stop attributing new writes to the Block.
+    pub fn end_native_block_output(&mut self) {
+        self.terminal.end_native_block_output();
+    }
+
+    /// Drop a provisional CommandStart arm that never became a Block.
+    pub fn cancel_pending_native_output(&mut self) {
+        self.terminal.cancel_pending_native_output();
+    }
+
+    /// Current native Block write-ownership region id.
+    pub fn native_active_region(&self) -> u64 {
+        self.terminal.native_active_region()
+    }
+
+    pub fn drain_attribution_journal(&mut self) -> Vec<seyal_terminal::PrimaryEvent> {
+        self.terminal.drain_attribution_journal()
+    }
+
+    pub fn attribution_journal_overflowed(&self) -> bool {
+        self.terminal.attribution_journal_overflowed()
+    }
+
+    pub fn primary_block_content_refs(&self) -> Vec<seyal_terminal::BlockContentRef> {
+        self.terminal.primary_block_content_refs()
+    }
+
+    pub fn primary_live_region_cells(
+        &self,
+        region_id: u64,
+    ) -> Vec<(u16, u16, seyal_terminal::Cell)> {
+        self.terminal.primary_live_region_cells(region_id)
+    }
+
+    pub fn primary_sealed_region_cells(
+        &self,
+        region_id: u64,
+    ) -> Vec<(seyal_terminal::LineId, u16, seyal_terminal::Cell)> {
+        self.terminal.primary_sealed_region_cells(region_id)
+    }
+
+    pub fn primary_visible_block_spans(
+        &self,
+        y: u64,
+        window_rows: u32,
+    ) -> Vec<seyal_terminal::VisibleBlockSpan> {
+        self.terminal.primary_visible_block_spans(y, window_rows)
+    }
+
+    pub fn primary_viewport_total_height(&self) -> u64 {
+        self.terminal.primary_viewport_total_height()
+    }
+
+    pub fn primary_on_window_region_spans(&self) -> Vec<seyal_terminal::OnWindowRegionSpan> {
+        self.terminal.primary_on_window_region_spans()
     }
 
     /// Transfers one bounded, untrusted host-presentation event (OSC title/CWD/hyperlink).

@@ -52,6 +52,11 @@ fn resize_client() -> (LocalDisplayClient, UnixStream) {
                 revision: 0,
                 records: Vec::new(),
             },
+            block_native_regions: seyal_runtime::local_ipc::framing::BlockNativeRegions {
+                revision: 0,
+                total_height: 0,
+                records: Vec::new(),
+            },
             command_blocks_supported: false,
             last_composer_result: None,
             composer_status: None,

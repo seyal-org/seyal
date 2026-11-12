@@ -650,6 +650,19 @@ pub extern "C" fn seyal_bridge_viewport_start_line_id_for(handle: u64) -> u64 {
     .unwrap_or(0)
 }
 
+/// Indexed Flow transcript height from the latest `BlockNativeRegions` push
+/// (#1484). Zero when Runtime has not published a map yet.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_native_regions_total_height() -> u64 {
+    with_display_client(|client| client.block_native_regions().total_height).unwrap_or(0)
+}
+
+/// Same as [`seyal_bridge_native_regions_total_height`] for one registry handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_native_regions_total_height_for(handle: u64) -> u64 {
+    super::with_client(handle, |client| client.block_native_regions().total_height).unwrap_or(0)
+}
+
 fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {
     if client.ensure_prepared_surface().is_err() {
         return SeyalPreparedFrame::empty();
