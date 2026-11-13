@@ -215,4 +215,47 @@ mod tests {
         assert!(plan.visible_items.iter().any(|item| item.block_id == 2));
         assert!(plan.clip_for(2).is_some());
     }
+
+    #[test]
+    fn two_display_plans_keep_independent_scroll_anchors() {
+        // Adversarial proof #1: one content map, two display indexes/plans.
+        let records = [(1u64, 10u64, 11u64, 20u32, 0u16, 0u16)];
+        let mut index_a = BlockViewportIndex::default();
+        index_a.replace_all([(1, 40)]);
+        let mut index_b = BlockViewportIndex::default();
+        index_b.replace_all([(1, 40)]);
+        let plan_a = BlockViewportPlan::build(
+            1,
+            101,
+            1,
+            1,
+            1,
+            1,
+            ScrollAnchor::AbsoluteY(0),
+            &index_a,
+            10,
+            &records,
+        );
+        let plan_b = BlockViewportPlan::build(
+            1,
+            202,
+            1,
+            1,
+            1,
+            1,
+            ScrollAnchor::LiveEnd,
+            &index_b,
+            10,
+            &records,
+        );
+        assert_eq!(plan_a.display_handle, 101);
+        assert_eq!(plan_b.display_handle, 202);
+        assert_eq!(plan_a.scroll_y, 0);
+        assert_eq!(plan_b.scroll_y, 30);
+        assert_ne!(plan_a.visible_items[0].first_visible_row, plan_b.visible_items[0].first_visible_row);
+        // Mutating one index must not affect the other plan's source index.
+        assert!(index_a.set_height(1, 50));
+        assert_eq!(index_b.height_of(1), Some(40));
+        assert_eq!(index_a.total_height(), 50);
+    }
 }
