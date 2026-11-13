@@ -105,15 +105,23 @@ impl TerminalCore {
             self.record_deferred();
             return;
         };
+        // Atomic (shell_events, journal marker) admit — Finding F / D1.
+        // Never enqueue Runtime-visible shell events without journal causality,
+        // and never journal without a paired shell_events slot.
         if self.shell_events.len() == self.shell_events.capacity() {
             self.record_deferred();
             return;
         }
-        self.journal_shell_boundary(&event);
+        if self.journal_shell_boundary(&event).is_err() {
+            self.record_deferred();
+            return;
+        }
         self.shell_events.push_back(event);
+        // D3: request Runtime observe before continuing a tall same-read burst.
+        self.attribution_observe_yield = true;
     }
 
-    fn journal_shell_boundary(&mut self, event: &ShellIntegrationEvent) {
+    fn journal_shell_boundary(&mut self, event: &ShellIntegrationEvent) -> Result<(), ()> {
         let cursor = self.primary.cursor(self.modes.cursor_visible);
         let (marker, line) = match event {
             ShellIntegrationEvent::PromptStarted { .. } => {
@@ -123,7 +131,7 @@ impl TerminalCore {
             ShellIntegrationEvent::CommandFinished { line, .. } => {
                 (MarkerKind::CommandFinished, *line)
             }
-            ShellIntegrationEvent::Readiness { .. } => return,
+            ShellIntegrationEvent::Readiness { .. } => return Ok(()),
         };
         let unit_offset = self
             .primary
@@ -136,11 +144,20 @@ impl TerminalCore {
             unit_offset,
             content_generation,
         };
-        if matches!(marker, MarkerKind::CommandStart) {
-            let _ = self.primary.engine.arm_command_start_output();
-        }
+        // Journal first; arm regions only after successful admit so a refused
+        // marker cannot leave dangling prompt/output ownership (D1).
         self.primary
             .engine
-            .record_shell_boundary(marker, version, cursor.col, None, true);
+            .record_shell_boundary(marker, version, cursor.col, None, true)?;
+        match marker {
+            MarkerKind::PromptStart => {
+                let _ = self.primary.engine.arm_prompt_start_header();
+            }
+            MarkerKind::CommandStart => {
+                let _ = self.primary.engine.arm_command_start_output();
+            }
+            MarkerKind::CommandFinished => {}
+        }
+        Ok(())
     }
 }

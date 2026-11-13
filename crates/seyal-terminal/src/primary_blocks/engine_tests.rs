@@ -61,6 +61,42 @@ fn window_map_resolves_initial_blank_raster() {
 }
 
 #[test]
+fn f_d6_reclaim_evicted_line_ids_drops_unit_generations_and_sealed_rows() {
+    let mut engine = PrimaryBlockEngine::new(4, 1).unwrap();
+    let block = engine.begin_block_output(BlockId(7)).unwrap();
+    engine
+        .write_at(
+            0,
+            0,
+            Cell::lead_inline('A', 1, Style::default()),
+            block.output,
+            LineId(9),
+            0,
+        )
+        .unwrap();
+    engine
+        .seal_window_row_indexed(0, LineId(9))
+        .unwrap();
+    assert_eq!(engine.unit_generation_at(LineId(9), 0), 1);
+    assert_eq!(engine.sealed_row_count(block.output), 1);
+    engine.reclaim_evicted_line_ids(&[LineId(9)]);
+    assert_eq!(engine.unit_generation_at(LineId(9), 0), 0);
+    assert_eq!(engine.sealed_row_count(block.output), 0);
+}
+
+#[test]
+fn f_hdr_prompt_arm_then_begin_reuses_header_region() {
+    // Finding F / D4: PromptStart arms header; begin_block_output must reuse it.
+    let mut engine = PrimaryBlockEngine::new(4, 1).unwrap();
+    let header = engine.arm_prompt_start_header().unwrap();
+    assert_eq!(engine.active_region(), header);
+    let block = engine.begin_block_output(BlockId(42)).unwrap();
+    assert_eq!(block.header, header);
+    assert_ne!(block.header, block.output);
+    assert_eq!(engine.active_region(), block.output);
+}
+
+#[test]
 fn begin_block_output_redirects_active_region() {
     let mut engine = PrimaryBlockEngine::new(4, 1).unwrap();
     assert_eq!(engine.active_region(), engine.unstructured_region());

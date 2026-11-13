@@ -10,6 +10,10 @@ pub(crate) trait Actions {
     fn osc(&mut self, bytes: &[u8], truncated: bool);
     fn deferred_string(&mut self);
     fn malformed(&mut self);
+    /// Finding F / D3: Runtime should observe attribution before more bytes.
+    fn should_yield_for_attribution(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,9 +71,16 @@ impl Parser {
         }
     }
 
-    pub(crate) fn feed(&mut self, bytes: &[u8], actions: &mut impl Actions) {
+    /// Feed until Ground after an attribution yield request, or until `bytes` ends.
+    /// Returns the number of input bytes consumed (putback is not counted twice).
+    pub(crate) fn feed_until_attribution_yield(
+        &mut self,
+        bytes: &[u8],
+        actions: &mut impl Actions,
+    ) -> usize {
         let mut index = 0;
         while index < bytes.len() || self.putback.is_some() {
+            let from_putback = self.putback.is_some();
             let byte = match self.putback.take() {
                 Some(byte) => byte,
                 None => {
@@ -79,7 +90,16 @@ impl Parser {
                 }
             };
             self.step(byte, actions);
+            if actions.should_yield_for_attribution()
+                && self.state == State::Ground
+                && self.putback.is_none()
+                && self.utf8_needed == 0
+            {
+                break;
+            }
+            let _ = from_putback;
         }
+        index
     }
 
     pub(crate) fn finish(&mut self, actions: &mut impl Actions) {

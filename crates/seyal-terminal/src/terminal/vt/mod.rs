@@ -36,6 +36,9 @@ pub(super) struct TerminalCore {
     pub(super) diagnostics: Diagnostics,
     pub(super) fault: Option<TerminalError>,
     pub(super) shell_events: VecDeque<ShellIntegrationEvent>,
+    /// Set after a trusted shell marker is journaled so Runtime can observe
+    /// before the rest of a tall PTY read is parsed (#1484 Finding F / D3).
+    pub(super) attribution_observe_yield: bool,
     pub(super) presentation_events: VecDeque<HostPresentationEvent>,
     pub(super) protocol_replies: VecDeque<ProtocolReply>,
     pub(super) primary_keyboard_flags: u8,
@@ -69,6 +72,7 @@ impl TerminalCore {
             diagnostics: Diagnostics::default(),
             fault: None,
             shell_events: VecDeque::with_capacity(16),
+            attribution_observe_yield: false,
             presentation_events: VecDeque::with_capacity(MAX_HOST_PRESENTATION_EVENTS),
             protocol_replies: VecDeque::with_capacity(MAX_PROTOCOL_REPLIES),
             primary_keyboard_flags: 0,
@@ -254,5 +258,9 @@ impl Actions for TerminalCore {
         if self.fault.is_none() {
             self.record_malformed();
         }
+    }
+
+    fn should_yield_for_attribution(&self) -> bool {
+        self.attribution_observe_yield
     }
 }

@@ -82,11 +82,9 @@ impl Runtime {
                     .get_mut(&id)
                     .ok_or(RuntimeError::UnknownExecution)?;
                 let generation_before = entry.execution.terminal().damage_generation();
-                let read_result = entry
-                    .execution
-                    .read_output(&mut self.read_buffer[..read_len]);
-                // Feed may fault after capturing protocol replies in the same
-                // chunk; arm writable before propagating so replies still drain.
+                // Read without feeding so Attribution D3 can observe between
+                // trusted markers inside one OS read (#1484).
+                let read_result = entry.execution.read_pty(&mut self.read_buffer[..read_len]);
                 let pending_replies = entry.execution.has_pending_protocol_replies();
                 let generation_after = entry.execution.terminal().damage_generation();
                 (
@@ -149,7 +147,29 @@ impl Runtime {
                 }
                 ReadOutcome::Bytes(count) => {
                     consumed += count;
-                    self.observe_shell_integration_events(id)?;
+                    // Finding F / D3: feed until each trusted marker yield, observe,
+                    // then continue the same OS read so shell_events cannot silently
+                    // defer under a marker storm (also covers nested session D5).
+                    let mut offset = 0usize;
+                    while offset < count {
+                        let n = {
+                            let entry = self
+                                .entries
+                                .get_mut(&id)
+                                .ok_or(RuntimeError::UnknownExecution)?;
+                            entry
+                                .execution
+                                .feed_yielding_for_attribution(&self.read_buffer[offset..count])?
+                        };
+                        if n == 0 {
+                            break;
+                        }
+                        offset = offset.saturating_add(n);
+                        self.observe_shell_integration_events(id)?;
+                        if let Some(entry) = self.entries.get_mut(&id) {
+                            entry.execution.clear_attribution_observe_yield();
+                        }
+                    }
                     let wants_write = {
                         let entry = self
                             .entries

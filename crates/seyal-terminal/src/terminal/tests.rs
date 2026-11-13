@@ -236,6 +236,59 @@ fn readiness_marker_is_the_fourth_shape_and_names_the_shell() {
 }
 
 #[test]
+fn f05_d3_feed_yielding_stops_after_trusted_marker() {
+    // Finding F / D3: feed_yielding_for_attribution must stop after OSC admit so
+    // Runtime can observe before the remainder of a tall same-read buffer.
+    let mut terminal = TerminalState::new(80, 24).unwrap();
+    let marker = b"\x1b]133;A;abababababababababababababababab\x07";
+    let trailing = b"PROMPT";
+    let mut buf = marker.to_vec();
+    buf.extend_from_slice(trailing);
+    let consumed = terminal.feed_yielding_for_attribution(&buf).unwrap();
+    assert_eq!(consumed, marker.len());
+    assert!(terminal.attribution_observe_yield_requested());
+    assert_eq!(
+        terminal.take_shell_integration_event(),
+        Some(ShellIntegrationEvent::PromptStarted {
+            token: ShellIntegrationToken::from_bytes([
+                0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0xab,
+                0xab, 0xab,
+            ])
+        })
+    );
+    terminal.clear_attribution_observe_yield();
+    let rest = terminal.feed_yielding_for_attribution(&buf[consumed..]).unwrap();
+    assert_eq!(rest, trailing.len());
+}
+
+#[test]
+fn f06_c_seventeenth_shell_marker_is_deferred_not_silently_admitted() {
+    // Finding F / S1: shell_events capacity is 16. While 16 events remain undrained,
+    // the 17th trusted marker must increment deferred_sequences and must not grow
+    // the queue (atomic shell_events + journal barrier D1).
+    let mut terminal = TerminalState::new(80, 24).unwrap();
+    let marker = b"\x1b]133;A;abababababababababababababababab\x07";
+    let before = terminal.diagnostics().deferred_sequences;
+    for _ in 0..16 {
+        terminal.feed(marker).unwrap();
+    }
+    assert_eq!(terminal.diagnostics().deferred_sequences, before);
+    terminal.feed(marker).unwrap();
+    assert!(
+        terminal.diagnostics().deferred_sequences > before,
+        "17th marker must be typed-deferred, not silently dropped"
+    );
+    let mut admitted = 0usize;
+    while terminal.take_shell_integration_event().is_some() {
+        admitted += 1;
+    }
+    assert_eq!(
+        admitted, 16,
+        "refused 17th marker must not enqueue shell_events without journal causality"
+    );
+}
+
+#[test]
 fn primary_history_range_returns_scrolled_rows_by_line_id() {
     let mut terminal = TerminalState::new(4, 2).unwrap();
     terminal.feed(b"one\r\ntwo\r\nthree").unwrap();

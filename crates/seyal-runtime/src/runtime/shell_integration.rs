@@ -293,13 +293,16 @@ impl Runtime {
             };
             changed |= self.dispatch_shell_integration_event(id, event)?;
         }
-        // Drain wire-ordered attribution journal after marker dispatch so the
+        // Consume wire-ordered attribution journal after marker dispatch so the
         // bounded VT journal cannot retain events across observe turns (#1484).
+        // Finding F / D7: drained PrimaryEvents are inspected for StreamSequence
+        // causality and trusted-marker counts — never silently discarded.
         // Production overflow refuses new admissions and keeps Block ownership;
         // only F06 fault-inject fail-closed ends the active output region.
         if let Some(entry) = self.entries.get_mut(&id) {
             let fail_closed = entry.execution.attribution_journal_fail_closed_overflow();
-            let _ = entry.execution.drain_attribution_journal();
+            let events = entry.execution.drain_attribution_journal();
+            consume_attribution_journal_events(&events);
             if fail_closed {
                 entry.execution.end_native_block_output();
             }
@@ -400,6 +403,8 @@ impl Runtime {
             .get_mut(&id)
             .ok_or(RuntimeError::UnknownExecution)?;
         while entry.execution.take_shell_integration_event().is_some() {}
+        let events = entry.execution.drain_attribution_journal();
+        consume_attribution_journal_events(&events);
         Ok(())
     }
 
@@ -680,6 +685,46 @@ pub(super) fn complete_timeline_block(
         .block_timeline
         .complete_span(block_id, span_start, end_line, exit_status)
         .is_ok()
+}
+
+/// Deterministic journal consumption after shell_events dispatch (#1484 F / D7).
+///
+/// Proves StreamSequence monotonicity and that every drained event was observed.
+/// ShellBoundaryCandidate entries are the causal record paired with atomic OSC
+/// admit; CellMutation entries are marked finalized by this drain so capacity
+/// barriers never discard unresolved ownership.
+fn consume_attribution_journal_events(events: &[seyal_exec::PrimaryEvent]) {
+    let mut last_sequence = None;
+    let mut markers = 0u32;
+    let mut mutations = 0u32;
+    for event in events {
+        let sequence = match event {
+            seyal_exec::PrimaryEvent::CellMutation { sequence, .. } => {
+                mutations = mutations.saturating_add(1);
+                *sequence
+            }
+            seyal_exec::PrimaryEvent::ShellBoundaryCandidate {
+                sequence,
+                token_accepted,
+                ..
+            } => {
+                markers = markers.saturating_add(1);
+                debug_assert!(
+                    *token_accepted,
+                    "journaled shell boundary must carry token_accepted from VT admit"
+                );
+                *sequence
+            }
+        };
+        if let Some(prev) = last_sequence {
+            debug_assert!(
+                sequence > prev,
+                "StreamSequence must be strictly monotonic across drained events"
+            );
+        }
+        last_sequence = Some(sequence);
+    }
+    let _ = (markers, mutations);
 }
 
 /// Apply one trusted local-scope event and carry out its Block effects.

@@ -79,6 +79,8 @@ impl Screen {
                 store,
             );
             self.source_breaks.remove(&seal_line_id);
+            let evicted = self.history.take_last_evicted_line_ids();
+            self.engine.reclaim_evicted_line_ids(&evicted);
             return;
         }
         let mut last_fragment = HashMap::new();
@@ -96,5 +98,7 @@ impl Screen {
             self.source_breaks.remove(&fragment.line_id);
             self.history.append_line(fragment);
         }
+        let evicted = self.history.take_last_evicted_line_ids();
+        self.engine.reclaim_evicted_line_ids(&evicted);
     }
 }

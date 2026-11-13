@@ -127,9 +127,45 @@ impl TerminalState {
         if let Some(error) = self.core.fault {
             return Err(error);
         }
-        self.parser.feed(bytes, &mut self.core);
+        // Full consumption for callers that do not interleave Runtime observe.
+        self.core.attribution_observe_yield = false;
+        let mut offset = 0;
+        while offset < bytes.len() {
+            self.core.attribution_observe_yield = false;
+            let consumed = self
+                .parser
+                .feed_until_attribution_yield(&bytes[offset..], &mut self.core);
+            offset = offset.saturating_add(consumed);
+            if consumed == 0 {
+                break;
+            }
+            // Clear yield so the next slice continues without a stuck request.
+            self.core.attribution_observe_yield = false;
+        }
         self.core.damage.commit();
         self.core.fault.map_or(Ok(()), Err)
+    }
+
+    /// Feed until a trusted shell marker requests Runtime observe, or until the
+    /// buffer ends (#1484 Finding F / D3). Returns bytes consumed.
+    pub fn feed_yielding_for_attribution(&mut self, bytes: &[u8]) -> Result<usize, TerminalError> {
+        if let Some(error) = self.core.fault {
+            return Err(error);
+        }
+        self.core.attribution_observe_yield = false;
+        let consumed = self
+            .parser
+            .feed_until_attribution_yield(bytes, &mut self.core);
+        self.core.damage.commit();
+        self.core.fault.map_or(Ok(consumed), Err)
+    }
+
+    pub fn clear_attribution_observe_yield(&mut self) {
+        self.core.attribution_observe_yield = false;
+    }
+
+    pub fn attribution_observe_yield_requested(&self) -> bool {
+        self.core.attribution_observe_yield
     }
 
     pub fn finish_input(&mut self) -> Result<(), TerminalError> {

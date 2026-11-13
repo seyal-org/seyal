@@ -283,6 +283,23 @@ impl TerminalExecution {
         Ok(outcome)
     }
 
+    /// Read PTY bytes without feeding the VT parser (Runtime attribution yield).
+    pub fn read_pty(&mut self, buffer: &mut [u8]) -> Result<ReadOutcome, ExecError> {
+        self.endpoint.read(buffer)
+    }
+
+    /// Feed a slice until a trusted shell marker requests Runtime observe, or
+    /// until the slice ends (#1484 Finding F / D3). Returns bytes consumed.
+    pub fn feed_yielding_for_attribution(&mut self, bytes: &[u8]) -> Result<usize, ExecError> {
+        let consumed = self.terminal.feed_yielding_for_attribution(bytes)?;
+        self.capture_protocol_replies();
+        Ok(consumed)
+    }
+
+    pub fn clear_attribution_observe_yield(&mut self) {
+        self.terminal.clear_attribution_observe_yield();
+    }
+
     pub fn write_input(&mut self, bytes: &[u8]) -> Result<WriteOutcome, ExecError> {
         self.endpoint.write(bytes)
     }

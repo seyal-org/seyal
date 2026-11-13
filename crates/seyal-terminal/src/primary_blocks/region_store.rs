@@ -259,6 +259,19 @@ impl RegionStore {
         u32::try_from(self.sealed_rows(region).len()).unwrap_or(u32::MAX)
     }
 
+    /// Remove sealed_rows / line_spine entries whose LineId was history-evicted.
+    pub(crate) fn reclaim_sealed_line_ids(&mut self, evicted: &[LineId]) {
+        if evicted.is_empty() {
+            return;
+        }
+        for grid in &mut self.regions {
+            grid.sealed_rows
+                .retain(|row| !evicted.iter().any(|id| *id == row.line_id));
+            grid.line_spine
+                .retain(|line| !evicted.iter().any(|id| *id == *line));
+        }
+    }
+
     /// Write a live window cell in place; bumps generation and records region.
     pub(crate) fn write_window(
         &mut self,

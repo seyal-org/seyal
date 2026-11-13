@@ -108,21 +108,18 @@ impl AttributionJournal {
         Ok(())
     }
 
-    /// Admit a shell boundary when at capacity by dropping oldest CellMutation
-    /// events only. ShellBoundaryCandidate entries are never dropped (F06).
+    /// Admit a shell boundary without discarding unresolved journal events.
+    ///
+    /// Preferential CellMutation eviction is forbidden until a Runtime consumer
+    /// proves those mutations were already finalized (#1484 Finding F / D2).
+    /// At capacity the marker is refused (`Err`) and prior events are retained;
+    /// callers must not enqueue the paired `shell_events` entry (atomic admit).
+    /// ShellBoundaryCandidate entries already in the journal are never dropped.
     pub(crate) fn push_shell_boundary(&mut self, event: PrimaryEvent) -> Result<(), ()> {
         debug_assert!(matches!(event, PrimaryEvent::ShellBoundaryCandidate { .. }));
-        while self.events.len() >= self.capacity {
-            match self.events.front() {
-                Some(PrimaryEvent::CellMutation { .. }) => {
-                    self.overflowed = true;
-                    self.events.pop_front();
-                }
-                _ => {
-                    self.overflowed = true;
-                    return Err(());
-                }
-            }
+        if self.events.len() >= self.capacity {
+            self.overflowed = true;
+            return Err(());
         }
         self.events.push_back(event);
         Ok(())
@@ -205,6 +202,78 @@ mod tests {
             })
             .is_err());
         assert!(journal.overflowed());
+        assert_eq!(journal.drain().len(), 1);
+    }
+
+    #[test]
+    fn f06_d_marker_refused_when_journal_full_without_evicting_cell_mutations() {
+        // Finding F / D2: do not discard unresolved CellMutations to admit a marker.
+        let mut journal = AttributionJournal::fault_inject(1);
+        let version = UnitVersion {
+            line_id: LineId(1),
+            unit_offset: 0,
+            content_generation: 1,
+        };
+        let cell_seq = journal.next_sequence();
+        journal
+            .push(PrimaryEvent::CellMutation {
+                sequence: cell_seq,
+                version,
+                handle: CellHandle {
+                    page: 0,
+                    slot: 0,
+                    generation: 1,
+                },
+                region: RegionId(1),
+            })
+            .unwrap();
+        let marker_seq = journal.next_sequence();
+        assert!(journal
+            .push_shell_boundary(PrimaryEvent::ShellBoundaryCandidate {
+                sequence: marker_seq,
+                marker: MarkerKind::CommandStart,
+                block: None,
+                version,
+                column: 0,
+                token_accepted: true,
+            })
+            .is_err());
+        assert!(journal.overflowed());
+        let drained = journal.drain();
+        assert_eq!(drained.len(), 1);
+        assert!(matches!(drained[0], PrimaryEvent::CellMutation { .. }));
+    }
+
+    #[test]
+    fn f06_d_marker_only_full_journal_refuses_additional_marker() {
+        let mut journal = AttributionJournal::fault_inject(1);
+        let version = UnitVersion {
+            line_id: LineId(1),
+            unit_offset: 0,
+            content_generation: 1,
+        };
+        let first = journal.next_sequence();
+        journal
+            .push_shell_boundary(PrimaryEvent::ShellBoundaryCandidate {
+                sequence: first,
+                marker: MarkerKind::PromptStart,
+                block: None,
+                version,
+                column: 0,
+                token_accepted: true,
+            })
+            .unwrap();
+        let second = journal.next_sequence();
+        assert!(journal
+            .push_shell_boundary(PrimaryEvent::ShellBoundaryCandidate {
+                sequence: second,
+                marker: MarkerKind::CommandStart,
+                block: None,
+                version,
+                column: 0,
+                token_accepted: true,
+            })
+            .is_err());
         assert_eq!(journal.drain().len(), 1);
     }
 }

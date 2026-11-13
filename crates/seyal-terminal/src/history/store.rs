@@ -47,6 +47,8 @@ pub(crate) struct HistoryStore {
     /// SoftWrap-chain width runs used to answer resize carry columns.
     /// Derived (§9.1), not resident source; closed hard-broken rows are omitted.
     pub(super) wrap_chains: VecDeque<WrapChain>,
+    /// LineIds recorded during the most recent eviction pass (Finding F / D6).
+    pub(super) last_evicted_line_ids: Vec<LineId>,
 }
 
 impl HistoryStore {

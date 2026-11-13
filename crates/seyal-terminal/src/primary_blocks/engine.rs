@@ -29,6 +29,9 @@ pub(crate) struct PrimaryBlockEngine {
     active_region_stack: Vec<RegionId>,
     /// Output region opened at OSC CommandStart before Runtime assigns BlockId.
     pending_output: Option<RegionId>,
+    /// Prompt/command header region opened at OSC PromptStart before BlockId
+    /// assignment (#1484 Finding F / D4).
+    pending_header: Option<RegionId>,
     viewport: BlockViewportIndex,
     /// Last content generation per (LineId, unit_offset). Overwrite mints anew.
     unit_generations: HashMap<(LineId, u64), u64>,
@@ -50,6 +53,7 @@ impl PrimaryBlockEngine {
             active_region: unstructured,
             active_region_stack: Vec::new(),
             pending_output: None,
+            pending_header: None,
             viewport: BlockViewportIndex::default(),
             unit_generations: HashMap::new(),
         })
@@ -97,6 +101,22 @@ impl PrimaryBlockEngine {
         self.active_region = region;
     }
 
+    /// OSC PromptStart: open a provisional prompt/command header region so
+    /// prompt bytes own the header RegionId before Runtime assigns BlockId (D4).
+    pub(crate) fn arm_prompt_start_header(&mut self) -> Result<RegionId, TerminalError> {
+        if let Some(region) = self.pending_header {
+            self.active_region = region;
+            return Ok(region);
+        }
+        self.push_active_region();
+        let region = self
+            .store
+            .alloc_region(RegionKind::PromptCommand, None)?;
+        self.pending_header = Some(region);
+        self.active_region = region;
+        Ok(region)
+    }
+
     /// OSC CommandStart: open a provisional output region so same-read bytes
     /// after the marker do not stay unstructured while Runtime validates.
     pub(crate) fn arm_command_start_output(&mut self) -> Result<RegionId, TerminalError> {
@@ -104,7 +124,7 @@ impl PrimaryBlockEngine {
             self.active_region = region;
             return Ok(region);
         }
-        // Preserve the outer Block (e.g. SSH host) across the provisional arm.
+        // Preserve the outer Block (e.g. SSH host) or pending header across the arm.
         self.push_active_region();
         let region = self.store.alloc_region(RegionKind::Output, None)?;
         self.pending_output = Some(region);
@@ -113,14 +133,20 @@ impl PrimaryBlockEngine {
     }
 
     /// Open Block regions and direct subsequent VT writes into `output`.
-    /// Reuses a provisional OSC-armed output region when present.
+    /// Reuses provisional OSC-armed header/output regions when present.
     pub(crate) fn begin_block_output(
         &mut self,
         id: BlockId,
     ) -> Result<BlockContent, TerminalError> {
-        let header = self
-            .store
-            .alloc_region(RegionKind::PromptCommand, Some(id))?;
+        let header = if let Some(pending) = self.pending_header.take() {
+            if let Some(grid) = self.store.region_mut(pending) {
+                grid.owner = Some(id);
+            }
+            pending
+        } else {
+            self.store
+                .alloc_region(RegionKind::PromptCommand, Some(id))?
+        };
         let output = if let Some(pending) = self.pending_output.take() {
             if let Some(grid) = self.store.region_mut(pending) {
                 grid.owner = Some(id);
@@ -136,6 +162,17 @@ impl PrimaryBlockEngine {
         self.viewport.rebuild(&self.blocks, &self.store);
         self.active_region = output;
         Ok(block)
+    }
+
+    /// Drop UnitVersion and sealed ownership indexes for evicted LineIds (D6).
+    pub(crate) fn reclaim_evicted_line_ids(&mut self, evicted: &[LineId]) {
+        if evicted.is_empty() {
+            return;
+        }
+        for line_id in evicted {
+            self.unit_generations.retain(|(lid, _), _| lid != line_id);
+        }
+        self.store.reclaim_sealed_line_ids(evicted);
     }
 
     pub(crate) fn block_content_refs(&self) -> Vec<BlockContentRef> {
@@ -238,13 +275,19 @@ impl PrimaryBlockEngine {
     /// (host under session) when present; otherwise returns to unstructured.
     pub(crate) fn end_block_output(&mut self) {
         self.pending_output = None;
+        self.pending_header = None;
         self.restore_active_region();
     }
 
-    /// Drop a provisional CommandStart arm that never became a Block.
+    /// Drop a provisional PromptStart/CommandStart arm that never became a Block.
     /// No-op when no pending region is armed.
     pub(crate) fn cancel_pending_output(&mut self) {
-        if self.pending_output.take().is_some() {
+        let had_output = self.pending_output.take().is_some();
+        let had_header = self.pending_header.take().is_some();
+        if had_output {
+            self.restore_active_region();
+        }
+        if had_header {
             self.restore_active_region();
         }
     }
@@ -325,6 +368,7 @@ impl PrimaryBlockEngine {
                 // F06 fault-inject: classify unresolved ownership as Unstructured.
                 super::attribution::JournalOverflowPolicy::FaultInject => {
                     self.pending_output = None;
+                    self.pending_header = None;
                     self.active_region_stack.clear();
                     self.active_region = self.unstructured;
                 }
@@ -477,6 +521,10 @@ impl PrimaryBlockEngine {
     /// Journal a trusted-shell boundary candidate in wire order with cell
     /// mutations. Runtime still validates nonce/ExecutionId before opening a
     /// Block; `token_accepted` here means the VT OSC token parsed cleanly.
+    ///
+    /// Returns `Err` when the journal refuses admission. Callers must treat
+    /// journal + `shell_events` as one atomic barrier (#1484 Finding F / D1):
+    /// never enqueue the Runtime-visible shell event after a refused journal.
     pub(crate) fn record_shell_boundary(
         &mut self,
         marker: MarkerKind,
@@ -484,16 +532,17 @@ impl PrimaryBlockEngine {
         column: u16,
         block: Option<BlockId>,
         token_accepted: bool,
-    ) {
+    ) -> Result<(), ()> {
         let sequence = self.journal.next_sequence();
-        let _ = self.journal.push_shell_boundary(PrimaryEvent::ShellBoundaryCandidate {
-            sequence,
-            marker,
-            block,
-            version,
-            column,
-            token_accepted,
-        });
+        self.journal
+            .push_shell_boundary(PrimaryEvent::ShellBoundaryCandidate {
+                sequence,
+                marker,
+                block,
+                version,
+                column,
+                token_accepted,
+            })
     }
 
     pub(crate) fn unit_generation_at(&self, line_id: LineId, unit_offset: u64) -> u64 {
