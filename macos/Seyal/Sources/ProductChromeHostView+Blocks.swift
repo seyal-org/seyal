@@ -805,21 +805,15 @@ extension ProductChromeHostView {
         // native map publishes (#1484 / ADR-015). Per-card chrome (header/gap/
         // seam) is a fixed derived inset, not AppKit transcript line counts.
         // Cleared canvas (no cards) collapses regardless of a stale Rust floor (#1424).
+        // Finding A/C/D: per-display Rust viewport index / plan is document
+        // extent authority. Do not invent chrome/card geometry when Rust has
+        // published indexed height (#1484 architecture exit).
         let rustRows = seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        let cardCount = CGFloat(blockCards.count)
-        let chromePerCard: CGFloat = 22 + 4 + 1 // header + body gap + seam
-        let stackSpacing = blocks.spacing * max(cardCount - 1, 0)
-        let chrome = cardCount * chromePerCard + stackSpacing
-            + blocks.edgeInsets.top + blocks.edgeInsets.bottom
         let contentHeight: CGFloat = {
             if !hasCards { return 0 }
-            // While a Block is still Running, card heights track the on-window
-            // LiveTail clip. Expanding the document to the full Rust indexed
-            // height every frame starves AtPrompt/Available on tall streams (#1484).
-            if hasRunningPrimaryClip() { return cardHeight }
-            if rustBody > 0 { return rustBody + chrome }
+            if rustBody > 0 { return rustBody }
             return cardHeight
         }()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0

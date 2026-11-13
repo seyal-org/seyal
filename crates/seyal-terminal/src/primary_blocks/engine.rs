@@ -226,41 +226,51 @@ impl PrimaryBlockEngine {
 
     /// One-pass on-window output spans for every Block (contiguous row runs).
     /// Gaps inside a Block's ownership collapse to first..last inclusive.
+    /// Complexity: O(window cells + B), not O(B × window cells).
     pub(crate) fn on_window_region_spans(&self) -> Vec<OnWindowRegionSpan> {
         let rows = self.store.window_rows();
         let cols = self.store.window_cols();
-        let mut spans = Vec::with_capacity(self.blocks.len());
+        let mut by_output: HashMap<RegionId, (Option<u16>, Option<u16>)> =
+            HashMap::with_capacity(self.blocks.len());
         for block in &self.blocks {
-            let mut first: Option<u16> = None;
-            let mut last: Option<u16> = None;
-            for row in 0..rows {
-                let mut owns = false;
-                for col in 0..cols {
-                    if self.store.region_at_window(col, row) == Some(block.output) {
-                        owns = true;
-                        break;
-                    }
-                }
-                if owns {
-                    if first.is_none() {
-                        first = Some(row);
-                    }
-                    last = Some(row);
-                }
-            }
-            let (first_row, row_count) = match (first, last) {
-                (Some(start), Some(end)) => (start, end.saturating_sub(start).saturating_add(1)),
-                _ => (0, 0),
-            };
-            spans.push(OnWindowRegionSpan {
-                block_id: block.id,
-                header: block.header,
-                output: block.output,
-                first_row,
-                row_count,
-            });
+            by_output.insert(block.output, (None, None));
         }
-        spans
+        for row in 0..rows {
+            for col in 0..cols {
+                let Some(region) = self.store.region_at_window(col, row) else {
+                    continue;
+                };
+                let Some(entry) = by_output.get_mut(&region) else {
+                    continue;
+                };
+                if entry.0.is_none() {
+                    entry.0 = Some(row);
+                }
+                entry.1 = Some(row);
+            }
+        }
+        self.blocks
+            .iter()
+            .map(|block| {
+                let (first, last) = by_output
+                    .get(&block.output)
+                    .copied()
+                    .unwrap_or((None, None));
+                let (first_row, row_count) = match (first, last) {
+                    (Some(start), Some(end)) => {
+                        (start, end.saturating_sub(start).saturating_add(1))
+                    }
+                    _ => (0, 0),
+                };
+                OnWindowRegionSpan {
+                    block_id: block.id,
+                    header: block.header,
+                    output: block.output,
+                    first_row,
+                    row_count,
+                }
+            })
+            .collect()
     }
 
     /// End the innermost Block output region. Restores a nested outer Block

@@ -624,18 +624,10 @@ extension SecondaryLivePaneHost {
         let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
         let cellHeight = surface.terminalPresentationCellSize().height
         let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        let cardCount = CGFloat(blockCards.count)
-        let chromePerCard: CGFloat = 22 + 4 + 1
-        let stackSpacing = blocks.spacing * max(cardCount - 1, 0)
-        let chrome = cardCount * chromePerCard + stackSpacing
-            + blocks.edgeInsets.top + blocks.edgeInsets.bottom
-        // Rust indexed row height owns sealed Flow content. While Running,
-        // keep the document on card/LiveTail heights so tall streams cannot
-        // expand the secondary leaf every sealed row (#1484).
+        // Finding A/C/D: Rust per-display viewport index owns document extent.
         let contentHeight: CGFloat = {
             if !hasCards { return 0 }
-            if hasRunningPrimaryClip() { return cardHeight }
-            if rustBody > 0 { return rustBody + chrome }
+            if rustBody > 0 { return rustBody }
             return cardHeight
         }()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
