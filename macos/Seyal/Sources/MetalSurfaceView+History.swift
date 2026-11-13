@@ -13,8 +13,27 @@ struct NativeHistoryRenderPageKey: Equatable {
 }
 
 extension MetalSurfaceView {
-  func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    bridge?.requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID) ?? -10
+  func requestHistoryRange(
+    startLine: UInt64,
+    endLine: UInt64,
+    blockID: UInt64,
+    startUnit: UInt32 = 0
+  ) -> Int32 {
+    guard let bridge else { return -10 }
+    let handle = bridge.windowFocusedDisplayHandle != 0
+      ? bridge.windowFocusedDisplayHandle
+      : bridge.clientHandle
+    return bridge.requestHistoryRange(
+      forDisplayHandle: handle,
+      startLine: startLine,
+      endLine: endLine,
+      blockID: blockID,
+      startUnit: startUnit
+    )
+  }
+
+  func requestSealedViewportClip(blockID: UInt64, displayHandle: UInt64) -> Int32 {
+    bridge?.requestSealedViewportClip(forDisplayHandle: displayHandle, blockID: blockID) ?? -10
   }
 
   func retainHistoryRange(_ range: NativeHistoryRange) {

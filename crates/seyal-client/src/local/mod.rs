@@ -541,7 +541,10 @@ impl LocalDisplayClient {
         start_unit: u32,
     ) -> Result<(), ClientError> {
         self.require_controller()?;
-        if block_id == 0 || start_line == 0 || end_line < start_line {
+        // Finding E: (0, 0) is sealed-row indexed retrieval; start_unit is the
+        // sealed index from BlockViewportPlan clipping.
+        let sealed_index_mode = start_line == 0 && end_line == 0;
+        if block_id == 0 || (!sealed_index_mode && (start_line == 0 || end_line < start_line)) {
             return Err(ClientError::Protocol);
         }
         let request_id = self.next_history_request_id;

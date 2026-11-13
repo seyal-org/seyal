@@ -245,6 +245,28 @@ fn history_range_request_rejects_unbounded_or_reversed_ranges() {
 }
 
 #[test]
+fn history_range_request_accepts_sealed_index_mode() {
+    let request = HistoryRangeRequest {
+        attachment_id: attachment(),
+        request_id: 9,
+        block_id: 44,
+        start_line: 0,
+        end_line: 0,
+        max_lines: 64,
+        max_cells: 4096,
+        start_unit: 128,
+    };
+    assert_eq!(HistoryRangeRequest::decode(&request.encode()), Ok(request));
+    // start_line==0 with non-zero end_line remains malformed.
+    let mut partial = request.encode();
+    partial[40..48].copy_from_slice(&8u64.to_le_bytes());
+    assert_eq!(
+        HistoryRangeRequest::decode(&partial),
+        Err(FramingError::MalformedPayload)
+    );
+}
+
+#[test]
 fn history_snapshot_round_trip_is_bounded_and_keeps_rows_distinct() {
     let snapshot = HistoryRangeSnapshot {
         request_id: 9,

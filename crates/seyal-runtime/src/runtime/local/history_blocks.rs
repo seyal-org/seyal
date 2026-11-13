@@ -61,12 +61,25 @@ impl Runtime {
         // LineId span — that masks RegionId ownership holes (#1484). Legacy
         // HISTORY reconstruction remains only for unscoped LineId requests.
         let (rows, more_rows) = if request.block_id != 0 {
-            match native_block_wire_rows(
-                entry,
-                request.block_id,
-                max_lines,
-                request.start_unit,
-            ) {
+            // Finding E: start_line==0 && end_line==0 means start_unit is a
+            // sealed-row index from BlockViewportPlan clipping (not lead skip).
+            let page = if request.start_line == 0 && request.end_line == 0 {
+                super::native_block_rows::native_block_wire_rows_from(
+                    entry,
+                    request.block_id,
+                    max_lines,
+                    0,
+                    usize::try_from(request.start_unit).unwrap_or(usize::MAX),
+                )
+            } else {
+                native_block_wire_rows(
+                    entry,
+                    request.block_id,
+                    max_lines,
+                    request.start_unit,
+                )
+            };
+            match page {
                 Some(page) => page,
                 None => (Vec::new(), false),
             }

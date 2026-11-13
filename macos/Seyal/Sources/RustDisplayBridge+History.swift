@@ -19,17 +19,23 @@ extension RustDisplayBridge {
     forDisplayHandle handle: UInt64,
     startLine: UInt64,
     endLine: UInt64,
-    blockID: UInt64
+    blockID: UInt64,
+    startUnit: UInt32 = 0
   ) -> Int32 {
     guard isConnected, handle != 0 else { return -4 }
-    guard blockID > 0, startLine > 0, endLine >= startLine else { return -4 }
+    // Finding E: (0, 0) is sealed-row indexed retrieval; startUnit is the
+    // sealed index from BlockViewportPlan clipping.
+    let sealedIndexMode = startLine == 0 && endLine == 0
+    guard blockID > 0, sealedIndexMode || (startLine > 0 && endLine >= startLine) else {
+      return -4
+    }
     // Address the named Controller directly. `seyal_bridge_select` only moves
     // poll/flush; focused history FFI would hit FOCUSED_DISPLAY_HANDLE (#1426).
     let requestID = seyal_bridge_next_history_request_id_for(handle)
     guard requestID != 0 else { return -4 }
     let result = finishAddressedMutation(
       seyal_bridge_request_history_range_for(
-        handle, blockID, startLine, endLine, 512, 131_072, 0),
+        handle, blockID, startLine, endLine, 512, 131_072, startUnit),
       forDisplayHandle: handle
     )
     if result == 0 {
@@ -38,6 +44,28 @@ extension RustDisplayBridge {
       requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
     }
     return result
+  }
+
+  /// Request visible sealed rows for one Block from the current viewport plan.
+  func requestSealedViewportClip(forDisplayHandle handle: UInt64, blockID: UInt64) -> Int32 {
+    var clip = SeyalBlockViewportClip()
+    if seyal_bridge_block_viewport_clip_for(handle, blockID, &clip) != 0, clip.row_count > 0 {
+      return requestHistoryRange(
+        forDisplayHandle: handle,
+        startLine: 0,
+        endLine: 0,
+        blockID: blockID,
+        startUnit: clip.first_row
+      )
+    }
+    // Plan has no sealed clip yet — fetch from sealed index 0 (bounded page).
+    return requestHistoryRange(
+      forDisplayHandle: handle,
+      startLine: 0,
+      endLine: 0,
+      blockID: blockID,
+      startUnit: 0
+    )
   }
 
   /// Discard this bridge's own focused-Controller stale requests.

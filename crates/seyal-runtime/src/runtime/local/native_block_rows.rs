@@ -23,6 +23,19 @@ pub(super) fn native_block_wire_rows(
     max_lines: usize,
     skip_leads: u32,
 ) -> Option<(Vec<WireRow>, bool)> {
+    native_block_wire_rows_from(entry, block_id, max_lines, skip_leads, 0)
+}
+
+/// RegionId sealed-row indexed retrieval for viewport plans (Finding E).
+/// `start_sealed_index` selects the first sealed ownership row; `skip_leads`
+/// then applies only within that window (never width-inferred jumps).
+pub(super) fn native_block_wire_rows_from(
+    entry: &Entry,
+    block_id: u64,
+    max_lines: usize,
+    skip_leads: u32,
+    start_sealed_index: usize,
+) -> Option<(Vec<WireRow>, bool)> {
     let record = entry
         .block_timeline
         .records()
@@ -45,13 +58,10 @@ pub(super) fn native_block_wire_rows(
         live_by_line.entry(line_id.0).or_default().push((col, cell));
     }
 
-    // Finding E: do not infer historical row offsets from the first sealed
-    // row's padded lead count (mixed Unicode / partial ownership / reflow).
-    // Walk sealed rows from index 0 and let NativeWirePage apply exact
-    // start_unit skipping. Indexed RegionId/source-anchor continuation is
-    // the follow-on retrieval API; this removes the unsafe uniform-lead jump.
+    // Finding E: address by sealed-row index (plan clipping / source anchor).
+    // Do not infer jumps from padded lead counts under Unicode/reflow.
     let skip = skip_leads;
-    let start_index = 0usize;
+    let start_index = start_sealed_index;
     let mut page = NativeWirePage::new(cols_n, max_lines, skip);
     let mut pending_line: Option<u64> = None;
     let mut pending_owned: Vec<(u16, Cell)> = Vec::new();
