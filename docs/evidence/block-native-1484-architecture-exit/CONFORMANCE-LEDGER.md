@@ -14,10 +14,10 @@ A requirement is COMPLIANT only when: corrected production path executes, owners
 |---|---|---|---|---|
 | A | Viewport indexes and scroll anchors are per-display Rust **client** state; TerminalState owns content only | Corrected: `LocalDisplayClient.block_viewport_index`; engine viewport field removed | **COMPLIANT** ([verify](2c190401-6b73-4116-a597-723bc9308e48)) | Architecture + Client viewport |
 | B | Incremental viewport index: O(log B) height/insert/remove/lookup; O(log B + visible) traversal; no full rebuild on ordinary output | Corrected: Fenwick+HashMap in `seyal-client/src/viewport/index.rs` with work-counter tests; same-order publishes use `set_height` | **COMPLIANT** ([verify](2c190401-6b73-4116-a597-723bc9308e48)) | Client viewport |
-| C | Complete Rust-owned `BlockViewportPlan` (ADR-009); Metal consumes plan; Runtime publishes bounded content/damage only | Plan+FFI+`applyBlockViewportPlan`; card fallback still present until D delete | PARTIAL | Protocol + Client viewport + Metal |
-| D | Swift is thin OS/IME/AX/GPU adapter; no authoritative card geometry/document height/per-Block HISTORY presentation | Plan-only Flow paint when index published; Flow HISTORY/NATIVE book fetches retired; card chrome remains AX host | PARTIAL | Metal/Swift migration |
-| E | Indexed RegionId/source-anchor viewport retrieval; visible rows + overscan only; no full-Block HISTORY retain for paint | Sealed-index HISTORY `(0,0)+start_unit`; plan clipping fetch wired; full-Block retain delete still open (D) | PARTIAL | Storage + Protocol |
-| F | Causal StreamSequence/UnitVersion ownership; no silent trusted-marker loss; deterministic barriers; proven capacity | Soft-cap yield + Entry watermark + f06_f after [F/A/B/D verify](2c190401-6b73-4116-a597-723bc9308e48); still PARTIAL pending re-verify | PARTIAL | Attribution |
+| C | Complete Rust-owned `BlockViewportPlan` (ADR-009); Metal consumes plan; Runtime publishes bounded content/damage only | Plan+FFI+`applyBlockViewportPlan`; card-clip fallback **deleted** | PARTIAL→awaiting indep COMPLIANT | Protocol + Client viewport + Metal |
+| D | Swift is thin OS/IME/AX/GPU adapter; no authoritative card geometry/document height/per-Block HISTORY presentation | Plan-only publish; HISTORY emission fail-closed; collectBlockOutputRegions deleted; chrome-only cards | PARTIAL→awaiting indep COMPLIANT | Metal/Swift migration |
+| E | Indexed RegionId/source-anchor viewport retrieval; visible rows + overscan only; no full-Block HISTORY retain for paint | Sealed-index + overscan; latest-clip retain (no monotonic full-Block); LineId HISTORY emission removed | PARTIAL→awaiting indep COMPLIANT | Storage + Protocol |
+| F | Causal StreamSequence/UnitVersion ownership; no silent trusted-marker loss; deterministic barriers; proven capacity | Soft-cap + watermark + cumulative consume counts + f06_f | PARTIAL→awaiting indep COMPLIANT | Attribution |
 
 ## Required production path (must execute)
 

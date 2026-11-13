@@ -348,6 +348,8 @@ impl Runtime {
             #[cfg(target_os = "macos")]
             session_runtime: super::session_bootstrap::SessionRuntime::default(),
             last_consumed_attribution_sequence: 0,
+            consumed_attribution_markers: 0,
+            consumed_attribution_mutations: 0,
         };
         let previous = self.by_token.insert(token, id);
         debug_assert!(previous.is_none());

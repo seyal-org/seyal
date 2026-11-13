@@ -118,6 +118,9 @@ pub(in crate::runtime) struct Entry {
     /// Last StreamSequence observed by Finding F journal consume (D7).
     /// Written on every drain so release builds cannot treat consume as a no-op.
     pub(in crate::runtime) last_consumed_attribution_sequence: u64,
+    /// Cumulative drained journal events observed by D7 consume.
+    pub(in crate::runtime) consumed_attribution_markers: u64,
+    pub(in crate::runtime) consumed_attribution_mutations: u64,
 }
 
 #[cfg(target_os = "macos")]

@@ -302,8 +302,14 @@ impl Runtime {
         if let Some(entry) = self.entries.get_mut(&id) {
             let fail_closed = entry.execution.attribution_journal_fail_closed_overflow();
             let events = entry.execution.drain_attribution_journal();
-            if let Some(watermark) = consume_attribution_journal_events(&events) {
-                entry.last_consumed_attribution_sequence = watermark;
+            if let Some(summary) = consume_attribution_journal_events(&events) {
+                entry.last_consumed_attribution_sequence = summary.watermark;
+                entry.consumed_attribution_markers = entry
+                    .consumed_attribution_markers
+                    .saturating_add(summary.markers);
+                entry.consumed_attribution_mutations = entry
+                    .consumed_attribution_mutations
+                    .saturating_add(summary.mutations);
             }
             if fail_closed {
                 entry.execution.end_native_block_output();
@@ -406,8 +412,14 @@ impl Runtime {
             .ok_or(RuntimeError::UnknownExecution)?;
         while entry.execution.take_shell_integration_event().is_some() {}
         let events = entry.execution.drain_attribution_journal();
-        if let Some(watermark) = consume_attribution_journal_events(&events) {
-            entry.last_consumed_attribution_sequence = watermark;
+        if let Some(summary) = consume_attribution_journal_events(&events) {
+            entry.last_consumed_attribution_sequence = summary.watermark;
+            entry.consumed_attribution_markers = entry
+                .consumed_attribution_markers
+                .saturating_add(summary.markers);
+            entry.consumed_attribution_mutations = entry
+                .consumed_attribution_mutations
+                .saturating_add(summary.mutations);
         }
         Ok(())
     }
@@ -691,23 +703,41 @@ pub(super) fn complete_timeline_block(
         .is_ok()
 }
 
+/// Result of D7 journal consume — release-visible ownership bookkeeping.
+struct AttributionConsumeSummary {
+    watermark: u64,
+    markers: u64,
+    mutations: u64,
+}
+
 /// Deterministic journal consumption after shell_events dispatch (#1484 F / D7).
 ///
 /// Drains are ownership barriers: every event advances the Entry's observed
-/// StreamSequence watermark (release-visible). Debug builds also assert
-/// marker token_accepted and strict sequence monotonicity. CellMutation
-/// rows are not a separate "finalized" flag — capacity barriers refuse new
-/// admits while prior events remain undrained.
-fn consume_attribution_journal_events(events: &[seyal_exec::PrimaryEvent]) -> Option<u64> {
+/// StreamSequence watermark and cumulative marker/mutation counts
+/// (release-visible). Debug builds also assert marker token_accepted and
+/// strict sequence monotonicity. Capacity barriers refuse new admits while
+/// prior events remain undrained — there is no separate "finalized" flag.
+fn consume_attribution_journal_events(
+    events: &[seyal_exec::PrimaryEvent],
+) -> Option<AttributionConsumeSummary> {
+    if events.is_empty() {
+        return None;
+    }
     let mut last_sequence = None;
+    let mut markers = 0u64;
+    let mut mutations = 0u64;
     for event in events {
         let sequence = match event {
-            seyal_exec::PrimaryEvent::CellMutation { sequence, .. } => *sequence,
+            seyal_exec::PrimaryEvent::CellMutation { sequence, .. } => {
+                mutations = mutations.saturating_add(1);
+                *sequence
+            }
             seyal_exec::PrimaryEvent::ShellBoundaryCandidate {
                 sequence,
                 token_accepted,
                 ..
             } => {
+                markers = markers.saturating_add(1);
                 debug_assert!(
                     *token_accepted,
                     "journaled shell boundary must carry token_accepted from VT admit"
@@ -723,7 +753,11 @@ fn consume_attribution_journal_events(events: &[seyal_exec::PrimaryEvent]) -> Op
         }
         last_sequence = Some(sequence);
     }
-    last_sequence.map(|seq| seq.0)
+    last_sequence.map(|seq| AttributionConsumeSummary {
+        watermark: seq.0,
+        markers,
+        mutations,
+    })
 }
 
 /// Apply one trusted local-scope event and carry out its Block effects.

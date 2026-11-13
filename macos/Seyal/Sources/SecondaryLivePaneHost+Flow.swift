@@ -172,8 +172,7 @@ extension SecondaryLivePaneHost {
                 // projection reserved1 (sealed-aware) (#1484).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
-            let rustIndexed = seyal_bridge_native_regions_total_height_for(displayHandle) > 0
-            card.setOutputLines(rustIndexed ? 1 : heightLines, cellHeight: cellHeight)
+            card.setOutputLines(1, cellHeight: cellHeight)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
@@ -308,8 +307,7 @@ extension SecondaryLivePaneHost {
             ) {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
-            let rustIndexed = seyal_bridge_native_regions_total_height_for(displayHandle) > 0
-            card.setOutputLines(rustIndexed ? 1 : heightLines, cellHeight: cellHeight)
+            card.setOutputLines(1, cellHeight: cellHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail (#1484).
             if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
                 || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
@@ -353,8 +351,7 @@ extension SecondaryLivePaneHost {
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
             card.setBodyTranscript(range.accessibilityTranscript())
-            let rustIndexed = seyal_bridge_native_regions_total_height_for(displayHandle) > 0
-            card.setOutputLines(rustIndexed ? 1 : max(range.rows.count, 1), cellHeight: cellHeight)
+            card.setOutputLines(1, cellHeight: cellHeight)
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()
@@ -440,111 +437,25 @@ extension SecondaryLivePaneHost {
         let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         guard !direct, displayHandle != 0 else { return }
-        // Finding C/D: Rust BlockViewportPlan is Flow paint authority. When the
-        // client index has published height, never fall back to AppKit card clips.
+        // Finding C/D: sole Flow paint authority is BlockViewportPlan.
         if surface.applyBlockViewportPlan(displayHandle: displayHandle) {
+            blockOutputZeroClipRetries = 0
             surface.refreshRecoveryAccessibilityValue()
-            return
-        }
-        if seyal_bridge_native_regions_total_height_for(displayHandle) > 0 {
-            if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
-                blockOutputZeroClipRetries += 1
-                DispatchQueue.main.async { [weak self] in
-                    self?.publishBlockOutputFrame()
-                }
+            if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",
+               lastVisibleHistoryPixelCount == 0,
+               Date().timeIntervalSince(lastHistoryPixelSampleAt) >= 0.5
+            {
+                lastHistoryPixelSampleAt = Date()
+                lastVisibleHistoryPixelCount = surface.inspectFlowPaint(sampleGPU: true).opaquePixelsInsideClips
             }
             return
         }
-        var regions = collectBlockOutputRegions()
-        if regions.isEmpty, !blockCards.isEmpty {
-            layoutSubtreeIfNeeded()
-            regions = collectBlockOutputRegions()
-            if regions.isEmpty {
-                if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
-                    blockOutputZeroClipRetries += 1
-                    DispatchQueue.main.async { [weak self] in
-                        self?.publishBlockOutputFrame()
-                    }
-                }
-                return
+        if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
+            blockOutputZeroClipRetries += 1
+            DispatchQueue.main.async { [weak self] in
+                self?.publishBlockOutputFrame()
             }
         }
-        blockOutputZeroClipRetries = 0
-        regions.sort { $0.id < $1.id }
-        lastPublishedTranscriptRegions = regions
-        transcriptFrameRevision &+= 1
-        surface.setTranscriptFrame(
-            NativeTranscriptFrame(
-                revision: transcriptFrameRevision,
-                regions: regions,
-                surfaceIdentity: ObjectIdentifier(surface)
-            )
-        )
-        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",
-           lastVisibleHistoryPixelCount == 0,
-           Date().timeIntervalSince(lastHistoryPixelSampleAt) >= 0.5
-        {
-            lastHistoryPixelSampleAt = Date()
-            lastVisibleHistoryPixelCount = surface.inspectFlowPaint(sampleGPU: true).opaquePixelsInsideClips
-        }
-    }
-
-    private func collectBlockOutputRegions() -> [NativeTranscriptRegion] {
-        var regions: [NativeTranscriptRegion] = []
-        for (blockID, card) in blockCards {
-            let clip = card.body.convert(card.body.bounds, to: surface)
-            guard clip.width > 0, clip.height > 0 else { continue }
-            let historyRows: Range<Int>?
-            let historyRequestID: UInt64
-            let historyRevision: UInt64
-            if let range = surface.retainedHistoryRange(
-                blockID: blockID,
-                displayHandle: displayHandle
-            ) {
-                let visibleBody = card.body.convert(surface.bounds, from: surface)
-                    .intersection(card.body.bounds)
-                let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
-                // Viewport intersection only — never the full tall card height.
-                let visibleRowCount = max(
-                    Int((max(visibleBody.height, 1) / cellHeight).rounded(.up)),
-                    1
-                )
-                let firstVisibleRow: Int
-                if followingLiveEnd {
-                    firstVisibleRow = max(range.rows.count - visibleRowCount, 0)
-                } else {
-                    firstVisibleRow = HistoryRenderWindow.firstVisibleRow(
-                        documentBounds: card.body.bounds,
-                        visibleBounds: visibleBody,
-                        isFlipped: card.body.isFlipped,
-                        cellHeight: cellHeight
-                    )
-                }
-                historyRows = HistoryRenderWindow(
-                    totalRows: range.rows.count,
-                    firstVisibleRow: firstVisibleRow,
-                    visibleRowCount: visibleRowCount
-                ).rows
-                historyRequestID = range.requestID
-                historyRevision = range.revision
-            } else {
-                historyRows = nil
-                historyRequestID = 0
-                historyRevision = 0
-            }
-            regions.append(
-                NativeTranscriptRegion(
-                    id: blockID,
-                    displayHandle: displayHandle,
-                    origin: clip.origin,
-                    clip: clip,
-                    historyRows: historyRows,
-                    historyRequestID: historyRequestID,
-                    historyRevision: historyRevision
-                )
-            )
-        }
-        return regions
     }
 
     /// Mirrors `ProductChromeHostView+Blocks.syncTranscriptDocumentSize`: when
@@ -574,13 +485,9 @@ extension SecondaryLivePaneHost {
         let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
         let cellHeight = surface.terminalPresentationCellSize().height
         let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        // Finding D: Rust per-display viewport index owns document extent.
-        // Never invent from AppKit card heights when the index has published.
-        let contentHeight: CGFloat = {
-            if rustBody > 0 { return rustBody }
-            if !hasCards { return 0 }
-            return cardHeight
-        }()
+        // Finding D: Rust viewport index / plan is sole document extent.
+        let contentHeight: CGFloat = rustBody > 0 ? rustBody : 0
+        _ = (hasCards, cardHeight)
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
         let preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0

@@ -166,13 +166,10 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
                 start_line: clip.start_line,
                 end_line: 0,
             },
-            LiveTailProjection::History(span) => SeyalAppBlockProjection {
-                kind: SEYAL_APP_BLOCK_PROJECTION_HISTORY,
-                reserved0: 0,
-                reserved1: 0,
-                start_line: span.start_line,
-                end_line: span.end_line,
-            },
+            // Finding D/E: Flow must not reconstruct completed Blocks via LineId
+            // HISTORY. Native RegionId map → NATIVE_REGIONS above; otherwise
+            // fail-closed until Runtime publishes RegionIds (no Swift HISTORY).
+            LiveTailProjection::History(_span) => SeyalAppBlockProjection::fail_closed(),
             LiveTailProjection::FailClosed => SeyalAppBlockProjection::fail_closed(),
         }
     })
@@ -365,9 +362,11 @@ mod tests {
         });
 
         let completed = seyal_app_block_projection(handle, 0);
-        assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(completed.start_line, 10);
-        assert_eq!(completed.end_line, 12);
+        assert_eq!(
+            completed.kind,
+            SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED,
+            "completed without native RegionIds must not use LineId HISTORY"
+        );
 
         let running = seyal_app_block_projection(handle, 1);
         assert_eq!(running.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
@@ -486,15 +485,10 @@ mod tests {
         });
 
         let completed = seyal_app_block_projection(handle, 0);
-        assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(completed.start_line, 10);
-        assert_eq!(completed.end_line, 12);
-        // ExecutionEnded settles the Running Block with end=start so History
-        // projects instead of FailClosed (clear→exit must not collapse bodies).
+        assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
+        // ExecutionEnded without native RegionIds stays fail-closed (Finding D/E).
         let settled = seyal_app_block_projection(handle, 1);
-        assert_eq!(settled.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(settled.start_line, 20);
-        assert_eq!(settled.end_line, 20);
+        assert_eq!(settled.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
 
         APPS.with(|apps| {
             let mut apps = apps.borrow_mut();
@@ -513,13 +507,9 @@ mod tests {
             );
         });
         let retained = seyal_app_block_projection(handle, 0);
-        assert_eq!(retained.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(retained.start_line, 10);
-        assert_eq!(retained.end_line, 12);
+        assert_eq!(retained.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
         let settled_unbound = seyal_app_block_projection(handle, 1);
-        assert_eq!(settled_unbound.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(settled_unbound.start_line, 20);
-        assert_eq!(settled_unbound.end_line, 20);
+        assert_eq!(settled_unbound.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 
@@ -651,16 +641,8 @@ mod tests {
         });
         let completed_host = seyal_app_block_projection(handle, 0);
         let completed_session = seyal_app_block_projection(handle, 1);
-        assert_eq!(completed_host.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(
-            (completed_host.start_line, completed_host.end_line),
-            (10, 29)
-        );
-        assert_eq!(completed_session.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(
-            (completed_session.start_line, completed_session.end_line),
-            (30, 40)
-        );
+        assert_eq!(completed_host.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
+        assert_eq!(completed_session.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
 
         crate::ffi::CLIENTS.with(|clients| {
             clients.borrow_mut().remove(&owner);

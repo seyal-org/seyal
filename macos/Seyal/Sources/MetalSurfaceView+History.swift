@@ -37,25 +37,15 @@ extension MetalSurfaceView {
   }
 
   func retainHistoryRange(_ range: NativeHistoryRange) {
-    // Key under the reply handle and under 0 so transcript publishes that use
-    // either activeBlockDisplayHandle or a legacy 0 handle still find the
-    // retain (blank Metal bodies with AX text — #1484 100k OCR).
-    let handles: [UInt64] = range.sourceDisplayHandle == 0
-      ? [0]
-      : [range.sourceDisplayHandle, 0]
-    for handle in handles {
-      let key = PaneBlockKey(
-        paneID: paneID,
-        displayHandle: handle,
-        blockID: range.blockID
-      )
-      // Monotonic retain: a shorter Complete must never erase a richer body for
-      // the same Pane/Block (four-pane MP0 short on-window overwrite — #1484).
-      if let existing = historyRanges[key], existing.rows.count > range.rows.count {
-        continue
-      }
-      historyRanges[key] = range
-    }
+    // Finding E/D: store the latest plan-bounded sealed clip only — never a
+    // dual-key legacy retain or monotonic full-Block accumulation.
+    let handle = range.sourceDisplayHandle
+    let key = PaneBlockKey(
+      paneID: paneID,
+      displayHandle: handle,
+      blockID: range.blockID
+    )
+    historyRanges[key] = range
   }
 
   func retainedHistoryRange(blockID: UInt64, displayHandle: UInt64 = 0) -> NativeHistoryRange? {

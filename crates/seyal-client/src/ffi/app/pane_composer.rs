@@ -19,7 +19,7 @@ use crate::presentation::PresentationMode;
 use crate::LocalDisplayClient;
 
 use super::block_projection::{
-    SeyalAppBlockProjection, SEYAL_APP_BLOCK_PROJECTION_HISTORY,
+    SeyalAppBlockProjection,
     SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
 };
 use super::decode::runtime_block_from_command;
@@ -428,13 +428,8 @@ pub extern "C" fn seyal_app_block_projection_for_pane(
                 start_line: clip.start_line,
                 end_line: 0,
             },
-            LiveTailProjection::History(span) => SeyalAppBlockProjection {
-                kind: SEYAL_APP_BLOCK_PROJECTION_HISTORY,
-                reserved0: 0,
-                reserved1: 0,
-                start_line: span.start_line,
-                end_line: span.end_line,
-            },
+            // Finding D/E: no LineId HISTORY reconstruction for Flow leaves.
+            LiveTailProjection::History(_span) => SeyalAppBlockProjection::fail_closed(),
             LiveTailProjection::FailClosed => SeyalAppBlockProjection::fail_closed(),
         }
     })
