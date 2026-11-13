@@ -316,16 +316,14 @@ extension ProductChromeHostView {
                    blockID: blockID,
                    displayHandle: activeBlockDisplayHandle
                ) {
-                // Transcript text is AX/retain only. Card height stays on the
-                // Rust projection (reserved1 now carries sealed count) so a
-                // short retain cannot collapse the body (#1484).
+                // Transcript text is AX/retain only. Card height floors on the
+                // Rust projection (reserved1 sealed count) and retained rows so
+                // a short retain cannot collapse the body (#1484 Phase G RC2).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
+                heightLines = max(heightLines, max(retainedRange.rows.count, 1))
             }
-            // Finding D: when Rust viewport index owns document extent, card
-            // body height is not paint/document authority — keep minimal chrome.
-            // Finding D: card body is chrome-only; plan owns paint geometry.
-            _ = heightLines
-            card.setOutputLines(1, cellHeight: cellHeight)
+            // Plan owns paint geometry; card height is chrome/AX hit-target only.
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
             let idHi = row.id_hi
@@ -558,14 +556,15 @@ extension ProductChromeHostView {
                     || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS),
                   let card = blockCards[row.id_lo]
             else { continue }
-            let heightLines = outputLineCount(projection: projection)
+            var heightLines = outputLineCount(projection: projection)
             if let retainedRange = pane.inputSurface.retainedHistoryRange(
                 blockID: row.id_lo,
                 displayHandle: activeBlockDisplayHandle
             ) {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
+                heightLines = max(heightLines, max(retainedRange.rows.count, 1))
             }
-            card.setOutputLines(1, cellHeight: cellHeight)
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail and
             // must not refill HISTORY on every frame (#1484 100k).
             if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
@@ -657,7 +656,12 @@ extension ProductChromeHostView {
         else { return }
         if let card = blockCards[range.blockID] {
             card.setBodyTranscript(range.accessibilityTranscript())
-            card.setOutputLines(1, cellHeight: cellHeight)
+            let projectionLines = nativeProjection(blockID: range.blockID)
+                .map { outputLineCount(projection: $0) } ?? 1
+            card.setOutputLines(
+                max(projectionLines, max(range.rows.count, 1)),
+                cellHeight: cellHeight
+            )
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()

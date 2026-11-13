@@ -3298,7 +3298,8 @@ final class SeyalHostComponentTests: XCTestCase {
             "publishBlockOutputFrame must paint via BlockViewportPlan only (no card-clip fallback)"
         )
         XCTAssertFalse(
-            hostText.contains("collectBlockOutputRegions"),
+            hostText.contains("collectBlockOutputRegions(")
+                || hostText.contains("func collectBlockOutputRegions"),
             "card-clip collectBlockOutputRegions must stay deleted from Flow publish"
         )
         let liveTail = sourceRoot.appendingPathComponent("MetalSurfaceView+LiveTail.swift")

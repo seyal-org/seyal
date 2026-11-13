@@ -162,17 +162,18 @@ extension SecondaryLivePaneHost {
             card.onSelect = { [weak self] _ in
                 self?.onFocus?()
             }
-            let heightLines = lines
+            var heightLines = lines
             if blockID != 0,
                let retainedRange = surface.retainedHistoryRange(
                    blockID: blockID,
                    displayHandle: displayHandle
                ) {
-                // Transcript text is AX/retain only; height stays on Rust
-                // projection reserved1 (sealed-aware) (#1484).
+                // Transcript text is AX/retain only; height floors on Rust
+                // projection reserved1 + retained rows (#1484 Phase G RC2).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
+                heightLines = max(heightLines, max(retainedRange.rows.count, 1))
             }
-            card.setOutputLines(1, cellHeight: cellHeight)
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
@@ -300,14 +301,15 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
-            let heightLines = outputLineCount(projection: projection)
+            var heightLines = outputLineCount(projection: projection)
             if let retainedRange = surface.retainedHistoryRange(
                 blockID: row.id_lo,
                 displayHandle: displayHandle
             ) {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
+                heightLines = max(heightLines, max(retainedRange.rows.count, 1))
             }
-            card.setOutputLines(1, cellHeight: cellHeight)
+            card.setOutputLines(heightLines, cellHeight: cellHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail (#1484).
             if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
                 || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
@@ -351,7 +353,12 @@ extension SecondaryLivePaneHost {
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
             card.setBodyTranscript(range.accessibilityTranscript())
-            card.setOutputLines(1, cellHeight: cellHeight)
+            let projectionLines = nativeProjection(blockID: range.blockID)
+                .map { outputLineCount(projection: $0) } ?? 1
+            card.setOutputLines(
+                max(projectionLines, max(range.rows.count, 1)),
+                cellHeight: cellHeight
+            )
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()
