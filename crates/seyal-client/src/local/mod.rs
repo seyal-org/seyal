@@ -308,14 +308,32 @@ impl LocalDisplayClient {
         map: &BlockNativeRegions,
     ) {
         // Height = sealed ownership rows + live on-window rows for each Block.
-        // Header spine length is not yet on the wire; sealed_rows covers output
-        // retention and row_count covers the live tail until Phase C plan.
-        self.block_viewport_index.replace_all(map.records.iter().map(|record| {
-            let height = record
-                .sealed_rows
-                .saturating_add(u32::from(record.row_count));
-            (record.block_id, height)
-        }));
+        // Ordinary output updates heights in place (O(log B) per Block) when
+        // timeline order is unchanged; structural reorder still replace_all.
+        let incoming: Vec<(u64, u32)> = map
+            .records
+            .iter()
+            .map(|record| {
+                let height = record
+                    .sealed_rows
+                    .saturating_add(u32::from(record.row_count));
+                (record.block_id, height)
+            })
+            .collect();
+        let order_unchanged = self.block_viewport_index.len() == incoming.len()
+            && self
+                .block_viewport_index
+                .ordered_ids()
+                .iter()
+                .zip(incoming.iter().map(|(id, _)| id))
+                .all(|(a, b)| a == b);
+        if order_unchanged {
+            for (id, height) in incoming {
+                let _ = self.block_viewport_index.set_height(id, height);
+            }
+        } else {
+            self.block_viewport_index.replace_all(incoming);
+        }
         self.rebuild_block_viewport_plan();
     }
 

@@ -261,6 +261,7 @@ impl Actions for TerminalCore {
     }
 
     fn should_yield_for_attribution(&self) -> bool {
-        self.attribution_observe_yield
+        // Marker yield (OSC) or journal soft-cap (Finding F / D3 capacity path).
+        self.attribution_observe_yield || self.primary.engine.journal.at_or_above_soft_cap()
     }
 }

@@ -325,4 +325,15 @@ mod tests {
         assert!(ops_at[2] <= ops_at[1].saturating_add(8));
         assert!(ops_at[2] < 64);
     }
+
+    #[test]
+    fn same_order_height_updates_skip_replace_all() {
+        let mut index = BlockViewportIndex::default();
+        index.replace_all([(1, 2), (2, 3), (3, 4)]);
+        index.work_mut().reset();
+        assert!(index.set_height(2, 9));
+        assert_eq!(index.work().rebuild_all, 0);
+        assert_eq!(index.height_of(2), Some(9));
+        assert_eq!(index.total_height(), 2 + 9 + 4);
+    }
 }
