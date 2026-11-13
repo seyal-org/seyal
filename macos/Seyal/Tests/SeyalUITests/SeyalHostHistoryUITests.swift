@@ -222,15 +222,18 @@ final class SeyalHostHistoryUITests: XCTestCase {
         waitBriefly(0.6)
         attachScreenshot(app, name: "m003-100k-scrolled-history")
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
-        let scrolledGpu = expectation(
-            for: NSPredicate(format: "value MATCHES %@", ".*history-gpu-ink=[1-9][0-9]*.*"),
+        let scrolledMetal = expectation(
+            for: NSPredicate(
+                format: "value MATCHES %@",
+                ".*history-instances=[1-9][0-9]*.*history-atlas=ok.*"
+            ),
             evaluatedWith: terminal,
             handler: nil
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [scrolledGpu], timeout: 8),
+            XCTWaiter.wait(for: [scrolledMetal], timeout: 8),
             .completed,
-            "scrolled Flow must keep HISTORY Metal ink; AX=\(terminal.value ?? "nil")"
+            "scrolled Flow must keep HISTORY Metal instances; AX=\(terminal.value ?? "nil")"
         )
         transcript.scroll(byDeltaX: 0, deltaY: -1_000_000)
         waitBriefly(0.6)
@@ -406,15 +409,18 @@ final class SeyalHostHistoryUITests: XCTestCase {
         app.activate()
         waitBriefly(0.35)
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
-        let gpu = expectation(
-            for: NSPredicate(format: "value MATCHES %@", ".*history-gpu-ink=[1-9][0-9]*.*"),
+        let metal = expectation(
+            for: NSPredicate(
+                format: "value MATCHES %@",
+                ".*history-instances=[1-9][0-9]*.*history-atlas=ok.*"
+            ),
             evaluatedWith: terminal,
             handler: nil
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [gpu], timeout: 8),
+            XCTWaiter.wait(for: [metal], timeout: 8),
             .completed,
-            "Metal must rasterize retained HISTORY; AX=\(terminal.value ?? "nil")"
+            "Metal must hold HISTORY instances + atlas; AX=\(terminal.value ?? "nil")"
         )
         let body = app.descendants(matching: .any)["seyal-block-0-body"].firstMatch
         let bodyMarker = expectation(

@@ -334,7 +334,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let gpuPaint = paint.historyInstanceCount > 0
       ? inspectFlowPaint(sampleGPU: true)
       : paint
-    let historyGpuInk = gpuPaint.opaquePixelsInsideClips
+    // Count ink anywhere in the offscreen encode — misaligned clips can leave
+    // inside=0 while glyphs still rasterize (#1484 100k).
+    let historyGpuInk =
+      gpuPaint.opaquePixelsInsideClips + gpuPaint.opaquePixelsOutsideClips
     let geometry: String
     if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
       geometry =
