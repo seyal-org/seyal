@@ -292,12 +292,16 @@ final class CommandBlockView: NSView {
     }
 
     func setBodyTranscript(_ text: String) {
-        guard bodyTranscript.stringValue != text else { return }
-        bodyTranscript.stringValue = text
-        // Callers pass `accessibilityTranscript()` (already budgeted). Do not
-        // re-summarize — a second pass can drop the live-end tail (#1484 100k).
-        bodyTranscript.setAccessibilityLabel(text)
-        bodyTranscript.setAccessibilityValue(text)
+        // Prefer caller-budgeted `accessibilityTranscript()`; only summarize
+        // when raw text exceeds the AX limit so a second pass cannot drop the
+        // live-end tail (#1484 100k / LongBlock AX).
+        let ax = text.count <= BlockAccessibilityText.limit
+            ? text
+            : Self.accessibilitySummary(for: text)
+        guard bodyTranscript.stringValue != ax else { return }
+        bodyTranscript.stringValue = ax
+        bodyTranscript.setAccessibilityLabel(ax)
+        bodyTranscript.setAccessibilityValue(ax)
     }
 
     private func updateAccessibilityValue() {
