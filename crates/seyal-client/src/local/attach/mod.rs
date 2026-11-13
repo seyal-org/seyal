@@ -827,6 +827,7 @@ impl LocalDisplayClient {
                 total_height: 0,
                 records: Vec::new(),
             },
+            block_viewport_index: crate::viewport::BlockViewportIndex::default(),
             command_blocks_supported,
             last_composer_result: None,
             composer_status: None,

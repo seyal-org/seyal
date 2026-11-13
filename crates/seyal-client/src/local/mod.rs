@@ -148,6 +148,9 @@ pub struct LocalDisplayClient {
     pub(crate) block_timeline: BlockTimeline,
     /// Latest native Block RegionId map (#1484). Empty until Runtime publishes.
     pub(crate) block_native_regions: BlockNativeRegions,
+    /// Per-display Block height index + scroll geometry (#1484 Findings A+B).
+    /// Derived from content metrics; never TerminalState authority.
+    pub(crate) block_viewport_index: crate::viewport::BlockViewportIndex,
     pub(crate) command_blocks_supported: bool,
     pub(crate) last_composer_result: Option<ComposerResult>,
     /// Latest Runtime-published composer eligibility for this attachment
@@ -288,6 +291,27 @@ impl LocalDisplayClient {
     /// independent and authoritative for cells/pixels.
     pub fn block_native_regions(&self) -> &BlockNativeRegions {
         &self.block_native_regions
+    }
+
+    /// Per-display indexed transcript height (Finding A). Preferred over the
+    /// Runtime-authored `BlockNativeRegions.total_height` wire field.
+    pub fn block_viewport_total_height(&self) -> u64 {
+        self.block_viewport_index.total_height()
+    }
+
+    pub(crate) fn apply_block_native_regions_to_viewport(
+        &mut self,
+        map: &BlockNativeRegions,
+    ) {
+        // Height = sealed ownership rows + live on-window rows for each Block.
+        // Header spine length is not yet on the wire; sealed_rows covers output
+        // retention and row_count covers the live tail until Phase C plan.
+        self.block_viewport_index.replace_all(map.records.iter().map(|record| {
+            let height = record
+                .sealed_rows
+                .saturating_add(u32::from(record.row_count));
+            (record.block_id, height)
+        }));
     }
 
     pub fn block_timeline(&self) -> &BlockTimeline {
@@ -619,6 +643,7 @@ fn reconstruction_probe_client_with_stream(
             total_height: 0,
             records: Vec::new(),
         },
+        block_viewport_index: crate::viewport::BlockViewportIndex::default(),
         command_blocks_supported: false,
         last_composer_result: None,
         composer_status: None,

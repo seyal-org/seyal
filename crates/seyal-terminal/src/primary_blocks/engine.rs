@@ -3,7 +3,7 @@
 use super::attribution::{AttributionJournal, MarkerKind, PrimaryEvent, UnitVersion};
 use super::region_store::{CellLookup, RegionStore};
 use super::types::{BlockContent, BlockId, RegionId, RegionKind};
-use super::viewport::{BlockContentRef, BlockViewportIndex, OnWindowRegionSpan, VisibleBlockSpan};
+use super::viewport::{BlockContentRef, OnWindowRegionSpan, VisibleBlockSpan};
 use super::vt_window_map::VTWindowMap;
 use crate::{Cell, LineId, TerminalError};
 use std::collections::HashMap;
@@ -32,7 +32,6 @@ pub(crate) struct PrimaryBlockEngine {
     /// Prompt/command header region opened at OSC PromptStart before BlockId
     /// assignment (#1484 Finding F / D4).
     pending_header: Option<RegionId>,
-    viewport: BlockViewportIndex,
     /// Last content generation per (LineId, unit_offset). Overwrite mints anew.
     unit_generations: HashMap<(LineId, u64), u64>,
 }
@@ -54,7 +53,6 @@ impl PrimaryBlockEngine {
             active_region_stack: Vec::new(),
             pending_output: None,
             pending_header: None,
-            viewport: BlockViewportIndex::default(),
             unit_generations: HashMap::new(),
         })
     }
@@ -159,7 +157,6 @@ impl PrimaryBlockEngine {
         };
         let block = BlockContent { id, header, output };
         self.blocks.push(block.clone());
-        self.viewport.rebuild(&self.blocks, &self.store);
         self.active_region = output;
         Ok(block)
     }
@@ -176,18 +173,13 @@ impl PrimaryBlockEngine {
     }
 
     pub(crate) fn block_content_refs(&self) -> Vec<BlockContentRef> {
-        self.viewport
-            .ordered_ids()
+        // Content order only — display viewport indexes live in seyal-client (A).
+        self.blocks
             .iter()
-            .filter_map(|id| {
-                self.blocks
-                    .iter()
-                    .find(|block| block.id == *id)
-                    .map(|block| BlockContentRef {
-                        block_id: block.id,
-                        header: block.header,
-                        output: block.output,
-                    })
+            .map(|block| BlockContentRef {
+                block_id: block.id,
+                header: block.header,
+                output: block.output,
             })
             .collect()
     }
@@ -352,7 +344,6 @@ impl PrimaryBlockEngine {
         let handle = self.store.write_window(col, row, cell, region)?;
         self.window.set(col, row, handle, region)?;
         self.store.note_line(region, line_id)?;
-        self.refresh_viewport_height_for_region(region);
         let sequence = self.journal.next_sequence();
         if self
             .journal
@@ -381,27 +372,11 @@ impl PrimaryBlockEngine {
         Ok(version)
     }
 
-    /// Bounded Flow viewport query over indexed Block heights (no cell copies).
-    pub(crate) fn visible_block_spans(&self, y: u64, window_rows: u32) -> Vec<VisibleBlockSpan> {
-        self.viewport.visible_spans(y, window_rows)
-    }
-
-    pub(crate) fn viewport_total_height(&self) -> u64 {
-        self.viewport.total_height()
-    }
-
-    pub(crate) fn viewport_height_of(&self, block_id: BlockId) -> u32 {
-        self.viewport.height_of(block_id).unwrap_or(0)
-    }
-
-    fn refresh_viewport_height_for_region(&mut self, region: RegionId) {
-        let Some(block) = self
-            .blocks
-            .iter()
-            .find(|block| block.header == region || block.output == region)
-            .cloned()
-        else {
-            return;
+    /// Content-derived presentation height for one Block (header + output spines).
+    /// Display viewport indexes are owned by seyal-client per displayHandle (A/B).
+    pub(crate) fn content_height_of(&self, block_id: BlockId) -> u32 {
+        let Some(block) = self.blocks.iter().find(|block| block.id == block_id) else {
+            return 0;
         };
         let header = self
             .store
@@ -413,10 +388,52 @@ impl PrimaryBlockEngine {
             .region(block.output)
             .map(|grid| grid.line_spine.len())
             .unwrap_or(0);
-        let height = u32::try_from(header.saturating_add(output)).unwrap_or(u32::MAX);
-        if !self.viewport.set_height(block.id, height) {
-            self.viewport.rebuild(&self.blocks, &self.store);
+        u32::try_from(header.saturating_add(output)).unwrap_or(u32::MAX)
+    }
+
+    pub(crate) fn content_total_height(&self) -> u64 {
+        self.blocks
+            .iter()
+            .map(|block| u64::from(self.content_height_of(block.id)))
+            .sum()
+    }
+
+    /// Compatibility shim: content height scan for tests during A/B cutover.
+    pub(crate) fn visible_block_spans(&self, y: u64, window_rows: u32) -> Vec<VisibleBlockSpan> {
+        // Build a throwaway prefix scan without retaining display authority.
+        let mut prefix = 0u64;
+        let window_end = y.saturating_add(u64::from(window_rows));
+        let mut out = Vec::new();
+        for block in &self.blocks {
+            let height = self.content_height_of(block.id);
+            let block_y = prefix;
+            let block_end = block_y.saturating_add(u64::from(height));
+            prefix = block_end;
+            if height == 0 || block_end <= y || block_y >= window_end {
+                continue;
+            }
+            let first_visible = y.saturating_sub(block_y).min(u64::from(height)) as u32;
+            let visible_end = window_end.min(block_end);
+            let visible_rows = (visible_end - (block_y + u64::from(first_visible))) as u32;
+            if visible_rows > 0 {
+                out.push(VisibleBlockSpan {
+                    block_id: block.id,
+                    y: block_y,
+                    height,
+                    first_visible_row: first_visible,
+                    visible_rows,
+                });
+            }
         }
+        out
+    }
+
+    pub(crate) fn viewport_total_height(&self) -> u64 {
+        self.content_total_height()
+    }
+
+    pub(crate) fn viewport_height_of(&self, block_id: BlockId) -> u32 {
+        self.content_height_of(block_id)
     }
 
     /// Blank / continuation / erase that is not a source-unit lead write.

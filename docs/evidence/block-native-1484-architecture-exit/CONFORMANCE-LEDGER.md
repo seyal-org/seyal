@@ -12,8 +12,8 @@ A requirement is COMPLIANT only when: corrected production path executes, owners
 
 | ID | Accepted requirement | Previous / current violating path | Status | Owner agent |
 |---|---|---|---|---|
-| A | Viewport indexes and scroll anchors are per-display Rust **client** state; TerminalState owns content only | `PrimaryBlockEngine.viewport: BlockViewportIndex` in `crates/seyal-terminal/src/primary_blocks/engine.rs` | VIOLATING | Architecture + Client viewport |
-| B | Incremental viewport index: O(log B) height/insert/remove/lookup; O(log B + visible) traversal; no full rebuild on ordinary output | `crates/seyal-terminal/src/primary_blocks/viewport.rs` linear `position()`, prefix rewrites, `begin_block_output` rebuild, `block_content_refs` / `on_window_region_spans` scans | VIOLATING | Client viewport |
+| A | Viewport indexes and scroll anchors are per-display Rust **client** state; TerminalState owns content only | Corrected: `LocalDisplayClient.block_viewport_index`; engine viewport field removed | PARTIAL→awaiting independent verify | Architecture + Client viewport |
+| B | Incremental viewport index: O(log B) height/insert/remove/lookup; O(log B + visible) traversal; no full rebuild on ordinary output | Corrected: Fenwick+HashMap in `seyal-client/src/viewport/index.rs` with work-counter tests | PARTIAL→awaiting independent verify | Client viewport |
 | C | Complete Rust-owned `BlockViewportPlan` (ADR-009); Metal consumes plan; Runtime publishes bounded content/damage only | `BlockNativeRegions` in `crates/seyal-protocol/src/pass7/native_regions.rs` is metadata (ids/spans/height), not a render plan; 128-record cap unevaluated | VIOLATING | Protocol + Client viewport + Metal |
 | D | Swift is thin OS/IME/AX/GPU adapter; no authoritative card geometry/document height/per-Block HISTORY presentation | `ProductChromeHostView+Blocks.swift`, `SecondaryLivePaneHost+Flow.swift`, `ProductChromeBlockViews.swift`, `MetalSurfaceView+{History,LiveTail}.swift`, `HistoryProjectionRequestBook.swift` | VIOLATING | Metal/Swift migration |
 | E | Indexed RegionId/source-anchor viewport retrieval; visible rows + overscan only; no full-Block HISTORY retain for paint | `native_block_rows.rs` + `history_blocks.rs` still serve per-Block HISTORY pages; lead-count page-skip assumes uniform row leads | VIOLATING | Storage + Protocol |
@@ -33,8 +33,8 @@ One PTY → One VT authority → PrimaryBlockEngine (RegionStore+HistoryStore+VT
 
 | Req | Corrected path | Production caller | Ownership proof | Complexity evidence | Legacy removed | Focused verification | Independent verdict |
 |---|---|---|---|---|---|---|---|
-| A | _TBD_ | _TBD_ | _TBD_ | n/a | _TBD_ | _TBD_ | OPEN |
-| B | _TBD_ | _TBD_ | _TBD_ | work-counter tests | _TBD_ | _TBD_ | OPEN |
+| A | `LocalDisplayClient.block_viewport_index`; engine field removed | poll apply + FFI `block_viewport_total_height` | Client owns index; Runtime content only | n/a | Engine `BlockViewportIndex` deleted | client+terminal unit tests | OPEN (indep verify) |
+| B | Fenwick+HashMap `seyal-client/viewport/index.rs` | `set_height`/`visible_spans` | O(log B) proof via WorkCounter | work-counter B∈{1k,4k,16k} | terminal prefix Vec index removed | `cargo test -p seyal-client --lib viewport::` | OPEN (indep verify) |
 | C | _TBD_ | _TBD_ | _TBD_ | n/a | _TBD_ | _TBD_ | OPEN |
 | D | _TBD_ | _TBD_ | _TBD_ | n/a | _TBD_ | _TBD_ | OPEN |
 | E | _TBD_ | _TBD_ | _TBD_ | no full-Block download | _TBD_ | _TBD_ | OPEN |

@@ -58,6 +58,7 @@ pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
             total_height: 0,
             records: Vec::new(),
         },
+        block_viewport_index: crate::viewport::BlockViewportIndex::default(),
         command_blocks_supported: false,
         last_composer_result: None,
         composer_status: None,

@@ -26,6 +26,7 @@ pub mod provisioning;
 pub mod recovery;
 pub mod shell;
 pub mod theme;
+pub mod viewport;
 
 #[cfg(test)]
 mod goto_tests;
