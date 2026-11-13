@@ -44,6 +44,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// Encoded Flow history is on-screen without a Candidate-D live frame
   /// (shell-exit retain). Must not satisfy SPEC-009 renderer-ready / Usable.
   var hasRetainedHistoryPresentation = false
+  /// Marks recovery/paint AX diagnostic stale; composed on next AX read so the
+  /// synchronous GPU sample never runs per Candidate-D frame (#1484 P0 lag).
+  var recoveryAccessibilityValueStale = false
   var presentationState = PresentationRecoveryState()
   var presentationRetryScheduled = false
   var presentationRetryTimer: Timer?
@@ -72,6 +75,20 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// can advance for unrelated runtime updates; identical regions need no new
   /// Metal history preparation.
   var lastTranscriptFrameRegions: [NativeTranscriptRegion]?
+  /// Last successfully applied BlockViewportPlan header signature.
+  /// Height-only growth invalidates via `totalExtent` (epoch stays stable).
+  /// Do not key on type-48 `content_generation` — it bumps every tick (#1484).
+  /// `chromeClipFingerprint` invalidates when AppKit body placement moves.
+  var lastAppliedViewportPlanSignature: (
+    handle: UInt64,
+    epoch: UInt64,
+    scrollY: UInt64,
+    visible: UInt32,
+    clipping: UInt32,
+    totalExtent: UInt64,
+    clipCount: UInt32,
+    chromeClipFingerprint: UInt64
+  )?
   private(set) var transcriptDisplayHandle: UInt64 = 0
   var lastProposedGeometry = CGRect.null
   var proposingGeometry = false
@@ -265,6 +282,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     guard handle != transcriptDisplayHandle else { return }
     transcriptDisplayHandle = handle
     lastTranscriptFrameRegions = nil
+    lastAppliedViewportPlanSignature = nil
     historyRenderPageKeys.removeAll(keepingCapacity: true)
     renderer.removeHistoryRegions(except: [])
     renderer.clearLiveTailPresentation()
@@ -305,56 +323,25 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     ))
   }
 
-  /// Makes the authoritative recovery state observable to VoiceOver and to
-  /// native acceptance automation without introducing a second terminal
-  /// model or changing the Runtime protocol.
-  ///
-  /// Prepared-frame rows/columns/cursor are mirrored read-only so headed
-  /// Flow-scroll acceptance (#865 / SPEC-008 §3.1) can prove transcript
-  /// scrolling does not mutate PTY size or terminal cursor state.
+  /// Marks the recovery/paint diagnostic AX value stale; composed on the next
+  /// AX read. Its `history-gpu-ink` field needs a synchronous offscreen render
+  /// plus full-surface readback, which must never run per Candidate-D frame
+  /// (#1484 P0 lag / flicker).
   func refreshRecoveryAccessibilityValue() {
-    let connection = terminalBridgeIsConnected ? "usable" : "disconnected"
-    let runtime = terminalRuntimeIdentity ?? "none"
-    let execution = terminalExecutionIdentity ?? "none"
-    let attachment = terminalAttachmentIdentity ?? "none"
-    let alternate = lastAlternateScreen == true ? "true" : "false"
-    let paint = renderer.inspectFlowPaint()
-    let flowPaint = paint.accessibilityToken
-    // history-instances / history-regions-painted expose Metal Block-body
-    // glyphs so XCUI fails when AX titles/bodies exist but paint is blank or
-    // collapsed onto one card (#1379 false-green).
-    let historyInstances = paint.historyInstanceCount
-    let historyRegionsPainted = paint.paintedHistoryRegionCount
-    let historyClips = paint.historyClipsDistinct ? "ok" : "collapse"
-    // Offscreen GPU sample proves atlas+history actually rasterize (CPU
-    // instance counts alone are false-green when atlas was released). Sample
-    // whenever HISTORY instances exist — not only after shell-exit retain —
-    // so 100k live-end AX sees history-gpu-ink (#1484).
-    let atlasReady = renderer.glyphAtlas.texture != nil
-    let gpuPaint = paint.historyInstanceCount > 0
-      ? inspectFlowPaint(sampleGPU: true)
-      : paint
-    // Count ink anywhere in the offscreen encode — misaligned clips can leave
-    // inside=0 while glyphs still rasterize (#1484 100k).
-    let historyGpuInk =
-      gpuPaint.opaquePixelsInsideClips + gpuPaint.opaquePixelsOutsideClips
-    let geometry: String
-    if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
-      geometry =
-        "rows=\(frame.rows) columns=\(frame.columns) "
-        + "cursor=\(frame.cursor_row),\(frame.cursor_column) "
-        + "cursor-visible=\(frame.cursor_visible != 0 ? "true" : "false")"
-    } else {
-      geometry = "rows=0 columns=0 cursor=0,0 cursor-visible=false"
+    recoveryAccessibilityValueStale = true
+  }
+
+  override func accessibilityValue() -> Any? {
+    if recoveryAccessibilityValueStale {
+      recoveryAccessibilityValueStale = false
+      super.setAccessibilityValue(composeRecoveryAccessibilityValue())
     }
-    setAccessibilityValue(
-      "process=\(ProcessInfo.processInfo.processIdentifier) connection=\(connection) "
-        + "runtime=\(runtime) execution=\(execution) "
-        + "attachment=\(attachment) alternate-screen=\(alternate) "
-        + "\(geometry) flow-paint=\(flowPaint) history-instances=\(historyInstances) "
-        + "history-regions-painted=\(historyRegionsPainted) history-clips=\(historyClips) "
-        + "history-atlas=\(atlasReady ? "ok" : "nil") history-gpu-ink=\(historyGpuInk)"
-    )
+    return super.accessibilityValue()
+  }
+
+  override func setAccessibilityValue(_ value: Any?) {
+    recoveryAccessibilityValueStale = false
+    super.setAccessibilityValue(value)
   }
 
   static func identityString(
@@ -751,6 +738,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       }
     } else {
       lastTranscriptFrameRegions = nil
+      lastAppliedViewportPlanSignature = nil
       renderer.removeHistoryRegions(except: [])
       historyRenderPageKeys.removeAll(keepingCapacity: true)
       hasRetainedHistoryPresentation = false

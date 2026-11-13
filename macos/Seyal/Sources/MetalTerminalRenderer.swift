@@ -297,7 +297,9 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             damage.markAll(rows: frame.rows)
         }
 
-        if scaleChanged {
+        // nil metrics means releaseDedicatedResources already reset the atlas;
+        // a second reset would orphan HISTORY prepared since then (#1484).
+        if scaleChanged, currentMetrics != nil {
             glyphAtlas.resetWhenGPUIdle()
         }
         if geometryChanged || instanceBuffer == nil {
@@ -509,7 +511,13 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             buffer: buffer,
             instanceCount: outputIndex,
             origin: SIMD2<Float>(Float(region.origin.x), Float(region.origin.y)),
-            clip: region.clip
+            clip: region.clip,
+            historySource: DeferredHistoryPrepare(
+                historyRange: historyRange,
+                region: region,
+                backingScale: backingScale
+            ),
+            atlasGeneration: glyphAtlas.stats.resets
         )
         // Completed NATIVE Blocks may have no live grid (`instanceBuffer == nil`
         // while `drawsLiveGrid` is still true). History alone must still arm
@@ -711,6 +719,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     func present(drawable: any CAMetalDrawable, presentsToDisplay: Bool = true) -> Bool {
         dispatchPrecondition(condition: .onQueue(.main))
         drainGPUCompletionsIfNeeded()
+        reencodeHistoryRegionsForCurrentAtlas()
         guard visible,
               persistentDisplayFailure == nil,
               needsPresent,
@@ -805,6 +814,9 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     func renderOffscreenAndWait(width: Int, height: Int) -> MTLTexture? {
         guard width > 0, height > 0 else {
             return nil
+        }
+        if framesInFlight == 0 {
+            reencodeHistoryRegionsForCurrentAtlas()
         }
         if presentationPlan.drawsLiveGrid {
             guard instanceBuffer != nil, instanceCount > 0, glyphAtlas.texture != nil else {

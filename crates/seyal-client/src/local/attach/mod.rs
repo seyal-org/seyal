@@ -830,6 +830,7 @@ impl LocalDisplayClient {
             block_viewport_index: crate::viewport::BlockViewportIndex::default(),
             block_viewport_plan: None,
             block_viewport_presentation_epoch: 0,
+            last_plan_native_paint_identity: Vec::new(),
             block_viewport_scroll_anchor: crate::viewport::ScrollAnchor::LiveEnd,
             block_viewport_window_rows: None,
             command_blocks_supported,

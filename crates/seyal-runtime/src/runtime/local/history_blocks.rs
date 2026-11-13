@@ -6,7 +6,7 @@ use crate::{
         MessageType, NativeBlockRegions, CAP_COMMAND_BLOCKS, CAP_NATIVE_BLOCK_REGIONS,
         CAP_SESSION_BOOTSTRAP,
     },
-    ExecutionId,
+    AttachmentId, ExecutionId,
 };
 
 use super::super::Runtime;
@@ -320,6 +320,27 @@ impl Runtime {
             let _ = self.send_attachment_after_display_frame(token, attachment_id, frame);
         }
         self.publish_block_native_regions(execution_id);
+    }
+
+    /// Drop one attachment from the type-48 delivery set so the next
+    /// `publish_block_native_regions` / `publish_block_timeline` will resend
+    /// even when content stamp is unchanged (suspend/resume / resync; #1484).
+    pub(in crate::runtime) fn forget_published_native_regions_for_attachment(
+        &mut self,
+        attachment_id: AttachmentId,
+    ) {
+        let Some(execution_id) = self
+            .local_ipc
+            .as_ref()
+            .and_then(|state| state.attachments.execution_of(attachment_id).ok())
+        else {
+            return;
+        };
+        if let Some(entry) = self.entries.get_mut(&execution_id) {
+            entry
+                .published_native_regions_attachments
+                .remove(&attachment_id);
+        }
     }
 
     /// Publish BlockId → RegionId map (+ on-window row spans) to peers that

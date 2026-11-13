@@ -84,7 +84,6 @@ extension SecondaryLivePaneHost {
             let detail = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
             let promptRow = seyal_app_copy(appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
-            let lines = outputLineCount(projection: projection)
             let card = CommandBlockStackReconciler.reuseOrCreate(
                 blockID: blockID,
                 previousCards: previousCards,
@@ -96,7 +95,7 @@ extension SecondaryLivePaneHost {
                     detail: detail,
                     state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                     cellHeight: cellHeight,
-                    lines: lines,
+                    lines: outputLineCount(projection: projection),
                     session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
                 )
             }
@@ -170,19 +169,16 @@ extension SecondaryLivePaneHost {
             card.onSelect = { [weak self] _ in
                 self?.onFocus?()
             }
-            var heightLines = lines
+            let lines = outputLineCount(projection: projection)
             if blockID != 0,
                let retainedRange = surface.retainedHistoryRange(
                    blockID: blockID,
                    displayHandle: displayHandle
                ) {
-                // Transcript text is AX/retain only; height floors on Rust
-                // projection reserved1 + retained rows (#1484 Phase G RC2).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
-                heightLines = max(heightLines, min(max(retainedRange.rows.count, 1), 128))
             }
-            let holdHeight = pinnedTranscriptOffsetY != nil || !savedFollowing
-            card.setOutputLines(heightLines, cellHeight: cellHeight, expandOnly: holdHeight)
+            // Reserve chrome body height for plan→card placement (#1484 manual).
+            card.setOutputLines(lines, cellHeight: cellHeight)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
@@ -313,16 +309,13 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
-            var heightLines = outputLineCount(projection: projection)
             if let retainedRange = surface.retainedHistoryRange(
                 blockID: row.id_lo,
                 displayHandle: displayHandle
             ) {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
-                heightLines = max(heightLines, min(max(retainedRange.rows.count, 1), 128))
             }
-            let holdHeight = pinnedTranscriptOffsetY != nil || !followingLiveEnd
-            card.setOutputLines(heightLines, cellHeight: cellHeight, expandOnly: holdHeight)
+            card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail (#1484).
             if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
                 || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
@@ -366,54 +359,28 @@ extension SecondaryLivePaneHost {
         // window bridge's owning surface; without this, a pane host that
         // requested via `historyBridge` never hears back (#1484 multipane).
         surface.notePlanClipHistoryResult(range)
-        // Finding D: no HistoryProjectionRequestBook — retain for Metal/AX and
-        // prepare Metal instances even when the plan frame is briefly absent.
+        // Finding D/ADR-015: retain for AX + Metal prepare from plan geometry.
+        // Do not resize cards, re-layout, or force LiveEnd scroll on every page
+        // (seq flicker / jump root cause).
         guard !range.rows.isEmpty else { return }
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
             card.setBodyTranscript(range.accessibilityTranscript())
-            let projectionLines = nativeProjection(blockID: range.blockID)
-                .map { outputLineCount(projection: $0) } ?? 1
-            let holdHeight = pinnedTranscriptOffsetY != nil || !followingLiveEnd
-            card.setOutputLines(
-                max(projectionLines, min(max(range.rows.count, 1), 128)),
-                cellHeight: cellHeight,
-                expandOnly: holdHeight
-            )
-            card.layoutSubtreeIfNeeded()
-            let clip = card.convert(card.body.frame, to: surface)
-            if clip.width > 1, clip.height > 1 {
-                var region = NativeTranscriptRegion(
-                    id: range.blockID,
-                    origin: .zero,
-                    clip: clip,
-                    historyRows: 0..<range.rows.count,
-                    historyRequestID: range.requestID,
-                    historyRevision: range.revision
-                )
-                region.displayHandle = range.sourceDisplayHandle
-                surface.renderHistoryRange(range, region: region)
-                if !lastPublishedTranscriptRegions.contains(where: { $0.id == range.blockID }) {
-                    lastPublishedTranscriptRegions.append(region)
-                } else {
-                    lastPublishedTranscriptRegions = lastPublishedTranscriptRegions.map {
-                        $0.id == range.blockID ? region : $0
-                    }
-                }
-            } else {
-                surface.renderHistoryRange(range)
-            }
+            let lines = nativeProjection(blockID: range.blockID)
+                .map { outputLineCount(projection: $0) }
+                ?? min(max(range.rows.count, 1), 128)
+            card.setOutputLines(lines, cellHeight: cellHeight)
+            layoutSubtreeIfNeeded()
+            refreshCachedChromeBodyClips()
+        }
+        if let planRegion = surface.currentTranscriptRegion(blockID: range.blockID) {
+            surface.renderHistoryRange(range, region: planRegion)
         } else {
             surface.renderHistoryRange(range)
         }
-        layoutSubtreeIfNeeded()
-        publishBlockOutputFrame()
-        syncTranscriptDocumentSize()
-        publishBlockOutputFrame()
-        // syncTranscriptDocumentSize already restores a mid-transcript pin.
-        if pinnedTranscriptOffsetY == nil, followingLiveEnd {
-            scrollTranscriptToLiveEnd()
+        if surface.liveTailBlockIDs().contains(range.blockID) {
+            publishLiveTailBlocks()
         }
     }
 
@@ -456,9 +423,18 @@ extension SecondaryLivePaneHost {
         if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {
+            let released = surface.liveTailBlockIDs()
             surface.setLiveTailBlocks([:])
+            if !released.isEmpty, displayHandle != 0 {
+                surface.reopenPlanClipsAfterLiveTailRelease(
+                    blockIDs: released,
+                    displayHandle: displayHandle
+                )
+            }
             return
         }
+        let previousLive = surface.liveTailBlockIDs()
+        let previousClips = surface.liveTailClips()
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
         var live: [UInt64: LiveTailClip] = [:]
         for index in 0..<Int(composerSnap.block_count) {
@@ -469,14 +445,19 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
-            // Completed NATIVE paints via RegionId HISTORY retain only — do not
-            // dual-paint LiveTail after completion (#1484 100k OCR / MP0).
+            guard row.id_lo != 0, projection.reserved1 > 0 else { continue }
             let nativeCompleted =
                 projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
-            guard row.id_lo != 0,
-                  projection.reserved1 > 0,
-                  !nativeCompleted,
-                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+            if nativeCompleted {
+                // Hold LiveTail until sealed HISTORY GPU is ready — no blank gap.
+                if !surface.hasPreparedHistoryRegion(blockID: row.id_lo),
+                   let held = previousClips[row.id_lo]
+                {
+                    live[row.id_lo] = held
+                }
+                continue
+            }
+            guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
             else { continue }
             live[row.id_lo] = LiveTailClip(
                 startLine: max(projection.start_line, 1),
@@ -485,6 +466,15 @@ extension SecondaryLivePaneHost {
             )
         }
         surface.setLiveTailBlocks(live)
+        let released = previousLive.subtracting(live.keys)
+        // Reopen settled plan clips so the next plan tick can fetch sealed
+        // HISTORY — no card-driven LiveEnd fallback (#1484 ADR-015).
+        if !released.isEmpty, displayHandle != 0 {
+            surface.reopenPlanClipsAfterLiveTailRelease(
+                blockIDs: released,
+                displayHandle: displayHandle
+            )
+        }
     }
 
     /// Push AppKit transcript scroll into the Rust plan anchor before Metal
@@ -532,43 +522,42 @@ extension SecondaryLivePaneHost {
         )
     }
 
+    func refreshCachedChromeBodyClips() {
+        var next: [UInt64: NSRect] = [:]
+        next.reserveCapacity(blockCards.count)
+        for (blockID, card) in blockCards {
+            card.layoutSubtreeIfNeeded()
+            let raw = card.convert(card.body.frame, to: surface)
+            guard raw.width > 1, raw.height > 1 else { continue }
+            next[blockID] = NSRect(
+                x: raw.origin.x.rounded(.down),
+                y: raw.origin.y.rounded(.down),
+                width: max(raw.width.rounded(.down), 1),
+                height: max(raw.height.rounded(.down), 1)
+            )
+        }
+        cachedChromeBodyClips = next
+    }
+
     func publishBlockOutputFrame() {
         let eligibility = seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
         let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         guard !direct, displayHandle != 0 else { return }
-        // Finding C/D: sole Flow paint authority is BlockViewportPlan.
-        // Screen clips map plan-selected Blocks onto AppKit body rects only.
-        layoutSubtreeIfNeeded()
+        // Plan owns selection/rows/HISTORY; chrome clips only place content.
         syncBlockViewportScrollAnchor()
-        var screenClips: [UInt64: NSRect] = [:]
-        screenClips.reserveCapacity(blockCards.count)
-        for (blockID, card) in blockCards {
-            card.layoutSubtreeIfNeeded()
-            let clip = card.convert(card.body.frame, to: surface)
-            guard clip.width > 1, clip.height > 1 else { continue }
-            screenClips[blockID] = clip
+        // Settled cache only — per-frame layoutSubtree/convert thrashed plan
+        // signatures and made simple echo laggy (#1484 P0).
+        if cachedChromeBodyClips.isEmpty, !blockCards.isEmpty {
+            refreshCachedChromeBodyClips()
         }
         if surface.applyBlockViewportPlan(
             displayHandle: displayHandle,
-            screenClips: screenClips,
+            chromeBodyClips: cachedChromeBodyClips,
             historyBridge: historyBridge
         ) {
             blockOutputZeroClipRetries = 0
-            // Drive visible-history-clips diagnostics from the AppKit body
-            // clips that just fed the plan (SplitFromLivePane / multipane OCR).
-            lastPublishedTranscriptRegions = screenClips.map { blockID, clip in
-                var region = NativeTranscriptRegion(
-                    id: blockID,
-                    origin: .zero,
-                    clip: clip,
-                    historyRows: 0..<1,
-                    historyRequestID: 0,
-                    historyRevision: 0
-                )
-                region.displayHandle = displayHandle
-                return region
-            }
+            lastPublishedTranscriptRegions = surface.currentTranscriptRegions()
             surface.refreshRecoveryAccessibilityValue()
             if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",
                lastVisibleHistoryPixelCount == 0,
@@ -579,36 +568,12 @@ extension SecondaryLivePaneHost {
             }
             return
         }
-        // Plan empty while Block cards exist (type-48 lag on refocused original
-        // pane): still fetch a bounded LiveEnd HISTORY page for AX (#1484).
-        var fallback: [(blockID: UInt64, sealedRows: UInt32)] = []
-        fallback.reserveCapacity(blockCards.count)
-        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
-        for index in 0..<Int(composerSnap.block_count) {
-            let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
-            guard row.id_lo != 0, blockCards[row.id_lo] != nil else { continue }
-            let projection = seyal_app_block_projection_for_pane(
-                appHandle, paneLo, paneHi, UInt32(index)
-            )
-            let kind = projection.kind
-            guard kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
-                || kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
-                || kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
-            else { continue }
-            // Prefer sealed/live row count; if still 0, ask for a LiveEnd-sized
-            // page so tall Blocks can expose their tail marker (#1484).
-            let rows = projection.reserved1 > 0
-                ? projection.reserved1
-                : UInt32(max(outputLineCount(projection: projection), 96))
-            fallback.append((row.id_lo, rows))
+        // LiveTail owns running paint; empty sealed plan mid-stream is normal.
+        if !surface.liveTailBlockIDs().isEmpty || blockCards.isEmpty {
+            blockOutputZeroClipRetries = 0
+            return
         }
-        if !fallback.isEmpty {
-            surface.requestNativeCardHistoryFallback(
-                displayHandle: displayHandle,
-                blocks: fallback,
-                historyBridge: historyBridge
-            )
-        }
+        // Plan absent during sealed revision churn — bounded retry only.
         if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
             blockOutputZeroClipRetries += 1
             DispatchQueue.main.async { [weak self] in
@@ -648,7 +613,7 @@ extension SecondaryLivePaneHost {
                 setTranscriptDocumentOffsetY(
                     documentOffsetY(forContentOffset: pinnedContentOffset)
                 )
-            } else if shouldFollowLiveEnd {
+            } else if shouldFollowLiveEnd, !isNearLiveEnd() {
                 scrollTranscriptToLiveEnd()
             }
         }
@@ -659,10 +624,8 @@ extension SecondaryLivePaneHost {
         let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
         let cellHeight = surface.terminalPresentationCellSize().height
         let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        // Finding D: Rust viewport index is preferred when authoritative.
-        // Type-48 can lag or under-report vs laid-out cards (refocused original
-        // pane); take max so mid-transcript scroll retention cannot collapse
-        // the AppKit document under a pinned AbsoluteY offset (#1484 FocusChurn).
+        // Rust owns terminal rows; AppKit chrome headers still need document
+        // room until Rust publishes chrome metrics (#1484 manual top-paint).
         let contentHeight: CGFloat = hasCards ? max(rustBody, cardHeight) : 0
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
@@ -692,14 +655,20 @@ extension SecondaryLivePaneHost {
             viewportHeight: viewportHeight,
             preservedDocumentHeight: preservedHeight
         )
+        var layoutChanged = false
         if abs(transcriptLeadingSpacerHeight.constant - spacers.leading) > 0.5 {
             transcriptLeadingSpacerHeight.constant = spacers.leading
             layoutSubtreeIfNeeded()
+            layoutChanged = true
         }
         if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - spacers.document) > 0.5 {
             blocks.setFrameSize(NSSize(width: width, height: spacers.document))
             transcript.reflectScrolledClipView(transcript.contentView)
             layoutSubtreeIfNeeded()
+            layoutChanged = true
+        }
+        if layoutChanged || cachedChromeBodyClips.count != blockCards.count {
+            refreshCachedChromeBodyClips()
         }
     }
 

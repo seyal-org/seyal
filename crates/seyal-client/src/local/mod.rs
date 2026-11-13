@@ -154,6 +154,10 @@ pub struct LocalDisplayClient {
     /// Latest Rust-owned viewport plan for Metal (Finding C).
     pub(crate) block_viewport_plan: Option<crate::viewport::BlockViewportPlan>,
     pub(crate) block_viewport_presentation_epoch: u64,
+    /// Last plan-build paint identity: `(block_id, header, output, sealed_rows)`.
+    /// Live `row_count` ticks that only grow heights do not bump
+    /// `presentation_epoch` (#1484 P0 seq / HISTORY retain).
+    pub(crate) last_plan_native_paint_identity: Vec<(u64, u64, u64, u32)>,
     pub(crate) block_viewport_scroll_anchor: crate::viewport::ScrollAnchor,
     /// AppKit-reported visible window height in presentation rows. When set,
     /// overrides PTY geometry for plan window selection (G5 AbsoluteY sync).
@@ -306,11 +310,15 @@ impl LocalDisplayClient {
         self.block_viewport_index.total_height()
     }
 
-    pub(crate) fn apply_block_native_regions_to_viewport(&mut self, map: &BlockNativeRegions) {
+    /// Rebuild the per-display viewport index + plan from the already-committed
+    /// `block_native_regions` map. Callers must assign the map first so plan
+    /// clips see the new RegionIds (#1484 FourPane type-48 lag).
+    pub(crate) fn apply_block_native_regions_to_viewport(&mut self) {
         // Height = sealed ownership rows + live on-window rows for each Block.
         // Ordinary output updates heights in place (O(log B) per Block) when
         // timeline order is unchanged; structural reorder still replace_all.
-        let incoming: Vec<(u64, u32)> = map
+        let incoming: Vec<(u64, u32)> = self
+            .block_native_regions
             .records
             .iter()
             .map(|record| {
@@ -334,7 +342,18 @@ impl LocalDisplayClient {
         } else {
             self.block_viewport_index.replace_all(incoming);
         }
-        self.rebuild_block_viewport_plan();
+        let next_identity: Vec<(u64, u64, u64, u32)> = self
+            .block_native_regions
+            .records
+            .iter()
+            .map(|r| (r.block_id, r.header_region, r.output_region, r.sealed_rows))
+            .collect();
+        // Bump presentation_epoch only when sealed RegionIds / ownership change.
+        // Live row_count growth keeps epoch stable so Metal retains HISTORY.
+        let bump_epoch = next_identity != self.last_plan_native_paint_identity
+            || self.block_viewport_plan.is_none();
+        self.last_plan_native_paint_identity = next_identity;
+        self.rebuild_block_viewport_plan_with_epoch(bump_epoch);
     }
 
     /// Sync AppKit scroll into the Rust plan anchor (G5). `live_end` keeps the
@@ -367,6 +386,7 @@ impl LocalDisplayClient {
     /// Rebuild the Metal-facing plan from the current per-display index (C).
     /// `bump_epoch` is false for scroll-only AbsoluteY/LiveEnd updates so
     /// Metal can retain overlapping HISTORY pages across near-end scrolls.
+    #[allow(dead_code)] // bumping wrapper retained for structural callers / tests
     pub(crate) fn rebuild_block_viewport_plan(&mut self) {
         self.rebuild_block_viewport_plan_with_epoch(true);
     }
@@ -760,6 +780,7 @@ fn reconstruction_probe_client_with_stream(
         block_viewport_index: crate::viewport::BlockViewportIndex::default(),
         block_viewport_plan: None,
         block_viewport_presentation_epoch: 0,
+        last_plan_native_paint_identity: Vec::new(),
         block_viewport_scroll_anchor: crate::viewport::ScrollAnchor::LiveEnd,
         block_viewport_window_rows: None,
         command_blocks_supported: false,

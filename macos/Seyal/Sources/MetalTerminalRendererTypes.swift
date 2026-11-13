@@ -244,6 +244,10 @@ struct HistoryRenderRegion {
     /// moving a Block does not require rewriting a buffer that the GPU may read.
     let origin: SIMD2<Float>
     let clip: CGRect
+    /// Sealed HISTORY only: instances bake glyph-atlas UVs, so they stay valid
+    /// only for `atlasGeneration`; `historySource` re-encodes after a reset.
+    var historySource: DeferredHistoryPrepare? = nil
+    var atlasGeneration: UInt64 = 0
 }
 
 enum MetalTerminalRendererError: Error {

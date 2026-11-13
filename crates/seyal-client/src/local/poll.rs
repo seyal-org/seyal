@@ -162,8 +162,12 @@ impl LocalDisplayClient {
                             seyal_runtime::local_ipc::framing::BlockNativeRegions::decode(payload)
                                 .map_err(|_| ClientError::Protocol)?;
                         if map.revision >= self.block_native_regions.revision {
-                            self.apply_block_native_regions_to_viewport(&map);
+                            // Commit the map before plan rebuild — rebuild reads
+                            // `block_native_regions.records` for RegionIds/clips.
+                            // Applying first left first-seen Blocks with
+                            // output_region=0 and empty clipping (#1484 FourPane).
                             self.block_native_regions = map;
+                            self.apply_block_native_regions_to_viewport();
                             metadata_changed = true;
                         }
                     }

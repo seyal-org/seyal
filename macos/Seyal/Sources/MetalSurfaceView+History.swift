@@ -37,6 +37,42 @@ extension MetalSurfaceView {
     bridge?.requestSealedViewportClip(forDisplayHandle: displayHandle, blockID: blockID) ?? -10
   }
 
+  func liveTailBlockIDs() -> Set<UInt64> {
+    Set(renderer.liveTail.clips.keys)
+  }
+
+  func liveTailClips() -> [UInt64: LiveTailClip] {
+    renderer.liveTail.clips
+  }
+
+  /// Sealed HISTORY instances ready for Metal — hold LiveTail until this is true.
+  func hasPreparedHistoryRegion(blockID: UInt64) -> Bool {
+    renderer.hasPreparedHistoryRegion(blockID: blockID)
+  }
+
+  /// Plan-owned transcript regions from the last successful BlockViewportPlan.
+  func currentTranscriptRegions() -> [NativeTranscriptRegion] {
+    lastTranscriptFrameRegions ?? []
+  }
+
+  func currentTranscriptRegion(blockID: UInt64) -> NativeTranscriptRegion? {
+    lastTranscriptFrameRegions?.first(where: { $0.id == blockID })
+  }
+
+  func reopenPlanClipsAfterLiveTailRelease(blockIDs: Set<UInt64>, displayHandle: UInt64) {
+    guard displayHandle != 0 else { return }
+    for blockID in blockIDs where blockID != 0 {
+      planClipRequestBook.retry(
+        HistoryProjectionRequestKey(
+          displayHandle: displayHandle,
+          blockID: blockID,
+          startLine: 0,
+          endLine: 0
+        )
+      )
+    }
+  }
+
   func retainHistoryRange(_ range: NativeHistoryRange) {
     // Finding E/D: store the latest plan-bounded sealed clip only — never a
     // dual-key legacy retain or monotonic full-Block accumulation.
@@ -46,6 +82,14 @@ extension MetalSurfaceView {
       displayHandle: handle,
       blockID: range.blockID
     )
+    let incomingAx = range.accessibilityTranscript()
+    if incomingAx.isEmpty { return }
+    if let previous = historyRanges[key],
+       !previous.accessibilityTranscript().isEmpty,
+       previous.startLine > range.startLine
+    {
+      return
+    }
     historyRanges[key] = range
   }
 
@@ -151,11 +195,10 @@ extension MetalSurfaceView {
         // Geometry-only scrolls reuse the prepared page; content/page changes
         // below prepare a fresh bounded buffer even when the clip is unchanged.
       } else {
+        // Defers while a drawable is in flight; GPU completion applies it and
+        // requests a fresh frame. Never zero framesInFlight on this path (#1484).
         try renderer.update(historyRange: page, region: rendererRegion, backingScale: scale)
         historyRenderPageKeys[range.blockID] = key
-        // LiveTail present often defers HISTORY; flush immediately so AX+Metal
-        // stay aligned for shell-exit retain (#1484).
-        renderer.forceFlushHistoryPreparesForRetain()
       }
       // Direct prepare (applyHistoryRange) must register order — inspectFlowPaint
       // only counts historyRegionOrder entries (#1484 clear→exit false-green).

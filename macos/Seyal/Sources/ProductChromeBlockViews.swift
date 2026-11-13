@@ -322,7 +322,21 @@ final class CommandBlockView: NSView {
         // unfocused stream / focus-churn tests observe AX markers while HISTORY
         // pages are still in flight (#1484 FlowSplitSibling / FocusChurn).
         if ax.isEmpty, !bodyTranscript.stringValue.isEmpty { return }
-        guard bodyTranscript.stringValue != ax else { return }
+        // Never demote LiveEnd-rich AX back to an onset-only latch (#1484 FourPane).
+        let current = bodyTranscript.stringValue
+        func nonEmptyLines(_ text: String) -> Int {
+            text.split(whereSeparator: \.isNewline)
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .count
+        }
+        let currentLines = nonEmptyLines(current)
+        let newLines = nonEmptyLines(ax)
+        if currentLines > 1,
+           ax == bodyAccessibilityOnsetLine || (newLines <= 2 && newLines < currentLines)
+        {
+            return
+        }
+        guard current != ax else { return }
         bodyTranscript.stringValue = ax
         bodyTranscript.setAccessibilityLabel(ax)
         bodyTranscript.setAccessibilityValue(ax)

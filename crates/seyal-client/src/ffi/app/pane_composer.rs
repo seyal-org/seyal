@@ -256,7 +256,7 @@ fn with_pane_matched_client<R>(
     .flatten()
 }
 
-fn eligibility_code(value: PresentationEligibility) -> u16 {
+pub(crate) fn eligibility_code(value: PresentationEligibility) -> u16 {
     match value {
         PresentationEligibility::Unbound => 0,
         PresentationEligibility::Flow => 1,

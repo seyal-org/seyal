@@ -81,6 +81,10 @@ impl Runtime {
                     // suspended attachment after this control has been handled.
                     state.pending_resync_set.remove(&(token, attachment_id));
                 }
+                // Forget type-48 delivery so resume/resync can republish the
+                // native-regions map after the client cleared presentation
+                // state under the fence (#1484 multipane extent=0).
+                self.forget_published_native_regions_for_attachment(attachment_id);
             }
             MessageType::ResumeDelivery => {
                 let Some(sequence) = resume_sequence else {
@@ -101,6 +105,9 @@ impl Runtime {
                                 .drop_attachment_presentation(token, attachment_id);
                             state.pending_resync_set.remove(&(token, attachment_id));
                         }
+                        // Ensure snapshot recovery is followed by a type-48
+                        // republish even if Suspend never ran (#1484).
+                        self.forget_published_native_regions_for_attachment(attachment_id);
                         self.schedule_snapshot_recovery(token, attachment_id);
                     }
                     Some(Err(AttachmentError::InvalidResumeSequence)) => {

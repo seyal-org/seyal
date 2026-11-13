@@ -25,16 +25,19 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     override init() {
         liveHost = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         super.init()
-        // Preserve ProductChromeHostView's frame/block refresh hook, then add
-        // the multi-window realization work for the same Rust commit.
+        // Preserve ProductChromeHostView's per-frame LiveTail/plan refresh, then
+        // drain window effects. Full chrome reconcile is NOT on this path —
+        // Candidate-D frames must not pay performChromeReconcile (#1484 P0).
+        // Timeline/status handlers and applyPendingEffectsAndReconcile own
+        // reconcileChrome; ChromeActions that need chrome after a command call
+        // it explicitly.
         let refreshProductHost = liveHost.pane.onProductChanged
         liveHost.pane.onProductChanged = { [weak self] in
             refreshProductHost?()
             guard let self else { return }
-            self.liveHost.reconcileChrome()
+            // Candidate-D: drain window effects only. Shell title/destroy
+            // snapshots every frame made simple echo laggy (#1484 P0).
             self.applyPendingEffects()
-            self.syncDestroyAgainstSnapshot()
-            self.refreshTitlesFromSnapshot()
         }
     }
 
@@ -93,6 +96,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     func applyPendingEffects() {
         // Drain window effects only. Quit effects stay queued for §4.
+        var drained = false
         while true {
             let effect = seyal_app_native_effect(appHandle, 0)
             guard effect.size != 0 else { break }
@@ -105,8 +109,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
                 applyEffect(effect)
             }
             ackOneEffect()
+            drained = true
         }
+        guard drained else { return }
         orderedKeys = snapshotOrderedWindowKeys().filter { realizations[$0] != nil }
+        // Title/destroy only after real window effects — not every Candidate-D.
+        syncDestroyAgainstSnapshot()
+        refreshTitlesFromSnapshot()
     }
 
     /// Cross-window navigation publishes product focus and an OrderFront

@@ -981,6 +981,9 @@ int32_t seyal_app_apply_runtime_composer_status(
 SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
 /* SPEC-022 R6.8 cursor for HISTORY_BACK/FORWARD; 0 = empty or invalid handle. */
 uint64_t seyal_app_focus_history_seq(uint64_t handle);
+/* Scalar eligibility / DirectInput without cloning snapshot screen/AX (#1484). */
+uint16_t seyal_app_eligibility(uint64_t handle);
+uint8_t seyal_app_block_scoped_direct_input(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);
 /* Pane-addressed composer read; empty when Pane unknown. Draft ptr is
  * invalidated by the next composer encode on this handle (#1424). */

@@ -674,6 +674,11 @@ impl ApplicationRoot {
     }
 
     fn eligibility(&self) -> PresentationEligibility {
+        self.presentation_eligibility()
+    }
+
+    /// Scalar presentation eligibility without cloning screen/AX snapshot data.
+    pub(crate) fn presentation_eligibility(&self) -> PresentationEligibility {
         if self.authority.is_none() {
             return PresentationEligibility::Unbound;
         }

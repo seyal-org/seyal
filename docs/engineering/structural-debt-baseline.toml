@@ -24,15 +24,15 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 977
+acknowledged_loc = 965
 issue = 1484
-reason = "Metal surface remains the thin historyRanges/hit-test owner; #1484 keeps shell-exit HISTORY buffers across disconnect (LiveTail cleared only) and plan-owned clip dedup hooks without a second VT/history authority."
+reason = "Metal surface remains the thin historyRanges/hit-test owner; #1484 keeps shell-exit HISTORY buffers across disconnect (LiveTail cleared only) and plan-owned clip dedup hooks without a second VT/history authority. Per-frame AX refresh is lazy (no GPU readback)."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
-acknowledged_loc = 897
+acknowledged_loc = 909
 issue = 1484
-reason = "Metal update/present lifecycle stays one main-queue presenter; #1379/#1484 keep deferred prepares and Flow paint counts without growing presenter authority."
+reason = "Metal update/present lifecycle stays one main-queue presenter; #1484 adds atlas-generation-aware HISTORY re-encode after reset without growing presenter authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
@@ -42,14 +42,14 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost+Flow.swift"
-acknowledged_loc = 763
+acknowledged_loc = 819
 issue = 1484
-reason = "Multipane Flow leaf owns plan publish, borrowed-bridge HISTORY, and transcript document sizing; #1484 floors document extent on max(Rust, cards), restores content-relative pins after geometry churn, expand-only body height under mid-transcript pins, and publishes lastPublishedTranscriptRegions from plan screen clips for multipane paint diagnostics."
+reason = "Multipane Flow leaf owns plan-only publish, borrowed-bridge HISTORY, and transcript document sizing; #1484 floors document extent on Rust native-region height only, restores content-relative pins after geometry churn, and records lastPublishedTranscriptRegions from plan-derived clips for multipane paint diagnostics."
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 933
+acknowledged_loc = 993
 issue = 1484
-reason = "Flow Blocks host remains the thin AppKit adapter for chrome cards + plan publish; #1484 demotes legacy multipane transcript AX ids, skips plan publish when secondary hosts own leaves, syncs AbsoluteY/LiveEnd before applyBlockViewportPlan, and maps body.frame screen clips without a second layout authority."
+reason = "Flow Blocks host remains the thin AppKit adapter for chrome cards + plan publish; #1484 demotes legacy multipane transcript AX ids, skips plan publish when secondary hosts own leaves, syncs AbsoluteY/LiveEnd before applyBlockViewportPlan, caches chrome body clips, and same-frame LiveTail release after HISTORY prepare."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
@@ -291,9 +291,9 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 762
+acknowledged_loc = 798
 issue = 1484
-reason = "Local display-client protocol proofs stay one module; #1484 initializes BlockNativeRegions, plan-index, and window_rows override fixtures on the shared LocalDisplayClient harness."
+reason = "Local display-client protocol proofs stay one module; #1484 adds native-regions commit-before-plan-rebuild clip proof plus BlockNativeRegions/plan-index/window_rows harness fixtures."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
@@ -367,6 +367,6 @@ reason = "Input admission stays one ingress module. #1388 adds the fenced compos
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 816
+acknowledged_loc = 820
 issue = 1484
-reason = "LocalDisplayClient remains the single per-display poll/apply façade; #1484 owns BlockViewportIndex + plan publish and AppKit AbsoluteY/LiveEnd scroll-anchor sync (scroll-only epoch hold) on this client without a terminal-engine viewport field."
+reason = "LocalDisplayClient remains the single per-display poll/apply façade; #1484 owns BlockViewportIndex + plan publish, AbsoluteY/LiveEnd scroll-anchor sync, and commit-before-rebuild native-regions apply so first-seen Blocks emit clips."

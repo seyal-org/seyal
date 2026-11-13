@@ -1,6 +1,6 @@
 # Architecture exit gate — #1484 / PR #1485
 
-Exact head under review: `7cd8388d` on `mahboobmonnamd/issue/1484` (PR #1485). Prior baseline `e335e1f2`.
+Exact head under review: WIP on `mahboobmonnamd/issue/1484` (PR #1485) atop `bc03c0d0`. Prior baseline `e335e1f2`. P0 responsiveness cut: [`P0-RESPONSIVENESS-2026-11-13.md`](./P0-RESPONSIVENESS-2026-11-13.md).
 
 Authority: ADR-004, ADR-009, ADR-010, ADR-011, SPEC-008, merged #1481/#1483, Issue #1484 body, AGENTS.md.
 

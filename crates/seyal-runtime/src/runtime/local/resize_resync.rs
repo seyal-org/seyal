@@ -379,6 +379,11 @@ impl Runtime {
                     generation,
                     rows,
                 );
+                // Snapshot recovery alone does not resend BlockNativeRegions.
+                // Forget + timeline publish matches late-attach so fenced
+                // multipane clients regain extent/clips (#1484 FourPane).
+                self.forget_published_native_regions_for_attachment(attachment_id);
+                self.publish_block_timeline(execution_id);
             }
         }
 

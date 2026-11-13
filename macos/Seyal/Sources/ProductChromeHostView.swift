@@ -90,6 +90,15 @@ final class ProductChromeHostView: NSView {
     /// Bounds zero-clip async republish so layout stalls cannot spin forever (#1379).
     var blockOutputZeroClipRetries: Int = 0
     static let blockOutputZeroClipRetryLimit = 8
+    /// Last Rust native-region row extent used for document sizing. Avoids
+    /// per-frame layoutSubtree during LiveTail streaming (#1484 P0).
+    var lastSyncedNativeRegionRows: UInt64 = .max
+    /// Settled AppKit body clips for plan placement. Refreshed only on layout
+    /// settle — never rebuilt on every Candidate-D tick (#1484 echo lag/flicker).
+    var cachedChromeBodyClips: [UInt64: NSRect] = [:]
+    /// Card chrome identity (ids/flags/title/projection). Generation-only
+    /// reconciles must not rebuildBlocks / reupload HISTORY (#1484 flicker).
+    var lastBlocksChromeSignature: UInt64 = 0
     var paneFollowsTranscript: [NSLayoutConstraint] = []
     var paneFillsCenter: [NSLayoutConstraint] = []
     var centerLeadingHost: NSLayoutConstraint!
@@ -432,10 +441,10 @@ final class ProductChromeHostView: NSView {
         }
         installComposerStatusHandler()
         pane.onProductChanged = { [weak self] in
-            self?.reconcileChrome()
-            // Frame advances (and ViewportLineIds remaps) arrive here via
-            // ThinPaneHostView.onFrameChanged — keep running PRIMARY_CLIP
-            // membership and card height in sync with each prepared generation.
+            // Per-prepared-frame path: LiveTail + plan paint only.
+            // Full chrome reconcile (shell/inspector/recovery/composer) belongs
+            // on timeline/status/bridge handlers — not every Candidate-D frame
+            // (#1484 P0 typing latency / seq sluggishness / ADR-015).
             self?.refreshRunningBlockOutput()
         }
         NotificationCenter.default.addObserver(

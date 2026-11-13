@@ -270,7 +270,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             super.scrollWheel(with: event)
             return
         }
-        let eligibility = seyal_app_snapshot(appHandle).eligibility
+        let eligibility = seyal_app_eligibility(appHandle)
         let alternate = terminalCurrentFrame()?.alternate_screen != 0
         if prefersRawLocalScrollback(eligibility: eligibility, alternateScreen: alternate),
             abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
@@ -335,7 +335,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             return
         }
 
-        let eligibility = seyal_app_snapshot(appHandle).eligibility
+        let eligibility = seyal_app_eligibility(appHandle)
         let alternate = terminalCurrentFrame()?.alternate_screen != 0
         if prefersRawLocalScrollback(eligibility: eligibility, alternateScreen: alternate),
             let pageDelta = Self.rawScrollPageDelta(for: event)
@@ -672,14 +672,14 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         if panePublishesBlockScopedDirectInput {
             return true
         }
-        let snap = seyal_app_snapshot(appHandle)
-        return snap.flags & UInt16(SEYAL_APP_SNAP_BLOCK_SCOPED_DIRECT_INPUT) != 0
-            && snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+        // Scalar FFI — never clone full snapshot screen/AX on the key path.
+        return seyal_app_block_scoped_direct_input(appHandle) != 0
+            && seyal_app_eligibility(appHandle) == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
     }
 
     /// Full-Pane Raw/TUI only — mouse reports and Raw local scrollback.
     private var allowsFullPaneDirectTerminal: Bool {
-        let eligibility = seyal_app_snapshot(appHandle).eligibility
+        let eligibility = seyal_app_eligibility(appHandle)
         return eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
     }

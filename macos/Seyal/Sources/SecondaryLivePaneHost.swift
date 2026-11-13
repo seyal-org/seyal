@@ -79,6 +79,8 @@ final class SecondaryLivePaneHost: NSView {
     var transcriptScrollStates: [UInt64: PaneTranscriptScrollState] = [:]
     var restoresScrollForDisplayHandleChange = false
     static let blockOutputZeroClipRetryLimit = 4
+    /// Settled AppKit body clips; layout-settle only (#1484 echo lag/flicker).
+    var cachedChromeBodyClips: [UInt64: NSRect] = [:]
     /// When true, this host owns keyboard/composer interaction for its Pane.
     private(set) var inputOwned = false
     private let statusLabel = NSTextField(labelWithString: "")
@@ -419,34 +421,32 @@ final class SecondaryLivePaneHost: NSView {
     }
 
     @objc private func transcriptBoundsDidChange(_ note: Notification) {
-        // History instance origins are baked in surface pixels; scroll must
-        // re-publish clips/origins even for programmatic follow-to-live-end /
-        // offset restore, or Metal history sticks at the pre-scroll geometry
-        // (#1379 / stuck glyphs). Only the follow-tail latch is gated.
-        if !isProgrammaticTranscriptScroll {
-            let nearLiveEnd = isNearLiveEnd()
-            let visibleMaxY = max(
-                transcriptDocumentScrollHeight() - transcript.contentView.bounds.height,
-                0
-            )
-            // A transient short document (type-48 lag / card rebuild) can make
-            // any offset look like live-end. Keep an intentional mid-transcript
-            // pin until the document can actually host it (#1484 FocusChurn).
-            let pinnedDocument = pinnedTranscriptOffsetY.map {
-                documentOffsetY(forContentOffset: $0)
-            }
-            if let pinnedDocument, pinnedDocument > visibleMaxY + 24 {
-                followingLiveEnd = false
-            } else if nearLiveEnd {
-                followingLiveEnd = true
-                pinnedTranscriptOffsetY = nil
-                clearPreservedDocumentHeight()
-            } else {
-                followingLiveEnd = false
-                pinnedTranscriptOffsetY = transcriptContentOffsetY()
-            }
-            rememberTranscriptScrollState()
+        // Plan-owned clips track AbsoluteY/LiveEnd via syncBlockViewportScrollAnchor.
+        // Programmatic LiveEnd/pin restores must not re-enter publish (loop).
+        // User scroll still republishes so plan geometry follows AppKit offset.
+        guard !isProgrammaticTranscriptScroll else { return }
+        let nearLiveEnd = isNearLiveEnd()
+        let visibleMaxY = max(
+            transcriptDocumentScrollHeight() - transcript.contentView.bounds.height,
+            0
+        )
+        // A transient short document (type-48 lag / card rebuild) can make
+        // any offset look like live-end. Keep an intentional mid-transcript
+        // pin until the document can actually host it (#1484 FocusChurn).
+        let pinnedDocument = pinnedTranscriptOffsetY.map {
+            documentOffsetY(forContentOffset: $0)
         }
+        if let pinnedDocument, pinnedDocument > visibleMaxY + 24 {
+            followingLiveEnd = false
+        } else if nearLiveEnd {
+            followingLiveEnd = true
+            pinnedTranscriptOffsetY = nil
+            clearPreservedDocumentHeight()
+        } else {
+            followingLiveEnd = false
+            pinnedTranscriptOffsetY = transcriptContentOffsetY()
+        }
+        rememberTranscriptScrollState()
         publishBlockOutputFrame()
     }
 

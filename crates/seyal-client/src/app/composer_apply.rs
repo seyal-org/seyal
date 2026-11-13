@@ -316,7 +316,7 @@ impl ApplicationRoot {
 
     /// True when Runtime published Flow Block-scoped character input for the
     /// current foreground Running Block (ComposerTargetMode::DirectInput).
-    pub(super) fn block_scoped_direct_input_eligible(&self) -> bool {
+    pub(crate) fn block_scoped_direct_input_eligible(&self) -> bool {
         self.eligibility() == PresentationEligibility::Flow
             && self.runtime_composer_target.is_some_and(|target| {
                 target.target_class == 2 // ForegroundProgram

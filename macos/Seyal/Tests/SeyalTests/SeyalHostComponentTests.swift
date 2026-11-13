@@ -5402,6 +5402,78 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(renderer.inspectFlowPaint().isClean)
     }
 
+    /// Sealed HISTORY bakes glyph-atlas UVs. After an atlas reset the next
+    /// encode must re-encode retained pages instead of sampling reused slots
+    /// (#1484 consistent-substitution garbling of sealed Blocks).
+    @MainActor
+    func testSealedHistoryReencodesAfterGlyphAtlasReset() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let renderer = try MetalTerminalRenderer(device: device)
+        renderer.setPresentationPlan(.flow())
+        func cell(_ scalar: UInt32) -> NativeHistoryRange.Cell {
+            NativeHistoryRange.Cell(scalar: scalar, foreground: 0x02e9_e1d8, background: 0, flags: 0)
+        }
+        let cellSize = renderer.cellPixelSize(backingScale: 1)
+        let clip = NSRect(x: 0, y: 0, width: cellSize.width * 2, height: cellSize.height)
+        try renderer.update(
+            historyRange: NativeHistoryRange(
+                startLine: 1, endLine: 1, blockID: 7, requestID: 1, revision: 1,
+                rows: [[cell(101), cell(114)]], sourceDisplayHandle: 0
+            ),
+            region: NativeTranscriptRegion(id: 7, origin: .zero, clip: clip),
+            backingScale: 1
+        )
+        renderer.setHistoryRegionOrder([7])
+        func historyUVs() throws -> [SIMD4<Float>] {
+            let region = try XCTUnwrap(renderer.historyRegions[7])
+            let pointer = region.buffer.contents().bindMemory(
+                to: TerminalInstance.self, capacity: region.instanceCount
+            )
+            return (0..<region.instanceCount).map { pointer[$0].uvRect }
+        }
+        let prepared = try historyUVs()
+        let metrics = renderer.glyphAtlas.metrics(backingScale: 1)
+
+        renderer.glyphAtlas.resetWhenGPUIdle()
+        let r = try renderer.glyphAtlas.lookup(scalar: 114, bold: false, backingScale: 1, cellMetrics: metrics)
+        XCTAssertEqual(r.uvRect, prepared[0], "precondition: reset reuses the first atlas slot")
+        XCTAssertEqual(try historyUVs(), prepared, "HISTORY still indexes the pre-reset atlas")
+
+        XCTAssertNotNil(renderer.renderOffscreenAndWait(width: cellSize.width * 2, height: cellSize.height))
+        let e = try renderer.glyphAtlas.lookup(scalar: 101, bold: false, backingScale: 1, cellMetrics: metrics)
+        XCTAssertEqual(try historyUVs(), [e.uvRect, r.uvRect], "encode must re-index the current atlas")
+        XCTAssertEqual(renderer.historyRegions[7]?.clip, clip, "re-encode keeps current placement")
+
+        let steady = try XCTUnwrap(renderer.historyRegions[7]?.buffer)
+        renderer.reencodeHistoryRegionsForCurrentAtlas()
+        XCTAssertTrue(renderer.historyRegions[7]?.buffer === steady, "matching generation must not re-upload")
+    }
+
+    /// #1484 P0: per-frame paths must not pay a synchronous GPU readback, and
+    /// HISTORY prepares must not zero the renderer's in-flight write gate.
+    func testFlowFrameHotPathHasNoGPUReadbackOrInFlightOverride() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let surface = try String(contentsOf: sources.appendingPathComponent("MetalSurfaceView.swift"), encoding: .utf8)
+        let history = try String(contentsOf: sources.appendingPathComponent("MetalSurfaceView+History.swift"), encoding: .utf8)
+        func body(of signature: String, in text: String) throws -> Substring {
+            let start = try XCTUnwrap(text.range(of: signature))
+            let end = text[start.upperBound...].range(of: "\n  func ")?.lowerBound ?? text.endIndex
+            return text[start.lowerBound..<end]
+        }
+        XCTAssertFalse(
+            try body(of: "func refreshRecoveryAccessibilityValue()", in: surface).contains("inspectFlowPaint"),
+            "AX refresh runs per frame; compose lazily on read"
+        )
+        XCTAssertFalse(
+            try body(of: "func renderHistoryRange(", in: history).contains("forceFlushHistoryPreparesForRetain"),
+            "HISTORY prepare must keep the in-flight gate"
+        )
+    }
+
     /// #865 / SPEC-008 §3.1: Flow transcript scroll handling republishes Block
     /// clips only. It must not change prepared-frame PTY size, cursor, or the
     /// last geometry proposal. Headed overflow scroll is covered by XCUI.
@@ -5661,11 +5733,65 @@ final class SeyalHostComponentTests: XCTestCase {
                 && flow.contains("notePlanClipHistoryResult"),
             "pane host must pass borrowed bridge and settle its own plan-clip book"
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             flow.contains("requestNativeCardHistoryFallback")
-                && plan.contains("func requestNativeCardHistoryFallback"),
-            "pane host must fall back to bounded NATIVE HISTORY when plan extent is empty"
+                || plan.contains("func requestNativeCardHistoryFallback"),
+            "ADR-015: no card-driven HISTORY fallback"
         )
+        XCTAssertTrue(
+            plan.contains("chromeBodyClips")
+                && (flow.contains("chromeBodyClips:") || chrome.contains("chromeBodyClips:")),
+            "chrome body clips may place plan-selected Blocks; plan still owns rows/HISTORY"
+        )
+        XCTAssertTrue(
+            flow.contains("max(rustBody, cardHeight)")
+                || chrome.contains("max(rustBody, cardHeight)"),
+            "document must host AppKit chrome headers until Rust chrome metrics exist"
+        )
+        let host = try String(
+            contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView.swift"),
+            encoding: .utf8
+        )
+        if let productChanged = host.range(of: "pane.onProductChanged = {") {
+            let end = host[productChanged.lowerBound...].range(of: "\n        }")?.lowerBound
+                ?? host.endIndex
+            let body = host[productChanged.lowerBound..<end]
+            XCTAssertTrue(
+                body.contains("refreshRunningBlockOutput()"),
+                "per-frame onProductChanged must refresh LiveTail/plan"
+            )
+            XCTAssertFalse(
+                body.contains("reconcileChrome()"),
+                "per-frame onProductChanged must not full-reconcile chrome"
+            )
+        } else {
+            XCTFail("ProductChromeHostView must wire pane.onProductChanged")
+        }
+        // Shipping AppDelegate uses MultiWindowHostController, which re-wraps
+        // onProductChanged — that wrap must also omit reconcileChrome (#1484).
+        let multi = try String(
+            contentsOf: sourceRoot.appendingPathComponent("MultiWindowHostController.swift"),
+            encoding: .utf8
+        )
+        if let wrap = multi.range(of: "liveHost.pane.onProductChanged = {") {
+            let end = multi[wrap.lowerBound...].range(of: "\n        }")?.lowerBound
+                ?? multi.endIndex
+            let body = multi[wrap.lowerBound..<end]
+            XCTAssertTrue(
+                body.contains("refreshProductHost?()"),
+                "MultiWindow must preserve ProductChrome frame refresh"
+            )
+            XCTAssertTrue(
+                body.contains("applyPendingEffects()"),
+                "MultiWindow must still drain window effects on product pulses"
+            )
+            XCTAssertFalse(
+                body.contains("reconcileChrome()"),
+                "MultiWindow onProductChanged must not full-reconcile every frame"
+            )
+        } else {
+            XCTFail("MultiWindowHostController must wrap pane.onProductChanged")
+        }
         XCTAssertTrue(
             chrome.contains("guard centerColumn.secondaryHosts.isEmpty else { return }"),
             "legacy chrome publish must not compete with multipane pane-host plan paint"

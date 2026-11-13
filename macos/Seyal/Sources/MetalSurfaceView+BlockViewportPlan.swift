@@ -2,15 +2,17 @@ import AppKit
 import Foundation
 
 extension MetalSurfaceView {
-  /// Consume the Rust-owned `BlockViewportPlan` for this display (Finding C).
-  /// Plan owns Block identity + visible row windows + sealed retrieval (E).
-  /// Optional `screenClips` are AppKit body rects in this surface's coordinates
-  /// (ADR-015 OS adapter) so Metal glyphs land under transparent card bodies —
-  /// not a second content authority (#1484 clear→exit ink).
+  /// Consume the Rust-owned `BlockViewportPlan` for this display (Finding C / ADR-015).
+  /// Plan owns Block identity, visible row windows, and sealed retrieval (E).
+  /// Optional `chromeBodyClips` only **place** plan-selected Blocks onto AppKit
+  /// chrome body rects (thin adapter). They never invent Blocks, rows, or HISTORY.
+  /// When clips are absent, plan row geometry is bottom-aligned into the surface
+  /// so short transcripts match Warp-style docked cards (#1484 manual).
   @discardableResult
   func applyBlockViewportPlan(
     displayHandle: UInt64,
-    screenClips: [UInt64: NSRect] = [:],
+    /// Plan-selected Block → chrome body rect in surface coordinates.
+    chromeBodyClips: [UInt64: NSRect] = [:],
     /// Pane hosts intentionally clear `bridge` when unfocused; they still must
     /// fetch sealed HISTORY through the window-borrowed bridge (#1484 / #1426).
     historyBridge: RustDisplayBridge? = nil
@@ -22,9 +24,57 @@ extension MetalSurfaceView {
     else {
       return false
     }
+    // Quantize chrome body placement so taller/shorter card bodies after
+    // setOutputLines rebuild plan→body clips (diagnosis residual: header≥22+4).
+    var chromeClipFingerprint: UInt64 = 0
+    for (blockID, rect) in chromeBodyClips.sorted(by: { $0.key < $1.key }) {
+      let qx = UInt64(max(0, rect.origin.x).rounded(.down))
+      let qy = UInt64(max(0, rect.origin.y).rounded(.down))
+      let qw = UInt64(max(0, rect.width).rounded(.down))
+      let qh = UInt64(max(0, rect.height).rounded(.down))
+      chromeClipFingerprint = chromeClipFingerprint
+        &+ (blockID &* 1_000_003)
+        &+ (qx &* 17)
+        &+ (qy &* 31)
+        &+ (qw &* 47)
+        &+ (qh &* 61)
+    }
+    let signature = (
+      handle: displayHandle,
+      epoch: header.presentation_epoch,
+      scrollY: header.scroll_y,
+      visible: header.visible_count,
+      clipping: header.clipping_count,
+      totalExtent: header.total_document_extent,
+      clipCount: UInt32(chromeBodyClips.count),
+      chromeClipFingerprint: chromeClipFingerprint
+    )
+    // Identical geometry: skip region rebuild + HISTORY reopen. Do NOT key on
+    // content_generation — type-48 bumps native revision every tick even when
+    // height/identity are unchanged; that was the remaining echo lag (#1484).
+    // Height-only growth is covered by totalExtent; seal by presentation_epoch.
+    // LiveTail cells still advance via damage prepare.
+    if lastAppliedViewportPlanSignature?.handle == signature.handle,
+       lastAppliedViewportPlanSignature?.epoch == signature.epoch,
+       lastAppliedViewportPlanSignature?.scrollY == signature.scrollY,
+       lastAppliedViewportPlanSignature?.visible == signature.visible,
+       lastAppliedViewportPlanSignature?.clipping == signature.clipping,
+       lastAppliedViewportPlanSignature?.totalExtent == signature.totalExtent,
+       lastAppliedViewportPlanSignature?.clipCount == signature.clipCount,
+       lastAppliedViewportPlanSignature?.chromeClipFingerprint == signature.chromeClipFingerprint,
+       let published = lastTranscriptFrameRegions,
+       !published.isEmpty
+    {
+      return true
+    }
 
     let cell = terminalPresentationCellSize()
     let surfaceHeight = bounds.height
+    // Warp bottom-dock: when terminal content is shorter than the surface,
+    // shift plan geometry up from the bottom so glyphs sit with docked cards
+    // instead of at the top of the pane (#1484 manual).
+    let contentHeightPoints = CGFloat(header.total_document_extent) * cell.height
+    let bottomAlignOffset = max(surfaceHeight - contentHeightPoints, 0)
     var regions: [NativeTranscriptRegion] = []
     regions.reserveCapacity(Int(header.visible_count))
 
@@ -36,9 +86,12 @@ extension MetalSurfaceView {
       else { continue }
 
       let clip: NSRect
-      if let screen = screenClips[item.block_id], screen.width > 1, screen.height > 1 {
-        // Thin adapter: map plan-selected Block onto the laid-out body hit target.
-        clip = screen
+      if let chrome = chromeBodyClips[item.block_id],
+         chrome.width > 1,
+         chrome.height > 1
+      {
+        // Thin adapter: place plan-selected content into chrome body.
+        clip = chrome
       } else {
         // Viewport-relative row = absolute document row − plan scroll_y.
         let docFirst = item.y.saturatingAdding(UInt64(item.first_visible_row))
@@ -46,7 +99,10 @@ extension MetalSurfaceView {
           ? docFirst - header.scroll_y
           : 0
         let heightPoints = CGFloat(item.visible_rows) * cell.height
+        // AppKit y grows up; viewportRow 0 is the top of the visible window.
+        // Subtract bottomAlignOffset so short content docks to the composer.
         let originYPoints = surfaceHeight
+          - bottomAlignOffset
           - (CGFloat(viewportRow) * cell.height)
           - heightPoints
         clip = NSRect(
@@ -60,13 +116,15 @@ extension MetalSurfaceView {
 
       // historyRows indexes the retained page buffer (often already windowed
       // by sealed-index start_unit), not absolute Block rows.
+      // historyRevision stays 0 on plan geometry: presentation_epoch must not
+      // defeat LiveTail region equality during seq streaming (#1484 P0 flicker).
       var region = NativeTranscriptRegion(
         id: item.block_id,
         origin: .zero,
         clip: clip,
         historyRows: 0..<Int(item.visible_rows),
         historyRequestID: 0,
-        historyRevision: header.presentation_epoch
+        historyRevision: 0
       )
       region.displayHandle = displayHandle
       regions.append(region)
@@ -80,12 +138,8 @@ extension MetalSurfaceView {
     )
     setTranscriptFrame(frame)
 
-    // Bounded sealed retrieval per clipping range — not full-Block HISTORY.
-    // Address the plan's displayHandle directly (not window-focused), so
-    // multipane Flow clips cannot hit the wrong Controller (#1426 / Finding E).
-    // LiveTail still paints Running Blocks, but AX needs a plan-window HISTORY
-    // page (Metal glyphs are not AX). Always pass unitLimit so Truncate cannot
-    // walk the whole Block (#1484 100k). Completed clips use the same window.
+    // Bounded sealed retrieval per plan clipping range — not full-Block HISTORY
+    // and not card-driven fallback (#1484 Finding E / ADR-015).
     for index in 0..<header.clipping_count {
       var clip = SeyalBlockViewportClip()
       guard seyal_bridge_block_viewport_clip_at_for(displayHandle, index, &clip) != 0,
@@ -101,7 +155,7 @@ extension MetalSurfaceView {
       if !planClipRequestBook.begin(key) {
         // Never reopen while a request is in flight — that floods HISTORY and
         // trips ClientError backpressure (-3), dropping the AX page (#1484).
-        // Only reopen a settled empty retain after LiveTail has cleared.
+        // Defer while LiveTail owns running paint; reopen only empty retains.
         if renderer.liveTail.clips[clip.block_id] != nil
           || planClipRequestBook.hasInFlight(
             displayHandle: displayHandle,
@@ -137,63 +191,8 @@ extension MetalSurfaceView {
       }
     }
 
+    lastAppliedViewportPlanSignature = signature
     return true
-  }
-
-  /// When BlockViewportPlan has no visible clips (native-regions lag / empty
-  /// index) but Flow already hosts Block cards, fetch one bounded sealed
-  /// LiveEnd page per Block for AX/Metal retain. Plan remains paint authority
-  /// once extent is non-zero; this only covers the multipane gap (#1484 FocusChurn).
-  func requestNativeCardHistoryFallback(
-    displayHandle: UInt64,
-    blocks: [(blockID: UInt64, sealedRows: UInt32)],
-    historyBridge: RustDisplayBridge? = nil
-  ) {
-    guard displayHandle != 0, let transport = bridge ?? historyBridge else { return }
-    for block in blocks {
-      guard block.blockID != 0, block.sealedRows > 0 else { continue }
-      // LiveTail may still paint; AX still needs a bounded sealed page.
-      let unitLimit = min(block.sealedRows, 128)
-      let first = block.sealedRows > unitLimit ? block.sealedRows &- unitLimit : 0
-      let key = HistoryProjectionRequestKey(
-        displayHandle: displayHandle,
-        blockID: block.blockID,
-        startLine: UInt64(first),
-        endLine: UInt64(first).saturatingAdding(UInt64(unitLimit))
-      )
-      if !planClipRequestBook.begin(key) {
-        if planClipRequestBook.hasInFlight(
-          displayHandle: displayHandle,
-          blockID: block.blockID
-        ) {
-          continue
-        }
-        let retained = retainedHistoryRange(
-          blockID: block.blockID,
-          displayHandle: displayHandle
-        )
-        let axEmpty = retained?.accessibilityTranscript().isEmpty ?? true
-        guard axEmpty,
-              planClipRequestBook.hasSettled(
-                displayHandle: displayHandle,
-                blockID: block.blockID
-              )
-        else { continue }
-        planClipRequestBook.retry(key)
-        guard planClipRequestBook.begin(key) else { continue }
-      }
-      let result = transport.requestHistoryRange(
-        forDisplayHandle: displayHandle,
-        startLine: 0,
-        endLine: 0,
-        blockID: block.blockID,
-        startUnit: first,
-        unitLimit: unitLimit
-      )
-      if result != 0 {
-        planClipRequestBook.retry(key)
-      }
-    }
   }
 
   /// Settle plan-owned clip requests after a HISTORY page arrives (or fails).
@@ -221,6 +220,6 @@ extension MetalSurfaceView {
 
 private extension UInt64 {
   func saturatingAdding(_ other: UInt64) -> UInt64 {
-    self.addingReportingOverflow(other).partialValue
+    addingReportingOverflow(other).partialValue
   }
 }

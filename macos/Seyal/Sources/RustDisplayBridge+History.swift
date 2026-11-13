@@ -120,6 +120,8 @@ extension RustDisplayBridge {
   func publishHistoryRanges(forDisplayHandle handle: UInt64) {
     guard isConnected, handle != 0 else { return }
     let pending = requestedHistoryRanges.filter { $0.key.displayHandle == handle }
+    // Idle typing/echo polls must not pay FFI when no HISTORY is outstanding.
+    guard !pending.isEmpty else { return }
     for (requestKey, request) in Array(pending) {
       let metadata = seyal_bridge_history_range_peek_for_handle(
         handle, request.blockID, requestKey.requestID)
@@ -186,7 +188,16 @@ extension RustDisplayBridge {
         : leads
       let published: NativeHistoryRange
       if sealedIndexMode {
-        published = chunk
+        published = NativeHistoryRange(
+          startLine: UInt64(request.startUnit),
+          endLine: UInt64(request.startUnit) &+ UInt64(rows.count),
+          blockID: chunk.blockID,
+          requestID: chunk.requestID,
+          revision: chunk.revision,
+          rows: chunk.rows,
+          status: chunk.status,
+          sourceDisplayHandle: chunk.sourceDisplayHandle
+        )
       } else {
         published = mergeHistoryRange(previous?.range, chunk)
       }
