@@ -104,7 +104,8 @@ extension MetalSurfaceView {
         startLine: 0,
         endLine: 0,
         blockID: clip.block_id,
-        startUnit: clip.first_row
+        startUnit: clip.first_row,
+        unitLimit: clip.row_count
       ) ?? -10
       if result != 0 {
         planClipRequestBook.retry(key)

@@ -20,7 +20,8 @@ extension RustDisplayBridge {
     startLine: UInt64,
     endLine: UInt64,
     blockID: UInt64,
-    startUnit: UInt32 = 0
+    startUnit: UInt32 = 0,
+    unitLimit: UInt32 = 0
   ) -> Int32 {
     guard isConnected, handle != 0 else { return -4 }
     // Finding E: (0, 0) is sealed-row indexed retrieval; startUnit is the
@@ -41,7 +42,13 @@ extension RustDisplayBridge {
     if result == 0 {
       let requestKey = PaneHistoryRequestKey(
         displayHandle: handle, paneID: paneID, requestID: requestID)
-      requestedHistoryRanges[requestKey] = (blockID, startLine, endLine, startUnit)
+      let clipEnd: UInt32 =
+        sealedIndexMode && unitLimit > 0
+        ? startUnit &+ unitLimit
+        : 0
+      requestedHistoryRanges[requestKey] = (
+        blockID, startLine, endLine, startUnit, clipEnd
+      )
     }
     return result
   }
@@ -55,7 +62,8 @@ extension RustDisplayBridge {
         startLine: 0,
         endLine: 0,
         blockID: blockID,
-        startUnit: clip.first_row
+        startUnit: clip.first_row,
+        unitLimit: clip.row_count
       )
     }
     // Plan has no sealed clip yet — fetch from sealed index 0 (bounded page).
@@ -64,7 +72,8 @@ extension RustDisplayBridge {
       startLine: 0,
       endLine: 0,
       blockID: blockID,
-      startUnit: 0
+      startUnit: 0,
+      unitLimit: 512
     )
   }
 
@@ -160,7 +169,6 @@ extension RustDisplayBridge {
         sourceDisplayHandle: handle
       )
       let previous = historyContinuations[requestKey]
-      let merged = mergeHistoryRange(previous?.range, chunk)
       let leads = historyLeadCount(rows)
       _ = seyal_bridge_history_range_consume_for_handle(
         handle, metadata.block_id, metadata.request_id)
@@ -170,33 +178,45 @@ extension RustDisplayBridge {
       let truncated = metadata.reserved == 1
       // Finding E sealed-index mode: advance by delivered sealed rows, not
       // padded lead counts (Unicode/reflow). Legacy LineId spans still use
-      // lead-count continuation.
+      // lead-count continuation. Plan windows must not Truncate-merge the
+      // whole Block (#1484 100k).
       let sealedIndexMode = request.startLine == 0 && request.endLine == 0
       let pageAdvance: UInt32 = sealedIndexMode
         ? UInt32(rows.count)
         : leads
+      let published: NativeHistoryRange
+      if sealedIndexMode {
+        published = chunk
+      } else {
+        published = mergeHistoryRange(previous?.range, chunk)
+      }
       if truncated, pageAdvance > 0, isConnected {
         let baseUnit = previous?.startUnit ?? request.startUnit
         let nextStart = baseUnit &+ pageAdvance
-        let nextID = seyal_bridge_next_history_request_id_for(handle)
-        if nextID != 0 {
-          let continued = finishAddressedMutation(
-            seyal_bridge_request_history_range_for(
-              handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
-              nextStart),
-            forDisplayHandle: handle
-          )
-          if continued == 0 {
-            let nextKey = PaneHistoryRequestKey(
-              displayHandle: handle, paneID: paneID, requestID: nextID)
-            requestedHistoryRanges[nextKey] = (
-              request.blockID, request.startLine, request.endLine, nextStart
+        let withinPlanWindow =
+          request.clipEndUnit == 0 || nextStart < request.clipEndUnit
+        if withinPlanWindow {
+          let nextID = seyal_bridge_next_history_request_id_for(handle)
+          if nextID != 0 {
+            let continued = finishAddressedMutation(
+              seyal_bridge_request_history_range_for(
+                handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
+                nextStart),
+              forDisplayHandle: handle
             )
-            historyContinuations[nextKey] = (nextStart, merged)
+            if continued == 0 {
+              let nextKey = PaneHistoryRequestKey(
+                displayHandle: handle, paneID: paneID, requestID: nextID)
+              requestedHistoryRanges[nextKey] = (
+                request.blockID, request.startLine, request.endLine, nextStart,
+                request.clipEndUnit
+              )
+              historyContinuations[nextKey] = (nextStart, published)
+            }
           }
         }
       }
-      onHistory(merged)
+      onHistory(published)
     }
   }
 

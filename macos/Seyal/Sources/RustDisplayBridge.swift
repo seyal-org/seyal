@@ -115,7 +115,10 @@ final class RustDisplayBridge {
   let allowsImplicitExecutionBootstrap: Bool
   var requestedHistoryRanges:
     [PaneHistoryRequestKey: (
-      blockID: UInt64, startLine: UInt64, endLine: UInt64, startUnit: UInt32
+      blockID: UInt64, startLine: UInt64, endLine: UInt64, startUnit: UInt32,
+      /// Sealed-index plan window end (`startUnit + row_count`). 0 = uncapped
+      /// legacy LineId continuation.
+      clipEndUnit: UInt32
     )] = [:]
   var historyRevisions: [PaneHistoryRequestKey: (revision: UInt64, requestID: UInt64)] = [:]
   var historyContinuations:

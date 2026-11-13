@@ -294,10 +294,10 @@ final class CommandBlockView: NSView {
     func setBodyTranscript(_ text: String) {
         guard bodyTranscript.stringValue != text else { return }
         bodyTranscript.stringValue = text
-        // Bound AX payloads so tall Block bodies do not stall XCUI tree walks.
-        let ax = Self.accessibilitySummary(for: text)
-        bodyTranscript.setAccessibilityLabel(ax)
-        bodyTranscript.setAccessibilityValue(ax)
+        // Callers pass `accessibilityTranscript()` (already budgeted). Do not
+        // re-summarize — a second pass can drop the live-end tail (#1484 100k).
+        bodyTranscript.setAccessibilityLabel(text)
+        bodyTranscript.setAccessibilityValue(text)
     }
 
     private func updateAccessibilityValue() {

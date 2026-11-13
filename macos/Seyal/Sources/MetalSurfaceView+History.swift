@@ -28,7 +28,8 @@ extension MetalSurfaceView {
       startLine: startLine,
       endLine: endLine,
       blockID: blockID,
-      startUnit: startUnit
+      startUnit: startUnit,
+      unitLimit: 0
     )
   }
 
