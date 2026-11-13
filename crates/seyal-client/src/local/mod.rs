@@ -151,6 +151,10 @@ pub struct LocalDisplayClient {
     /// Per-display Block height index + scroll geometry (#1484 Findings A+B).
     /// Derived from content metrics; never TerminalState authority.
     pub(crate) block_viewport_index: crate::viewport::BlockViewportIndex,
+    /// Latest Rust-owned viewport plan for Metal (Finding C).
+    pub(crate) block_viewport_plan: Option<crate::viewport::BlockViewportPlan>,
+    pub(crate) block_viewport_presentation_epoch: u64,
+    pub(crate) block_viewport_scroll_anchor: crate::viewport::ScrollAnchor,
     pub(crate) command_blocks_supported: bool,
     pub(crate) last_composer_result: Option<ComposerResult>,
     /// Latest Runtime-published composer eligibility for this attachment
@@ -312,6 +316,55 @@ impl LocalDisplayClient {
                 .saturating_add(u32::from(record.row_count));
             (record.block_id, height)
         }));
+        self.rebuild_block_viewport_plan();
+    }
+
+    /// Rebuild the Metal-facing plan from the current per-display index (C).
+    pub(crate) fn rebuild_block_viewport_plan(&mut self) {
+        self.block_viewport_presentation_epoch =
+            self.block_viewport_presentation_epoch.saturating_add(1);
+        let window_rows = u32::from(self.committed_geometry.rows.max(1));
+        let records: Vec<_> = self
+            .block_native_regions
+            .records
+            .iter()
+            .map(|r| {
+                (
+                    r.block_id,
+                    r.header_region,
+                    r.output_region,
+                    r.sealed_rows,
+                    r.first_row,
+                    r.row_count,
+                )
+            })
+            .collect();
+        let execution_key = u64::from_le_bytes(
+            self.execution_id.to_bytes()[..8]
+                .try_into()
+                .expect("ExecutionId is 16 bytes"),
+        );
+        let display_key = u64::from_le_bytes(
+            self.attachment_id.to_bytes()[..8]
+                .try_into()
+                .expect("AttachmentId is 16 bytes"),
+        );
+        self.block_viewport_plan = Some(crate::viewport::BlockViewportPlan::build(
+            execution_key,
+            display_key,
+            self.block_viewport_presentation_epoch,
+            self.block_native_regions.revision,
+            self.block_timeline.revision,
+            self.block_native_regions.revision,
+            self.block_viewport_scroll_anchor,
+            &self.block_viewport_index,
+            window_rows,
+            &records,
+        ));
+    }
+
+    pub fn block_viewport_plan(&self) -> Option<&crate::viewport::BlockViewportPlan> {
+        self.block_viewport_plan.as_ref()
     }
 
     pub fn block_timeline(&self) -> &BlockTimeline {
@@ -644,6 +697,9 @@ fn reconstruction_probe_client_with_stream(
             records: Vec::new(),
         },
         block_viewport_index: crate::viewport::BlockViewportIndex::default(),
+        block_viewport_plan: None,
+        block_viewport_presentation_epoch: 0,
+        block_viewport_scroll_anchor: crate::viewport::ScrollAnchor::LiveEnd,
         command_blocks_supported: false,
         last_composer_result: None,
         composer_status: None,

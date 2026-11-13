@@ -45,28 +45,13 @@ pub(super) fn native_block_wire_rows(
         live_by_line.entry(line_id.0).or_default().push((col, cell));
     }
 
-    // O(1) page skip for full-width single-width rows (common seq/stream
-    // output): each padded row exposes exactly `cols_n` leads, so whole
-    // skipped pages jump the sealed-row index instead of re-visiting.
-    let mut skip = skip_leads;
-    let mut start_index = 0usize;
-    let sealed_len = terminal.primary_sealed_rows_len(output);
-    if cols_n > 0 && skip >= u32::from(cols_n) && sealed_len > 0 {
-        let mut probe_leads: Option<u32> = None;
-        terminal.primary_visit_sealed_region_rows_from(output, 0, |_, owned| {
-            probe_leads = Some(padded_row_leads(owned, cols_n));
-            false
-        });
-        if let Some(leads) = probe_leads
-            && leads == u32::from(cols_n)
-        {
-            let jump = usize::try_from(skip / leads).unwrap_or(usize::MAX);
-            let take = jump.min(sealed_len);
-            skip -= leads.saturating_mul(take as u32);
-            start_index = take;
-        }
-    }
-
+    // Finding E: do not infer historical row offsets from the first sealed
+    // row's padded lead count (mixed Unicode / partial ownership / reflow).
+    // Walk sealed rows from index 0 and let NativeWirePage apply exact
+    // start_unit skipping. Indexed RegionId/source-anchor continuation is
+    // the follow-on retrieval API; this removes the unsafe uniform-lead jump.
+    let skip = skip_leads;
+    let start_index = 0usize;
     let mut page = NativeWirePage::new(cols_n, max_lines, skip);
     let mut pending_line: Option<u64> = None;
     let mut pending_owned: Vec<(u16, Cell)> = Vec::new();
