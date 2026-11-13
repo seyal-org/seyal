@@ -298,6 +298,10 @@ final class CommandBlockView: NSView {
         let ax = text.count <= BlockAccessibilityText.limit
             ? text
             : Self.accessibilitySummary(for: text)
+        // Never erase a populated body with a transient empty retain — multipane
+        // unfocused stream / focus-churn tests observe AX markers while HISTORY
+        // pages are still in flight (#1484 FlowSplitSibling / FocusChurn).
+        if ax.isEmpty, !bodyTranscript.stringValue.isEmpty { return }
         guard bodyTranscript.stringValue != ax else { return }
         bodyTranscript.stringValue = ax
         bodyTranscript.setAccessibilityLabel(ax)
