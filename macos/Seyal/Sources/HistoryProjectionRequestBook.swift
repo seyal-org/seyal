@@ -21,6 +21,18 @@ struct HistoryProjectionRequestBook {
         return true
     }
 
+    /// True when any in-flight key shares this Controller + Block.
+    func hasInFlight(displayHandle: UInt64, blockID: UInt64) -> Bool {
+        inFlight.contains { $0.displayHandle == displayHandle && $0.blockID == blockID }
+    }
+
+    /// True when a settled key shares this Controller + Block (and nothing is
+    /// still in flight for it).
+    func hasSettled(displayHandle: UInt64, blockID: UInt64) -> Bool {
+        !hasInFlight(displayHandle: displayHandle, blockID: blockID)
+            && settled.contains { $0.displayHandle == displayHandle && $0.blockID == blockID }
+    }
+
     mutating func complete(_ key: HistoryProjectionRequestKey) {
         let matching = Set(inFlight.filter {
             $0.displayHandle == key.displayHandle && $0.blockID == key.blockID

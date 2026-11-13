@@ -161,6 +161,11 @@ extension ProductChromeHostView {
         }
         blockCards.removeAll()
         lastBlockCount = 0
+        // Demote legacy AX ids so XCUI `seyal-blocks-scroll` / `seyal-blocks`
+        // resolve to the focused SecondaryLivePaneHost (#1484 FocusChurn).
+        blocks.setAccessibilityIdentifier("seyal-legacy-multipane-blocks")
+        transcript.setAccessibilityIdentifier("seyal-legacy-multipane-blocks-scroll")
+        transcript.isHidden = true
         syncTranscriptDocumentSize()
     }
 
@@ -852,6 +857,10 @@ extension ProductChromeHostView {
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         guard !direct else { return }
+        // Multipane: each SecondaryLivePaneHost owns plan paint + AbsoluteY for
+        // its Controller. The emptied legacy chrome host must not rewrite the
+        // focused handle's scroll anchor / sealed clips (#1484 FocusChurn).
+        guard centerColumn.secondaryHosts.isEmpty else { return }
         let surface = pane.inputSurface
         // Finding C/D: sole Flow paint authority is BlockViewportPlan. Card-clip
         // geometry and collectBlockOutputRegions are deleted — never fallback.

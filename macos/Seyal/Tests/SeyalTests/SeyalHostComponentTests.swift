@@ -5651,6 +5651,25 @@ final class SeyalHostComponentTests: XCTestCase {
             plan.contains("forDisplayHandle: displayHandle"),
             "plan sealed clips must address the plan displayHandle, not window focus alone"
         )
+        XCTAssertTrue(
+            plan.contains("historyBridge: RustDisplayBridge?")
+                && plan.contains("bridge ?? historyBridge"),
+            "plan fetch must accept a pane-host borrowed bridge when surface.bridge is nil"
+        )
+        XCTAssertTrue(
+            flow.contains("historyBridge: historyBridge")
+                && flow.contains("notePlanClipHistoryResult"),
+            "pane host must pass borrowed bridge and settle its own plan-clip book"
+        )
+        XCTAssertTrue(
+            flow.contains("requestNativeCardHistoryFallback")
+                && plan.contains("func requestNativeCardHistoryFallback"),
+            "pane host must fall back to bounded NATIVE HISTORY when plan extent is empty"
+        )
+        XCTAssertTrue(
+            chrome.contains("guard centerColumn.secondaryHosts.isEmpty else { return }"),
+            "legacy chrome publish must not compete with multipane pane-host plan paint"
+        )
     }
 
     @MainActor

@@ -20,7 +20,8 @@ extension SecondaryLivePaneHost {
             return
         }
         // Preserve scroll across projection rebuilds so focus/reconcile churn
-        // does not jump the transcript (#1424).
+        // does not jump the transcript (#1424). Prefer an intentional
+        // mid-transcript pin over a transient contentView origin.
         let savedScrollState: PaneTranscriptScrollState = {
             if restoresScrollForDisplayHandleChange {
                 restoresScrollForDisplayHandleChange = false
@@ -29,9 +30,16 @@ extension SecondaryLivePaneHost {
             }
             return currentTranscriptScrollState()
         }()
-        let savedOffsetY = savedScrollState.offsetY
-        let savedFollowing = savedScrollState.followsLiveEnd
-        let savedDocumentHeight = savedScrollState.documentHeight
+        let savedOffsetY = pinnedTranscriptOffsetY.map {
+            documentOffsetY(forContentOffset: $0)
+        } ?? savedScrollState.offsetY
+        let savedFollowing = pinnedTranscriptOffsetY != nil ? false : savedScrollState.followsLiveEnd
+        let savedDocumentHeight = max(
+            savedScrollState.documentHeight,
+            pinnedTranscriptOffsetY.map {
+                documentOffsetY(forContentOffset: $0) + transcript.contentView.bounds.height + 1
+            } ?? 0
+        )
         let previousCards = blockCards
         blockCards.removeAll(keepingCapacity: true)
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
@@ -173,7 +181,8 @@ extension SecondaryLivePaneHost {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
                 heightLines = max(heightLines, min(max(retainedRange.rows.count, 1), 128))
             }
-            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            let holdHeight = pinnedTranscriptOffsetY != nil || !savedFollowing
+            card.setOutputLines(heightLines, cellHeight: cellHeight, expandOnly: holdHeight)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
@@ -232,6 +241,9 @@ extension SecondaryLivePaneHost {
             }
             setTranscriptDocumentOffsetY(savedOffsetY)
             followingLiveEnd = savedFollowing
+            if !savedFollowing {
+                pinnedTranscriptOffsetY = transcriptContentOffsetY(documentOffsetY: savedOffsetY)
+            }
         }
         lastBlockCount = visibleIndex
         rememberTranscriptScrollState()
@@ -309,7 +321,8 @@ extension SecondaryLivePaneHost {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
                 heightLines = max(heightLines, min(max(retainedRange.rows.count, 1), 128))
             }
-            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            let holdHeight = pinnedTranscriptOffsetY != nil || !followingLiveEnd
+            card.setOutputLines(heightLines, cellHeight: cellHeight, expandOnly: holdHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail (#1484).
             if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
                 || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
@@ -349,6 +362,10 @@ extension SecondaryLivePaneHost {
         guard range.sourceDisplayHandle == 0 || range.sourceDisplayHandle == displayHandle else {
             return
         }
+        // Settle this pane surface's plan-clip book. Replies arrive on the
+        // window bridge's owning surface; without this, a pane host that
+        // requested via `historyBridge` never hears back (#1484 multipane).
+        surface.notePlanClipHistoryResult(range)
         // Finding D: no HistoryProjectionRequestBook — retain for Metal/AX and
         // prepare Metal instances even when the plan frame is briefly absent.
         guard !range.rows.isEmpty else { return }
@@ -358,9 +375,11 @@ extension SecondaryLivePaneHost {
             card.setBodyTranscript(range.accessibilityTranscript())
             let projectionLines = nativeProjection(blockID: range.blockID)
                 .map { outputLineCount(projection: $0) } ?? 1
+            let holdHeight = pinnedTranscriptOffsetY != nil || !followingLiveEnd
             card.setOutputLines(
                 max(projectionLines, min(max(range.rows.count, 1), 128)),
-                cellHeight: cellHeight
+                cellHeight: cellHeight,
+                expandOnly: holdHeight
             )
             card.layoutSubtreeIfNeeded()
             let clip = card.convert(card.body.frame, to: surface)
@@ -385,7 +404,8 @@ extension SecondaryLivePaneHost {
         publishBlockOutputFrame()
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
-        if followingLiveEnd {
+        // syncTranscriptDocumentSize already restores a mid-transcript pin.
+        if pinnedTranscriptOffsetY == nil, followingLiveEnd {
             scrollTranscriptToLiveEnd()
         }
     }
@@ -468,11 +488,24 @@ extension SecondaryLivePaneHost {
         let scrollY = transcript.contentView.bounds.origin.y
         let viewportH = max(transcript.contentView.bounds.height, 1)
         let contentTop = max(scrollY - spacer, 0)
-        let absoluteY = UInt64((contentTop / cellHeight).rounded(.down))
+        var absoluteY = UInt64((contentTop / cellHeight).rounded(.down))
         let windowRows = UInt32(max(1, (viewportH / cellHeight).rounded(.up)))
         let maxY = max(transcriptDocumentScrollHeight() - viewportH, 0)
         let inLiveEndNeighborhood = scrollY >= maxY - viewportH
-        let liveEnd = followingLiveEnd || isNearLiveEnd() || inLiveEndNeighborhood
+        var liveEnd = followingLiveEnd || isNearLiveEnd() || inLiveEndNeighborhood
+        // Tall AppKit chrome (reserved1) can outrun the sealed index. Clamp
+        // AbsoluteY into the Rust extent so the plan cannot sit past content
+        // with visible_count=0 while cards already exist (#1484 FocusChurn).
+        let rustExtent = seyal_bridge_native_regions_total_height_for(displayHandle)
+        if rustExtent > 0 {
+            let maxOrigin = rustExtent > UInt64(windowRows)
+                ? rustExtent - UInt64(windowRows)
+                : 0
+            if absoluteY > maxOrigin {
+                absoluteY = maxOrigin
+                liveEnd = true
+            }
+        }
         _ = seyal_bridge_block_viewport_set_scroll_anchor_for(
             displayHandle,
             liveEnd ? 1 : 0,
@@ -500,7 +533,8 @@ extension SecondaryLivePaneHost {
         }
         if surface.applyBlockViewportPlan(
             displayHandle: displayHandle,
-            screenClips: screenClips
+            screenClips: screenClips,
+            historyBridge: historyBridge
         ) {
             blockOutputZeroClipRetries = 0
             surface.refreshRecoveryAccessibilityValue()
@@ -512,6 +546,36 @@ extension SecondaryLivePaneHost {
                 lastVisibleHistoryPixelCount = surface.inspectFlowPaint(sampleGPU: true).opaquePixelsInsideClips
             }
             return
+        }
+        // Plan empty while Block cards exist (type-48 lag on refocused original
+        // pane): still fetch a bounded LiveEnd HISTORY page for AX (#1484).
+        var fallback: [(blockID: UInt64, sealedRows: UInt32)] = []
+        fallback.reserveCapacity(blockCards.count)
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        for index in 0..<Int(composerSnap.block_count) {
+            let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
+            guard row.id_lo != 0, blockCards[row.id_lo] != nil else { continue }
+            let projection = seyal_app_block_projection_for_pane(
+                appHandle, paneLo, paneHi, UInt32(index)
+            )
+            let kind = projection.kind
+            guard kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+                || kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
+                || kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
+            else { continue }
+            // Prefer sealed/live row count; if still 0, ask for a LiveEnd-sized
+            // page so tall Blocks can expose their tail marker (#1484).
+            let rows = projection.reserved1 > 0
+                ? projection.reserved1
+                : UInt32(max(outputLineCount(projection: projection), 96))
+            fallback.append((row.id_lo, rows))
+        }
+        if !fallback.isEmpty {
+            surface.requestNativeCardHistoryFallback(
+                displayHandle: displayHandle,
+                blocks: fallback,
+                historyBridge: historyBridge
+            )
         }
         if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
             blockOutputZeroClipRetries += 1
@@ -533,11 +597,26 @@ extension SecondaryLivePaneHost {
     /// left a permanent dead zone below cards once content shrank after
     /// growing tall.
     func syncTranscriptDocumentSize() {
-        let shouldFollowLiveEnd = followingLiveEnd
+        let shouldFollowLiveEnd = followingLiveEnd && pinnedTranscriptOffsetY == nil
+        let pinnedContentOffset = pinnedTranscriptOffsetY
+        let documentHeightBefore = blocks.frame.height
+        let spacerBefore = transcriptLeadingSpacerHeightValue
         isProgrammaticTranscriptScroll = true
         defer {
+            let documentHeightAfter = blocks.frame.height
+            let spacerAfter = transcriptLeadingSpacerHeightValue
+            let geometryChanged =
+                abs(documentHeightAfter - documentHeightBefore) > 0.5
+                || abs(spacerAfter - spacerBefore) > 0.5
             isProgrammaticTranscriptScroll = false
-            if shouldFollowLiveEnd {
+            // Re-apply a mid-transcript pin only when document geometry changed;
+            // unconditional restore fights live XCUI/user scrolling (#1484).
+            if let pinnedContentOffset, geometryChanged {
+                followingLiveEnd = false
+                setTranscriptDocumentOffsetY(
+                    documentOffsetY(forContentOffset: pinnedContentOffset)
+                )
+            } else if shouldFollowLiveEnd {
                 scrollTranscriptToLiveEnd()
             }
         }
@@ -548,12 +627,34 @@ extension SecondaryLivePaneHost {
         let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
         let cellHeight = surface.terminalPresentationCellSize().height
         let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        // Finding D: Rust viewport index / plan is sole document extent.
-        let contentHeight: CGFloat = rustBody > 0 ? rustBody : 0
-        _ = (hasCards, cardHeight)
+        // Finding D: Rust viewport index is preferred when authoritative.
+        // Type-48 can lag or under-report vs laid-out cards (refocused original
+        // pane); take max so mid-transcript scroll retention cannot collapse
+        // the AppKit document under a pinned AbsoluteY offset (#1484 FocusChurn).
+        let contentHeight: CGFloat = hasCards ? max(rustBody, cardHeight) : 0
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
-        let preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
+        var preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
+        // While the reader holds a mid-transcript pin, never let transient
+        // rebuild/HISTORY settle shrink the document below that offset.
+        // Set the constraint inline — do not call preserveDocumentHeight here
+        // (it re-enters syncTranscriptDocumentSize).
+        if let pinnedContentOffset, hasCards {
+            // Ensure the document can host the content-relative pin after spacer
+            // recompute: documentOffset = contentOffset + leading.
+            let pinFloor = max(contentHeight, max(pinnedContentOffset, 0) + viewportHeight + 1)
+            let needed = max(preservedHeight, pinFloor)
+            if needed > preservedHeight + 0.5 {
+                clearPreservedDocumentHeight()
+                let constraint = blocks.heightAnchor.constraint(
+                    greaterThanOrEqualToConstant: needed
+                )
+                constraint.priority = .defaultHigh
+                constraint.isActive = true
+                preservedDocumentHeightConstraint = constraint
+                preservedHeight = needed
+            }
+        }
         let spacers = TranscriptDocumentSizing.spacerHeights(
             contentHeight: contentHeight,
             viewportHeight: viewportHeight,
@@ -619,6 +720,7 @@ extension SecondaryLivePaneHost {
     func scrollTranscriptToLiveEnd() {
         isProgrammaticTranscriptScroll = true
         defer { isProgrammaticTranscriptScroll = false }
+        pinnedTranscriptOffsetY = nil
         let visible = transcript.contentView.bounds
         let maxY = max(transcriptDocumentScrollHeight() - visible.height, 0)
         transcript.contentView.scroll(to: NSPoint(x: visible.origin.x, y: maxY))

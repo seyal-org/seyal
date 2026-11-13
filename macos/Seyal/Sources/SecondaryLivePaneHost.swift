@@ -63,6 +63,11 @@ final class SecondaryLivePaneHost: NSView {
     var blockCards: [UInt64: CommandBlockView] = [:]
     var lastBlockCount = 0
     var followingLiveEnd = true
+    /// When set, focus/HISTORY/layout churn must restore this *content-relative*
+    /// scroll offset (`documentOffsetY - leadingSpacer`) instead of following
+    /// live end. Content-relative pins survive leading-spacer churn when card
+    /// height and Rust extent disagree (#1484 FocusChurn mid-transcript).
+    var pinnedTranscriptOffsetY: CGFloat?
     var isProgrammaticTranscriptScroll = false
     var transcriptFrameRevision: UInt64 = 0
     private var lastTranscriptViewportSize: CGSize = .zero
@@ -324,8 +329,37 @@ final class SecondaryLivePaneHost: NSView {
             refreshInputOwnershipChrome()
             return
         }
+        rememberTranscriptScrollState()
         inputOwned = owned
         refreshInputOwnershipChrome()
+        restorePinnedTranscriptOffsetIfNeeded()
+        if pinnedTranscriptOffsetY != nil {
+            DispatchQueue.main.async { [weak self] in
+                self?.restorePinnedTranscriptOffsetIfNeeded()
+            }
+        }
+    }
+
+    /// Leading spacer above real Block cards (Warp bottom-dock slack).
+    var transcriptLeadingSpacerHeightValue: CGFloat {
+        transcriptLeadingSpacerHeight.constant
+    }
+
+    /// Scroll offset relative to card content, independent of leading spacer.
+    func transcriptContentOffsetY(documentOffsetY: CGFloat? = nil) -> CGFloat {
+        let scrollY = documentOffsetY ?? transcript.contentView.bounds.origin.y
+        return scrollY - transcriptLeadingSpacerHeightValue
+    }
+
+    func documentOffsetY(forContentOffset contentOffsetY: CGFloat) -> CGFloat {
+        contentOffsetY + transcriptLeadingSpacerHeightValue
+    }
+
+    func restorePinnedTranscriptOffsetIfNeeded() {
+        guard let pinnedContent = pinnedTranscriptOffsetY else { return }
+        followingLiveEnd = false
+        syncTranscriptDocumentSize()
+        setTranscriptDocumentOffsetY(documentOffsetY(forContentOffset: pinnedContent))
     }
 
     /// Document scroll offset of the transcript (for retention tests).
@@ -342,8 +376,20 @@ final class SecondaryLivePaneHost: NSView {
         transcript.contentView.scroll(to: NSPoint(x: 0, y: clamped))
         transcript.reflectScrolledClipView(transcript.contentView)
         // Mid-transcript programmatic scrolls must clear follow-bottom so the
-        // next rebuild does not jump to live end (#1424).
-        followingLiveEnd = maxY > 0 && clamped >= maxY - 24
+        // next rebuild does not jump to live end (#1424). When the requested
+        // offset still exceeds the current document, keep followingLiveEnd
+        // false and retain the pin — the document is still settling (#1484).
+        if y > maxY + 24 {
+            followingLiveEnd = false
+            if pinnedTranscriptOffsetY == nil {
+                pinnedTranscriptOffsetY = transcriptContentOffsetY(documentOffsetY: y)
+            }
+        } else {
+            followingLiveEnd = maxY > 0 && clamped >= maxY - 24
+            if followingLiveEnd {
+                pinnedTranscriptOffsetY = nil
+            }
+        }
         rememberTranscriptScrollState()
     }
 
@@ -378,7 +424,27 @@ final class SecondaryLivePaneHost: NSView {
         // offset restore, or Metal history sticks at the pre-scroll geometry
         // (#1379 / stuck glyphs). Only the follow-tail latch is gated.
         if !isProgrammaticTranscriptScroll {
-            followingLiveEnd = isNearLiveEnd()
+            let nearLiveEnd = isNearLiveEnd()
+            let visibleMaxY = max(
+                transcriptDocumentScrollHeight() - transcript.contentView.bounds.height,
+                0
+            )
+            // A transient short document (type-48 lag / card rebuild) can make
+            // any offset look like live-end. Keep an intentional mid-transcript
+            // pin until the document can actually host it (#1484 FocusChurn).
+            let pinnedDocument = pinnedTranscriptOffsetY.map {
+                documentOffsetY(forContentOffset: $0)
+            }
+            if let pinnedDocument, pinnedDocument > visibleMaxY + 24 {
+                followingLiveEnd = false
+            } else if nearLiveEnd {
+                followingLiveEnd = true
+                pinnedTranscriptOffsetY = nil
+                clearPreservedDocumentHeight()
+            } else {
+                followingLiveEnd = false
+                pinnedTranscriptOffsetY = transcriptContentOffsetY()
+            }
             rememberTranscriptScrollState()
         }
         publishBlockOutputFrame()

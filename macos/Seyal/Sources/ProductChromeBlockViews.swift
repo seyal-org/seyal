@@ -338,8 +338,12 @@ final class CommandBlockView: NSView {
         bodyTranscript.frame = body.bounds
     }
 
-    func setOutputLines(_ lines: Int, cellHeight: CGFloat) {
+    func setOutputLines(_ lines: Int, cellHeight: CGFloat, expandOnly: Bool = false) {
         let height = max(cellHeight, 1) * CGFloat(max(lines, 1))
+        // Mid-transcript scroll retention measures body frame.minY. A later
+        // viewport-sized HISTORY page must not shrink a taller sealed body and
+        // yank that frame under a preserved scroll offset (#1484 FocusChurn).
+        if expandOnly, height + 0.5 < bodyHeight.constant { return }
         guard abs(bodyHeight.constant - height) > 0.5 else { return }
         bodyHeight.constant = height
     }
