@@ -65,6 +65,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var lastRenderError: Error?
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
   var historyRenderPageKeys: [UInt64: NativeHistoryRenderPageKey] = [:]
+  /// Plan-owned sealed-index HISTORY dedup (Finding C/E). Keys encode the
+  /// clipping window; wire requests stay `(0,0)+start_unit`.
+  var planClipRequestBook = HistoryProjectionRequestBook()
   /// Latest geometry installed for the active Flow transcript. Frame revisions
   /// can advance for unrelated runtime updates; identical regions need no new
   /// Metal history preparation.
@@ -159,6 +162,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
           // only re-encodes ranges already stored here; dropping this store
           // leaves Block bodies empty even after Runtime history arrives.
           self.retainHistoryRange(range)
+          self.notePlanClipHistoryResult(range)
           if let onHistoryRangeChanged {
             onHistoryRangeChanged(range)
           } else {

@@ -61,6 +61,12 @@ extension MetalSurfaceView {
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
     bridge?.discardHistoryRequests(except: historyExceptPreservingRawScrollback(blockIDs))
+    let handle = transcriptDisplayHandle != 0
+      ? transcriptDisplayHandle
+      : (bridge?.windowFocusedDisplayHandle ?? bridge?.clientHandle ?? 0)
+    if handle != 0 {
+      planClipRequestBook.retain(blockIDs: blockIDs, forDisplayHandle: handle)
+    }
   }
 
   /// Installs a bounded Runtime history projection in this Pane's Metal renderer.

@@ -7,9 +7,10 @@ struct HistoryProjectionRequestKey: Hashable {
     let endLine: UInt64
 }
 
-/// Test-only request-book helper retained for SeyalHostComponentTests.
-/// Production Flow hosts no longer own a HistoryProjectionRequestBook —
-/// sealed clip fetches are plan-driven (#1484 Finding D).
+/// Bounded HISTORY request dedup for plan-owned sealed clips and component
+/// tests. Production Flow chrome hosts do not own fetches (#1484 Finding D);
+/// `MetalSurfaceView.applyBlockViewportPlan` uses this so identical clips are
+/// not re-requested every display frame (#1484 100k).
 struct HistoryProjectionRequestBook {
     private var inFlight = Set<HistoryProjectionRequestKey>()
     private var settled = Set<HistoryProjectionRequestKey>()

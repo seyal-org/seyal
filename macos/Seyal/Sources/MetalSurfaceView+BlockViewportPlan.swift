@@ -67,22 +67,69 @@ extension MetalSurfaceView {
     // Bounded sealed retrieval per clipping range — not full-Block HISTORY.
     // Address the plan's displayHandle directly (not window-focused), so
     // multipane Flow clips cannot hit the wrong Controller (#1426 / Finding E).
+    // Running LiveTail Blocks get one AX seed page only (paint stays LiveTail);
+    // completed clips use the plan window with dedup so publish retries cannot
+    // flood HISTORY during high-volume output (#1484 100k / clear→exit AX).
     for index in 0..<header.clipping_count {
       var clip = SeyalBlockViewportClip()
       guard seyal_bridge_block_viewport_clip_at_for(displayHandle, index, &clip) != 0,
             clip.block_id != 0,
             clip.row_count > 0
       else { continue }
-      _ = bridge?.requestHistoryRange(
+      let liveTailPainted = renderer.liveTail.clips[clip.block_id] != nil
+      let key: HistoryProjectionRequestKey
+      let startUnit: UInt32
+      if liveTailPainted {
+        // Stable key: one seed for the whole Running lifetime.
+        key = HistoryProjectionRequestKey(
+          displayHandle: displayHandle,
+          blockID: clip.block_id,
+          startLine: 0,
+          endLine: 0
+        )
+        startUnit = 0
+      } else {
+        key = HistoryProjectionRequestKey(
+          displayHandle: displayHandle,
+          blockID: clip.block_id,
+          startLine: UInt64(clip.first_row),
+          endLine: UInt64(clip.first_row).saturatingAdding(UInt64(clip.row_count))
+        )
+        startUnit = clip.first_row
+      }
+      guard planClipRequestBook.begin(key) else { continue }
+      let result = bridge?.requestHistoryRange(
         forDisplayHandle: displayHandle,
         startLine: 0,
         endLine: 0,
         blockID: clip.block_id,
-        startUnit: clip.first_row
-      )
+        startUnit: startUnit
+      ) ?? -10
+      if result != 0 {
+        planClipRequestBook.retry(key)
+      }
     }
 
     return true
+  }
+
+  /// Settle plan-owned clip requests after a HISTORY page arrives (or fails).
+  func notePlanClipHistoryResult(_ range: NativeHistoryRange) {
+    let handle = range.sourceDisplayHandle != 0
+      ? range.sourceDisplayHandle
+      : transcriptDisplayHandle
+    let key = HistoryProjectionRequestKey(
+      displayHandle: handle,
+      blockID: range.blockID,
+      startLine: 0,
+      endLine: 0
+    )
+    planClipRequestBook.receive(
+      key,
+      status: range.status,
+      deliveredRows: range.rows.count,
+      minimumRows: range.rows.isEmpty ? 1 : nil
+    )
   }
 }
 
