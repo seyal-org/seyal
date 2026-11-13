@@ -115,6 +115,9 @@ pub(in crate::runtime) struct Entry {
     /// Session secret S, challenge K, and the session mechanism-5 machine.
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) session_runtime: super::session_bootstrap::SessionRuntime,
+    /// Last StreamSequence observed by Finding F journal consume (D7).
+    /// Written on every drain so release builds cannot treat consume as a no-op.
+    pub(in crate::runtime) last_consumed_attribution_sequence: u64,
 }
 
 #[cfg(target_os = "macos")]

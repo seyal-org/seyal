@@ -302,7 +302,9 @@ impl Runtime {
         if let Some(entry) = self.entries.get_mut(&id) {
             let fail_closed = entry.execution.attribution_journal_fail_closed_overflow();
             let events = entry.execution.drain_attribution_journal();
-            consume_attribution_journal_events(&events);
+            if let Some(watermark) = consume_attribution_journal_events(&events) {
+                entry.last_consumed_attribution_sequence = watermark;
+            }
             if fail_closed {
                 entry.execution.end_native_block_output();
             }
@@ -404,7 +406,9 @@ impl Runtime {
             .ok_or(RuntimeError::UnknownExecution)?;
         while entry.execution.take_shell_integration_event().is_some() {}
         let events = entry.execution.drain_attribution_journal();
-        consume_attribution_journal_events(&events);
+        if let Some(watermark) = consume_attribution_journal_events(&events) {
+            entry.last_consumed_attribution_sequence = watermark;
+        }
         Ok(())
     }
 
@@ -693,7 +697,9 @@ pub(super) fn complete_timeline_block(
 /// ShellBoundaryCandidate entries are the causal record paired with atomic OSC
 /// admit; CellMutation entries are marked finalized by this drain so capacity
 /// barriers never discard unresolved ownership.
-fn consume_attribution_journal_events(events: &[seyal_exec::PrimaryEvent]) {
+/// Returns the highest StreamSequence watermark observed. Callers must store
+/// it on the Entry so release builds retain a production side effect (D7).
+fn consume_attribution_journal_events(events: &[seyal_exec::PrimaryEvent]) -> Option<u64> {
     let mut last_sequence = None;
     let mut markers = 0u32;
     let mut mutations = 0u32;
@@ -725,6 +731,7 @@ fn consume_attribution_journal_events(events: &[seyal_exec::PrimaryEvent]) {
         last_sequence = Some(sequence);
     }
     let _ = (markers, mutations);
+    last_sequence.map(|seq| seq.0)
 }
 
 /// Apply one trusted local-scope event and carry out its Block effects.
