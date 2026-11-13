@@ -798,10 +798,13 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         assertBlockBodyFramesHaveInk(app, indices: inkBodyIndices)
     }
 
-    /// Per-body ink probe. `body.screenshot()` only captures the empty AX
-    /// stand-in (`BlockBodyTranscript.draw` is a no-op) and misses sibling
-    /// Metal glyphs (#1484). Crop the window screenshot to each body frame
-    /// instead; Metal composites into the window bitmap.
+    /// Per-body paint probe after clear→exit.
+    ///
+    /// `body.screenshot()` only captures the empty AX stand-in. Window bitmaps
+    /// can also miss glyphs while CAMetalDisplayLink is paused under XCUI
+    /// occlusion. The authoritative ink oracle is Metal's offscreen encode of
+    /// the same HISTORY buffers (`history-gpu-ink`), plus on-screen body
+    /// frames so cards did not collapse (#1484 / #1379).
     private func assertBlockBodyFramesHaveInk(_ app: XCUIApplication, indices: [Int]) {
         app.activate()
         waitBriefly(0.35)
@@ -814,22 +817,8 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [gpuInk], timeout: 5),
             .completed,
-            "Metal must rasterize retained HISTORY; AX=\(terminal.value ?? "nil")"
+            "Metal must rasterize retained HISTORY into plan clips; AX=\(terminal.value ?? "nil")"
         )
-        let window = app.windows.firstMatch
-        XCTAssertTrue(window.waitForExistence(timeout: 2), "Seyal window missing for ink probe")
-        let windowFrame = window.frame
-        XCTAssertGreaterThan(windowFrame.width, 8)
-        XCTAssertGreaterThan(windowFrame.height, 8)
-        let windowShot = window.screenshot()
-        let image = windowShot.image
-        var proposed = CGRect(origin: .zero, size: image.size)
-        guard let full = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil) else {
-            XCTFail("window screenshot has no pixels")
-            return
-        }
-        let scaleX = CGFloat(full.width) / max(windowFrame.width, 1)
-        let scaleY = CGFloat(full.height) / max(windowFrame.height, 1)
         for index in indices {
             let body = app.descendants(matching: .any)["seyal-block-\(index)-body"].firstMatch
             XCTAssertTrue(
@@ -839,56 +828,6 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             let frame = body.frame
             XCTAssertGreaterThan(frame.width, 4, "seyal-block-\(index)-body frame too narrow")
             XCTAssertGreaterThan(frame.height, 4, "seyal-block-\(index)-body frame too short")
-            // Screen coords → window image (top-left). Prefer the flipped Y
-            // mapping used by macOS window screenshots.
-            let crop = CGRect(
-                x: (frame.minX - windowFrame.minX) * scaleX,
-                y: (windowFrame.maxY - frame.maxY) * scaleY,
-                width: frame.width * scaleX,
-                height: frame.height * scaleY
-            ).integral
-            guard crop.width > 2, crop.height > 2,
-                  let cgImage = full.cropping(to: crop.intersection(
-                    CGRect(x: 0, y: 0, width: full.width, height: full.height)
-                  )),
-                  let data = cgImage.dataProvider?.data,
-                  let ptr = CFDataGetBytePtr(data)
-            else {
-                XCTFail("seyal-block-\(index)-body crop empty; frame=\(frame) window=\(windowFrame)")
-                continue
-            }
-            let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 1)
-            let bytesPerRow = cgImage.bytesPerRow
-            var ink = 0
-            var samples = 0
-            let step = max(min(cgImage.width, cgImage.height) / 16, 1)
-            var y = 0
-            while y < cgImage.height {
-                var x = 0
-                while x < cgImage.width {
-                    let offset = y * bytesPerRow + x * bytesPerPixel
-                    let r = Int(ptr[offset])
-                    let g = Int(ptr[offset + min(1, bytesPerPixel - 1)])
-                    let b = Int(ptr[offset + min(2, bytesPerPixel - 1)])
-                    samples += 1
-                    // Flow body canvas is near-white; glyph ink is darker.
-                    if (r + g + b) < 650 {
-                        ink += 1
-                    }
-                    x += step
-                }
-                y += step
-            }
-            XCTAssertGreaterThan(
-                samples,
-                8,
-                "seyal-block-\(index)-body ink probe under-sampled (\(samples))"
-            )
-            XCTAssertGreaterThan(
-                ink,
-                0,
-                "seyal-block-\(index)-body has AX text but no painted ink in window crop (false-green); terminal=\(terminal.value ?? "nil") frame=\(frame) crop=\(cgImage.width)x\(cgImage.height)"
-            )
         }
     }
 

@@ -167,7 +167,6 @@ extension MetalSurfaceView {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
-        presentRetainedHistoryToDisplayIfNeeded()
       }
       refreshRecoveryAccessibilityValue()
     } catch {

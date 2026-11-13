@@ -568,7 +568,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
-        presentRetainedHistoryToDisplayIfNeeded()
       }
     } else if shouldAttachRuntime {
       // The window can be attachable before AppKit publishes a reliable
@@ -744,7 +743,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
-        presentRetainedHistoryToDisplayIfNeeded()
       }
     } else {
       lastTranscriptFrameRegions = nil

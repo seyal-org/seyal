@@ -42,20 +42,6 @@ extension MetalSurfaceView {
     }
   }
 
-  /// Cold-path present for shell-exit retain when CAMetalDisplayLink may not
-  /// fire under occlusion. Not used on the live PTY hot path.
-  func presentRetainedHistoryToDisplayIfNeeded() {
-    guard hasRetainedHistoryPresentation,
-      renderer.hasPresentablePreparedState,
-      !renderer.hasFrameInFlight,
-      let metalLayer = layer as? CAMetalLayer,
-      let drawable = metalLayer.nextDrawable()
-    else {
-      return
-    }
-    _ = renderer.present(drawable: drawable)
-  }
-
   nonisolated func metalDisplayLink(
     _ link: CAMetalDisplayLink,
     needsUpdate update: CAMetalDisplayLink.Update
