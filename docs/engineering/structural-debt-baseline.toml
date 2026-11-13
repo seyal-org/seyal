@@ -24,7 +24,7 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 952
+acknowledged_loc = 960
 issue = 1484
 reason = "Metal surface remains the thin historyRanges/hit-test owner; #1484 keeps shell-exit HISTORY buffers across disconnect (LiveTail cleared only) and plan-owned clip dedup hooks without a second VT/history authority."
 

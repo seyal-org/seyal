@@ -326,6 +326,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let historyInstances = paint.historyInstanceCount
     let historyRegionsPainted = paint.paintedHistoryRegionCount
     let historyClips = paint.historyClipsDistinct ? "ok" : "collapse"
+    // Offscreen GPU sample proves atlas+history actually rasterize (CPU
+    // instance counts alone are false-green when atlas was released).
+    let atlasReady = renderer.glyphAtlas.texture != nil
+    let gpuPaint = hasRetainedHistoryPresentation
+      ? inspectFlowPaint(sampleGPU: true)
+      : paint
+    let historyGpuInk = gpuPaint.opaquePixelsInsideClips
     let geometry: String
     if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
       geometry =
@@ -340,7 +347,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         + "runtime=\(runtime) execution=\(execution) "
         + "attachment=\(attachment) alternate-screen=\(alternate) "
         + "\(geometry) flow-paint=\(flowPaint) history-instances=\(historyInstances) "
-        + "history-regions-painted=\(historyRegionsPainted) history-clips=\(historyClips)"
+        + "history-regions-painted=\(historyRegionsPainted) history-clips=\(historyClips) "
+        + "history-atlas=\(atlasReady ? "ok" : "nil") history-gpu-ink=\(historyGpuInk)"
     )
   }
 
