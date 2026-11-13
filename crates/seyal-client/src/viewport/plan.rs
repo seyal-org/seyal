@@ -304,7 +304,9 @@ mod tests {
             window_rows: 24,
             records: &records,
         });
-        let clip = plan.clip_for(7).expect("live-only completed Block must clip");
+        let clip = plan
+            .clip_for(7)
+            .expect("live-only completed Block must clip");
         assert_eq!(clip.first_row, 0);
         assert_eq!(clip.row_count, 1);
         assert!(!clip.sealed);
