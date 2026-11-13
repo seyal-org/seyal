@@ -334,67 +334,11 @@ extension SecondaryLivePaneHost {
         }
     }
 
+    /// Flow Block output fetches are owned by `applyBlockViewportPlan` (C/D/E).
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
-        // Sealed/completed NATIVE fetches RegionId-owned cells for AX/retain.
-        // Running PRIMARY_CLIP paints via LiveTail only — mid-stream history
-        // walks starve the reactor on tall Blocks (#1484 100k / multipane).
-        // Include reserved0/reserved1 so seal transitions reopen the book.
         guard displayHandle != 0 else { return }
-        if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
-            // Finding E: sealed-row index from BlockViewportPlan clipping.
-            var clip = SeyalBlockViewportClip()
-            let firstRow: UInt32
-            let rowCount: UInt32
-            if seyal_bridge_block_viewport_clip_for(displayHandle, blockID, &clip) != 0,
-               clip.row_count > 0
-            {
-                firstRow = clip.first_row
-                rowCount = clip.row_count
-            } else {
-                firstRow = 0
-                rowCount = max(projection.reserved1, 1)
-            }
-            let key = HistoryProjectionRequestKey(
-                displayHandle: displayHandle,
-                blockID: blockID,
-                startLine: UInt64(firstRow) + 1,
-                endLine: UInt64(firstRow) + UInt64(max(rowCount, 1))
-            )
-            guard historyProjectionRequests.begin(key) else { return }
-            let result = historyBridge?.requestHistoryRange(
-                forDisplayHandle: displayHandle,
-                startLine: 0,
-                endLine: 0,
-                blockID: blockID,
-                startUnit: firstRow
-            ) ?? -10
-            if result != 0 {
-                historyProjectionRequests.retry(key)
-            }
-            return
-        }
-        guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
-              projection.start_line > 0,
-              projection.end_line >= projection.start_line
-        else { return }
-        // Surfaces intentionally have bridge == nil; borrow the window bridge
-        // and address this pane's Controller (#1424).
-        let key = HistoryProjectionRequestKey(
-            displayHandle: displayHandle,
-            blockID: blockID,
-            startLine: projection.start_line,
-            endLine: projection.end_line
-        )
-        guard historyProjectionRequests.begin(key) else { return }
-        let result = historyBridge?.requestHistoryRange(
-            forDisplayHandle: displayHandle,
-            startLine: projection.start_line,
-            endLine: projection.end_line,
-            blockID: blockID
-        ) ?? -10
-        if result != 0 {
-            historyProjectionRequests.retry(key)
-        }
+        _ = blockID
+        _ = projection
     }
 
     /// Deliver a completed history range into this leaf's Metal surface + card.
@@ -518,9 +462,19 @@ extension SecondaryLivePaneHost {
         let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         guard !direct, displayHandle != 0 else { return }
-        // Finding C: prefer Rust BlockViewportPlan geometry over AppKit card clips.
+        // Finding C/D: Rust BlockViewportPlan is Flow paint authority. When the
+        // client index has published height, never fall back to AppKit card clips.
         if surface.applyBlockViewportPlan(displayHandle: displayHandle) {
             surface.refreshRecoveryAccessibilityValue()
+            return
+        }
+        if seyal_bridge_native_regions_total_height_for(displayHandle) > 0 {
+            if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
+                blockOutputZeroClipRetries += 1
+                DispatchQueue.main.async { [weak self] in
+                    self?.publishBlockOutputFrame()
+                }
+            }
             return
         }
         var regions = collectBlockOutputRegions()
@@ -642,10 +596,11 @@ extension SecondaryLivePaneHost {
         let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
         let cellHeight = surface.terminalPresentationCellSize().height
         let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
-        // Finding A/C/D: Rust per-display viewport index owns document extent.
+        // Finding D: Rust per-display viewport index owns document extent.
+        // Never invent from AppKit card heights when the index has published.
         let contentHeight: CGFloat = {
-            if !hasCards { return 0 }
             if rustBody > 0 { return rustBody }
+            if !hasCards { return 0 }
             return cardHeight
         }()
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
