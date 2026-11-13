@@ -646,8 +646,9 @@ extension ProductChromeHostView {
             break
         }
         // Finding D: no HistoryProjectionRequestBook — plan-owned sealed clips
-        // continue via RustDisplayBridge truncated paging; this path only
-        // retains cells for Metal/AX and republishes the plan frame.
+        // continue via RustDisplayBridge truncated paging; this path retains
+        // cells for Metal/AX. Always prepare Metal instances here so shell-exit
+        // retain is not AX-only when BlockViewportPlan is briefly absent (#1484).
         guard !range.rows.isEmpty else { return }
         pane.inputSurface.retainHistoryRange(range)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
@@ -662,6 +663,23 @@ extension ProductChromeHostView {
                 max(projectionLines, max(range.rows.count, 1)),
                 cellHeight: cellHeight
             )
+            let clip = card.convert(card.body.bounds, to: pane.inputSurface)
+            if clip.width > 1, clip.height > 1 {
+                var region = NativeTranscriptRegion(
+                    id: range.blockID,
+                    origin: .zero,
+                    clip: clip,
+                    historyRows: 0..<range.rows.count,
+                    historyRequestID: range.requestID,
+                    historyRevision: range.revision
+                )
+                region.displayHandle = range.sourceDisplayHandle
+                pane.inputSurface.renderHistoryRange(range, region: region)
+            } else {
+                pane.inputSurface.renderHistoryRange(range)
+            }
+        } else {
+            pane.inputSurface.renderHistoryRange(range)
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()

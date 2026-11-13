@@ -347,7 +347,8 @@ extension SecondaryLivePaneHost {
         guard range.sourceDisplayHandle == 0 || range.sourceDisplayHandle == displayHandle else {
             return
         }
-        // Finding D: no HistoryProjectionRequestBook — retain for Metal/AX only.
+        // Finding D: no HistoryProjectionRequestBook — retain for Metal/AX and
+        // prepare Metal instances even when the plan frame is briefly absent.
         guard !range.rows.isEmpty else { return }
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
@@ -359,6 +360,23 @@ extension SecondaryLivePaneHost {
                 max(projectionLines, max(range.rows.count, 1)),
                 cellHeight: cellHeight
             )
+            let clip = card.convert(card.body.bounds, to: surface)
+            if clip.width > 1, clip.height > 1 {
+                var region = NativeTranscriptRegion(
+                    id: range.blockID,
+                    origin: .zero,
+                    clip: clip,
+                    historyRows: 0..<range.rows.count,
+                    historyRequestID: range.requestID,
+                    historyRevision: range.revision
+                )
+                region.displayHandle = range.sourceDisplayHandle
+                surface.renderHistoryRange(range, region: region)
+            } else {
+                surface.renderHistoryRange(range)
+            }
+        } else {
+            surface.renderHistoryRange(range)
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()

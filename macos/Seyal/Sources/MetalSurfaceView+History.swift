@@ -153,6 +153,11 @@ extension MetalSurfaceView {
         try renderer.update(historyRange: page, region: rendererRegion, backingScale: scale)
         historyRenderPageKeys[range.blockID] = key
       }
+      // Direct prepare (applyHistoryRange) must register order — inspectFlowPaint
+      // only counts historyRegionOrder entries (#1484 clear→exit false-green).
+      if !renderer.historyRegionOrder.contains(range.blockID) {
+        renderer.setHistoryRegionOrder(renderer.historyRegionOrder + [range.blockID])
+      }
       // History-only Flow has no Candidate-D live frame and cannot mark the renderer Usable.
       hasRetainedHistoryPresentation = true
       if shouldRender {
