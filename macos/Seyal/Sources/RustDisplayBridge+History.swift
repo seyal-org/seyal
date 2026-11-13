@@ -41,7 +41,7 @@ extension RustDisplayBridge {
     if result == 0 {
       let requestKey = PaneHistoryRequestKey(
         displayHandle: handle, paneID: paneID, requestID: requestID)
-      requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
+      requestedHistoryRanges[requestKey] = (blockID, startLine, endLine, startUnit)
     }
     return result
   }
@@ -168,8 +168,16 @@ extension RustDisplayBridge {
       historyRevisions.removeValue(forKey: requestKey)
       historyContinuations.removeValue(forKey: requestKey)
       let truncated = metadata.reserved == 1
-      if truncated, leads > 0, isConnected {
-        let nextStart = (previous?.startUnit ?? 0) + leads
+      // Finding E sealed-index mode: advance by delivered sealed rows, not
+      // padded lead counts (Unicode/reflow). Legacy LineId spans still use
+      // lead-count continuation.
+      let sealedIndexMode = request.startLine == 0 && request.endLine == 0
+      let pageAdvance: UInt32 = sealedIndexMode
+        ? UInt32(rows.count)
+        : leads
+      if truncated, pageAdvance > 0, isConnected {
+        let baseUnit = previous?.startUnit ?? request.startUnit
+        let nextStart = baseUnit &+ pageAdvance
         let nextID = seyal_bridge_next_history_request_id_for(handle)
         if nextID != 0 {
           let continued = finishAddressedMutation(
@@ -181,7 +189,9 @@ extension RustDisplayBridge {
           if continued == 0 {
             let nextKey = PaneHistoryRequestKey(
               displayHandle: handle, paneID: paneID, requestID: nextID)
-            requestedHistoryRanges[nextKey] = request
+            requestedHistoryRanges[nextKey] = (
+              request.blockID, request.startLine, request.endLine, nextStart
+            )
             historyContinuations[nextKey] = (nextStart, merged)
           }
         }
