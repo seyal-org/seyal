@@ -713,30 +713,59 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // (SPEC-009 §8.2.2 / §10). History present uses the retained flag only
     // when Rust still retains Flow history.
     hasPreparedState = false
+    // Prune historyRanges to the Rust timeline *before* re-encoding so
+    // rebuildBlocks cannot wipe Metal buffers we just rebuilt (#1484).
+    onTimelineChanged?()
     hasRetainedHistoryPresentation = retainHistory && !historyRanges.isEmpty
-    if retainHistory, let regions = retainedFrameRegions, !regions.isEmpty {
+    if retainHistory, !historyRanges.isEmpty {
       var order: [UInt64] = []
-      order.reserveCapacity(regions.count)
-      for region in regions {
-        let key = PaneBlockKey(
-          paneID: paneID,
-          displayHandle: region.displayHandle,
-          blockID: region.id
-        )
-        guard let range = historyRanges[key] ?? historyRanges[
-          PaneBlockKey(paneID: paneID, displayHandle: 0, blockID: region.id)
-        ] else { continue }
+      var encodedRegions: [NativeTranscriptRegion] = []
+      let planRegions = retainedFrameRegions ?? []
+      for region in planRegions {
+        let range = historyRanges[
+          PaneBlockKey(
+            paneID: paneID,
+            displayHandle: region.displayHandle,
+            blockID: region.id
+          )
+        ] ?? historyRanges.first(where: {
+          $0.key.paneID == paneID && $0.key.blockID == region.id
+        })?.value
+        guard let range, !range.rows.isEmpty else { continue }
         renderHistoryRange(range, region: region)
         if !order.contains(region.id) {
           order.append(region.id)
         }
+        encodedRegions.append(region)
       }
-      // inspectFlowPaint only counts regions in historyRegionOrder.
+      // Floor-hidden / newly revealed Blocks may be absent from the last live
+      // plan frame. Stack distinct clips so shell-exit paint is not AX-only
+      // and history-clips stay non-collapsed (#1379 / #1484).
+      let cellHeight = max(terminalPresentationCellSize().height, 1)
+      var stackY = bounds.height
+      for (key, range) in historyRanges.sorted(by: { $0.key.blockID < $1.key.blockID })
+      where key.paneID == paneID {
+        guard !order.contains(key.blockID), !range.rows.isEmpty else { continue }
+        let rowCount = max(range.rows.count, 1)
+        let height = min(CGFloat(rowCount) * cellHeight, max(bounds.height * 0.4, cellHeight))
+        stackY -= height
+        var region = NativeTranscriptRegion(
+          id: key.blockID,
+          origin: .zero,
+          clip: NSRect(x: 0, y: stackY, width: max(bounds.width, 1), height: height),
+          historyRows: 0..<rowCount,
+          historyRequestID: range.requestID,
+          historyRevision: range.revision
+        )
+        region.displayHandle = key.displayHandle
+        renderHistoryRange(range, region: region)
+        order.append(key.blockID)
+        encodedRegions.append(region)
+      }
       renderer.setHistoryRegionOrder(order)
-      lastTranscriptFrameRegions = regions
+      lastTranscriptFrameRegions = encodedRegions
       hasRetainedHistoryPresentation = !renderer.historyRegions.isEmpty
     }
-    onTimelineChanged?()
     if retainHistory, shouldRender, hasRetainedHistoryPresentation {
       renderer.requestPresent()
       beginPresentationAttemptSeries()

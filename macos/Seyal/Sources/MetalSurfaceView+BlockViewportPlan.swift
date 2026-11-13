@@ -67,43 +67,31 @@ extension MetalSurfaceView {
     // Bounded sealed retrieval per clipping range — not full-Block HISTORY.
     // Address the plan's displayHandle directly (not window-focused), so
     // multipane Flow clips cannot hit the wrong Controller (#1426 / Finding E).
-    // Running LiveTail Blocks get one AX seed page only (paint stays LiveTail);
-    // completed clips use the plan window with dedup so publish retries cannot
-    // flood HISTORY during high-volume output (#1484 100k / clear→exit AX).
+    // Skip LiveTail-painted Running Blocks entirely — an AX "seed" page at
+    // start_unit 0 Truncates into a full-Block continuation storm under 100k
+    // output. Completed clips use the plan window with dedup (#1484).
     for index in 0..<header.clipping_count {
       var clip = SeyalBlockViewportClip()
       guard seyal_bridge_block_viewport_clip_at_for(displayHandle, index, &clip) != 0,
             clip.block_id != 0,
             clip.row_count > 0
       else { continue }
-      let liveTailPainted = renderer.liveTail.clips[clip.block_id] != nil
-      let key: HistoryProjectionRequestKey
-      let startUnit: UInt32
-      if liveTailPainted {
-        // Stable key: one seed for the whole Running lifetime.
-        key = HistoryProjectionRequestKey(
-          displayHandle: displayHandle,
-          blockID: clip.block_id,
-          startLine: 0,
-          endLine: 0
-        )
-        startUnit = 0
-      } else {
-        key = HistoryProjectionRequestKey(
-          displayHandle: displayHandle,
-          blockID: clip.block_id,
-          startLine: UInt64(clip.first_row),
-          endLine: UInt64(clip.first_row).saturatingAdding(UInt64(clip.row_count))
-        )
-        startUnit = clip.first_row
+      if renderer.liveTail.clips[clip.block_id] != nil {
+        continue
       }
+      let key = HistoryProjectionRequestKey(
+        displayHandle: displayHandle,
+        blockID: clip.block_id,
+        startLine: UInt64(clip.first_row),
+        endLine: UInt64(clip.first_row).saturatingAdding(UInt64(clip.row_count))
+      )
       guard planClipRequestBook.begin(key) else { continue }
       let result = bridge?.requestHistoryRange(
         forDisplayHandle: displayHandle,
         startLine: 0,
         endLine: 0,
         blockID: clip.block_id,
-        startUnit: startUnit
+        startUnit: clip.first_row
       ) ?? -10
       if result != 0 {
         planClipRequestBook.retry(key)
