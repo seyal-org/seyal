@@ -699,9 +699,14 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // (#1379): that leftover frame paints loose text/cursor over Block cards.
     // Drop Metal history *buffers* (and any deferred prepares) too — keep
     // historyRanges rows so chrome can re-encode against settled AppKit clips.
+    // Snapshot plan-owned region geometry first: after disconnect the live
+    // BlockViewportPlan is gone, so publishBlockOutputFrame cannot rebuild
+    // clips — re-encode retained rows against this last plan frame (#1484).
+    let retainedFrameRegions = lastTranscriptFrameRegions
     clearLiveTailPresentation()
     lastTranscriptFrameRegions = nil
     renderer.removeHistoryRegions(except: [])
+    historyRenderPageKeys.removeAll(keepingCapacity: true)
     cancelPresentationRetries()
     resetPreparationRecovery()
     // Live Candidate-D readiness must not linger into reconnect/New shell
@@ -709,6 +714,20 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // when Rust still retains Flow history.
     hasPreparedState = false
     hasRetainedHistoryPresentation = retainHistory && !historyRanges.isEmpty
+    if retainHistory, let regions = retainedFrameRegions, !regions.isEmpty {
+      for region in regions {
+        let key = PaneBlockKey(
+          paneID: paneID,
+          displayHandle: region.displayHandle,
+          blockID: region.id
+        )
+        guard let range = historyRanges[key] ?? historyRanges[
+          PaneBlockKey(paneID: paneID, displayHandle: 0, blockID: region.id)
+        ] else { continue }
+        renderHistoryRange(range, region: region)
+      }
+      hasRetainedHistoryPresentation = !renderer.historyRegions.isEmpty
+    }
     onTimelineChanged?()
     if retainHistory, shouldRender, hasRetainedHistoryPresentation {
       renderer.requestPresent()
