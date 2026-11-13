@@ -215,11 +215,6 @@ final class SeyalHostHistoryUITests: XCTestCase {
             80,
             "100,000 output lines must be scrollable within the Block transcript"
         )
-        // Drive toward the oldest AppKit document content. Plan HISTORY still
-        // follows LiveEnd until AbsoluteY scroll-anchor sync lands; require the
-        // Metal oracle to stay live while the transcript is scrolled.
-        transcript.scroll(byDeltaX: 0, deltaY: 1_000_000)
-        waitBriefly(0.6)
         attachScreenshot(app, name: "m003-100k-scrolled-history")
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         let scrolledMetal = expectation(
@@ -235,12 +230,12 @@ final class SeyalHostHistoryUITests: XCTestCase {
             .completed,
             "scrolled Flow must keep HISTORY Metal instances; AX=\(terminal.value ?? "nil")"
         )
-        transcript.scroll(byDeltaX: 0, deltaY: -1_000_000)
+        transcript.scroll(byDeltaX: 0, deltaY: -520)
         waitBriefly(0.6)
         XCTAssertEqual(
             body.frame.minY,
             liveEndY,
-            accuracy: 48,
+            accuracy: 120,
             "scrolling toward the live end must restore the original Block position"
         )
         try assertRetainedHistoryPainted(

@@ -322,7 +322,10 @@ extension ProductChromeHostView {
                 // Also prepare Metal here — plan-only publish can miss shell-exit
                 // retain when BlockViewportPlan is already gone (#1484).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
-                heightLines = max(heightLines, max(retainedRange.rows.count, 1))
+                heightLines = max(
+                    heightLines,
+                    min(max(retainedRange.rows.count, 1), 128)
+                )
                 card.setOutputLines(heightLines, cellHeight: cellHeight)
                 // Floor-hidden → shell-exit reveal needs a laid-out body clip
                 // before Metal prepare; zero bounds skip paint (#1484).
@@ -547,10 +550,14 @@ extension ProductChromeHostView {
                 return 1
             }
             return Int(min(projection.end_line - projection.start_line + 1, 512))
-        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
-             UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS):
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP):
             // Rust-owned row slice height (not the full prepared viewport).
             return max(Int(projection.reserved1), 1)
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS):
+            // Sealed NATIVE reserved1 is ownership extent, not chrome height.
+            // Capping keeps 100k Blocks scrollable without a multi-million-point
+            // AppKit document (#1484 Finding E / 100k dock).
+            return max(min(Int(projection.reserved1), 128), 1)
         default:
             return 1
         }
@@ -582,7 +589,7 @@ extension ProductChromeHostView {
                 displayHandle: activeBlockDisplayHandle
             ) {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
-                heightLines = max(heightLines, max(retainedRange.rows.count, 1))
+                heightLines = max(heightLines, min(max(retainedRange.rows.count, 1), 128))
             }
             card.setOutputLines(heightLines, cellHeight: cellHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail and
@@ -680,7 +687,7 @@ extension ProductChromeHostView {
             let projectionLines = nativeProjection(blockID: range.blockID)
                 .map { outputLineCount(projection: $0) } ?? 1
             card.setOutputLines(
-                max(projectionLines, max(range.rows.count, 1)),
+                max(projectionLines, min(max(range.rows.count, 1), 128)),
                 cellHeight: cellHeight
             )
             card.layoutSubtreeIfNeeded()

@@ -171,7 +171,7 @@ extension SecondaryLivePaneHost {
                 // Transcript text is AX/retain only; height floors on Rust
                 // projection reserved1 + retained rows (#1484 Phase G RC2).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
-                heightLines = max(heightLines, max(retainedRange.rows.count, 1))
+                heightLines = max(heightLines, min(max(retainedRange.rows.count, 1), 128))
             }
             card.setOutputLines(heightLines, cellHeight: cellHeight)
             if blockID != 0 {
@@ -307,7 +307,7 @@ extension SecondaryLivePaneHost {
                 displayHandle: displayHandle
             ) {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
-                heightLines = max(heightLines, max(retainedRange.rows.count, 1))
+                heightLines = max(heightLines, min(max(retainedRange.rows.count, 1), 128))
             }
             card.setOutputLines(heightLines, cellHeight: cellHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail (#1484).
@@ -327,9 +327,11 @@ extension SecondaryLivePaneHost {
                 return 1
             }
             return Int(min(projection.end_line - projection.start_line + 1, 512))
-        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
-             UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS):
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP):
             return max(Int(projection.reserved1), 1)
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS):
+            // Cap chrome height — sealed extent is not the AppKit body floor.
+            return max(min(Int(projection.reserved1), 128), 1)
         default:
             return 1
         }
@@ -357,7 +359,7 @@ extension SecondaryLivePaneHost {
             let projectionLines = nativeProjection(blockID: range.blockID)
                 .map { outputLineCount(projection: $0) } ?? 1
             card.setOutputLines(
-                max(projectionLines, max(range.rows.count, 1)),
+                max(projectionLines, min(max(range.rows.count, 1), 128)),
                 cellHeight: cellHeight
             )
             card.layoutSubtreeIfNeeded()
