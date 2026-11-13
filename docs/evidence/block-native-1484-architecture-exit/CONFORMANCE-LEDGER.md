@@ -1,6 +1,6 @@
 # Architecture exit gate — #1484 / PR #1485
 
-Exact head under review: `a356130e` (PR #1485 / `mahboobmonnamd/issue/1484`). Prior baseline `e335e1f2`.
+Exact head under review: `33b60e36` (PR #1485 / `mahboobmonnamd/issue/1484`). Prior baseline `e335e1f2`.
 
 Authority: ADR-004, ADR-009, ADR-010, ADR-011, SPEC-008, merged #1481/#1483, Issue #1484 body, AGENTS.md.
 
