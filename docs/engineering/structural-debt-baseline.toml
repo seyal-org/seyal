@@ -30,7 +30,7 @@ reason = "Metal surface remains the thin historyRanges/hit-test owner; #1484 kee
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
-acknowledged_loc = 893
+acknowledged_loc = 897
 issue = 1484
 reason = "Metal update/present lifecycle stays one main-queue presenter; #1379/#1484 keep deferred prepares and Flow paint counts without growing presenter authority."
 

@@ -811,6 +811,10 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 return nil
             }
         } else if !orderedBlockRegions.isEmpty {
+            // Ensure atlas texture before HISTORY-only offscreen encode (#1484).
+            if glyphAtlas.texture == nil {
+                _ = try? glyphAtlas.ensureTextureForRendering()
+            }
             guard glyphAtlas.texture != nil else { return nil }
         }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(

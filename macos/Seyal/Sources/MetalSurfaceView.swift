@@ -327,9 +327,11 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let historyRegionsPainted = paint.paintedHistoryRegionCount
     let historyClips = paint.historyClipsDistinct ? "ok" : "collapse"
     // Offscreen GPU sample proves atlas+history actually rasterize (CPU
-    // instance counts alone are false-green when atlas was released).
+    // instance counts alone are false-green when atlas was released). Sample
+    // whenever HISTORY instances exist — not only after shell-exit retain —
+    // so 100k live-end AX sees history-gpu-ink (#1484).
     let atlasReady = renderer.glyphAtlas.texture != nil
-    let gpuPaint = hasRetainedHistoryPresentation
+    let gpuPaint = paint.historyInstanceCount > 0
       ? inspectFlowPaint(sampleGPU: true)
       : paint
     let historyGpuInk = gpuPaint.opaquePixelsInsideClips
