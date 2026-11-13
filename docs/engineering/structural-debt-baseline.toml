@@ -36,15 +36,21 @@ reason = "Metal update/present lifecycle stays one main-queue presenter; #1379/#
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 930
+acknowledged_loc = 989
 issue = 1484
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1484 pins sibling composer submit to the live display handle, drains BlockTimeline admission after submit, and keeps per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1484 adds content-relative mid-transcript scroll pins across focus ownership churn, restores them after setInputOwned, and keeps per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/SecondaryLivePaneHost+Flow.swift"
+acknowledged_loc = 731
+issue = 1484
+reason = "Multipane Flow leaf owns plan publish, borrowed-bridge HISTORY, and transcript document sizing; #1484 floors document extent on max(Rust, cards), restores content-relative pins after geometry churn, and expand-only body height under mid-transcript pins so viewport HISTORY pages cannot yank scroll retention."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 924
+acknowledged_loc = 933
 issue = 1484
-reason = "Flow Blocks host remains the thin AppKit adapter for chrome cards + plan publish; #1484 syncs AppKit scroll into AbsoluteY/LiveEnd with a LiveEnd sticky neighborhood before applyBlockViewportPlan, keeps Rust indexed height as sole document extent, and maps body.frame screen clips without a second layout authority."
+reason = "Flow Blocks host remains the thin AppKit adapter for chrome cards + plan publish; #1484 demotes legacy multipane transcript AX ids, skips plan publish when secondary hosts own leaves, syncs AbsoluteY/LiveEnd before applyBlockViewportPlan, and maps body.frame screen clips without a second layout authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
