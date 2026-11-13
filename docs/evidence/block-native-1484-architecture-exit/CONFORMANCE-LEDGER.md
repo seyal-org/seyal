@@ -114,3 +114,5 @@ Detail: [`SOURCE-INVENTORY.md`](./SOURCE-INVENTORY.md). Specialist reports: agen
 - 2026-11-13: G5 AbsoluteY AppKit↔plan scroll sync landed — `seyal_bridge_block_viewport_set_scroll_anchor_for` + Flow host sync before `applyBlockViewportPlan`; onset AbsoluteY vs LiveEnd unit proof green.
 
 - 2026-11-13: Tip `152ed412` — G5 AbsoluteY with LiveEnd sticky neighborhood + scroll-only presentation_epoch hold; make check EXIT 0; focused headed workload 13/13 (1 skip), clear→exit PASS, 100k PASS; component AbsoluteY source-review PASS; Foundation Quality CI green on tip.
+
+- 2026-11-13: Tip `0b3bd44a` — `make bench` EXIT 0 (Pass-7/Pass-8 measured evidence). Focused headed after helper fix: Workload 12/12 + skip, 100k PASS, multipane Completed/Unfocused/RunningFlow PASS; remaining FAIL: FlowSplitSibling stream COMPLETE AX, FocusChurn scroll-b body AX (fix in flight).
