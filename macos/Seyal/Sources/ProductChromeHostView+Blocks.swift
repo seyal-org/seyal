@@ -324,6 +324,9 @@ extension ProductChromeHostView {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
                 heightLines = max(heightLines, max(retainedRange.rows.count, 1))
                 card.setOutputLines(heightLines, cellHeight: cellHeight)
+                // Floor-hidden → shell-exit reveal needs a laid-out body clip
+                // before Metal prepare; zero bounds skip paint (#1484).
+                card.layoutSubtreeIfNeeded()
                 let clip = card.convert(card.body.bounds, to: pane.inputSurface)
                 if clip.width > 1, clip.height > 1 {
                     var region = NativeTranscriptRegion(
