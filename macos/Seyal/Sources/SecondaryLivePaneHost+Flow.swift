@@ -491,7 +491,7 @@ extension SecondaryLivePaneHost {
     /// consumes clips (G5 AbsoluteY). Mirrors ProductChrome.
     func syncBlockViewportScrollAnchor() {
         let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
-        let spacer = transcriptLeadingSpacerHeight?.constant ?? 0
+        let spacer = transcriptLeadingSpacerHeightValue
         let scrollY = transcript.contentView.bounds.origin.y
         let viewportH = max(transcript.contentView.bounds.height, 1)
         let contentTop = max(scrollY - spacer, 0)
@@ -499,7 +499,18 @@ extension SecondaryLivePaneHost {
         let windowRows = UInt32(max(1, (viewportH / cellHeight).rounded(.up)))
         let maxY = max(transcriptDocumentScrollHeight() - viewportH, 0)
         let inLiveEndNeighborhood = scrollY >= maxY - viewportH
-        var liveEnd = followingLiveEnd || isNearLiveEnd() || inLiveEndNeighborhood
+        // Reader following live end must keep the LiveEnd plan — never emit an
+        // AbsoluteY onset window that latches thin AX pages (#1484 FourPane).
+        if followingLiveEnd {
+            _ = seyal_bridge_block_viewport_set_scroll_anchor_for(
+                displayHandle,
+                1,
+                0,
+                windowRows
+            )
+            return
+        }
+        var liveEnd = isNearLiveEnd() || inLiveEndNeighborhood
         // Tall AppKit chrome (reserved1) can outrun the sealed index. Clamp
         // AbsoluteY into the Rust extent so the plan cannot sit past content
         // with visible_count=0 while cards already exist (#1484 FocusChurn).

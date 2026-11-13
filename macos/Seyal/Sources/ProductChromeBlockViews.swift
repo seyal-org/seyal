@@ -291,13 +291,33 @@ final class CommandBlockView: NSView {
         bodyTranscript.setAccessibilityIdentifier(identifier)
     }
 
+    /// First non-empty body line, retained across LiveEnd page swaps so AX
+    /// summaries keep stream onset (#1484 SplitFromLivePane / FourPane).
+    private(set) var bodyAccessibilityOnsetLine: String = ""
+
+    var bodyAccessibilityIsEmpty: Bool {
+        bodyTranscript.stringValue.isEmpty
+    }
+
     func setBodyTranscript(_ text: String) {
         // Prefer caller-budgeted `accessibilityTranscript()`; only summarize
         // when raw text exceeds the AX limit so a second pass cannot drop the
         // live-end tail (#1484 100k / LongBlock AX).
-        let ax = text.count <= BlockAccessibilityText.limit
+        var ax = text.count <= BlockAccessibilityText.limit
             ? text
             : Self.accessibilitySummary(for: text)
+        if bodyAccessibilityOnsetLine.isEmpty {
+            let first = ax.split(whereSeparator: \.isNewline)
+                .map(String.init)
+                .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if let first { bodyAccessibilityOnsetLine = first }
+        } else if !ax.isEmpty, !ax.contains(bodyAccessibilityOnsetLine) {
+            // Prepend preserved onset so LiveEnd pages still expose line 1.
+            ax = bodyAccessibilityOnsetLine + "\n" + ax
+            if ax.count > BlockAccessibilityText.limit {
+                ax = Self.accessibilitySummary(for: ax)
+            }
+        }
         // Never erase a populated body with a transient empty retain — multipane
         // unfocused stream / focus-churn tests observe AX markers while HISTORY
         // pages are still in flight (#1484 FlowSplitSibling / FocusChurn).
