@@ -114,17 +114,21 @@ impl BlockViewportPlan {
                 live_first_row: live_first,
                 live_row_count: live_count,
             });
-            if output != 0 && span.visible_rows > 0 && span.first_visible_row < sealed {
-                // Visible sealed rows ± bounded overscan (SPEC-008); never the
-                // full Block. Overscan stays inside [0, sealed).
+            if output != 0 && span.visible_rows > 0 {
+                // Visible Block rows ± bounded overscan (SPEC-008). Extent is
+                // sealed ownership + live on-window rows — `native_block_wire_rows_from`
+                // merges both. Gating on `first_visible_row < sealed` alone drops
+                // short completed Blocks (sealed=0) and live-end docks where the
+                // visible window sits past sealed (#1484 AX / 100k / clear→exit).
                 const OVERSCAN: u32 = 16;
-                let sealed_remaining = sealed - span.first_visible_row;
-                let sealed_vis = span.visible_rows.min(sealed_remaining);
-                if sealed_vis > 0 {
+                let extent = span
+                    .height
+                    .max(sealed.saturating_add(u32::from(live_count)));
+                if extent > 0 {
                     let first = span.first_visible_row.saturating_sub(OVERSCAN);
-                    let end = (span.first_visible_row + sealed_vis)
+                    let end = (span.first_visible_row + span.visible_rows)
                         .saturating_add(OVERSCAN)
-                        .min(sealed);
+                        .min(extent);
                     let row_count = end.saturating_sub(first);
                     if row_count > 0 {
                         clipping.push(ClippedGridRange {
@@ -132,7 +136,7 @@ impl BlockViewportPlan {
                             region_id: output,
                             first_row: first,
                             row_count,
-                            sealed: true,
+                            sealed: sealed > 0,
                         });
                     }
                 }
@@ -280,5 +284,57 @@ mod tests {
         assert!(index_a.set_height(1, 50));
         assert_eq!(index_b.height_of(1), Some(40));
         assert_eq!(index_a.total_height(), 50);
+    }
+
+    #[test]
+    fn plan_clips_short_completed_block_with_zero_sealed_rows() {
+        // printf-sized Block: all content still on-window, sealed_rows == 0.
+        let mut index = BlockViewportIndex::default();
+        index.replace_all([(7, 1)]);
+        let records = [(7u64, 70u64, 71u64, 0u32, 0u16, 1u16)];
+        let plan = BlockViewportPlan::build(BlockViewportPlanRequest {
+            execution_id: 1,
+            display_handle: 1,
+            presentation_epoch: 1,
+            source_generation: 1,
+            block_revision: 1,
+            content_generation: 1,
+            scroll_anchor: ScrollAnchor::LiveEnd,
+            index: &index,
+            window_rows: 24,
+            records: &records,
+        });
+        let clip = plan.clip_for(7).expect("live-only completed Block must clip");
+        assert_eq!(clip.first_row, 0);
+        assert_eq!(clip.row_count, 1);
+        assert!(!clip.sealed);
+    }
+
+    #[test]
+    fn plan_clips_live_end_when_first_visible_row_past_sealed() {
+        // 100k-class live end: viewport sits entirely in the live window past sealed.
+        let mut index = BlockViewportIndex::default();
+        index.replace_all([(9, 100)]);
+        let records = [(9u64, 90u64, 91u64, 80u32, 0u16, 20u16)];
+        let plan = BlockViewportPlan::build(BlockViewportPlanRequest {
+            execution_id: 1,
+            display_handle: 1,
+            presentation_epoch: 1,
+            source_generation: 1,
+            block_revision: 1,
+            content_generation: 1,
+            scroll_anchor: ScrollAnchor::LiveEnd,
+            index: &index,
+            window_rows: 10,
+            records: &records,
+        });
+        assert_eq!(plan.scroll_y, 90);
+        let item = &plan.visible_items[0];
+        assert!(item.first_visible_row >= 80);
+        let clip = plan
+            .clip_for(9)
+            .expect("live-end past sealed must still request HISTORY");
+        assert!(clip.row_count > 0);
+        assert!(clip.first_row + clip.row_count <= 100);
     }
 }
