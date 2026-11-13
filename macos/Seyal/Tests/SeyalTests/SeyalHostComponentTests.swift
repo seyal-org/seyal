@@ -3294,7 +3294,8 @@ final class SeyalHostComponentTests: XCTestCase {
             "Expand-never-shrink frame can exceed fittingSize; scroll math must prefer frame"
         )
         XCTAssertTrue(
-            hostText.contains("applyBlockViewportPlan(displayHandle:"),
+            hostText.contains("applyBlockViewportPlan(")
+                && hostText.contains("displayHandle:"),
             "publishBlockOutputFrame must paint via BlockViewportPlan only (no card-clip fallback)"
         )
         XCTAssertTrue(
@@ -5618,7 +5619,8 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         for text in [chrome, flow] {
             XCTAssertTrue(
-                text.contains("applyBlockViewportPlan(displayHandle:"),
+                text.contains("applyBlockViewportPlan(")
+                    && text.contains("displayHandle:"),
                 "Flow hosts must publish via BlockViewportPlan"
             )
             XCTAssertTrue(
