@@ -76,23 +76,16 @@ impl Runtime {
         while consumed < self.config.read_dispatch_bytes {
             let remaining = self.config.read_dispatch_bytes - consumed;
             let read_len = remaining.min(self.read_buffer.len());
-            let (outcome, _generation_before, _generation_after, pending_replies) = {
+            let (outcome, pending_replies) = {
                 let entry = self
                     .entries
                     .get_mut(&id)
                     .ok_or(RuntimeError::UnknownExecution)?;
-                let generation_before = entry.execution.terminal().damage_generation();
                 // Read without feeding so Attribution D3 can observe between
                 // trusted markers inside one OS read (#1484).
                 let read_result = entry.execution.read_pty(&mut self.read_buffer[..read_len]);
                 let pending_replies = entry.execution.has_pending_protocol_replies();
-                let generation_after = entry.execution.terminal().damage_generation();
-                (
-                    read_result,
-                    generation_before,
-                    generation_after,
-                    pending_replies,
-                )
+                (read_result, pending_replies)
             };
             if pending_replies {
                 let token = self
@@ -150,8 +143,17 @@ impl Runtime {
                     // Finding F / D3: feed until each trusted marker yield, observe,
                     // then continue the same OS read so shell_events cannot silently
                     // defer under a marker storm (also covers nested session D5).
+                    // Benchmark stamps must follow each feed chunk — read_pty alone
+                    // does not mutate VT damage, and mid-feed yields can publish
+                    // intermediate display generations.
                     let mut offset = 0usize;
                     while offset < count {
+                        #[cfg(feature = "benchmark-instrumentation")]
+                        let generation_before = self
+                            .entries
+                            .get(&id)
+                            .map(|entry| entry.execution.terminal().damage_generation())
+                            .unwrap_or(0);
                         let n = {
                             let entry = self
                                 .entries
@@ -168,6 +170,19 @@ impl Runtime {
                         self.observe_shell_integration_events(id)?;
                         if let Some(entry) = self.entries.get_mut(&id) {
                             entry.execution.clear_attribution_observe_yield();
+                        }
+                        #[cfg(feature = "benchmark-instrumentation")]
+                        {
+                            let generation_after = self
+                                .entries
+                                .get(&id)
+                                .map(|entry| entry.execution.terminal().damage_generation())
+                                .unwrap_or(0);
+                            if generation_after > generation_before {
+                                self.benchmark
+                                    .source_times
+                                    .insert((id, generation_after), Instant::now());
+                            }
                         }
                     }
                     let wants_write = {
@@ -192,11 +207,6 @@ impl Runtime {
                             self.benchmark.pty_bytes_read.saturating_add(count as u64);
                         self.benchmark.pty_read_calls =
                             self.benchmark.pty_read_calls.saturating_add(1);
-                        if _generation_after > _generation_before {
-                            self.benchmark
-                                .source_times
-                                .insert((id, _generation_after), Instant::now());
-                        }
                     }
                 }
             }
