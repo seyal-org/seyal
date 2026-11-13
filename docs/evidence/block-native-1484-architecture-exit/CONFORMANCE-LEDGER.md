@@ -112,3 +112,5 @@ Detail: [`SOURCE-INVENTORY.md`](./SOURCE-INVENTORY.md). Specialist reports: agen
 - 2026-11-13: Headed acceptance on tip `28a50594` (PR #1485): `SeyalHostWorkloadUITests` 13/13 (1 skip); `testHundredThousandOutputLinesRemainScrollableAndDocked` PASS; `testClearThenExitKeepsPaintedBlockBodies` PASS; `make check` exit 0. Architecture A–F remain COMPLIANT from independent verify. AbsoluteY AppKit↔plan scroll sync for onset HISTORY remains follow-up (LiveEnd plan + capped chrome height).
 
 - 2026-11-13: G5 AbsoluteY AppKit↔plan scroll sync landed — `seyal_bridge_block_viewport_set_scroll_anchor_for` + Flow host sync before `applyBlockViewportPlan`; onset AbsoluteY vs LiveEnd unit proof green.
+
+- 2026-11-13: Tip `152ed412` — G5 AbsoluteY with LiveEnd sticky neighborhood + scroll-only presentation_epoch hold; make check EXIT 0; focused headed workload 13/13 (1 skip), clear→exit PASS, 100k PASS; component AbsoluteY source-review PASS; Foundation Quality CI green on tip.
