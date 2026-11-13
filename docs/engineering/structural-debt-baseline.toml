@@ -24,7 +24,7 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 974
+acknowledged_loc = 977
 issue = 1484
 reason = "Metal surface remains the thin historyRanges/hit-test owner; #1484 keeps shell-exit HISTORY buffers across disconnect (LiveTail cleared only) and plan-owned clip dedup hooks without a second VT/history authority."
 
@@ -42,7 +42,7 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 886
+acknowledged_loc = 893
 issue = 1484
 reason = "Flow Blocks host owns on-window NATIVE LiveTail plus sealed NATIVE RegionId fetches (#1484 dual-seal DELETE) beside PRIMARY_CLIP; Rust indexed height is the sole document content height, with retained RegionId row counts flooring sealed card body height when live reserved1 is still a short clip. Plan publish maps AppKit body rects as ADR-015 screen placement only."
 
