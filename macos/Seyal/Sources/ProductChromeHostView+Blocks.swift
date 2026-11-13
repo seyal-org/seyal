@@ -316,14 +316,31 @@ extension ProductChromeHostView {
                    blockID: blockID,
                    displayHandle: activeBlockDisplayHandle
                ) {
-                // Transcript text is AX/retain only. Card height floors on the
-                // Rust projection (reserved1 sealed count) and retained rows so
-                // a short retain cannot collapse the body (#1484 Phase G RC2).
+                // Transcript text is AX/retain. Card height floors on the Rust
+                // projection (reserved1 sealed count) and retained rows so a
+                // short retain cannot collapse the body (#1484 Phase G RC2).
+                // Also prepare Metal here — plan-only publish can miss shell-exit
+                // retain when BlockViewportPlan is already gone (#1484).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
                 heightLines = max(heightLines, max(retainedRange.rows.count, 1))
+                card.setOutputLines(heightLines, cellHeight: cellHeight)
+                let clip = card.convert(card.body.bounds, to: pane.inputSurface)
+                if clip.width > 1, clip.height > 1 {
+                    var region = NativeTranscriptRegion(
+                        id: blockID,
+                        origin: .zero,
+                        clip: clip,
+                        historyRows: 0..<retainedRange.rows.count,
+                        historyRequestID: retainedRange.requestID,
+                        historyRevision: retainedRange.revision
+                    )
+                    region.displayHandle = retainedRange.sourceDisplayHandle
+                    pane.inputSurface.renderHistoryRange(retainedRange, region: region)
+                }
+            } else {
+                // Plan owns paint geometry; card height is chrome/AX hit-target only.
+                card.setOutputLines(heightLines, cellHeight: cellHeight)
             }
-            // Plan owns paint geometry; card height is chrome/AX hit-target only.
-            card.setOutputLines(heightLines, cellHeight: cellHeight)
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
             let idHi = row.id_hi

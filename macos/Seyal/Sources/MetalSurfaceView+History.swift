@@ -152,6 +152,9 @@ extension MetalSurfaceView {
       } else {
         try renderer.update(historyRange: page, region: rendererRegion, backingScale: scale)
         historyRenderPageKeys[range.blockID] = key
+        // LiveTail present often defers HISTORY; flush immediately so AX+Metal
+        // stay aligned for shell-exit retain (#1484).
+        renderer.forceFlushHistoryPreparesForRetain()
       }
       // Direct prepare (applyHistoryRange) must register order — inspectFlowPaint
       // only counts historyRegionOrder entries (#1484 clear→exit false-green).
