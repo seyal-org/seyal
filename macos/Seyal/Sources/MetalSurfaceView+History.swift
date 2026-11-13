@@ -166,4 +166,53 @@ extension MetalSurfaceView {
       lastRenderError = error
     }
   }
+
+  /// Re-install HISTORY Metal instances after shell-exit when buffers were
+  /// pruned but `historyRanges` still hold RegionId pages.
+  func reencodeRetainedHistoryAfterDisconnect() {
+    var order: [UInt64] = []
+    var encodedRegions: [NativeTranscriptRegion] = []
+    for region in lastTranscriptFrameRegions ?? [] {
+      let range = historyRanges[
+        PaneBlockKey(
+          paneID: paneID,
+          displayHandle: region.displayHandle,
+          blockID: region.id
+        )
+      ] ?? historyRanges.first(where: {
+        $0.key.paneID == paneID && $0.key.blockID == region.id
+      })?.value
+      guard let range, !range.rows.isEmpty else { continue }
+      renderHistoryRange(range, region: region)
+      if !order.contains(region.id) {
+        order.append(region.id)
+      }
+      encodedRegions.append(region)
+    }
+    let cellHeight = max(terminalPresentationCellSize().height, 1)
+    var stackY = bounds.height
+    for (key, range) in historyRanges.sorted(by: { $0.key.blockID < $1.key.blockID })
+    where key.paneID == paneID {
+      guard !order.contains(key.blockID), !range.rows.isEmpty else { continue }
+      let rowCount = max(range.rows.count, 1)
+      let height = min(CGFloat(rowCount) * cellHeight, max(bounds.height * 0.4, cellHeight))
+      stackY -= height
+      var region = NativeTranscriptRegion(
+        id: key.blockID,
+        origin: .zero,
+        clip: NSRect(x: 0, y: stackY, width: max(bounds.width, 1), height: height),
+        historyRows: 0..<rowCount,
+        historyRequestID: range.requestID,
+        historyRevision: range.revision
+      )
+      region.displayHandle = key.displayHandle
+      renderHistoryRange(range, region: region)
+      order.append(key.blockID)
+      encodedRegions.append(region)
+    }
+    renderer.setHistoryRegionOrder(order)
+    if !encodedRegions.isEmpty {
+      lastTranscriptFrameRegions = encodedRegions
+    }
+  }
 }

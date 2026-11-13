@@ -696,81 +696,35 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let retainHistory = recoveryAppHandle != 0 && seyal_app_retains_flow_history(recoveryAppHandle) != 0
     // Always drop running primary clips on disconnect. Retained history must
     // not share the surface with the last prepared viewport after clear→exit
-    // (#1379): that leftover frame paints loose text/cursor over Block cards.
-    // Drop Metal history *buffers* (and any deferred prepares) too — keep
-    // historyRanges rows so chrome can re-encode against settled AppKit clips.
-    // Snapshot plan-owned region geometry first: after disconnect the live
-    // BlockViewportPlan is gone, so publishBlockOutputFrame cannot rebuild
-    // clips — re-encode retained rows against this last plan frame (#1484).
-    let retainedFrameRegions = lastTranscriptFrameRegions
+    // (#1379): that leftover Candidate-D frame paints loose text/cursor over
+    // Block cards. Keep already-prepared HISTORY Metal buffers when Rust
+    // retains Flow history — wiping them made shell-exit AX-only because the
+    // live BlockViewportPlan is gone and cannot rebuild clips (#1484).
     clearLiveTailPresentation()
-    lastTranscriptFrameRegions = nil
-    renderer.removeHistoryRegions(except: [])
-    historyRenderPageKeys.removeAll(keepingCapacity: true)
     cancelPresentationRetries()
     resetPreparationRecovery()
-    // Live Candidate-D readiness must not linger into reconnect/New shell
-    // (SPEC-009 §8.2.2 / §10). History present uses the retained flag only
-    // when Rust still retains Flow history.
     hasPreparedState = false
-    // Prune historyRanges to the Rust timeline *before* re-encoding so
-    // rebuildBlocks cannot wipe Metal buffers we just rebuilt (#1484).
-    onTimelineChanged?()
-    hasRetainedHistoryPresentation = retainHistory && !historyRanges.isEmpty
-    if retainHistory, !historyRanges.isEmpty {
-      var order: [UInt64] = []
-      var encodedRegions: [NativeTranscriptRegion] = []
-      let planRegions = retainedFrameRegions ?? []
-      for region in planRegions {
-        let range = historyRanges[
-          PaneBlockKey(
-            paneID: paneID,
-            displayHandle: region.displayHandle,
-            blockID: region.id
-          )
-        ] ?? historyRanges.first(where: {
-          $0.key.paneID == paneID && $0.key.blockID == region.id
-        })?.value
-        guard let range, !range.rows.isEmpty else { continue }
-        renderHistoryRange(range, region: region)
-        if !order.contains(region.id) {
-          order.append(region.id)
-        }
-        encodedRegions.append(region)
+    if retainHistory {
+      hasRetainedHistoryPresentation = !historyRanges.isEmpty || !renderer.historyRegions.isEmpty
+      onTimelineChanged?()
+      // rebuildBlocks may prune ranges/buffers to the ended timeline; if Metal
+      // buffers were dropped, re-encode from remaining retained rows against
+      // the last plan frame (and stack any revealed floor-hidden Blocks).
+      if renderer.historyRegions.isEmpty, !historyRanges.isEmpty {
+        reencodeRetainedHistoryAfterDisconnect()
       }
-      // Floor-hidden / newly revealed Blocks may be absent from the last live
-      // plan frame. Stack distinct clips so shell-exit paint is not AX-only
-      // and history-clips stay non-collapsed (#1379 / #1484).
-      let cellHeight = max(terminalPresentationCellSize().height, 1)
-      var stackY = bounds.height
-      for (key, range) in historyRanges.sorted(by: { $0.key.blockID < $1.key.blockID })
-      where key.paneID == paneID {
-        guard !order.contains(key.blockID), !range.rows.isEmpty else { continue }
-        let rowCount = max(range.rows.count, 1)
-        let height = min(CGFloat(rowCount) * cellHeight, max(bounds.height * 0.4, cellHeight))
-        stackY -= height
-        var region = NativeTranscriptRegion(
-          id: key.blockID,
-          origin: .zero,
-          clip: NSRect(x: 0, y: stackY, width: max(bounds.width, 1), height: height),
-          historyRows: 0..<rowCount,
-          historyRequestID: range.requestID,
-          historyRevision: range.revision
-        )
-        region.displayHandle = key.displayHandle
-        renderHistoryRange(range, region: region)
-        order.append(key.blockID)
-        encodedRegions.append(region)
-      }
-      renderer.setHistoryRegionOrder(order)
-      lastTranscriptFrameRegions = encodedRegions
       hasRetainedHistoryPresentation = !renderer.historyRegions.isEmpty
-    }
-    if retainHistory, shouldRender, hasRetainedHistoryPresentation {
-      renderer.requestPresent()
-      beginPresentationAttemptSeries()
-      armMetalDisplayLink()
-    } else if !retainHistory {
+      if shouldRender, hasRetainedHistoryPresentation {
+        renderer.requestPresent()
+        beginPresentationAttemptSeries()
+        armMetalDisplayLink()
+      }
+    } else {
+      lastTranscriptFrameRegions = nil
+      renderer.removeHistoryRegions(except: [])
+      historyRenderPageKeys.removeAll(keepingCapacity: true)
+      hasRetainedHistoryPresentation = false
+      onTimelineChanged?()
       // Presentation retries / retained flag already cleared above. Do not
       // call invalidatePreparedPresentation — it would also drop
       // hasRetainedHistoryPresentation after a late retain latch and wipe
