@@ -1,6 +1,6 @@
 # Architecture exit gate — #1484 / PR #1485
 
-Exact head under review: `e335e1f250b22cd3acfb80687e7bfe3f4ea0fb39` (plus any subsequent local tip).
+Exact head under review: `a356130e` (PR #1485 / `mahboobmonnamd/issue/1484`). Prior baseline `e335e1f2`.
 
 Authority: ADR-004, ADR-009, ADR-010, ADR-011, SPEC-008, merged #1481/#1483, Issue #1484 body, AGENTS.md.
 
@@ -102,3 +102,4 @@ Detail: [`SOURCE-INVENTORY.md`](./SOURCE-INVENTORY.md). Specialist reports: agen
 - 2026-11-13: `3155e444` single-pass on-window spans; Flow hosts use Rust document extent (D progress). Remaining: Metal plan consume, delete card/HISTORY paths, RegionId/source-anchor retrieval API, independent COMPLIANT marks.
 - 2026-11-13: Finding E sealed-index HISTORY `(start_line,end_line)=(0,0)` + `native_block_wire_rows_from`; Finding C Metal `applyBlockViewportPlan` + plan FFI. Remaining: Finding D legacy card/HISTORY delete; independent COMPLIANT marks.
 - 2026-11-13: Finding D progress — Flow refuses card-clip fallback when index published; Flow HISTORY/NATIVE projection fetches no-op; document extent prefers Rust index. Card chrome host not fully deleted yet.
+- 2026-11-13: `44e83480` Finding E sealed-index; `d380675e` Finding C Metal plan FFI/consume; `b38dddf7`/`42817dbe` Finding D Flow authority retirement + setOutputLines disable; `0b24373c` two-display plan proof; `a356130e` sealed overscan. Architecture exit remains HOLD — no COMPLIANT marks without independent adversarial close-out; headed UI deferred.
