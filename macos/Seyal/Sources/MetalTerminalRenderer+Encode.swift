@@ -356,7 +356,14 @@ extension MetalTerminalRenderer {
 
         if !visible {
             releaseWhenIdle = false
-            releaseDedicatedResources()
+            // Occlusion hide must not wipe retained Flow HISTORY (#1484).
+            if historyRegionOrder.isEmpty {
+                releaseDedicatedResources()
+            } else {
+                instanceBuffer = nil
+                instanceCount = 0
+                liveTail = LiveTailRenderState()
+            }
             return
         }
         releaseWhenIdle = false

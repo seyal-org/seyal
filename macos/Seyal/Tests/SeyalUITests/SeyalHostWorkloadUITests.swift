@@ -803,6 +803,8 @@ final class SeyalHostWorkloadUITests: XCTestCase {
     /// Metal glyphs (#1484). Crop the window screenshot to each body frame
     /// instead; Metal composites into the window bitmap.
     private func assertBlockBodyFramesHaveInk(_ app: XCUIApplication, indices: [Int]) {
+        app.activate()
+        waitBriefly(0.35)
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         let gpuInk = expectation(
             for: NSPredicate(format: "value MATCHES %@", ".*history-gpu-ink=[1-9][0-9]*.*"),

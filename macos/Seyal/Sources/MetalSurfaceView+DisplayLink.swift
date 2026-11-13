@@ -25,7 +25,10 @@ extension MetalSurfaceView {
   }
 
   func armMetalDisplayLink() {
-    guard shouldRender,
+    // Retained Flow HISTORY must arm even when AppKit occlusion briefly clears
+    // shouldRender (headed XCUI). Otherwise shell-exit keeps CPU instances with
+    // a blank on-screen drawable (#1484).
+    guard (shouldRender || hasRetainedHistoryPresentation),
       canPresentSurface,
       presentationState.pending,
       !presentationState.exhausted,
@@ -37,6 +40,20 @@ extension MetalSurfaceView {
     if presentationState.armIfNeeded() {
       metalDisplayLinkLease?.link.isPaused = false
     }
+  }
+
+  /// Cold-path present for shell-exit retain when CAMetalDisplayLink may not
+  /// fire under occlusion. Not used on the live PTY hot path.
+  func presentRetainedHistoryToDisplayIfNeeded() {
+    guard hasRetainedHistoryPresentation,
+      renderer.hasPresentablePreparedState,
+      !renderer.hasFrameInFlight,
+      let metalLayer = layer as? CAMetalLayer,
+      let drawable = metalLayer.nextDrawable()
+    else {
+      return
+    }
+    _ = renderer.present(drawable: drawable)
   }
 
   nonisolated func metalDisplayLink(
@@ -66,7 +83,7 @@ extension MetalSurfaceView {
     link.isPaused = true
     renderer.drainGPUCompletionsIfNeeded()
 
-    guard shouldRender,
+    guard (shouldRender || hasRetainedHistoryPresentation),
       canPresentSurface,
       renderer.persistentDisplayFailure == nil,
       !presentationState.exhausted,

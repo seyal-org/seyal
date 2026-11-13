@@ -196,9 +196,22 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 requestCurrentFrameIfNeeded()
             }
         } else {
-            needsPresent = false
+            // Keep retained Flow HISTORY buffers across occlusion flaps so
+            // shell-exit paint is not wiped while XCUI / Spaces hide the window
+            // (#1484). Live-only surfaces still release immediately.
+            let keepHistory = !historyRegionOrder.isEmpty
+            if !keepHistory {
+                needsPresent = false
+            }
             if framesInFlight == 0 {
-                releaseDedicatedResources()
+                if keepHistory {
+                    // Drop live grid only; HISTORY instances + atlas stay.
+                    instanceBuffer = nil
+                    instanceCount = 0
+                    liveTail = LiveTailRenderState()
+                } else {
+                    releaseDedicatedResources()
+                }
             } else {
                 releaseWhenIdle = true
             }

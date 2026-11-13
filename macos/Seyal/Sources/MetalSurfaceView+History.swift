@@ -163,10 +163,11 @@ extension MetalSurfaceView {
       }
       // History-only Flow has no Candidate-D live frame and cannot mark the renderer Usable.
       hasRetainedHistoryPresentation = true
-      if shouldRender {
+      if shouldRender || hasRetainedHistoryPresentation {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
+        presentRetainedHistoryToDisplayIfNeeded()
       }
       refreshRecoveryAccessibilityValue()
     } catch {

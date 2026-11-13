@@ -513,8 +513,15 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func updateVisibility() {
     let renderable = shouldRender
-    let becameRenderable = renderable && !self.renderable
-    self.renderable = renderable
+    // Shell-exit retained HISTORY must keep the glyph atlas + instance buffers
+    // even when AppKit briefly reports occlusion (headed XCUI behind the
+    // runner). setVisible(false) previously released them and left offscreen
+    // inspect counts with a blank on-screen layer (#1484 clear→exit).
+    let keepRetainedHistory =
+      hasRetainedHistoryPresentation && !renderer.historyRegionOrder.isEmpty
+    let gpuVisible = renderable || keepRetainedHistory
+    let becameRenderable = gpuVisible && !self.renderable
+    self.renderable = gpuVisible
     if isNativeInteractionProbe {
       // SPEC §10 probes: first-responder / AX / IME only — no Metal display
       // link or full-size drawable alongside the qualification soak bridge.
@@ -522,25 +529,27 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       renderer.setVisible(false)
       return
     }
-    if renderable {
+    if gpuVisible {
       if let metalLayer = layer as? CAMetalLayer {
         installMetalDisplayLink(on: metalLayer)
       }
       forceNextFrame = true
-      startAutomaticBridgeRecoveryIfNeeded()
-      // A connected recovery can reach Restoring before AppKit accepts its
-      // first-responder/IME handoff. Retry that deferred presentation step on
-      // later visibility/activation changes, even when no new PTY frame lands.
-      if recoveryPresentationPending, hasPreparedState {
-        _ = advanceRecoveryPresentationIfReady()
+      if renderable {
+        startAutomaticBridgeRecoveryIfNeeded()
+        // A connected recovery can reach Restoring before AppKit accepts its
+        // first-responder/IME handoff. Retry that deferred presentation step on
+        // later visibility/activation changes, even when no new PTY frame lands.
+        if recoveryPresentationPending, hasPreparedState {
+          _ = advanceRecoveryPresentationIfReady()
+        }
       }
     } else {
       invalidateMetalDisplayLink()
       invalidatePreparedPresentation()
     }
 
-    renderer.setVisible(renderable)
-    if renderable {
+    renderer.setVisible(gpuVisible)
+    if gpuVisible {
       // Showing is the explicit recovery boundary for an exhausted GPU
       // completion failure series. Reconstruct from the latest committed
       // Candidate-D state; never request PTY-byte replay.
@@ -552,11 +561,14 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       {
         lastRenderError = nil
       }
-      bridge?.publishCurrentFrame()
+      if renderable {
+        bridge?.publishCurrentFrame()
+      }
       if canPresentSurface, !presentationState.exhausted {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
+        presentRetainedHistoryToDisplayIfNeeded()
       }
     } else if shouldAttachRuntime {
       // The window can be attachable before AppKit publishes a reliable
@@ -727,10 +739,12 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         renderer.forceFlushHistoryPreparesForRetain()
       }
       hasRetainedHistoryPresentation = !renderer.historyRegions.isEmpty
-      if shouldRender, hasRetainedHistoryPresentation {
+      if hasRetainedHistoryPresentation {
+        updateVisibility()
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
+        presentRetainedHistoryToDisplayIfNeeded()
       }
     } else {
       lastTranscriptFrameRegions = nil
