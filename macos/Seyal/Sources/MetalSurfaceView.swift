@@ -715,6 +715,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     hasPreparedState = false
     hasRetainedHistoryPresentation = retainHistory && !historyRanges.isEmpty
     if retainHistory, let regions = retainedFrameRegions, !regions.isEmpty {
+      var order: [UInt64] = []
+      order.reserveCapacity(regions.count)
       for region in regions {
         let key = PaneBlockKey(
           paneID: paneID,
@@ -725,7 +727,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
           PaneBlockKey(paneID: paneID, displayHandle: 0, blockID: region.id)
         ] else { continue }
         renderHistoryRange(range, region: region)
+        if !order.contains(region.id) {
+          order.append(region.id)
+        }
       }
+      // inspectFlowPaint only counts regions in historyRegionOrder.
+      renderer.setHistoryRegionOrder(order)
+      lastTranscriptFrameRegions = regions
       hasRetainedHistoryPresentation = !renderer.historyRegions.isEmpty
     }
     onTimelineChanged?()
