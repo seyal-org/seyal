@@ -1,6 +1,6 @@
 # Architecture exit gate — #1484 / PR #1485
 
-Exact head under review: `da2f5025` on `mahboobmonnamd/issue/1484` (PR #1485). Prior baseline `e335e1f2`.
+Exact head under review: `7cd8388d` on `mahboobmonnamd/issue/1484` (PR #1485). Prior baseline `e335e1f2`.
 
 Authority: ADR-004, ADR-009, ADR-010, ADR-011, SPEC-008, merged #1481/#1483, Issue #1484 body, AGENTS.md.
 
@@ -14,10 +14,10 @@ A requirement is COMPLIANT only when: corrected production path executes, owners
 |---|---|---|---|---|
 | A | Viewport indexes and scroll anchors are per-display Rust **client** state; TerminalState owns content only | Corrected: `LocalDisplayClient.block_viewport_index`; engine viewport field removed | **COMPLIANT** (`verify` (agent `2c190401-6b73-4116-a597-723bc9308e48`)) | Architecture + Client viewport |
 | B | Incremental viewport index: O(log B) height/insert/remove/lookup; O(log B + visible) traversal; no full rebuild on ordinary output | Corrected: Fenwick+HashMap in `seyal-client/src/viewport/index.rs` with work-counter tests; same-order publishes use `set_height` | **COMPLIANT** (`verify` (agent `2c190401-6b73-4116-a597-723bc9308e48`)) | Client viewport |
-| C | Complete Rust-owned `BlockViewportPlan` (ADR-009); Metal consumes plan; Runtime publishes bounded content/damage only | Plan+FFI+`applyBlockViewportPlan`; card-clip fallback **deleted** | PARTIAL→awaiting indep COMPLIANT | Protocol + Client viewport + Metal |
-| D | Swift is thin OS/IME/AX/GPU adapter; no authoritative card geometry/document height/per-Block HISTORY presentation | Plan-only publish; HISTORY emission fail-closed; collectBlockOutputRegions deleted; chrome-only cards | PARTIAL→awaiting indep COMPLIANT | Metal/Swift migration |
-| E | Indexed RegionId/source-anchor viewport retrieval; visible rows + overscan only; no full-Block HISTORY retain for paint | Sealed-index + overscan; latest-clip retain (no monotonic full-Block); LineId HISTORY emission removed | PARTIAL→awaiting indep COMPLIANT | Storage + Protocol |
-| F | Causal StreamSequence/UnitVersion ownership; no silent trusted-marker loss; deterministic barriers; proven capacity | Soft-cap + watermark + cumulative consume counts + f06_f | PARTIAL→awaiting indep COMPLIANT | Attribution |
+| C | Complete Rust-owned `BlockViewportPlan` (ADR-009); Metal consumes plan; Runtime publishes bounded content/damage only | Plan+FFI+`applyBlockViewportPlan`; card-clip fallback **deleted** | **COMPLIANT** (indep `27d26c58`) | Protocol + Client viewport + Metal |
+| D | Swift is thin OS/IME/AX/GPU adapter; no authoritative card geometry/document height/per-Block HISTORY presentation | Plan-only publish; HISTORY emission fail-closed; collectBlockOutputRegions deleted; chrome-only cards | **COMPLIANT** (indep `27d26c58`) | Metal/Swift migration |
+| E | Indexed RegionId/source-anchor viewport retrieval; visible rows + overscan only; no full-Block HISTORY retain for paint | Sealed-index + overscan; latest-clip retain (no monotonic full-Block); LineId HISTORY emission removed | **COMPLIANT** (indep `27d26c58`) | Storage + Protocol |
+| F | Causal StreamSequence/UnitVersion ownership; no silent trusted-marker loss; deterministic barriers; proven capacity | Soft-cap + watermark + cumulative consume counts + f06_f | **COMPLIANT** (indep `27d26c58`) | Attribution |
 
 ## Required production path (must execute)
 
@@ -35,10 +35,10 @@ One PTY → One VT authority → PrimaryBlockEngine (RegionStore+HistoryStore+VT
 |---|---|---|---|---|---|---|---|
 | A | `LocalDisplayClient.block_viewport_index`; engine field removed | poll apply + FFI `block_viewport_total_height` | Client owns index; Runtime content only | n/a | Engine `BlockViewportIndex` deleted | client+terminal unit tests | **COMPLIANT** |
 | B | Fenwick+HashMap `seyal-client/viewport/index.rs` | `set_height`/`visible_spans` + same-order publish | O(log B) proof via WorkCounter | work-counter B∈{1k,4k,16k} | terminal prefix Vec index removed | `cargo test -p seyal-client --lib viewport::` | **COMPLIANT** |
-| C | `BlockViewportPlan` + FFI header/items/clips; Metal `applyBlockViewportPlan` | Flow `publishBlockOutputFrame` plan-only | Client owns plan; Metal paints plan clips | n/a | `collectBlockOutputRegions` + card-clip fallback **deleted** | protocol+client viewport+plan unit | OPEN (indep verify) |
-| D | Plan-only publish; Flow HISTORY/NATIVE fetch retired; chrome-only `setOutputLines(1)` | `publishBlockOutputFrame` + no-op `applyBlockOutputProjection` | Plan owns paint; cards AX/header chrome only | n/a | card-clip/`collectBlockOutputRegions` deleted; HISTORY fail-closed | source review + focused unit | OPEN (indep verify) |
-| E | `native_block_wire_rows_from` + protocol `(0,0)` sealed-index; Swift clip fetch | Flow NATIVE uses plan clip `start_unit` | RegionId sealed index, not lead skip | no full-Block download required for clip | latest-clip retain only (no monotonic full-Block) | protocol sealed-index + runtime native_block_rows | OPEN (indep verify) |
-| F | D1–D7 production path: atomic admit, refuse-at-capacity, feed yield+reactor observe, prompt header, journal consume, eviction reclaim | `osc.rs`, `attribution.rs`, `engine.rs`, `reactor_io.rs`, `shell_integration.rs`, `history_seal.rs` | Ownership: VT journal+shell_events atomic; Runtime consumes drain; header owns prompt bytes until begin | F05-D3, F06-C/D, F-HDR, F-D6 unit green | Preferential CellMutation eviction removed; discarded drain removed | Focused `seyal-terminal` f05/f06/f_hdr/f_d6 | OPEN (independent verify) |
+| C | `BlockViewportPlan` + FFI header/items/clips; Metal `applyBlockViewportPlan` | Flow `publishBlockOutputFrame` plan-only | Client owns plan; Metal paints plan clips | n/a | `collectBlockOutputRegions` + card-clip fallback **deleted** | protocol+client viewport+plan unit | **COMPLIANT** |
+| D | Plan-only publish; Flow HISTORY/NATIVE fetch retired; chrome-only `setOutputLines(1)` | `publishBlockOutputFrame` + no-op `applyBlockOutputProjection` | Plan owns paint; cards AX/header chrome only | n/a | card-clip/`collectBlockOutputRegions` deleted; HISTORY fail-closed | source review + focused unit | **COMPLIANT** |
+| E | `native_block_wire_rows_from` + protocol `(0,0)` sealed-index; Swift clip fetch | Flow NATIVE uses plan clip `start_unit` | RegionId sealed index, not lead skip | no full-Block download required for clip | latest-clip retain only (no monotonic full-Block) | protocol sealed-index + runtime native_block_rows | **COMPLIANT** |
+| F | D1–D7 production path: atomic admit, refuse-at-capacity, feed yield+reactor observe, prompt header, journal consume, eviction reclaim | `osc.rs`, `attribution.rs`, `engine.rs`, `reactor_io.rs`, `shell_integration.rs`, `history_seal.rs` | Ownership: VT journal+shell_events atomic; Runtime consumes drain; header owns prompt bytes until begin | F05-D3, F06-C/D, F-HDR, F-D6 unit green | Preferential CellMutation eviction removed; discarded drain removed | Focused `seyal-terminal` f05/f06/f_hdr/f_d6 | **COMPLIANT** |
 
 ## Explicit non-goals for this gate
 - Full headed UI campaign / timeout increases / assertion weakening
@@ -107,3 +107,4 @@ Detail: [`SOURCE-INVENTORY.md`](./SOURCE-INVENTORY.md). Specialist reports: agen
 - 2026-11-13: `Independent F/A/B/D` (agent `2c190401-6b73-4116-a597-723bc9308e48`) marks **A COMPLIANT**, **B COMPLIANT**, F/D PARTIAL. Follow-up: remove production `HistoryProjectionRequestBook` wiring; fix D7 doc overclaim; re-verify F after soft-cap/watermark. Architecture exit still HOLD (C/D/E/F not all COMPLIANT).
 - 2026-11-13: `da2f5025` deletes card-clip/`collectBlockOutputRegions` dual path; plan-only Flow publish; HISTORY fail-closed; D7 cumulative consume counts; chrome-only `setOutputLines(1)`. C/D/E/F await independent COMPLIANT at this tip. UUID agent links scrubbed for `make check`.
 - 2026-11-13: D7 prior-watermark consume + focused Runtime test; PromptStart+CommandStart stack collapse; nested SSH host RegionId restore; HISTORY LineId Stale path restored for non-(0,0) spans; structural-debt split of terminal tests; clippy/cohesion green path. Awaiting tip push + independent F COMPLIANT re-verify before architecture GO.
+- 2026-11-13: Independent verify agent `27d26c58` marks **A–F COMPLIANT** at `faef42a3`; architecture exit **GO**. Tip `7cd8388d` adds Pass-5 D3 feed stamp; `make check` + `make bench` green. Acceptance matrix in progress.

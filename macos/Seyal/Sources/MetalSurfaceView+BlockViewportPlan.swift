@@ -65,13 +65,16 @@ extension MetalSurfaceView {
     setTranscriptFrame(frame)
 
     // Bounded sealed retrieval per clipping range — not full-Block HISTORY.
+    // Address the plan's displayHandle directly (not window-focused), so
+    // multipane Flow clips cannot hit the wrong Controller (#1426 / Finding E).
     for index in 0..<header.clipping_count {
       var clip = SeyalBlockViewportClip()
       guard seyal_bridge_block_viewport_clip_at_for(displayHandle, index, &clip) != 0,
             clip.block_id != 0,
             clip.row_count > 0
       else { continue }
-      _ = requestHistoryRange(
+      _ = bridge?.requestHistoryRange(
+        forDisplayHandle: displayHandle,
         startLine: 0,
         endLine: 0,
         blockID: clip.block_id,

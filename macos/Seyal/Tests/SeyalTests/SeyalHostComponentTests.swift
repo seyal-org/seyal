@@ -3294,8 +3294,12 @@ final class SeyalHostComponentTests: XCTestCase {
             "Expand-never-shrink frame can exceed fittingSize; scroll math must prefer frame"
         )
         XCTAssertTrue(
-            hostText.contains("regions.isEmpty, !blockCards.isEmpty"),
-            "publishBlockOutputFrame must not wipe history when Block cards still exist"
+            hostText.contains("applyBlockViewportPlan(displayHandle:"),
+            "publishBlockOutputFrame must paint via BlockViewportPlan only (no card-clip fallback)"
+        )
+        XCTAssertFalse(
+            hostText.contains("collectBlockOutputRegions"),
+            "card-clip collectBlockOutputRegions must stay deleted from Flow publish"
         )
         let liveTail = sourceRoot.appendingPathComponent("MetalSurfaceView+LiveTail.swift")
         let liveText = (try? String(contentsOf: liveTail, encoding: .utf8)) ?? ""
@@ -5587,7 +5591,8 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     func testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC() throws {
-        // #1484 Phase D: on-window completed Blocks use NATIVE_REGIONS → LiveTailClip.
+        // #1484 C/D/E: Flow paint is BlockViewportPlan-only; sealed clips use
+        // (0,0)+start_unit HISTORY wire; cards remain chrome/AX hosts.
         let sourceRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // SeyalTests/
             .deletingLastPathComponent() // Tests/
@@ -5601,40 +5606,39 @@ final class SeyalHostComponentTests: XCTestCase {
             contentsOf: sourceRoot.appendingPathComponent("SecondaryLivePaneHost+Flow.swift"),
             encoding: .utf8
         )
+        let plan = try String(
+            contentsOf: sourceRoot.appendingPathComponent("MetalSurfaceView+BlockViewportPlan.swift"),
+            encoding: .utf8
+        )
         for text in [chrome, flow] {
             XCTAssertTrue(
-                text.contains("SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS"),
-                "Flow hosts must recognize NATIVE_REGIONS"
+                text.contains("applyBlockViewportPlan(displayHandle:"),
+                "Flow hosts must publish via BlockViewportPlan"
             )
             XCTAssertTrue(
-                text.contains("NATIVE_REGIONS")
-                    && text.contains("publishLiveTailBlocks"),
-                "NATIVE_REGIONS must feed the batched LiveTail path"
+                text.contains("func applyBlockOutputProjection"),
+                "legacy projection hook remains a no-op for call-site stability"
             )
-            XCTAssertTrue(
-                text.contains("reserved0 == UInt16.max"),
-                "sealed NATIVE_REGIONS must use the reserved0==UInt16.max sentinel"
-            )
-            let applyRange = text.range(of: "func applyBlockOutputProjection")
-            XCTAssertNotNil(applyRange)
-            if let applyRange {
+            if let applyRange = text.range(of: "func applyBlockOutputProjection") {
                 let applyEnd = text[applyRange.lowerBound...].range(of: "\n    func ")?.lowerBound
                     ?? text.endIndex
                 let body = text[applyRange.lowerBound..<applyEnd]
-                XCTAssertTrue(
-                    body.contains("SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS"),
-                    "NATIVE must RegionId-fetch content (sealed and on-window)"
-                )
-                XCTAssertTrue(
-                    body.contains("SEYAL_APP_BLOCK_PROJECTION_HISTORY"),
-                    "LineId HISTORY IPC remains only for HISTORY projections"
-                )
-                XCTAssertTrue(
+                XCTAssertFalse(
                     body.contains("requestHistoryRange"),
-                    "HISTORY and sealed-NATIVE content fetch share requestHistoryRange wire"
+                    "applyBlockOutputProjection must not own HISTORY fetches after plan cutover"
                 )
             }
         }
+        XCTAssertTrue(
+            plan.contains("startLine: 0")
+                && plan.contains("endLine: 0")
+                && plan.contains("startUnit:"),
+            "Metal plan must request sealed-index HISTORY pages"
+        )
+        XCTAssertTrue(
+            plan.contains("forDisplayHandle: displayHandle"),
+            "plan sealed clips must address the plan displayHandle, not window focus alone"
+        )
     }
 
     @MainActor
