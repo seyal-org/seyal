@@ -394,6 +394,13 @@ extension SecondaryLivePaneHost {
                 )
                 region.displayHandle = range.sourceDisplayHandle
                 surface.renderHistoryRange(range, region: region)
+                if !lastPublishedTranscriptRegions.contains(where: { $0.id == range.blockID }) {
+                    lastPublishedTranscriptRegions.append(region)
+                } else {
+                    lastPublishedTranscriptRegions = lastPublishedTranscriptRegions.map {
+                        $0.id == range.blockID ? region : $0
+                    }
+                }
             } else {
                 surface.renderHistoryRange(range)
             }
@@ -537,6 +544,20 @@ extension SecondaryLivePaneHost {
             historyBridge: historyBridge
         ) {
             blockOutputZeroClipRetries = 0
+            // Drive visible-history-clips diagnostics from the AppKit body
+            // clips that just fed the plan (SplitFromLivePane / multipane OCR).
+            lastPublishedTranscriptRegions = screenClips.map { blockID, clip in
+                var region = NativeTranscriptRegion(
+                    id: blockID,
+                    origin: .zero,
+                    clip: clip,
+                    historyRows: 0..<1,
+                    historyRequestID: 0,
+                    historyRevision: 0
+                )
+                region.displayHandle = displayHandle
+                return region
+            }
             surface.refreshRecoveryAccessibilityValue()
             if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",
                lastVisibleHistoryPixelCount == 0,

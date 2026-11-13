@@ -42,10 +42,9 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost+Flow.swift"
-acknowledged_loc = 731
+acknowledged_loc = 752
 issue = 1484
-reason = "Multipane Flow leaf owns plan publish, borrowed-bridge HISTORY, and transcript document sizing; #1484 floors document extent on max(Rust, cards), restores content-relative pins after geometry churn, and expand-only body height under mid-transcript pins so viewport HISTORY pages cannot yank scroll retention."
-
+reason = "Multipane Flow leaf owns plan publish, borrowed-bridge HISTORY, and transcript document sizing; #1484 floors document extent on max(Rust, cards), restores content-relative pins after geometry churn, expand-only body height under mid-transcript pins, and publishes lastPublishedTranscriptRegions from plan screen clips for multipane paint diagnostics."
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
 acknowledged_loc = 933
