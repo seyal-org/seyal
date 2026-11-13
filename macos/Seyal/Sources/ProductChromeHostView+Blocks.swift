@@ -321,7 +321,11 @@ extension ProductChromeHostView {
                 // short retain cannot collapse the body (#1484).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
-            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            // Finding D: when Rust viewport index owns document extent, card
+            // body height is not paint/document authority — keep minimal chrome.
+            let rustIndexed =
+                seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle) > 0
+            card.setOutputLines(rustIndexed ? 1 : heightLines, cellHeight: cellHeight)
             card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
             let idHi = row.id_hi
@@ -561,7 +565,9 @@ extension ProductChromeHostView {
             ) {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
-            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            let rustIndexed =
+                seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle) > 0
+            card.setOutputLines(rustIndexed ? 1 : heightLines, cellHeight: cellHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail and
             // must not refill HISTORY on every frame (#1484 100k).
             if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
@@ -668,8 +674,10 @@ extension ProductChromeHostView {
         if let card = blockCards[range.blockID], !range.rows.isEmpty {
             // Prefer Runtime projection height; transcript text is AX/retain.
             card.setBodyTranscript(range.accessibilityTranscript())
+            let rustIndexed =
+                seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle) > 0
             let heightLines = max(nativeProjectionMinimumRows(blockID: range.blockID) ?? 0, 1)
-            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            card.setOutputLines(rustIndexed ? 1 : heightLines, cellHeight: cellHeight)
         }
         if range.status == 0,
            let minimumRows,

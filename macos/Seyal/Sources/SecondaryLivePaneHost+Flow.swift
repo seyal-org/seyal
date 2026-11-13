@@ -172,7 +172,8 @@ extension SecondaryLivePaneHost {
                 // projection reserved1 (sealed-aware) (#1484).
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
-            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            let rustIndexed = seyal_bridge_native_regions_total_height_for(displayHandle) > 0
+            card.setOutputLines(rustIndexed ? 1 : heightLines, cellHeight: cellHeight)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
@@ -308,7 +309,8 @@ extension SecondaryLivePaneHost {
             ) {
                 card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
-            card.setOutputLines(heightLines, cellHeight: cellHeight)
+            let rustIndexed = seyal_bridge_native_regions_total_height_for(displayHandle) > 0
+            card.setOutputLines(rustIndexed ? 1 : heightLines, cellHeight: cellHeight)
             // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail (#1484).
             if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
                 || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
@@ -369,7 +371,8 @@ extension SecondaryLivePaneHost {
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
             card.setBodyTranscript(range.accessibilityTranscript())
-            card.setOutputLines(max(minimumRows ?? 1, 1), cellHeight: cellHeight)
+            let rustIndexed = seyal_bridge_native_regions_total_height_for(displayHandle) > 0
+            card.setOutputLines(rustIndexed ? 1 : max(minimumRows ?? 1, 1), cellHeight: cellHeight)
         }
         if range.status == 0,
            let minimumRows,
