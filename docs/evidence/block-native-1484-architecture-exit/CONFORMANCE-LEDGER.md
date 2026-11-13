@@ -96,3 +96,7 @@ Detail: [`SOURCE-INVENTORY.md`](./SOURCE-INVENTORY.md). Specialist reports: agen
 - 2026-11-12: Client-viewport specialist integrated; `03-client-viewport.md` persisted; all seven specialists complete; `CORRECTION-PLAN.md` locked; begin Phase F production edits.
 - 2026-11-12: [Legacy debt removal map](9771d1e1-0932-41ea-818a-bc66db3d5f29) already persisted prior to late notification (no duplicate).
 - 2026-11-12: Phase F D1/D2 landed — atomic `(shell_events, journal)` admit; no CellMutation eviction for markers; F06-C/D tests green. F remains PARTIAL (D3–D7 / journal consumer).
+- 2026-11-13: `de8c701e` Finding F D1–D7 production path pushed.
+- 2026-11-13: `fe6a716f` Findings A+B — client Fenwick index; engine viewport removed.
+- 2026-11-13: `864f1c07` Finding C plan builder + Finding E remove lead-count skip.
+- 2026-11-13: `3155e444` single-pass on-window spans; Flow hosts use Rust document extent (D progress). Remaining: Metal plan consume, delete card/HISTORY paths, RegionId/source-anchor retrieval API, independent COMPLIANT marks.
