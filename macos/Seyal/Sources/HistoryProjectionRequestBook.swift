@@ -7,9 +7,9 @@ struct HistoryProjectionRequestKey: Hashable {
     let endLine: UInt64
 }
 
-/// Deduplicates stable completed-Block history requests across registry polls.
-/// A request stays remembered after its reply so an unchanged projection does
-/// not repeatedly refill the shared bridge queue during focus churn.
+/// Test-only request-book helper retained for SeyalHostComponentTests.
+/// Production Flow hosts no longer own a HistoryProjectionRequestBook —
+/// sealed clip fetches are plan-driven (#1484 Finding D).
 struct HistoryProjectionRequestBook {
     private var inFlight = Set<HistoryProjectionRequestKey>()
     private var settled = Set<HistoryProjectionRequestKey>()

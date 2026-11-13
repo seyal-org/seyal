@@ -693,28 +693,21 @@ pub(super) fn complete_timeline_block(
 
 /// Deterministic journal consumption after shell_events dispatch (#1484 F / D7).
 ///
-/// Proves StreamSequence monotonicity and that every drained event was observed.
-/// ShellBoundaryCandidate entries are the causal record paired with atomic OSC
-/// admit; CellMutation entries are marked finalized by this drain so capacity
-/// barriers never discard unresolved ownership.
-/// Returns the highest StreamSequence watermark observed. Callers must store
-/// it on the Entry so release builds retain a production side effect (D7).
+/// Drains are ownership barriers: every event advances the Entry's observed
+/// StreamSequence watermark (release-visible). Debug builds also assert
+/// marker token_accepted and strict sequence monotonicity. CellMutation
+/// rows are not a separate "finalized" flag — capacity barriers refuse new
+/// admits while prior events remain undrained.
 fn consume_attribution_journal_events(events: &[seyal_exec::PrimaryEvent]) -> Option<u64> {
     let mut last_sequence = None;
-    let mut markers = 0u32;
-    let mut mutations = 0u32;
     for event in events {
         let sequence = match event {
-            seyal_exec::PrimaryEvent::CellMutation { sequence, .. } => {
-                mutations = mutations.saturating_add(1);
-                *sequence
-            }
+            seyal_exec::PrimaryEvent::CellMutation { sequence, .. } => *sequence,
             seyal_exec::PrimaryEvent::ShellBoundaryCandidate {
                 sequence,
                 token_accepted,
                 ..
             } => {
-                markers = markers.saturating_add(1);
                 debug_assert!(
                     *token_accepted,
                     "journaled shell boundary must carry token_accepted from VT admit"
@@ -730,7 +723,6 @@ fn consume_attribution_journal_events(events: &[seyal_exec::PrimaryEvent]) -> Op
         }
         last_sequence = Some(sequence);
     }
-    let _ = (markers, mutations);
     last_sequence.map(|seq| seq.0)
 }
 

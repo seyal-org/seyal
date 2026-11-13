@@ -648,54 +648,25 @@ extension ProductChromeHostView {
         case .primary:
             break
         }
-        let bookKey = HistoryProjectionRequestKey(
-            displayHandle: range.sourceDisplayHandle == 0
-                ? activeBlockDisplayHandle : range.sourceDisplayHandle,
-            blockID: range.blockID,
-            startLine: range.startLine,
-            endLine: range.endLine
-        )
-        let minimumRows = nativeProjectionMinimumRows(blockID: range.blockID)
-        if range.rows.isEmpty {
-            historyProjectionRequests.complete(bookKey)
-            return
-        }
-        historyProjectionRequests.receive(
-            bookKey,
-            status: range.status,
-            deliveredRows: range.rows.count,
-            minimumRows: minimumRows
-        )
+        // Finding D: no HistoryProjectionRequestBook — plan-owned sealed clips
+        // continue via RustDisplayBridge truncated paging; this path only
+        // retains cells for Metal/AX and republishes the plan frame.
+        guard !range.rows.isEmpty else { return }
         pane.inputSurface.retainHistoryRange(range)
         let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         guard range.sourceDisplayHandle == 0
             || range.sourceDisplayHandle == activeBlockDisplayHandle
         else { return }
-        if let card = blockCards[range.blockID], !range.rows.isEmpty {
-            // Prefer Runtime projection height; transcript text is AX/retain.
+        if let card = blockCards[range.blockID] {
             card.setBodyTranscript(range.accessibilityTranscript())
             let rustIndexed =
                 seyal_bridge_native_regions_total_height_for(activeBlockDisplayHandle) > 0
-            let heightLines = max(nativeProjectionMinimumRows(blockID: range.blockID) ?? 0, 1)
-            card.setOutputLines(rustIndexed ? 1 : heightLines, cellHeight: cellHeight)
+            card.setOutputLines(rustIndexed ? 1 : max(range.rows.count, 1), cellHeight: cellHeight)
         }
-        if range.status == 0,
-           let minimumRows,
-           range.rows.count < minimumRows,
-           let projection = nativeProjection(blockID: range.blockID)
-        {
-            applyBlockOutputProjection(blockID: range.blockID, projection: projection)
-        }
-        // Paint with Auto Layout sizes first, then expand the document frame.
-        // setFrameSize-before-publish can yield zero-height clips that wipe Metal
-        // history and leave titles-only white bodies (#1379).
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
-        // History replies arrive after the initial live-end scroll and can grow
-        // earlier cards. Keep following only when the user was already at the
-        // live end so the newly submitted Block stays hittable.
         if followingLiveEnd {
             scrollTranscriptToLiveEnd()
         }

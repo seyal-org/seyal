@@ -71,7 +71,6 @@ final class SecondaryLivePaneHost: NSView {
     var lastPublishedTranscriptRegions: [NativeTranscriptRegion] = []
     var lastVisibleHistoryPixelCount = 0
     var lastHistoryPixelSampleAt = Date.distantPast
-    var historyProjectionRequests = HistoryProjectionRequestBook()
     var transcriptScrollStates: [UInt64: PaneTranscriptScrollState] = [:]
     var restoresScrollForDisplayHandleChange = false
     static let blockOutputZeroClipRetryLimit = 4
@@ -394,7 +393,6 @@ final class SecondaryLivePaneHost: NSView {
     func updateDisplayHandle(_ handle: UInt64) -> Bool {
         guard handle != displayHandle else { return false }
         rememberTranscriptScrollState()
-        historyProjectionRequests.discard(forDisplayHandle: displayHandle)
         surface.activateTranscriptDisplayHandle(handle)
         displayHandle = handle
         composer.boundDisplayHandle = handle
@@ -781,11 +779,6 @@ final class SecondaryLivePaneHost: NSView {
             surface.applyRendererPresentation(.fullPane(mode))
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])
-            // Wiping Metal/history caches must also clear the settled request
-            // book. Otherwise return-to-Flow rebuilds skip HistoryRangeRequest
-            // for already-settled Block keys and leave permanently blank bodies
-            // (#1379 adversarial review B2).
-            historyProjectionRequests.discard(forDisplayHandle: displayHandle)
             composer.isHidden = true
             transcriptBottomToHost.isActive = false
             clearPreservedDocumentHeight()

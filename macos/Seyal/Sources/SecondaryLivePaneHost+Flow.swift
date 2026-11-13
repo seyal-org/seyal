@@ -186,7 +186,6 @@ extension SecondaryLivePaneHost {
         )
         // Bridgeless surfaces: discard through the borrowed window bridge,
         // scoped to this pane's own handle (#1426 residual).
-        historyProjectionRequests.retain(blockIDs: retained, forDisplayHandle: displayHandle)
         historyBridge?.discardHistoryRequests(except: retained, forDisplayHandle: displayHandle)
         surface.removeTranscriptRegions(except: retained)
         followingLiveEnd = savedFollowing
@@ -348,38 +347,14 @@ extension SecondaryLivePaneHost {
         guard range.sourceDisplayHandle == 0 || range.sourceDisplayHandle == displayHandle else {
             return
         }
-        let key = HistoryProjectionRequestKey(
-            displayHandle: range.sourceDisplayHandle == 0 ? displayHandle : range.sourceDisplayHandle,
-            blockID: range.blockID,
-            startLine: range.startLine,
-            endLine: range.endLine
-        )
-        let minimumRows = nativeProjectionMinimumRows(blockID: range.blockID)
-        guard !range.rows.isEmpty else {
-            // Native sealed fetches may complete empty after eviction; settle
-            // by block id so we do not hot-loop retries (#1484).
-            historyProjectionRequests.complete(key)
-            return
-        }
-        historyProjectionRequests.receive(
-            key,
-            status: range.status,
-            deliveredRows: range.rows.count,
-            minimumRows: minimumRows
-        )
+        // Finding D: no HistoryProjectionRequestBook — retain for Metal/AX only.
+        guard !range.rows.isEmpty else { return }
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
             card.setBodyTranscript(range.accessibilityTranscript())
             let rustIndexed = seyal_bridge_native_regions_total_height_for(displayHandle) > 0
-            card.setOutputLines(rustIndexed ? 1 : max(minimumRows ?? 1, 1), cellHeight: cellHeight)
-        }
-        if range.status == 0,
-           let minimumRows,
-           range.rows.count < minimumRows,
-           let projection = nativeProjection(blockID: range.blockID)
-        {
-            applyBlockOutputProjection(blockID: range.blockID, projection: projection)
+            card.setOutputLines(rustIndexed ? 1 : max(range.rows.count, 1), cellHeight: cellHeight)
         }
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()

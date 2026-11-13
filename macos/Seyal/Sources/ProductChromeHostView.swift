@@ -74,8 +74,6 @@ final class ProductChromeHostView: NSView {
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
     var chromeNeedsReconcile = false
     var blockCards: [UInt64: CommandBlockView] = [:]
-    /// Deduplicates primary NATIVE/HISTORY fetches across frame refreshes (#1484).
-    var historyProjectionRequests = HistoryProjectionRequestBook()
     var composerDockConstraints: [NSLayoutConstraint] = []
     var transcriptRelayBottomConstraint: NSLayoutConstraint?
     let transcriptTopSpacer = NSView(frame: .zero)
