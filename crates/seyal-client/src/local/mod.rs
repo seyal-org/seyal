@@ -358,14 +358,24 @@ impl LocalDisplayClient {
         self.block_viewport_scroll_anchor = next_anchor;
         self.block_viewport_window_rows = Some(next_window);
         if !unchanged || self.block_viewport_plan.is_none() {
-            self.rebuild_block_viewport_plan();
+            // Scroll-only: keep presentation_epoch so Metal retains overlapping
+            // HISTORY pages across near-end AbsoluteY/LiveEnd flips (#1484 100k).
+            self.rebuild_block_viewport_plan_with_epoch(false);
         }
     }
 
     /// Rebuild the Metal-facing plan from the current per-display index (C).
+    /// `bump_epoch` is false for scroll-only AbsoluteY/LiveEnd updates so
+    /// Metal can retain overlapping HISTORY pages across near-end scrolls.
     pub(crate) fn rebuild_block_viewport_plan(&mut self) {
-        self.block_viewport_presentation_epoch =
-            self.block_viewport_presentation_epoch.saturating_add(1);
+        self.rebuild_block_viewport_plan_with_epoch(true);
+    }
+
+    pub(crate) fn rebuild_block_viewport_plan_with_epoch(&mut self, bump_epoch: bool) {
+        if bump_epoch {
+            self.block_viewport_presentation_epoch =
+                self.block_viewport_presentation_epoch.saturating_add(1);
+        }
         let window_rows = self
             .block_viewport_window_rows
             .unwrap_or_else(|| u32::from(self.committed_geometry.rows.max(1)))

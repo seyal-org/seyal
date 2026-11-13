@@ -832,9 +832,16 @@ extension ProductChromeHostView {
         let contentTop = max(scrollY - spacer, 0)
         let absoluteY = UInt64((contentTop / cellHeight).rounded(.down))
         let windowRows = UInt32(max(1, (viewportH / cellHeight).rounded(.up)))
+        // LiveEnd sticky zone: keep the LiveEnd plan until AppKit leaves the
+        // last viewport of the transcript. Tiny near-end scrolls must not
+        // churn presentation_epoch / HISTORY pages (#1484 100k). AbsoluteY
+        // owns mid-transcript onset once past that neighborhood.
+        let maxY = max(transcriptDocumentScrollHeight() - viewportH, 0)
+        let inLiveEndNeighborhood = scrollY >= maxY - viewportH
+        let liveEnd = followingLiveEnd || isNearLiveEnd() || inLiveEndNeighborhood
         _ = seyal_bridge_block_viewport_set_scroll_anchor_for(
             displayHandle,
-            followingLiveEnd ? 1 : 0,
+            liveEnd ? 1 : 0,
             absoluteY,
             windowRows
         )

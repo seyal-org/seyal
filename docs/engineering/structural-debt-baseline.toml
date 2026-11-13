@@ -42,9 +42,9 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 917
+acknowledged_loc = 924
 issue = 1484
-reason = "Flow Blocks host remains the thin AppKit adapter for chrome cards + plan publish; #1484 syncs AppKit scroll into AbsoluteY/LiveEnd before applyBlockViewportPlan, keeps Rust indexed height as sole document extent, and maps body.frame screen clips without a second layout authority."
+reason = "Flow Blocks host remains the thin AppKit adapter for chrome cards + plan publish; #1484 syncs AppKit scroll into AbsoluteY/LiveEnd with a LiveEnd sticky neighborhood before applyBlockViewportPlan, keeps Rust indexed height as sole document extent, and maps body.frame screen clips without a second layout authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
@@ -362,6 +362,6 @@ reason = "Input admission stays one ingress module. #1388 adds the fenced compos
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 806
+acknowledged_loc = 816
 issue = 1484
-reason = "LocalDisplayClient remains the single per-display poll/apply façade; #1484 owns BlockViewportIndex + plan publish and AppKit AbsoluteY/LiveEnd scroll-anchor sync on this client without a terminal-engine viewport field."
+reason = "LocalDisplayClient remains the single per-display poll/apply façade; #1484 owns BlockViewportIndex + plan publish and AppKit AbsoluteY/LiveEnd scroll-anchor sync (scroll-only epoch hold) on this client without a terminal-engine viewport field."

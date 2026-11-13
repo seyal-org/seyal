@@ -470,9 +470,12 @@ extension SecondaryLivePaneHost {
         let contentTop = max(scrollY - spacer, 0)
         let absoluteY = UInt64((contentTop / cellHeight).rounded(.down))
         let windowRows = UInt32(max(1, (viewportH / cellHeight).rounded(.up)))
+        let maxY = max(transcriptDocumentScrollHeight() - viewportH, 0)
+        let inLiveEndNeighborhood = scrollY >= maxY - viewportH
+        let liveEnd = followingLiveEnd || isNearLiveEnd() || inLiveEndNeighborhood
         _ = seyal_bridge_block_viewport_set_scroll_anchor_for(
             displayHandle,
-            followingLiveEnd ? 1 : 0,
+            liveEnd ? 1 : 0,
             absoluteY,
             windowRows
         )
