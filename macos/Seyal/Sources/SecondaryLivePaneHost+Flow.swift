@@ -360,6 +360,7 @@ extension SecondaryLivePaneHost {
                 max(projectionLines, max(range.rows.count, 1)),
                 cellHeight: cellHeight
             )
+            card.layoutSubtreeIfNeeded()
             let clip = card.convert(card.body.bounds, to: surface)
             if clip.width > 1, clip.height > 1 {
                 var region = NativeTranscriptRegion(
@@ -463,7 +464,20 @@ extension SecondaryLivePaneHost {
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         guard !direct, displayHandle != 0 else { return }
         // Finding C/D: sole Flow paint authority is BlockViewportPlan.
-        if surface.applyBlockViewportPlan(displayHandle: displayHandle) {
+        // Screen clips map plan-selected Blocks onto AppKit body rects only.
+        layoutSubtreeIfNeeded()
+        var screenClips: [UInt64: NSRect] = [:]
+        screenClips.reserveCapacity(blockCards.count)
+        for (blockID, card) in blockCards {
+            card.layoutSubtreeIfNeeded()
+            let clip = card.convert(card.body.bounds, to: surface)
+            guard clip.width > 1, clip.height > 1 else { continue }
+            screenClips[blockID] = clip
+        }
+        if surface.applyBlockViewportPlan(
+            displayHandle: displayHandle,
+            screenClips: screenClips
+        ) {
             blockOutputZeroClipRetries = 0
             surface.refreshRecoveryAccessibilityValue()
             if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",

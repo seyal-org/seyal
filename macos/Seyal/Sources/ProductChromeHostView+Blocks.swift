@@ -683,6 +683,7 @@ extension ProductChromeHostView {
                 max(projectionLines, max(range.rows.count, 1)),
                 cellHeight: cellHeight
             )
+            card.layoutSubtreeIfNeeded()
             let clip = card.convert(card.body.bounds, to: pane.inputSurface)
             if clip.width > 1, clip.height > 1 {
                 var region = NativeTranscriptRegion(
@@ -820,8 +821,21 @@ extension ProductChromeHostView {
         let surface = pane.inputSurface
         // Finding C/D: sole Flow paint authority is BlockViewportPlan. Card-clip
         // geometry and collectBlockOutputRegions are deleted — never fallback.
+        // Screen clips only map plan-selected Blocks onto AppKit body rects.
         guard activeBlockDisplayHandle != 0 else { return }
-        if surface.applyBlockViewportPlan(displayHandle: activeBlockDisplayHandle) {
+        layoutSubtreeIfNeeded()
+        var screenClips: [UInt64: NSRect] = [:]
+        screenClips.reserveCapacity(blockCards.count)
+        for (blockID, card) in blockCards {
+            card.layoutSubtreeIfNeeded()
+            let clip = card.convert(card.body.bounds, to: surface)
+            guard clip.width > 1, clip.height > 1 else { continue }
+            screenClips[blockID] = clip
+        }
+        if surface.applyBlockViewportPlan(
+            displayHandle: activeBlockDisplayHandle,
+            screenClips: screenClips
+        ) {
             blockOutputZeroClipRetries = 0
             surface.refreshRecoveryAccessibilityValue()
             return

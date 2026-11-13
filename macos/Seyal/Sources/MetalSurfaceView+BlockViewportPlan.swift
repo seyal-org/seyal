@@ -3,10 +3,15 @@ import Foundation
 
 extension MetalSurfaceView {
   /// Consume the Rust-owned `BlockViewportPlan` for this display (Finding C).
-  /// Builds transcript regions from plan geometry — not AppKit card clips —
-  /// and requests sealed-index HISTORY pages for each clipping range (Finding E).
+  /// Plan owns Block identity + visible row windows + sealed retrieval (E).
+  /// Optional `screenClips` are AppKit body rects in this surface's coordinates
+  /// (ADR-015 OS adapter) so Metal glyphs land under transparent card bodies —
+  /// not a second content authority (#1484 clear→exit ink).
   @discardableResult
-  func applyBlockViewportPlan(displayHandle: UInt64) -> Bool {
+  func applyBlockViewportPlan(
+    displayHandle: UInt64,
+    screenClips: [UInt64: NSRect] = [:]
+  ) -> Bool {
     guard displayHandle != 0 else { return false }
     var header = SeyalBlockViewportPlanHeader()
     guard seyal_bridge_block_viewport_plan_header_for(displayHandle, &header) != 0,
@@ -27,23 +32,31 @@ extension MetalSurfaceView {
             item.visible_rows > 0
       else { continue }
 
-      // Viewport-relative row = absolute document row − plan scroll_y.
-      let docFirst = item.y.saturatingAdding(UInt64(item.first_visible_row))
-      let viewportRow = docFirst >= header.scroll_y
-        ? docFirst - header.scroll_y
-        : 0
-      let heightPoints = CGFloat(item.visible_rows) * cell.height
-      let originYPoints = surfaceHeight
-        - (CGFloat(viewportRow) * cell.height)
-        - heightPoints
-      let clip = NSRect(
-        x: 0,
-        y: originYPoints,
-        width: bounds.width,
-        height: heightPoints
-      )
+      let clip: NSRect
+      if let screen = screenClips[item.block_id], screen.width > 1, screen.height > 1 {
+        // Thin adapter: map plan-selected Block onto the laid-out body hit target.
+        clip = screen
+      } else {
+        // Viewport-relative row = absolute document row − plan scroll_y.
+        let docFirst = item.y.saturatingAdding(UInt64(item.first_visible_row))
+        let viewportRow = docFirst >= header.scroll_y
+          ? docFirst - header.scroll_y
+          : 0
+        let heightPoints = CGFloat(item.visible_rows) * cell.height
+        let originYPoints = surfaceHeight
+          - (CGFloat(viewportRow) * cell.height)
+          - heightPoints
+        clip = NSRect(
+          x: 0,
+          y: originYPoints,
+          width: bounds.width,
+          height: heightPoints
+        )
+      }
       guard clip.width > 0, clip.height > 0 else { continue }
 
+      // historyRows indexes the retained page buffer (often already windowed
+      // by sealed-index start_unit), not absolute Block rows.
       var region = NativeTranscriptRegion(
         id: item.block_id,
         origin: .zero,
