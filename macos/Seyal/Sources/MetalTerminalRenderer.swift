@@ -506,6 +506,13 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             || !presentationPlan.drawsLiveGrid
     }
 
+    /// Shell-exit retain: stop treating in-flight LiveTail frames as a gate so
+    /// deferred HISTORY pages become inspectable glyphs (#1484 false-green).
+    func forceFlushHistoryPreparesForRetain() {
+        framesInFlight = 0
+        flushDeferredHistoryPrepares()
+    }
+
     func flushDeferredHistoryPrepares() {
         guard framesInFlight == 0, !deferredHistoryPrepares.isEmpty else { return }
         let pending = deferredHistoryPrepares

@@ -705,13 +705,18 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     resetPreparationRecovery()
     hasPreparedState = false
     if retainHistory {
+      // LiveTail/present may still hold framesInFlight; force deferred HISTORY
+      // prepares through so inspectFlowPaint is not stuck at instances=0.
+      renderer.forceFlushHistoryPreparesForRetain()
       hasRetainedHistoryPresentation = !historyRanges.isEmpty || !renderer.historyRegions.isEmpty
       onTimelineChanged?()
+      renderer.forceFlushHistoryPreparesForRetain()
       // rebuildBlocks may prune ranges/buffers to the ended timeline; if Metal
       // buffers were dropped, re-encode from remaining retained rows against
       // the last plan frame (and stack any revealed floor-hidden Blocks).
       if renderer.historyRegions.isEmpty, !historyRanges.isEmpty {
         reencodeRetainedHistoryAfterDisconnect()
+        renderer.forceFlushHistoryPreparesForRetain()
       }
       hasRetainedHistoryPresentation = !renderer.historyRegions.isEmpty
       if shouldRender, hasRetainedHistoryPresentation {
