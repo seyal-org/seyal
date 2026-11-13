@@ -110,3 +110,5 @@ Detail: [`SOURCE-INVENTORY.md`](./SOURCE-INVENTORY.md). Specialist reports: agen
 - 2026-11-13: Independent verify agent `27d26c58` marks **A–F COMPLIANT** at `faef42a3`; architecture exit **GO**. Tip `7cd8388d` adds Pass-5 D3 feed stamp; `make check` + `make bench` green. Acceptance matrix in progress.
 
 - 2026-11-13: Headed acceptance on tip `28a50594` (PR #1485): `SeyalHostWorkloadUITests` 13/13 (1 skip); `testHundredThousandOutputLinesRemainScrollableAndDocked` PASS; `testClearThenExitKeepsPaintedBlockBodies` PASS; `make check` exit 0. Architecture A–F remain COMPLIANT from independent verify. AbsoluteY AppKit↔plan scroll sync for onset HISTORY remains follow-up (LiveEnd plan + capped chrome height).
+
+- 2026-11-13: G5 AbsoluteY AppKit↔plan scroll sync landed — `seyal_bridge_block_viewport_set_scroll_anchor_for` + Flow host sync before `applyBlockViewportPlan`; onset AbsoluteY vs LiveEnd unit proof green.

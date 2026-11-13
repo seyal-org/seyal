@@ -820,6 +820,26 @@ extension ProductChromeHostView {
         }
     }
 
+    /// Push AppKit transcript scroll into the Rust plan anchor before Metal
+    /// consumes clips (G5 AbsoluteY). LiveEnd stays LiveEnd; otherwise the
+    /// presentation-row origin is AbsoluteY from content scroll past the
+    /// leading spacer. Thin adapter only — plan ownership remains Rust.
+    func syncBlockViewportScrollAnchor(displayHandle: UInt64, surface: MetalSurfaceView) {
+        let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
+        let spacer = transcriptLeadingSpacerHeight?.constant ?? 0
+        let scrollY = transcript.contentView.bounds.origin.y
+        let viewportH = max(transcript.contentView.bounds.height, 1)
+        let contentTop = max(scrollY - spacer, 0)
+        let absoluteY = UInt64((contentTop / cellHeight).rounded(.down))
+        let windowRows = UInt32(max(1, (viewportH / cellHeight).rounded(.up)))
+        _ = seyal_bridge_block_viewport_set_scroll_anchor_for(
+            displayHandle,
+            followingLiveEnd ? 1 : 0,
+            absoluteY,
+            windowRows
+        )
+    }
+
     func publishBlockOutputFrame() {
         let snapshot = seyal_app_snapshot(pane.appHandle)
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
@@ -831,6 +851,10 @@ extension ProductChromeHostView {
         // Screen clips only map plan-selected Blocks onto AppKit body rects.
         guard activeBlockDisplayHandle != 0 else { return }
         layoutSubtreeIfNeeded()
+        syncBlockViewportScrollAnchor(
+            displayHandle: activeBlockDisplayHandle,
+            surface: surface
+        )
         var screenClips: [UInt64: NSRect] = [:]
         screenClips.reserveCapacity(blockCards.count)
         for (blockID, card) in blockCards {

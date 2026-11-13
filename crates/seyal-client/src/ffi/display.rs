@@ -665,6 +665,25 @@ pub extern "C" fn seyal_bridge_native_regions_total_height_for(handle: u64) -> u
     super::with_client(handle, |client| client.block_viewport_total_height()).unwrap_or(0)
 }
 
+/// Sync AppKit transcript scroll into the per-display plan anchor (G5).
+/// `live_end != 0` pins LiveEnd; otherwise `absolute_y` is the presentation-row
+/// origin. `window_rows` is the AppKit viewport height in presentation rows.
+/// Returns 1 when the handle resolves; 0 otherwise.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_set_scroll_anchor_for(
+    handle: u64,
+    live_end: i32,
+    absolute_y: u64,
+    window_rows: u32,
+) -> i32 {
+    match super::with_client_mut(handle, |client| {
+        client.set_block_viewport_scroll_anchor(live_end != 0, absolute_y, window_rows);
+    }) {
+        Some(()) => 1,
+        None => 0,
+    }
+}
+
 /// Copy the current [`crate::viewport::BlockViewportPlan`] header for Metal (C).
 /// Returns 1 when a plan exists; 0 when absent.
 #[unsafe(no_mangle)]

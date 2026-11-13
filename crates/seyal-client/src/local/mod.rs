@@ -155,6 +155,9 @@ pub struct LocalDisplayClient {
     pub(crate) block_viewport_plan: Option<crate::viewport::BlockViewportPlan>,
     pub(crate) block_viewport_presentation_epoch: u64,
     pub(crate) block_viewport_scroll_anchor: crate::viewport::ScrollAnchor,
+    /// AppKit-reported visible window height in presentation rows. When set,
+    /// overrides PTY geometry for plan window selection (G5 AbsoluteY sync).
+    pub(crate) block_viewport_window_rows: Option<u32>,
     pub(crate) command_blocks_supported: bool,
     pub(crate) last_composer_result: Option<ComposerResult>,
     /// Latest Runtime-published composer eligibility for this attachment
@@ -334,11 +337,39 @@ impl LocalDisplayClient {
         self.rebuild_block_viewport_plan();
     }
 
+    /// Sync AppKit scroll into the Rust plan anchor (G5). `live_end` keeps the
+    /// plan pinned to the transcript tail; otherwise `absolute_y` is the
+    /// presentation-row origin of the visible window. `window_rows` is the
+    /// AppKit viewport height in presentation rows (minimum 1).
+    pub fn set_block_viewport_scroll_anchor(
+        &mut self,
+        live_end: bool,
+        absolute_y: u64,
+        window_rows: u32,
+    ) {
+        let next_anchor = if live_end {
+            crate::viewport::ScrollAnchor::LiveEnd
+        } else {
+            crate::viewport::ScrollAnchor::AbsoluteY(absolute_y)
+        };
+        let next_window = window_rows.max(1);
+        let unchanged = self.block_viewport_scroll_anchor == next_anchor
+            && self.block_viewport_window_rows == Some(next_window);
+        self.block_viewport_scroll_anchor = next_anchor;
+        self.block_viewport_window_rows = Some(next_window);
+        if !unchanged || self.block_viewport_plan.is_none() {
+            self.rebuild_block_viewport_plan();
+        }
+    }
+
     /// Rebuild the Metal-facing plan from the current per-display index (C).
     pub(crate) fn rebuild_block_viewport_plan(&mut self) {
         self.block_viewport_presentation_epoch =
             self.block_viewport_presentation_epoch.saturating_add(1);
-        let window_rows = u32::from(self.committed_geometry.rows.max(1));
+        let window_rows = self
+            .block_viewport_window_rows
+            .unwrap_or_else(|| u32::from(self.committed_geometry.rows.max(1)))
+            .max(1);
         let records: Vec<_> = self
             .block_native_regions
             .records
@@ -720,6 +751,7 @@ fn reconstruction_probe_client_with_stream(
         block_viewport_plan: None,
         block_viewport_presentation_epoch: 0,
         block_viewport_scroll_anchor: crate::viewport::ScrollAnchor::LiveEnd,
+        block_viewport_window_rows: None,
         command_blocks_supported: false,
         last_composer_result: None,
         composer_status: None,

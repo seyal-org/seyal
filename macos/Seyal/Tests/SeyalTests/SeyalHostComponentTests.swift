@@ -3297,6 +3297,11 @@ final class SeyalHostComponentTests: XCTestCase {
             hostText.contains("applyBlockViewportPlan(displayHandle:"),
             "publishBlockOutputFrame must paint via BlockViewportPlan only (no card-clip fallback)"
         )
+        XCTAssertTrue(
+            hostText.contains("syncBlockViewportScrollAnchor")
+                && hostText.contains("seyal_bridge_block_viewport_set_scroll_anchor_for"),
+            "Flow publish must sync AppKit scroll into Rust AbsoluteY/LiveEnd plan anchor (G5)"
+        )
         XCTAssertFalse(
             hostText.contains("collectBlockOutputRegions(")
                 || hostText.contains("func collectBlockOutputRegions"),
@@ -5615,6 +5620,10 @@ final class SeyalHostComponentTests: XCTestCase {
             XCTAssertTrue(
                 text.contains("applyBlockViewportPlan(displayHandle:"),
                 "Flow hosts must publish via BlockViewportPlan"
+            )
+            XCTAssertTrue(
+                text.contains("seyal_bridge_block_viewport_set_scroll_anchor_for"),
+                "Flow hosts must sync AppKit scroll into AbsoluteY/LiveEnd before plan paint"
             )
             XCTAssertTrue(
                 text.contains("func applyBlockOutputProjection"),

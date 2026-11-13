@@ -313,6 +313,47 @@ mod tests {
     }
 
     #[test]
+    fn absolute_y_selects_onset_while_live_end_selects_tail() {
+        // G5: AppKit mid-scroll AbsoluteY must paint onset HISTORY, not LiveEnd.
+        let mut index = BlockViewportIndex::default();
+        index.replace_all([(1, 40), (2, 40)]);
+        let records = [
+            (1u64, 10u64, 11u64, 40u32, 0u16, 0u16),
+            (2u64, 20u64, 21u64, 40u32, 0u16, 0u16),
+        ];
+        let onset = BlockViewportPlan::build(BlockViewportPlanRequest {
+            execution_id: 1,
+            display_handle: 1,
+            presentation_epoch: 1,
+            source_generation: 1,
+            block_revision: 1,
+            content_generation: 1,
+            scroll_anchor: ScrollAnchor::AbsoluteY(0),
+            index: &index,
+            window_rows: 10,
+            records: &records,
+        });
+        let live = BlockViewportPlan::build(BlockViewportPlanRequest {
+            execution_id: 1,
+            display_handle: 1,
+            presentation_epoch: 1,
+            source_generation: 1,
+            block_revision: 1,
+            content_generation: 1,
+            scroll_anchor: ScrollAnchor::LiveEnd,
+            index: &index,
+            window_rows: 10,
+            records: &records,
+        });
+        assert_eq!(onset.scroll_y, 0);
+        assert_eq!(live.scroll_y, 70);
+        assert!(onset.clip_for(1).is_some());
+        assert!(onset.clip_for(2).is_none());
+        assert!(live.clip_for(2).is_some());
+        assert!(live.clip_for(1).is_none());
+    }
+
+    #[test]
     fn plan_clips_live_end_when_first_visible_row_past_sealed() {
         // 100k-class live end: viewport sits entirely in the live window past sealed.
         let mut index = BlockViewportIndex::default();

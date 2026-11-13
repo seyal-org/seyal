@@ -394,6 +394,13 @@ typedef struct SeyalBlockViewportClip {
     uint8_t reserved[3];
 } SeyalBlockViewportClip;
 
+/* AppKit scroll → Rust plan anchor (G5 AbsoluteY / LiveEnd). */
+int32_t seyal_bridge_block_viewport_set_scroll_anchor_for(
+    uint64_t handle,
+    int32_t live_end,
+    uint64_t absolute_y,
+    uint32_t window_rows
+);
 int32_t seyal_bridge_block_viewport_plan_header_for(
     uint64_t handle,
     SeyalBlockViewportPlanHeader *out

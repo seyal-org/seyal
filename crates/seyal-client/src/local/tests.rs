@@ -62,6 +62,7 @@ pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
         block_viewport_plan: None,
         block_viewport_presentation_epoch: 0,
         block_viewport_scroll_anchor: crate::viewport::ScrollAnchor::LiveEnd,
+        block_viewport_window_rows: None,
         command_blocks_supported: false,
         last_composer_result: None,
         composer_status: None,
