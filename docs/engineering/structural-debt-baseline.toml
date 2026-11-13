@@ -42,9 +42,9 @@ reason = "The pane host owns its independent transcript viewport and per-termina
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 893
+acknowledged_loc = 917
 issue = 1484
-reason = "Flow Blocks host owns on-window NATIVE LiveTail plus sealed NATIVE RegionId fetches (#1484 dual-seal DELETE) beside PRIMARY_CLIP; Rust indexed height is the sole document content height, with retained RegionId row counts flooring sealed card body height when live reserved1 is still a short clip. Plan publish maps AppKit body rects as ADR-015 screen placement only."
+reason = "Flow Blocks host remains the thin AppKit adapter for chrome cards + plan publish; #1484 syncs AppKit scroll into AbsoluteY/LiveEnd before applyBlockViewportPlan, keeps Rust indexed height as sole document extent, and maps body.frame screen clips without a second layout authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
@@ -60,9 +60,9 @@ reason = "Block projection FFI remains the single Flow clip export; #1484 plan-o
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/display.rs"
-acknowledged_loc = 875
+acknowledged_loc = 894
 issue = 1484
-reason = "Display FFI remains the thin prepared-frame / history / viewport export surface; #1484 adds BlockViewportPlan header/item/clip accessors beside native-regions total_height without a second display authority."
+reason = "Display FFI remains the thin prepared-frame / history / viewport export surface; #1484 adds BlockViewportPlan header/item/clip accessors plus set_scroll_anchor for AppKit AbsoluteY/LiveEnd sync without a second display authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
@@ -286,9 +286,9 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 761
+acknowledged_loc = 762
 issue = 1484
-reason = "Local display-client protocol proofs stay one module; #1484 initializes BlockNativeRegions (with total_height) and plan-index fixtures on the shared LocalDisplayClient harness."
+reason = "Local display-client protocol proofs stay one module; #1484 initializes BlockNativeRegions, plan-index, and window_rows override fixtures on the shared LocalDisplayClient harness."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
@@ -362,6 +362,6 @@ reason = "Input admission stays one ingress module. #1388 adds the fenced compos
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 774
+acknowledged_loc = 806
 issue = 1484
-reason = "LocalDisplayClient remains the single per-display poll/apply façade; #1484 owns BlockViewportIndex + plan publish on this client without a terminal-engine viewport field."
+reason = "LocalDisplayClient remains the single per-display poll/apply façade; #1484 owns BlockViewportIndex + plan publish and AppKit AbsoluteY/LiveEnd scroll-anchor sync on this client without a terminal-engine viewport field."
