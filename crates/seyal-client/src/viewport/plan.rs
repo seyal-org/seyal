@@ -108,16 +108,26 @@ impl BlockViewportPlan {
                 live_row_count: live_count,
             });
             if output != 0 && span.visible_rows > 0 && span.first_visible_row < sealed {
+                // Visible sealed rows ± bounded overscan (SPEC-008); never the
+                // full Block. Overscan stays inside [0, sealed).
+                const OVERSCAN: u32 = 16;
                 let sealed_remaining = sealed - span.first_visible_row;
                 let sealed_vis = span.visible_rows.min(sealed_remaining);
                 if sealed_vis > 0 {
-                    clipping.push(ClippedGridRange {
-                        block_id: span.block_id,
-                        region_id: output,
-                        first_row: span.first_visible_row,
-                        row_count: sealed_vis,
-                        sealed: true,
-                    });
+                    let first = span.first_visible_row.saturating_sub(OVERSCAN);
+                    let end = (span.first_visible_row + sealed_vis)
+                        .saturating_add(OVERSCAN)
+                        .min(sealed);
+                    let row_count = end.saturating_sub(first);
+                    if row_count > 0 {
+                        clipping.push(ClippedGridRange {
+                            block_id: span.block_id,
+                            region_id: output,
+                            first_row: first,
+                            row_count,
+                            sealed: true,
+                        });
+                    }
                 }
             }
         }
