@@ -77,6 +77,9 @@ pub(crate) use types::{
     SeyalHistoryRow, SeyalHistorySidecar, SeyalPass9DiagSnapshot, SeyalPreparedFrame,
     SeyalRecoveryResult, SeyalSessionSurface,
 };
+pub use types::{
+    SeyalBlockViewportClip, SeyalBlockViewportPlanHeader, SeyalBlockViewportVisibleItem,
+};
 
 #[allow(unused_imports)]
 pub use app::pane_recovery::{
@@ -117,6 +120,8 @@ pub use display::{
     seyal_bridge_history_range_consume_for_handle, seyal_bridge_history_range_peek_for,
     seyal_bridge_history_range_peek_for_handle, seyal_bridge_history_range_row_for,
     seyal_bridge_history_range_row_for_handle, seyal_bridge_history_range_sidecar_for,
+    seyal_bridge_block_viewport_clip_at_for, seyal_bridge_block_viewport_clip_for,
+    seyal_bridge_block_viewport_plan_header_for, seyal_bridge_block_viewport_visible_at_for,
     seyal_bridge_history_range_sidecar_for_handle, seyal_bridge_native_regions_total_height,
     seyal_bridge_native_regions_total_height_for, seyal_bridge_next_composer_request_id,
     seyal_bridge_next_history_request_id, seyal_bridge_next_history_request_id_for,

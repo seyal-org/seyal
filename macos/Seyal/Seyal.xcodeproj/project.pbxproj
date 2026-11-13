@@ -14,6 +14,7 @@
 		A10000000000000000000091 /* MetalSurfaceView+RawScrollback.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000091 /* MetalSurfaceView+RawScrollback.swift */; };
 		A10000000000000000000092 /* RawScrollbackViewport+SelfTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000092 /* RawScrollbackViewport+SelfTests.swift */; };
 		A10000000000000000000093 /* MetalSurfaceView+History.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000093 /* MetalSurfaceView+History.swift */; };
+		A10000000000000000000094 /* MetalSurfaceView+BlockViewportPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000094 /* MetalSurfaceView+BlockViewportPlan.swift */; };
 		A10000000000000000000004 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* AppKit.framework */; };
 		A10000000000000000000005 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* Metal.framework */; };
 		A10000000000000000000006 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* QuartzCore.framework */; };
@@ -128,6 +129,7 @@
 		A20000000000000000000091 /* MetalSurfaceView+RawScrollback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+RawScrollback.swift"; sourceTree = "<group>"; };
 		A20000000000000000000092 /* RawScrollbackViewport+SelfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RawScrollbackViewport+SelfTests.swift"; sourceTree = "<group>"; };
 		A20000000000000000000093 /* MetalSurfaceView+History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+History.swift"; sourceTree = "<group>"; };
+		A20000000000000000000094 /* MetalSurfaceView+BlockViewportPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+BlockViewportPlan.swift"; sourceTree = "<group>"; };
 		A20000000000000000000004 /* Seyal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Seyal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000005 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		A20000000000000000000006 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
@@ -315,6 +317,7 @@
 				A20000000000000000000054 /* MetalSurfaceView+DisplayLink.swift */,
 				A2000000000000000000006B /* MetalSurfaceView+LiveTail.swift */,
 				A20000000000000000000093 /* MetalSurfaceView+History.swift */,
+				A20000000000000000000094 /* MetalSurfaceView+BlockViewportPlan.swift */,
 				A20000000000000000000056 /* MetalTerminalRendererTypes.swift */,
 				A20000000000000000000057 /* MetalTerminalRenderer+Encode.swift */,
 				A2000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift */,
@@ -560,6 +563,7 @@
 				A10000000000000000000054 /* MetalSurfaceView+DisplayLink.swift in Sources */,
 				A1000000000000000000006B /* MetalSurfaceView+LiveTail.swift in Sources */,
 				A10000000000000000000093 /* MetalSurfaceView+History.swift in Sources */,
+				A10000000000000000000094 /* MetalSurfaceView+BlockViewportPlan.swift in Sources */,
 				A10000000000000000000056 /* MetalTerminalRendererTypes.swift in Sources */,
 				A10000000000000000000057 /* MetalTerminalRenderer+Encode.swift in Sources */,
 				A1000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift in Sources */,

@@ -5,9 +5,11 @@ use crate::LocalDisplayClient;
 
 use super::{
     error_code, with_active_client, with_active_client_mut, with_display_client,
-    with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
-    SeyalComposerTarget, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange,
-    SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame, SeyalSessionSurface,
+    with_display_client_mut, SeyalBlockRecord, SeyalBlockViewportClip,
+    SeyalBlockViewportPlanHeader, SeyalBlockViewportVisibleItem, SeyalComposerResult,
+    SeyalComposerStatus, SeyalComposerTarget, SeyalExecutionBlockMetadata, SeyalHistoryCell,
+    SeyalHistoryRange, SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame,
+    SeyalSessionSurface,
 };
 
 #[unsafe(no_mangle)]
@@ -661,6 +663,173 @@ pub extern "C" fn seyal_bridge_native_regions_total_height() -> u64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_native_regions_total_height_for(handle: u64) -> u64 {
     super::with_client(handle, |client| client.block_viewport_total_height()).unwrap_or(0)
+}
+
+/// Copy the current [`crate::viewport::BlockViewportPlan`] header for Metal (C).
+/// Returns 1 when a plan exists; 0 when absent.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_plan_header_for(
+    handle: u64,
+    out: *mut SeyalBlockViewportPlanHeader,
+) -> i32 {
+    if out.is_null() {
+        return 0;
+    }
+    let header = super::with_client(handle, |client| {
+        client.block_viewport_plan().map(|plan| SeyalBlockViewportPlanHeader {
+            execution_id: plan.execution_id,
+            display_handle: plan.display_handle,
+            presentation_epoch: plan.presentation_epoch,
+            source_generation: plan.source_generation,
+            block_revision: plan.block_revision,
+            content_generation: plan.content_generation,
+            scroll_y: plan.scroll_y,
+            window_rows: plan.window_rows,
+            visible_count: u32::try_from(plan.visible_items.len()).unwrap_or(u32::MAX),
+            clipping_count: u32::try_from(plan.clipping.len()).unwrap_or(u32::MAX),
+            reserved: 0,
+            total_document_extent: plan.total_document_extent,
+        })
+    })
+    .flatten();
+    match header {
+        Some(h) => {
+            unsafe {
+                *out = h;
+            }
+            1
+        }
+        None => {
+            unsafe {
+                *out = SeyalBlockViewportPlanHeader::empty();
+            }
+            0
+        }
+    }
+}
+
+/// Visible plan item at `index` for one registry handle. Returns 1 on hit.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_visible_at_for(
+    handle: u64,
+    index: u32,
+    out: *mut SeyalBlockViewportVisibleItem,
+) -> i32 {
+    if out.is_null() {
+        return 0;
+    }
+    let item = super::with_client(handle, |client| {
+        client
+            .block_viewport_plan()
+            .and_then(|plan| plan.visible_items.get(index as usize).copied())
+            .map(|item| SeyalBlockViewportVisibleItem {
+                block_id: item.block_id,
+                header_region: item.header_region,
+                output_region: item.output_region,
+                y: item.y,
+                height: item.height,
+                first_visible_row: item.first_visible_row,
+                visible_rows: item.visible_rows,
+                sealed_rows: item.sealed_rows,
+                live_first_row: item.live_first_row,
+                live_row_count: item.live_row_count,
+            })
+    })
+    .flatten();
+    match item {
+        Some(v) => {
+            unsafe {
+                *out = v;
+            }
+            1
+        }
+        None => {
+            unsafe {
+                *out = SeyalBlockViewportVisibleItem::empty();
+            }
+            0
+        }
+    }
+}
+
+/// Clipping range at `index` for one registry handle. Returns 1 on hit.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_clip_at_for(
+    handle: u64,
+    index: u32,
+    out: *mut SeyalBlockViewportClip,
+) -> i32 {
+    if out.is_null() {
+        return 0;
+    }
+    let clip = super::with_client(handle, |client| {
+        client
+            .block_viewport_plan()
+            .and_then(|plan| plan.clipping.get(index as usize).copied())
+            .map(|clip| SeyalBlockViewportClip {
+                block_id: clip.block_id,
+                region_id: clip.region_id,
+                first_row: clip.first_row,
+                row_count: clip.row_count,
+                sealed: u8::from(clip.sealed),
+                reserved: [0; 3],
+            })
+    })
+    .flatten();
+    match clip {
+        Some(c) => {
+            unsafe {
+                *out = c;
+            }
+            1
+        }
+        None => {
+            unsafe {
+                *out = SeyalBlockViewportClip::empty();
+            }
+            0
+        }
+    }
+}
+
+/// Clipping range for one BlockId in the current plan. Returns 1 on hit.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_clip_for(
+    handle: u64,
+    block_id: u64,
+    out: *mut SeyalBlockViewportClip,
+) -> i32 {
+    if out.is_null() {
+        return 0;
+    }
+    let clip = super::with_client(handle, |client| {
+        client
+            .block_viewport_plan()
+            .and_then(|plan| plan.clip_for(block_id))
+            .map(|clip| SeyalBlockViewportClip {
+                block_id: clip.block_id,
+                region_id: clip.region_id,
+                first_row: clip.first_row,
+                row_count: clip.row_count,
+                sealed: u8::from(clip.sealed),
+                reserved: [0; 3],
+            })
+    })
+    .flatten();
+    match clip {
+        Some(c) => {
+            unsafe {
+                *out = c;
+            }
+            1
+        }
+        None => {
+            unsafe {
+                *out = SeyalBlockViewportClip::empty();
+            }
+            0
+        }
+    }
 }
 
 fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {

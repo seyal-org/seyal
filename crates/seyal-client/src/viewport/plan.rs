@@ -51,6 +51,10 @@ pub struct BlockViewportPlan {
     pub block_revision: u64,
     pub content_generation: u64,
     pub scroll_anchor: ScrollAnchor,
+    /// Absolute presentation Y of the visible window origin.
+    pub scroll_y: u64,
+    /// Visible window height in presentation rows.
+    pub window_rows: u32,
     pub total_document_extent: u64,
     pub visible_items: Vec<VisiblePlanItem>,
     pub clipping: Vec<ClippedGridRange>,
@@ -125,6 +129,8 @@ impl BlockViewportPlan {
             block_revision,
             content_generation,
             scroll_anchor,
+            scroll_y,
+            window_rows,
             total_document_extent: index.total_height(),
             visible_items,
             clipping,
@@ -140,6 +146,8 @@ impl BlockViewportPlan {
             block_revision: 0,
             content_generation: 0,
             scroll_anchor: ScrollAnchor::AbsoluteY(0),
+            scroll_y: 0,
+            window_rows: 0,
             total_document_extent: spans
                 .iter()
                 .map(|s| s.y.saturating_add(u64::from(s.height)))
@@ -162,6 +170,11 @@ impl BlockViewportPlan {
                 .collect(),
             clipping: Vec::new(),
         }
+    }
+
+    /// Clipping range for one Block, if the current plan covers it.
+    pub fn clip_for(&self, block_id: u64) -> Option<ClippedGridRange> {
+        self.clipping.iter().copied().find(|c| c.block_id == block_id)
     }
 }
 
@@ -195,8 +208,11 @@ mod tests {
         assert_eq!(plan.display_handle, 99);
         assert_eq!(plan.presentation_epoch, 3);
         assert_eq!(plan.total_document_extent, 35);
+        assert_eq!(plan.scroll_y, 8);
+        assert_eq!(plan.window_rows, 10);
         assert!(!plan.visible_items.is_empty());
         assert_eq!(plan.visible_items[0].block_id, 1);
         assert!(plan.visible_items.iter().any(|item| item.block_id == 2));
+        assert!(plan.clip_for(2).is_some());
     }
 }

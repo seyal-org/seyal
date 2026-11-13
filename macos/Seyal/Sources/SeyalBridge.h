@@ -355,6 +355,65 @@ uint64_t seyal_bridge_viewport_start_line_id_for(uint64_t handle);
 /* Indexed Flow transcript height from BlockNativeRegions (#1484); 0 if unpublished. */
 uint64_t seyal_bridge_native_regions_total_height(void);
 uint64_t seyal_bridge_native_regions_total_height_for(uint64_t handle);
+
+/* Rust-owned BlockViewportPlan for Metal (Finding C / ADR-009). */
+typedef struct SeyalBlockViewportPlanHeader {
+    uint64_t execution_id;
+    uint64_t display_handle;
+    uint64_t presentation_epoch;
+    uint64_t source_generation;
+    uint64_t block_revision;
+    uint64_t content_generation;
+    uint64_t scroll_y;
+    uint32_t window_rows;
+    uint32_t visible_count;
+    uint32_t clipping_count;
+    uint32_t reserved;
+    uint64_t total_document_extent;
+} SeyalBlockViewportPlanHeader;
+
+typedef struct SeyalBlockViewportVisibleItem {
+    uint64_t block_id;
+    uint64_t header_region;
+    uint64_t output_region;
+    uint64_t y;
+    uint32_t height;
+    uint32_t first_visible_row;
+    uint32_t visible_rows;
+    uint32_t sealed_rows;
+    uint16_t live_first_row;
+    uint16_t live_row_count;
+} SeyalBlockViewportVisibleItem;
+
+typedef struct SeyalBlockViewportClip {
+    uint64_t block_id;
+    uint64_t region_id;
+    uint32_t first_row;
+    uint32_t row_count;
+    uint8_t sealed;
+    uint8_t reserved[3];
+} SeyalBlockViewportClip;
+
+int32_t seyal_bridge_block_viewport_plan_header_for(
+    uint64_t handle,
+    SeyalBlockViewportPlanHeader *out
+);
+int32_t seyal_bridge_block_viewport_visible_at_for(
+    uint64_t handle,
+    uint32_t index,
+    SeyalBlockViewportVisibleItem *out
+);
+int32_t seyal_bridge_block_viewport_clip_at_for(
+    uint64_t handle,
+    uint32_t index,
+    SeyalBlockViewportClip *out
+);
+int32_t seyal_bridge_block_viewport_clip_for(
+    uint64_t handle,
+    uint64_t block_id,
+    SeyalBlockViewportClip *out
+);
+
 int32_t seyal_bridge_ensure_prepared_for(uint64_t handle);
 uint64_t seyal_bridge_block_timeline_revision(void);
 uint64_t seyal_bridge_next_composer_request_id(void);

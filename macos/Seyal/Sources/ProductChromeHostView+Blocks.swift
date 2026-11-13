@@ -581,18 +581,32 @@ extension ProductChromeHostView {
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
         guard activeBlockDisplayHandle != 0 else { return }
         if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) {
+            // Finding E: sealed-row index from BlockViewportPlan clipping.
+            var clip = SeyalBlockViewportClip()
+            let firstRow: UInt32
+            let rowCount: UInt32
+            if seyal_bridge_block_viewport_clip_for(
+                activeBlockDisplayHandle, blockID, &clip
+            ) != 0, clip.row_count > 0 {
+                firstRow = clip.first_row
+                rowCount = clip.row_count
+            } else {
+                firstRow = 0
+                rowCount = max(projection.reserved1, 1)
+            }
+            // Book key tracks sealed window identity; wire uses (0,0)+startUnit.
             let key = HistoryProjectionRequestKey(
                 displayHandle: activeBlockDisplayHandle,
                 blockID: blockID,
-                startLine: UInt64(projection.reserved0),
-                endLine: UInt64(max(projection.reserved1, 1))
+                startLine: UInt64(firstRow) + 1,
+                endLine: UInt64(firstRow) + UInt64(max(rowCount, 1))
             )
             guard historyProjectionRequests.begin(key) else { return }
-            // start/end ignored when Runtime resolves RegionId-owned cells.
             let result = pane.inputSurface.requestHistoryRange(
-                startLine: 1,
-                endLine: 1,
-                blockID: blockID
+                startLine: 0,
+                endLine: 0,
+                blockID: blockID,
+                startUnit: firstRow
             )
             if result != 0 {
                 historyProjectionRequests.retry(key)
@@ -837,6 +851,13 @@ extension ProductChromeHostView {
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         guard !direct else { return }
         let surface = pane.inputSurface
+        // Finding C: prefer Rust BlockViewportPlan geometry over AppKit card clips.
+        if activeBlockDisplayHandle != 0,
+           surface.applyBlockViewportPlan(displayHandle: activeBlockDisplayHandle)
+        {
+            surface.refreshRecoveryAccessibilityValue()
+            return
+        }
         var regions = collectBlockOutputRegions(surface: surface)
         // Cards exist but clips are still zero-sized: retry once after layout.
         // Never publish an empty region set while cards remain — that clears
