@@ -1,6 +1,6 @@
 # Architecture exit gate — #1484 / PR #1485
 
-Exact head under review: `33b60e36` (PR #1485 / `mahboobmonnamd/issue/1484`). Prior baseline `e335e1f2`.
+Exact head under review: tip of `mahboobmonnamd/issue/1484` (PR #1485). Prior baseline `e335e1f2`.
 
 Authority: ADR-004, ADR-009, ADR-010, ADR-011, SPEC-008, merged #1481/#1483, Issue #1484 body, AGENTS.md.
 
@@ -103,3 +103,4 @@ Detail: [`SOURCE-INVENTORY.md`](./SOURCE-INVENTORY.md). Specialist reports: agen
 - 2026-11-13: Finding E sealed-index HISTORY `(start_line,end_line)=(0,0)` + `native_block_wire_rows_from`; Finding C Metal `applyBlockViewportPlan` + plan FFI. Remaining: Finding D legacy card/HISTORY delete; independent COMPLIANT marks.
 - 2026-11-13: Finding D progress — Flow refuses card-clip fallback when index published; Flow HISTORY/NATIVE projection fetches no-op; document extent prefers Rust index. Card chrome host not fully deleted yet.
 - 2026-11-13: `44e83480` Finding E sealed-index; `d380675e` Finding C Metal plan FFI/consume; `b38dddf7`/`42817dbe` Finding D Flow authority retirement + setOutputLines disable; `0b24373c` two-display plan proof; `a356130e` sealed overscan. Architecture exit remains HOLD — no COMPLIANT marks without independent adversarial close-out; headed UI deferred.
+- 2026-11-13: Independent verifies persisted under agent-store `verify-{f-d1d2,f-partial,ab,ce}.md` — all PARTIAL; C/E dual-path; F soft-cap/D5 gaps then patched (soft-cap yield + f06_f + incremental set_height). Still no COMPLIANT; D card host delete remains.
