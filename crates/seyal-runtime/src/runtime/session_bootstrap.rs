@@ -589,12 +589,38 @@ fn apply_session_effects(entry: &mut Entry, event: IntegrationEvent) -> bool {
             }
             Effect::Complete(block_id, exit, line) => {
                 entry.execution.end_native_block_output();
+                // CommandFinished may yield before a following PromptStart arm
+                // in the same PTY read; discard that provisional arm so the
+                // outer host Block regains the write region (#1484 nested SSH).
+                entry.execution.cancel_pending_native_output();
                 changed |=
                     super::shell_integration::complete_timeline_block(entry, block_id, exit, line);
             }
         }
     }
+    // Nested shell idle at prompt while the SSH host Block is still Running:
+    // any residual PromptStart arm must not steal the host output RegionId.
+    if entry.session_runtime.pending.is_none()
+        && matches!(
+            entry.session_runtime.integration,
+            IntegrationState::AtPrompt
+        )
+        && session_host_block_running(entry)
+    {
+        entry.execution.cancel_pending_native_output();
+    }
     changed
+}
+
+fn session_host_block_running(entry: &Entry) -> bool {
+    use crate::command_block_timeline::CommandBlockLifecycle;
+    let Some(host) = entry.session.host_block() else {
+        return false;
+    };
+    entry
+        .block_timeline
+        .records()
+        .any(|record| record.id.raw() == host && record.lifecycle == CommandBlockLifecycle::Running)
 }
 
 pub(super) fn fresh_secret(

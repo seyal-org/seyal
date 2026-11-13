@@ -19,8 +19,8 @@ use crate::presentation::PresentationMode;
 use crate::LocalDisplayClient;
 
 use super::block_projection::{
-    SeyalAppBlockProjection,
-    SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
+    SeyalAppBlockProjection, SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS,
+    SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
 };
 use super::decode::runtime_block_from_command;
 use super::encode::{

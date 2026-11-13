@@ -303,10 +303,7 @@ impl LocalDisplayClient {
         self.block_viewport_index.total_height()
     }
 
-    pub(crate) fn apply_block_native_regions_to_viewport(
-        &mut self,
-        map: &BlockNativeRegions,
-    ) {
+    pub(crate) fn apply_block_native_regions_to_viewport(&mut self, map: &BlockNativeRegions) {
         // Height = sealed ownership rows + live on-window rows for each Block.
         // Ordinary output updates heights in place (O(log B) per Block) when
         // timeline order is unchanged; structural reorder still replace_all.
@@ -368,16 +365,18 @@ impl LocalDisplayClient {
                 .expect("AttachmentId is 16 bytes"),
         );
         self.block_viewport_plan = Some(crate::viewport::BlockViewportPlan::build(
-            execution_key,
-            display_key,
-            self.block_viewport_presentation_epoch,
-            self.block_native_regions.revision,
-            self.block_timeline.revision,
-            self.block_native_regions.revision,
-            self.block_viewport_scroll_anchor,
-            &self.block_viewport_index,
-            window_rows,
-            &records,
+            crate::viewport::BlockViewportPlanRequest {
+                execution_id: execution_key,
+                display_handle: display_key,
+                presentation_epoch: self.block_viewport_presentation_epoch,
+                source_generation: self.block_native_regions.revision,
+                block_revision: self.block_timeline.revision,
+                content_generation: self.block_native_regions.revision,
+                scroll_anchor: self.block_viewport_scroll_anchor,
+                index: &self.block_viewport_index,
+                window_rows,
+                records: &records,
+            },
         ));
     }
 

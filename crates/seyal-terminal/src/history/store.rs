@@ -71,10 +71,9 @@ impl HistoryStore {
         let first_segment = self
             .segments
             .partition_point(|segment| segment.lines.last().is_some_and(|line| line.line_id < id));
-        let first_line = self
-            .segments
-            .get(first_segment)
-            .map_or(0, |segment| segment.lines.partition_point(|line| line.line_id < id));
+        let first_line = self.segments.get(first_segment).map_or(0, |segment| {
+            segment.lines.partition_point(|line| line.line_id < id)
+        });
         let first_tail = self.tail.partition_point(|line| line.line_id < id);
         self.segments
             .iter()

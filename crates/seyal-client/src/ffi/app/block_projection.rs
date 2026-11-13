@@ -17,7 +17,9 @@ use super::APPS;
 
 /// Fail closed: host must not invent a history range or draw terminal pixels.
 pub const SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED: u16 = 0;
-/// Completed Block: request the inclusive trusted history span.
+/// Completed Block: inclusive trusted history span (ABI retained; Flow emit
+/// path is fail-closed — hosts must still recognize the kind).
+#[allow(dead_code)] // C ABI / SeyalApp.h parity; production Flow never emits this kind.
 pub const SEYAL_APP_BLOCK_PROJECTION_HISTORY: u16 = 1;
 /// Running Block: clip the damage-driven prepared primary frame into the
 /// Block output region. Not a Pane-wide live grid.
@@ -363,8 +365,7 @@ mod tests {
 
         let completed = seyal_app_block_projection(handle, 0);
         assert_eq!(
-            completed.kind,
-            SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED,
+            completed.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED,
             "completed without native RegionIds must not use LineId HISTORY"
         );
 
@@ -642,7 +643,10 @@ mod tests {
         let completed_host = seyal_app_block_projection(handle, 0);
         let completed_session = seyal_app_block_projection(handle, 1);
         assert_eq!(completed_host.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
-        assert_eq!(completed_session.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
+        assert_eq!(
+            completed_session.kind,
+            SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED
+        );
 
         crate::ffi::CLIENTS.with(|clients| {
             clients.borrow_mut().remove(&owner);

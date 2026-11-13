@@ -266,9 +266,8 @@ impl RegionStore {
         }
         for grid in &mut self.regions {
             grid.sealed_rows
-                .retain(|row| !evicted.iter().any(|id| *id == row.line_id));
-            grid.line_spine
-                .retain(|line| !evicted.iter().any(|id| *id == *line));
+                .retain(|row| !evicted.contains(&row.line_id));
+            grid.line_spine.retain(|line| !evicted.contains(line));
         }
     }
 

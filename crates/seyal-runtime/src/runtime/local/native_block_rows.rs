@@ -15,20 +15,12 @@ type WireRow = (LineId, Vec<HistoryWireCell>);
 /// cells filtered by RegionId ownership. When the Block has native RegionIds,
 /// never fall back to Swift LineId-span HISTORY assembly.
 ///
-/// Returns `(rows, more_rows)`. `more_rows` is true only when owned rows remain
-/// after this page — the client must not re-request when this is false.
-pub(super) fn native_block_wire_rows(
-    entry: &Entry,
-    block_id: u64,
-    max_lines: usize,
-    skip_leads: u32,
-) -> Option<(Vec<WireRow>, bool)> {
-    native_block_wire_rows_from(entry, block_id, max_lines, skip_leads, 0)
-}
-
 /// RegionId sealed-row indexed retrieval for viewport plans (Finding E).
 /// `start_sealed_index` selects the first sealed ownership row; `skip_leads`
 /// then applies only within that window (never width-inferred jumps).
+///
+/// Returns `(rows, more_rows)`. `more_rows` is true only when owned rows remain
+/// after this page — the client must not re-request when this is false.
 pub(super) fn native_block_wire_rows_from(
     entry: &Entry,
     block_id: u64,
@@ -151,7 +143,7 @@ impl NativeWirePage {
 
     /// Admit one owned row. Returns `false` when the page is full and another
     /// row would need to be emitted (`more` is then true).
-    fn push(&mut self, line_id: LineId, owned: &mut Vec<(u16, Cell)>) -> bool {
+    fn push(&mut self, line_id: LineId, owned: &mut [(u16, Cell)]) -> bool {
         owned.sort_by_key(|(col, _)| *col);
         if self.skip > 0 {
             let leads = padded_row_leads(owned, self.cols_n);

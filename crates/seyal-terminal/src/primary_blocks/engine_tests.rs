@@ -74,9 +74,7 @@ fn f_d6_reclaim_evicted_line_ids_drops_unit_generations_and_sealed_rows() {
             0,
         )
         .unwrap();
-    engine
-        .seal_window_row_indexed(0, LineId(9))
-        .unwrap();
+    engine.seal_window_row_indexed(0, LineId(9)).unwrap();
     assert_eq!(engine.unit_generation_at(LineId(9), 0), 1);
     assert_eq!(engine.sealed_row_count(block.output), 1);
     engine.reclaim_evicted_line_ids(&[LineId(9)]);
@@ -216,6 +214,25 @@ fn arm_then_begin_reuses_pending_without_double_push() {
     assert_eq!(engine.active_region(), host.output);
     engine.end_block_output();
     assert_eq!(engine.active_region(), engine.unstructured_region());
+}
+
+#[test]
+fn prompt_and_command_arm_then_begin_restores_outer_not_header() {
+    // Real OSC A then C arms both provisional regions; session end must
+    // restore the host output RegionId, not the consumed header frame.
+    let mut engine = PrimaryBlockEngine::new(4, 1).unwrap();
+    let host = engine.begin_block_output(BlockId(1)).unwrap();
+    let header = engine.arm_prompt_start_header().unwrap();
+    let armed = engine.arm_command_start_output().unwrap();
+    let session = engine.begin_block_output(BlockId(2)).unwrap();
+    assert_eq!(session.header, header);
+    assert_eq!(session.output, armed);
+    engine.end_block_output();
+    assert_eq!(
+        engine.active_region(),
+        host.output,
+        "nested end must restore host output, not provisional header"
+    );
 }
 
 #[test]

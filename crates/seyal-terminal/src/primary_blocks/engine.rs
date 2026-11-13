@@ -107,9 +107,7 @@ impl PrimaryBlockEngine {
             return Ok(region);
         }
         self.push_active_region();
-        let region = self
-            .store
-            .alloc_region(RegionKind::PromptCommand, None)?;
+        let region = self.store.alloc_region(RegionKind::PromptCommand, None)?;
         self.pending_header = Some(region);
         self.active_region = region;
         Ok(region)
@@ -136,6 +134,7 @@ impl PrimaryBlockEngine {
         &mut self,
         id: BlockId,
     ) -> Result<BlockContent, TerminalError> {
+        let reused_header = self.pending_header.is_some();
         let header = if let Some(pending) = self.pending_header.take() {
             if let Some(grid) = self.store.region_mut(pending) {
                 grid.owner = Some(id);
@@ -149,7 +148,13 @@ impl PrimaryBlockEngine {
             if let Some(grid) = self.store.region_mut(pending) {
                 grid.owner = Some(id);
             }
-            // Arm already pushed the outer region and set active to `pending`.
+            // CommandStart arm pushed the prior active (header or outer Block).
+            // When PromptStart also armed a provisional header, that prior frame
+            // is the header itself — collapse it so end_block_output restores
+            // the outer Block write region, not the header RegionId (#1484 SSH).
+            if reused_header && self.active_region_stack.last().copied() == Some(header) {
+                let _ = self.active_region_stack.pop();
+            }
             pending
         } else {
             self.push_active_region();

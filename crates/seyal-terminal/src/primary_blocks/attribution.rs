@@ -179,7 +179,7 @@ mod tests {
     fn soft_cap_is_below_hard_capacity() {
         let journal = AttributionJournal::production(64);
         assert!(journal.soft_cap() < 64);
-        assert!(journal.soft_cap() >= 64 - (64 / 8).max(1));
+        assert!(journal.soft_cap() >= 64 - (64 / 8));
         assert!(!journal.at_or_above_soft_cap());
     }
 

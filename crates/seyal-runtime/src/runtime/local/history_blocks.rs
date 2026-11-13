@@ -9,9 +9,7 @@ use crate::{
     ExecutionId,
 };
 
-use super::native_block_rows::native_block_wire_rows;
 use super::super::Runtime;
-
 fn pack_terminal_color(color: Color) -> u32 {
     match color {
         Color::Default => 0,
@@ -57,13 +55,12 @@ impl Runtime {
         };
         let max_lines = usize::from(request.max_lines);
         let revision = entry.execution.terminal().damage_generation();
-        // Native-addressed fetches (block_id != 0) never fall through to a
-        // LineId span — that masks RegionId ownership holes (#1484). Legacy
-        // HISTORY reconstruction remains only for unscoped LineId requests.
-        let (rows, more_rows) = if request.block_id != 0 {
-            // Finding E: start_line==0 && end_line==0 means start_unit is a
-            // sealed-row index from BlockViewportPlan clipping (not lead skip).
-            let page = if request.start_line == 0 && request.end_line == 0 {
+        // Finding E: only `(start_line,end_line)=(0,0)` with `block_id != 0` is
+        // sealed-row-index addressing from BlockViewportPlan clips. Any real
+        // LineId span (including block-tagged Pass7 HISTORY) keeps the VT
+        // history wire path so Stale/Truncated remain authoritative.
+        let (rows, more_rows) =
+            if request.block_id != 0 && request.start_line == 0 && request.end_line == 0 {
                 super::native_block_rows::native_block_wire_rows_from(
                     entry,
                     request.block_id,
@@ -71,63 +68,52 @@ impl Runtime {
                     0,
                     usize::try_from(request.start_unit).unwrap_or(usize::MAX),
                 )
+                .unwrap_or_default()
             } else {
-                native_block_wire_rows(
-                    entry,
-                    request.block_id,
+                match entry.execution.terminal().primary_history_wire_range(
+                    LineId(request.start_line),
+                    LineId(request.end_line),
                     max_lines,
                     request.start_unit,
-                )
-            };
-            match page {
-                Some(page) => page,
-                None => (Vec::new(), false),
-            }
-        } else {
-            match entry.execution.terminal().primary_history_wire_range(
-                LineId(request.start_line),
-                LineId(request.end_line),
-                max_lines,
-                request.start_unit,
-            ) {
-                Ok(rows) => {
-                    // VT caps at max_lines; a full window may have more in-range rows.
-                    let more = max_lines > 0 && rows.len() == max_lines;
-                    (rows, more)
-                }
-                Err(HistoryRangeError::Unrepresentable) => {
-                    self.send_error(
-                        token,
-                        ErrorCode::DisplayUnavailable,
-                        MessageType::HistoryRangeRequest as u16,
-                    );
-                    return;
-                }
-                Err(HistoryRangeError::Stale) => {
-                    let snapshot = framing::HistoryRangeSnapshot {
-                        request_id: request.request_id,
-                        block_id: request.block_id,
-                        revision,
-                        status: framing::HistoryRangeStatus::Stale,
-                        rows: Vec::new(),
-                        sidecar: Vec::new(),
-                    };
-                    let Ok(payload) = snapshot.try_encode() else {
+                ) {
+                    Ok(rows) => {
+                        // VT caps at max_lines; a full window may have more in-range rows.
+                        let more = max_lines > 0 && rows.len() == max_lines;
+                        (rows, more)
+                    }
+                    Err(HistoryRangeError::Unrepresentable) => {
                         self.send_error(
                             token,
-                            ErrorCode::CapacityExceeded,
+                            ErrorCode::DisplayUnavailable,
                             MessageType::HistoryRangeRequest as u16,
                         );
                         return;
-                    };
-                    let _ = self.send_mandatory_frame(
-                        token,
-                        framing::encode_frame(MessageType::HistoryRangeSnapshot, &payload),
-                    );
-                    return;
+                    }
+                    Err(HistoryRangeError::Stale) => {
+                        let snapshot = framing::HistoryRangeSnapshot {
+                            request_id: request.request_id,
+                            block_id: request.block_id,
+                            revision,
+                            status: framing::HistoryRangeStatus::Stale,
+                            rows: Vec::new(),
+                            sidecar: Vec::new(),
+                        };
+                        let Ok(payload) = snapshot.try_encode() else {
+                            self.send_error(
+                                token,
+                                ErrorCode::CapacityExceeded,
+                                MessageType::HistoryRangeRequest as u16,
+                            );
+                            return;
+                        };
+                        let _ = self.send_mandatory_frame(
+                            token,
+                            framing::encode_frame(MessageType::HistoryRangeSnapshot, &payload),
+                        );
+                        return;
+                    }
                 }
-            }
-        };
+            };
         let source_rows = rows.into_iter().map(|(line_id, cells)| {
             (
                 line_id.0,

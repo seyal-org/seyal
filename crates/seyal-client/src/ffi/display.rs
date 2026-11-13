@@ -676,20 +676,22 @@ pub extern "C" fn seyal_bridge_block_viewport_plan_header_for(
         return 0;
     }
     let header = super::with_client(handle, |client| {
-        client.block_viewport_plan().map(|plan| SeyalBlockViewportPlanHeader {
-            execution_id: plan.execution_id,
-            display_handle: plan.display_handle,
-            presentation_epoch: plan.presentation_epoch,
-            source_generation: plan.source_generation,
-            block_revision: plan.block_revision,
-            content_generation: plan.content_generation,
-            scroll_y: plan.scroll_y,
-            window_rows: plan.window_rows,
-            visible_count: u32::try_from(plan.visible_items.len()).unwrap_or(u32::MAX),
-            clipping_count: u32::try_from(plan.clipping.len()).unwrap_or(u32::MAX),
-            reserved: 0,
-            total_document_extent: plan.total_document_extent,
-        })
+        client
+            .block_viewport_plan()
+            .map(|plan| SeyalBlockViewportPlanHeader {
+                execution_id: plan.execution_id,
+                display_handle: plan.display_handle,
+                presentation_epoch: plan.presentation_epoch,
+                source_generation: plan.source_generation,
+                block_revision: plan.block_revision,
+                content_generation: plan.content_generation,
+                scroll_y: plan.scroll_y,
+                window_rows: plan.window_rows,
+                visible_count: u32::try_from(plan.visible_items.len()).unwrap_or(u32::MAX),
+                clipping_count: u32::try_from(plan.clipping.len()).unwrap_or(u32::MAX),
+                reserved: 0,
+                total_document_extent: plan.total_document_extent,
+            })
     })
     .flatten();
     match header {

@@ -8,4 +8,6 @@ mod index;
 mod plan;
 
 pub use index::{BlockViewportIndex, VisibleBlockSpan, WorkCounter};
-pub use plan::{BlockViewportPlan, ClippedGridRange, ScrollAnchor, VisiblePlanItem};
+pub use plan::{
+    BlockViewportPlan, BlockViewportPlanRequest, ClippedGridRange, ScrollAnchor, VisiblePlanItem,
+};

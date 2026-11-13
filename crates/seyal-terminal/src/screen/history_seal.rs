@@ -39,7 +39,9 @@ impl Screen {
             .find(|(_, cell)| cell.role == CellRole::Lead)
             .and_then(|(anchor, _)| anchor.map(|anchor| anchor.line_id))
             .unwrap_or_else(|| self.current_source_line_id(row as u16));
-        let _ = self.engine.seal_window_row_indexed(row as u16, seal_line_id);
+        let _ = self
+            .engine
+            .seal_window_row_indexed(row as u16, seal_line_id);
         let mut fragments: Vec<HistoryLine> = Vec::new();
         for (col, cell) in self.engine.store.grid_cells[start..end].iter().enumerate() {
             if cell.role != CellRole::Lead {

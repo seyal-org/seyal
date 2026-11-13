@@ -60,36 +60,43 @@ pub struct BlockViewportPlan {
     pub clipping: Vec<ClippedGridRange>,
 }
 
+/// Inputs for [`BlockViewportPlan::build`] (keeps the builder under Clippy's
+/// argument limit without inventing a second plan authority).
+pub struct BlockViewportPlanRequest<'a> {
+    pub execution_id: u64,
+    pub display_handle: u64,
+    pub presentation_epoch: u64,
+    pub source_generation: u64,
+    pub block_revision: u64,
+    pub content_generation: u64,
+    pub scroll_anchor: ScrollAnchor,
+    pub index: &'a BlockViewportIndex,
+    pub window_rows: u32,
+    pub records: &'a [(u64, u64, u64, u32, u16, u16)],
+}
+
 impl BlockViewportPlan {
     /// Build a plan for `[scroll_y, scroll_y + window_rows)` from the client index
     /// and the latest native content map records.
-    pub fn build(
-        execution_id: u64,
-        display_handle: u64,
-        presentation_epoch: u64,
-        source_generation: u64,
-        block_revision: u64,
-        content_generation: u64,
-        scroll_anchor: ScrollAnchor,
-        index: &BlockViewportIndex,
-        window_rows: u32,
-        records: &[(u64, u64, u64, u32, u16, u16)],
-    ) -> Self {
-        let scroll_y = match scroll_anchor {
-            ScrollAnchor::LiveEnd => index
+    pub fn build(req: BlockViewportPlanRequest<'_>) -> Self {
+        let scroll_y = match req.scroll_anchor {
+            ScrollAnchor::LiveEnd => req
+                .index
                 .total_height()
-                .saturating_sub(u64::from(window_rows)),
+                .saturating_sub(u64::from(req.window_rows)),
             ScrollAnchor::AbsoluteY(y) => y,
-            ScrollAnchor::BlockRow { block_id, row } => index
+            ScrollAnchor::BlockRow { block_id, row } => req
+                .index
                 .y_of(block_id)
                 .unwrap_or(0)
                 .saturating_add(u64::from(row)),
         };
-        let spans = index.visible_spans(scroll_y, window_rows);
+        let spans = req.index.visible_spans(scroll_y, req.window_rows);
         let mut visible_items = Vec::with_capacity(spans.len());
         let mut clipping = Vec::with_capacity(spans.len());
         for span in spans {
-            let meta = records
+            let meta = req
+                .records
                 .iter()
                 .find(|(id, _, _, _, _, _)| *id == span.block_id);
             let (header, output, sealed, live_first, live_count) = meta
@@ -132,16 +139,16 @@ impl BlockViewportPlan {
             }
         }
         Self {
-            execution_id,
-            display_handle,
-            presentation_epoch,
-            source_generation,
-            block_revision,
-            content_generation,
-            scroll_anchor,
+            execution_id: req.execution_id,
+            display_handle: req.display_handle,
+            presentation_epoch: req.presentation_epoch,
+            source_generation: req.source_generation,
+            block_revision: req.block_revision,
+            content_generation: req.content_generation,
+            scroll_anchor: req.scroll_anchor,
             scroll_y,
-            window_rows,
-            total_document_extent: index.total_height(),
+            window_rows: req.window_rows,
+            total_document_extent: req.index.total_height(),
             visible_items,
             clipping,
         }
@@ -184,7 +191,10 @@ impl BlockViewportPlan {
 
     /// Clipping range for one Block, if the current plan covers it.
     pub fn clip_for(&self, block_id: u64) -> Option<ClippedGridRange> {
-        self.clipping.iter().copied().find(|c| c.block_id == block_id)
+        self.clipping
+            .iter()
+            .copied()
+            .find(|c| c.block_id == block_id)
     }
 }
 
@@ -202,18 +212,18 @@ mod tests {
             (2, 20, 21, 15, 0, 2),
             (3, 30, 31, 5, 0, 0),
         ];
-        let plan = BlockViewportPlan::build(
-            7,
-            99,
-            3,
-            4,
-            5,
-            6,
-            ScrollAnchor::AbsoluteY(8),
-            &index,
-            10,
-            &records,
-        );
+        let plan = BlockViewportPlan::build(BlockViewportPlanRequest {
+            execution_id: 7,
+            display_handle: 99,
+            presentation_epoch: 3,
+            source_generation: 4,
+            block_revision: 5,
+            content_generation: 6,
+            scroll_anchor: ScrollAnchor::AbsoluteY(8),
+            index: &index,
+            window_rows: 10,
+            records: &records,
+        });
         assert_eq!(plan.execution_id, 7);
         assert_eq!(plan.display_handle, 99);
         assert_eq!(plan.presentation_epoch, 3);
@@ -234,35 +244,38 @@ mod tests {
         index_a.replace_all([(1, 40)]);
         let mut index_b = BlockViewportIndex::default();
         index_b.replace_all([(1, 40)]);
-        let plan_a = BlockViewportPlan::build(
-            1,
-            101,
-            1,
-            1,
-            1,
-            1,
-            ScrollAnchor::AbsoluteY(0),
-            &index_a,
-            10,
-            &records,
-        );
-        let plan_b = BlockViewportPlan::build(
-            1,
-            202,
-            1,
-            1,
-            1,
-            1,
-            ScrollAnchor::LiveEnd,
-            &index_b,
-            10,
-            &records,
-        );
+        let plan_a = BlockViewportPlan::build(BlockViewportPlanRequest {
+            execution_id: 1,
+            display_handle: 101,
+            presentation_epoch: 1,
+            source_generation: 1,
+            block_revision: 1,
+            content_generation: 1,
+            scroll_anchor: ScrollAnchor::AbsoluteY(0),
+            index: &index_a,
+            window_rows: 10,
+            records: &records,
+        });
+        let plan_b = BlockViewportPlan::build(BlockViewportPlanRequest {
+            execution_id: 1,
+            display_handle: 202,
+            presentation_epoch: 1,
+            source_generation: 1,
+            block_revision: 1,
+            content_generation: 1,
+            scroll_anchor: ScrollAnchor::LiveEnd,
+            index: &index_b,
+            window_rows: 10,
+            records: &records,
+        });
         assert_eq!(plan_a.display_handle, 101);
         assert_eq!(plan_b.display_handle, 202);
         assert_eq!(plan_a.scroll_y, 0);
         assert_eq!(plan_b.scroll_y, 30);
-        assert_ne!(plan_a.visible_items[0].first_visible_row, plan_b.visible_items[0].first_visible_row);
+        assert_ne!(
+            plan_a.visible_items[0].first_visible_row,
+            plan_b.visible_items[0].first_visible_row
+        );
         // Mutating one index must not affect the other plan's source index.
         assert!(index_a.set_height(1, 50));
         assert_eq!(index_b.height_of(1), Some(40));

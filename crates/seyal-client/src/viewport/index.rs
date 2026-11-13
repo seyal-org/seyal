@@ -116,9 +116,7 @@ impl BlockViewportIndex {
     }
 
     pub fn height_of(&self, block_id: u64) -> Option<u32> {
-        self.ranks
-            .get(&block_id)
-            .map(|&rank| self.heights[rank])
+        self.ranks.get(&block_id).map(|&rank| self.heights[rank])
     }
 
     pub fn total_height(&self) -> u64 {
@@ -263,7 +261,7 @@ impl BlockViewportIndex {
 }
 
 fn lsb(i: usize) -> usize {
-    i & i.wrapping_neg()
+    i.isolate_lowest_one()
 }
 
 #[cfg(test)]

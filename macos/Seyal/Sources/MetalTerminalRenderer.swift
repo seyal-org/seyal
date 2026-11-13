@@ -1,7 +1,6 @@
 import Foundation
 import Metal
 import QuartzCore
-
 /// Main-queue-only Metal presenter.
 ///
 /// Intentionally **not** `@MainActor`: CAMetalDisplayLink and other AppKit

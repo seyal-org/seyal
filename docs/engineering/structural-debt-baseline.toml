@@ -31,8 +31,8 @@ reason = "Metal surface remains the thin historyRanges/hit-test owner; #1442 add
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
 acknowledged_loc = 873
-issue = 1379
-reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and splits live-tail vs history Flow paint counts so clear→exit ink stays history-only."
+issue = 1484
+reason = "Metal update/present lifecycle stays one main-queue presenter; #1379/#1484 keep deferred prepares and Flow paint counts without growing presenter authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
@@ -54,15 +54,15 @@ reason = "Chrome actions remain the thin FOCUS_PANE / split / tab adapter; #1484
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/block_projection.rs"
-acknowledged_loc = 856
+acknowledged_loc = 938
 issue = 1484
-reason = "Block projection FFI remains the single Flow clip export; #1484 emits NATIVE_REGIONS for on-window and sealed off-window RegionId maps (reserved0=u16::MAX sentinel) without LineId HISTORY reconstruction when native records exist."
+reason = "Block projection FFI remains the single Flow clip export; #1484 plan-only path fails closed on HISTORY LineId emission, retains latest plan clips only, and drops card-clip dual authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/display.rs"
-acknowledged_loc = 704
+acknowledged_loc = 875
 issue = 1484
-reason = "Display FFI remains the thin prepared-frame / history / viewport export surface; #1484 adds native-regions total_height accessors beside existing viewport LineId helpers without a second display authority."
+reason = "Display FFI remains the thin prepared-frame / history / viewport export surface; #1484 adds BlockViewportPlan header/item/clip accessors beside native-regions total_height without a second display authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
@@ -286,9 +286,9 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 757
+acknowledged_loc = 761
 issue = 1484
-reason = "Local display-client protocol proofs stay one module; #1484 initializes BlockNativeRegions (with total_height) on the shared LocalDisplayClient test fixture beside existing composer/timeline coverage."
+reason = "Local display-client protocol proofs stay one module; #1484 initializes BlockNativeRegions (with total_height) and plan-index fixtures on the shared LocalDisplayClient harness."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
@@ -298,15 +298,15 @@ reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 admit Fl
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
-acknowledged_loc = 776
+acknowledged_loc = 932
 issue = 1484
-reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1484 begins native Block output-region ownership on StartPendingBlock/Complete, cancels provisional OSC arms on DropPending, records RegionIds on the timeline, and drains the VT attribution journal per observe turn without moving marker dispatch into a second module."
+reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1484 drains VT attribution with Entry watermark + cumulative marker/mutation consume counts without a second journal consumer."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/terminal/tests.rs"
-acknowledged_loc = 902
+acknowledged_loc = 723
 issue = 1484
-reason = "TerminalState unit suite remains one VT/oracle module; #1484 adds scroll remint RegionId retention and resize reflow RegionId retention proofs beside native-Block overwrite / seal-without-spill coverage."
+reason = "Core TerminalState VT/oracle suite stays one module after #1484 extracted attribution-yield and native-Block seal/scale proofs into sibling test modules."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_overlay.rs"
@@ -316,7 +316,7 @@ reason = "ADR-026 F4 overlay transitions, wire projection, and composer derivati
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_bootstrap.rs"
-acknowledged_loc = 716
+acknowledged_loc = 742
 issue = 1484
 reason = "Session bootstrap stays one Runtime cold-path module; #1484 opens/closes native Block RegionIds on session StartPendingBlock/Complete and cancels provisional OSC arms on DropPending in parity with the local trusted path so nested SSH Blocks restore host RegionStore attribution."
 
@@ -359,3 +359,9 @@ path = "crates/seyal-runtime/src/runtime/local/ingress.rs"
 acknowledged_loc = 982
 issue = 1388
 reason = "Input admission stays one ingress module. #1388 adds the fenced composer command path and the direct-input hold mapping; SessionConsent decoding lives in session_consent.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/local/mod.rs"
+acknowledged_loc = 774
+issue = 1484
+reason = "LocalDisplayClient remains the single per-display poll/apply façade; #1484 owns BlockViewportIndex + plan publish on this client without a terminal-engine viewport field."
