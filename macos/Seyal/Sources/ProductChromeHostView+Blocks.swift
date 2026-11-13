@@ -327,7 +327,7 @@ extension ProductChromeHostView {
                 // Floor-hidden → shell-exit reveal needs a laid-out body clip
                 // before Metal prepare; zero bounds skip paint (#1484).
                 card.layoutSubtreeIfNeeded()
-                let clip = card.convert(card.body.bounds, to: pane.inputSurface)
+                let clip = card.convert(card.body.frame, to: pane.inputSurface)
                 if clip.width > 1, clip.height > 1 {
                     var region = NativeTranscriptRegion(
                         id: blockID,
@@ -684,7 +684,7 @@ extension ProductChromeHostView {
                 cellHeight: cellHeight
             )
             card.layoutSubtreeIfNeeded()
-            let clip = card.convert(card.body.bounds, to: pane.inputSurface)
+            let clip = card.convert(card.body.frame, to: pane.inputSurface)
             if clip.width > 1, clip.height > 1 {
                 var region = NativeTranscriptRegion(
                     id: range.blockID,
@@ -828,7 +828,7 @@ extension ProductChromeHostView {
         screenClips.reserveCapacity(blockCards.count)
         for (blockID, card) in blockCards {
             card.layoutSubtreeIfNeeded()
-            let clip = card.convert(card.body.bounds, to: surface)
+            let clip = card.convert(card.body.frame, to: surface)
             guard clip.width > 1, clip.height > 1 else { continue }
             screenClips[blockID] = clip
         }

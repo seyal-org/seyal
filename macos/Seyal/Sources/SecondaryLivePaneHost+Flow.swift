@@ -361,7 +361,7 @@ extension SecondaryLivePaneHost {
                 cellHeight: cellHeight
             )
             card.layoutSubtreeIfNeeded()
-            let clip = card.convert(card.body.bounds, to: surface)
+            let clip = card.convert(card.body.frame, to: surface)
             if clip.width > 1, clip.height > 1 {
                 var region = NativeTranscriptRegion(
                     id: range.blockID,
@@ -470,7 +470,7 @@ extension SecondaryLivePaneHost {
         screenClips.reserveCapacity(blockCards.count)
         for (blockID, card) in blockCards {
             card.layoutSubtreeIfNeeded()
-            let clip = card.convert(card.body.bounds, to: surface)
+            let clip = card.convert(card.body.frame, to: surface)
             guard clip.width > 1, clip.height > 1 else { continue }
             screenClips[blockID] = clip
         }
