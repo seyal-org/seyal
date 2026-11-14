@@ -1,6 +1,6 @@
 # ADR-019 — Local Resource Addressing and navigation authority
 
-- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1004. An author or agent comment is not that acceptance.
+- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1004. An author or agent comment is not that acceptance. **ADR-029** drops `Tab` from `ResourceAddress` when SPEC-032 is accepted. Until then the closed set below remains in force.
 - **Date:** 2026-09-24
 - **Issue:** #1004 (refinement) — parent #674, epic #665
 - **Numbering:** ADR-019. Sibling documents stay on their own pull requests and

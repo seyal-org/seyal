@@ -1,6 +1,6 @@
 # ADR-021 — Intra-Tab PaneTree operations and focus transitions
 
-- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1001
+- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1001. **ADR-029** scopes these pane-tree operations to the workspace pane tree when SPEC-032 is accepted. Until then they stay intra-Tab.
 - **Date:** 2026-09-25
 - **Issue:** #1001 (refinement) — parent #674, epic #665
 - **Numbering:** Final. Allocation across concurrent M003 refinements is

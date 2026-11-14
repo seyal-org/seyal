@@ -144,6 +144,8 @@ The viewport should only materialize/render content close to the visible region.
 
 ## 4. Workspace object model
 
+ADR-029 replaces the Tab layer below with one pane tree owned by the selected workspace, once SPEC-032 is accepted. Until that spec is accepted, the tree in this section remains the implementation model.
+
 The UI may expose:
 
 ```text
