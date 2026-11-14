@@ -107,6 +107,13 @@ fn negotiated_presentation_envelope_wraps_display_line_ids_and_block_timeline() 
     assert_eq!(envelope.attachment_id, attach_id());
     assert_eq!(envelope.resume_sequence, 11);
     assert_eq!(envelope.payload, &[6, 7]);
+
+    let native = encode_frame(MessageType::BlockNativeRegions, &[8, 9, 10]);
+    let wrapped = envelope_presentation_frame(&native, attach_id(), 12).unwrap();
+    let envelope = decode_presentation_envelope(&wrapped).unwrap();
+    assert_eq!(envelope.attachment_id, attach_id());
+    assert_eq!(envelope.resume_sequence, 12);
+    assert_eq!(envelope.payload, &[8, 9, 10]);
 }
 
 #[test]

@@ -18,6 +18,7 @@ mod modes;
 mod mouse;
 mod parser;
 mod presentation;
+mod primary_blocks;
 mod protocol_reply;
 mod screen;
 mod selection;
@@ -51,6 +52,10 @@ pub use mouse::{
 pub use presentation::{
     HostPresentationEvent, PresentationPayload, MAX_HOST_PRESENTATION_EVENTS,
     MAX_PRESENTATION_PAYLOAD_BYTES,
+};
+pub use primary_blocks::{
+    BlockContentRef, BlockId, CellHandle, MarkerKind, OnWindowRegionSpan, PrimaryEvent, RegionId,
+    StreamSequence, UnitVersion, VisibleBlockSpan,
 };
 pub use protocol_reply::{ProtocolReply, MAX_PROTOCOL_REPLIES, MAX_PROTOCOL_REPLY_BYTES};
 pub use selection::{

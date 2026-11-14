@@ -185,8 +185,17 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
 
     @discardableResult
     func focusEditor() -> Bool {
-        // Never force-focus a non-editable Busy dock over DirectInput Metal.
-        guard textView.isEditable else { return false }
+        focusEditor(allowHidden: false)
+    }
+
+    /// - Parameter allowHidden: recovery after a dismissed palette may need to
+    ///   reclaim the editor while Rust composer mode is still Hidden/Busy and
+    ///   `reconcile()` has not yet revealed the dock (#1484). Multipane demote
+    ///   and DirectInput must keep `allowHidden == false` so a hidden dock
+    ///   cannot steal keys from the visible pane editor or Metal surface.
+    @discardableResult
+    func focusEditor(allowHidden: Bool) -> Bool {
+        if isHidden && !allowHidden { return false }
         return window?.makeFirstResponder(textView) ?? false
     }
 
@@ -278,6 +287,14 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
                 onEnsureFocused?()
                 _ = window?.makeFirstResponder(textView)
             }
+            // FOCUS_PANE is synchronous in ProductChrome, but still re-check:
+            // a missed focus leaves SET_COMPOSER_DRAFT / SUBMIT on the sibling
+            // fence with an empty Rust draft and no Block (#1484 multipane).
+            let focused = seyal_app_shell(appHandle)
+            if focused.focused_pane_lo != paneLo || focused.focused_pane_hi != paneHi {
+                onEnsureFocused?()
+                _ = window?.makeFirstResponder(textView)
+            }
         }
     }
 
@@ -345,10 +362,11 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         } else {
             placeholder.stringValue = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
         }
+        // DirectInput retracts the dock (`isHidden`) but admission is still Busy;
+        // XCUI Busy parity asserts `value == busy`, not a second "hidden" token
+        // (#1484 / Stage C busy-or-hidden).
         setAccessibilityValue(
-            blockScopedDirectInput
-                ? "hidden"
-                : (relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden")))
+            relay ? "relay" : (available ? "available" : (busy || blockScopedDirectInput ? "busy" : "hidden"))
         )
         if composer.epoch != lastEpoch {
             lastEpoch = composer.epoch
@@ -531,7 +549,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         return copyUTF8(row.title, row.title_len) ?? ""
     }
 
-    private func pushDraft() {
+    private func pushDraft() -> Bool {
         let snapshot = prepareFocusedMutation()
         let composer = readComposer()
         var action = SeyalAppAction()
@@ -541,18 +559,24 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.applySnapshotFence(snapshot)
         action.target_generation = composer.epoch
         let utf8 = Array(textView.string.utf8)
-        utf8.withUnsafeBufferPointer { buffer in
+        return utf8.withUnsafeBufferPointer { buffer in
             action.payload = buffer.baseAddress
             action.payload_len = UInt32(buffer.count)
-            _ = seyal_app_apply(appHandle, &action)
+            return seyal_app_apply(appHandle, &action) == 0
         }
     }
 
     private func submit() {
-        pushDraft()
+        // Retry once if the first draft push races a Pane focus switch — otherwise
+        // SUBMIT sees an empty Rust draft and never reaches Runtime (#1484).
+        if !pushDraft() {
+            prepareBoundPaneInputFocus()
+            guard pushDraft() else { return }
+        }
         let composer = readComposer()
         guard composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0 else { return }
         let command = textView.string
+        guard !command.isEmpty else { return }
         let snapshot = prepareFocusedMutation()
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -560,17 +584,25 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         action.applySnapshotFence(snapshot)
         action.target_generation = composer.epoch
-        guard seyal_app_apply(appHandle, &action) == 0 else { return }
+        // ApplicationRoot SUBMIT can fail closed on a stale pane fence after
+        // multipane focus churn. Still admit through the pane-pinned Runtime
+        // path so a sibling Block is not dropped (#1484 G8).
+        let appSubmitted = seyal_app_apply(appHandle, &action) == 0
         var status = onSubmitComposer?(command) ?? -10
         if status == -12 {
             let payload = command.hasSuffix("\r") ? command : command + "\r"
             status = onSubmitRaw?(payload) ?? -10
         }
-        if status == 0 {
+        // Clear the AppRoot pending request when Runtime transport accepted.
+        // Busy dock AX is brief: zsh preexec then publishes DirectInput and
+        // retracts the dock (#1468). Do not block Accept on Busy visibility.
+        if status == 0, appSubmitted {
             let submitted = readComposer()
             if submitted.request_id != 0 {
                 applyComposerResult(requestID: submitted.request_id, accepted: true)
             }
+        } else if status != 0 && status != -12 {
+            setAccessibilityValue("Command not accepted.")
         }
         reconcile()
     }

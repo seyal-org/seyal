@@ -53,6 +53,17 @@ pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
             revision: 0,
             records: Vec::new(),
         },
+        block_native_regions: seyal_runtime::local_ipc::framing::BlockNativeRegions {
+            revision: 0,
+            total_height: 0,
+            records: Vec::new(),
+        },
+        block_viewport_index: crate::viewport::BlockViewportIndex::default(),
+        block_viewport_plan: None,
+        block_viewport_presentation_epoch: 0,
+        last_plan_native_paint_identity: Vec::new(),
+        block_viewport_scroll_anchor: crate::viewport::ScrollAnchor::LiveEnd,
+        block_viewport_window_rows: None,
         command_blocks_supported: false,
         last_composer_result: None,
         composer_status: None,
@@ -218,6 +229,93 @@ fn pinned_execution_must_still_be_running_before_reconnect() {
     assert!(execution_is_running(&running, execution_id));
     assert!(!execution_is_running(&finalized, execution_id));
     assert!(!execution_is_running(&different_execution, execution_id));
+}
+
+#[test]
+fn native_regions_commit_before_plan_rebuild_emits_clips() {
+    // #1484: first-seen Blocks must clip from the committed map, not the prior
+    // empty records that previously drove plan rebuild.
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(24);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 100,
+        records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+            block_id: 42,
+            header_region: 100,
+            output_region: 101,
+            first_row: 0,
+            row_count: 0,
+            sealed_rows: 100,
+        }],
+    };
+    client.apply_block_native_regions_to_viewport();
+    let plan = client
+        .block_viewport_plan()
+        .expect("plan must rebuild from committed map");
+    assert!(
+        plan.total_document_extent > 0,
+        "committed map must produce non-zero extent"
+    );
+    assert!(
+        plan.clip_for(42).is_some(),
+        "first-seen Block must emit a sealed clip from committed RegionIds"
+    );
+}
+
+#[test]
+fn live_row_count_growth_does_not_bump_presentation_epoch() {
+    // #1484 P0: seq streaming grows live row_count without sealed RegionId change.
+    // presentation_epoch must stay stable so Metal retains HISTORY pages.
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(24);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 10,
+        records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+            block_id: 7,
+            header_region: 1,
+            output_region: 2,
+            first_row: 0,
+            row_count: 5,
+            sealed_rows: 0,
+        }],
+    };
+    client.apply_block_native_regions_to_viewport();
+    let epoch_after_first = client.block_viewport_presentation_epoch;
+    assert!(epoch_after_first > 0);
+
+    client.block_native_regions.revision = 2;
+    client.block_native_regions.records[0].row_count = 20;
+    client.block_native_regions.total_height = 20;
+    client.apply_block_native_regions_to_viewport();
+    assert_eq!(
+        client.block_viewport_presentation_epoch, epoch_after_first,
+        "live height growth must not bump presentation_epoch"
+    );
+    assert_eq!(
+        client.block_viewport_total_height(),
+        20,
+        "Fenwick index must still track live height"
+    );
+
+    client.block_native_regions.revision = 3;
+    client.block_native_regions.records[0].sealed_rows = 20;
+    client.block_native_regions.records[0].row_count = 0;
+    client.block_native_regions.records[0].output_region = 9;
+    client.apply_block_native_regions_to_viewport();
+    assert!(
+        client.block_viewport_presentation_epoch > epoch_after_first,
+        "sealed RegionId / ownership change must bump presentation_epoch"
+    );
 }
 
 #[test]

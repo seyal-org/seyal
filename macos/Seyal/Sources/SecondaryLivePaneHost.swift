@@ -63,6 +63,11 @@ final class SecondaryLivePaneHost: NSView {
     var blockCards: [UInt64: CommandBlockView] = [:]
     var lastBlockCount = 0
     var followingLiveEnd = true
+    /// When set, focus/HISTORY/layout churn must restore this *content-relative*
+    /// scroll offset (`documentOffsetY - leadingSpacer`) instead of following
+    /// live end. Content-relative pins survive leading-spacer churn when card
+    /// height and Rust extent disagree (#1484 FocusChurn mid-transcript).
+    var pinnedTranscriptOffsetY: CGFloat?
     var isProgrammaticTranscriptScroll = false
     var transcriptFrameRevision: UInt64 = 0
     private var lastTranscriptViewportSize: CGSize = .zero
@@ -71,10 +76,11 @@ final class SecondaryLivePaneHost: NSView {
     var lastPublishedTranscriptRegions: [NativeTranscriptRegion] = []
     var lastVisibleHistoryPixelCount = 0
     var lastHistoryPixelSampleAt = Date.distantPast
-    var historyProjectionRequests = HistoryProjectionRequestBook()
     var transcriptScrollStates: [UInt64: PaneTranscriptScrollState] = [:]
     var restoresScrollForDisplayHandleChange = false
     static let blockOutputZeroClipRetryLimit = 4
+    /// Settled AppKit body clips; layout-settle only (#1484 echo lag/flicker).
+    var cachedChromeBodyClips: [UInt64: NSRect] = [:]
     /// When true, this host owns keyboard/composer interaction for its Pane.
     private(set) var inputOwned = false
     private let statusLabel = NSTextField(labelWithString: "")
@@ -156,13 +162,14 @@ final class SecondaryLivePaneHost: NSView {
         composer.onEnsureFocused = { [weak self] in
             self?.onFocus?()
         }
-        // Bridgeless surfaces borrow the window bridge; submit must still reach
-        // the focused Controller so Flow commands and TUI entry work (#1424).
+        // Bridgeless surfaces borrow the window bridge; pin this leaf's
+        // Controller so a stale windowFocusedDisplayHandle cannot admit the
+        // command onto a sibling execution (#1484 / #1426 multipane).
         composer.onSubmitComposer = { [weak self] command in
-            self?.historyBridge?.submitComposerCommand(command) ?? -10
+            self?.submitComposerCommandPinned(command) ?? -10
         }
         composer.onSubmitRaw = { [weak self] command in
-            self?.historyBridge?.submitCommittedText(command) ?? -10
+            self?.submitCommittedTextPinned(command) ?? -10
         }
         composer.onCommandConsumed = { [weak self] in
             self?.reconcileFlowPresentation()
@@ -324,8 +331,37 @@ final class SecondaryLivePaneHost: NSView {
             refreshInputOwnershipChrome()
             return
         }
+        rememberTranscriptScrollState()
         inputOwned = owned
         refreshInputOwnershipChrome()
+        restorePinnedTranscriptOffsetIfNeeded()
+        if pinnedTranscriptOffsetY != nil {
+            DispatchQueue.main.async { [weak self] in
+                self?.restorePinnedTranscriptOffsetIfNeeded()
+            }
+        }
+    }
+
+    /// Leading spacer above real Block cards (Warp bottom-dock slack).
+    var transcriptLeadingSpacerHeightValue: CGFloat {
+        transcriptLeadingSpacerHeight.constant
+    }
+
+    /// Scroll offset relative to card content, independent of leading spacer.
+    func transcriptContentOffsetY(documentOffsetY: CGFloat? = nil) -> CGFloat {
+        let scrollY = documentOffsetY ?? transcript.contentView.bounds.origin.y
+        return scrollY - transcriptLeadingSpacerHeightValue
+    }
+
+    func documentOffsetY(forContentOffset contentOffsetY: CGFloat) -> CGFloat {
+        contentOffsetY + transcriptLeadingSpacerHeightValue
+    }
+
+    func restorePinnedTranscriptOffsetIfNeeded() {
+        guard let pinnedContent = pinnedTranscriptOffsetY else { return }
+        followingLiveEnd = false
+        syncTranscriptDocumentSize()
+        setTranscriptDocumentOffsetY(documentOffsetY(forContentOffset: pinnedContent))
     }
 
     /// Document scroll offset of the transcript (for retention tests).
@@ -342,8 +378,20 @@ final class SecondaryLivePaneHost: NSView {
         transcript.contentView.scroll(to: NSPoint(x: 0, y: clamped))
         transcript.reflectScrolledClipView(transcript.contentView)
         // Mid-transcript programmatic scrolls must clear follow-bottom so the
-        // next rebuild does not jump to live end (#1424).
-        followingLiveEnd = maxY > 0 && clamped >= maxY - 24
+        // next rebuild does not jump to live end (#1424). When the requested
+        // offset still exceeds the current document, keep followingLiveEnd
+        // false and retain the pin — the document is still settling (#1484).
+        if y > maxY + 24 {
+            followingLiveEnd = false
+            if pinnedTranscriptOffsetY == nil {
+                pinnedTranscriptOffsetY = transcriptContentOffsetY(documentOffsetY: y)
+            }
+        } else {
+            followingLiveEnd = maxY > 0 && clamped >= maxY - 24
+            if followingLiveEnd {
+                pinnedTranscriptOffsetY = nil
+            }
+        }
         rememberTranscriptScrollState()
     }
 
@@ -373,14 +421,32 @@ final class SecondaryLivePaneHost: NSView {
     }
 
     @objc private func transcriptBoundsDidChange(_ note: Notification) {
-        // History instance origins are baked in surface pixels; scroll must
-        // re-publish clips/origins even for programmatic follow-to-live-end /
-        // offset restore, or Metal history sticks at the pre-scroll geometry
-        // (#1379 / stuck glyphs). Only the follow-tail latch is gated.
-        if !isProgrammaticTranscriptScroll {
-            followingLiveEnd = isNearLiveEnd()
-            rememberTranscriptScrollState()
+        // Plan-owned clips track AbsoluteY/LiveEnd via syncBlockViewportScrollAnchor.
+        // Programmatic LiveEnd/pin restores must not re-enter publish (loop).
+        // User scroll still republishes so plan geometry follows AppKit offset.
+        guard !isProgrammaticTranscriptScroll else { return }
+        let nearLiveEnd = isNearLiveEnd()
+        let visibleMaxY = max(
+            transcriptDocumentScrollHeight() - transcript.contentView.bounds.height,
+            0
+        )
+        // A transient short document (type-48 lag / card rebuild) can make
+        // any offset look like live-end. Keep an intentional mid-transcript
+        // pin until the document can actually host it (#1484 FocusChurn).
+        let pinnedDocument = pinnedTranscriptOffsetY.map {
+            documentOffsetY(forContentOffset: $0)
         }
+        if let pinnedDocument, pinnedDocument > visibleMaxY + 24 {
+            followingLiveEnd = false
+        } else if nearLiveEnd {
+            followingLiveEnd = true
+            pinnedTranscriptOffsetY = nil
+            clearPreservedDocumentHeight()
+        } else {
+            followingLiveEnd = false
+            pinnedTranscriptOffsetY = transcriptContentOffsetY()
+        }
+        rememberTranscriptScrollState()
         publishBlockOutputFrame()
     }
 
@@ -393,7 +459,6 @@ final class SecondaryLivePaneHost: NSView {
     func updateDisplayHandle(_ handle: UInt64) -> Bool {
         guard handle != displayHandle else { return false }
         rememberTranscriptScrollState()
-        historyProjectionRequests.discard(forDisplayHandle: displayHandle)
         surface.activateTranscriptDisplayHandle(handle)
         displayHandle = handle
         composer.boundDisplayHandle = handle
@@ -425,6 +490,87 @@ final class SecondaryLivePaneHost: NSView {
         _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
         publishFrame()
         reconcileFlowPresentation()
+    }
+
+    /// Prefer the live shell binding's Controller over a stale host cache so
+    /// focus churn cannot submit onto a sibling execution (#1484 / #1426).
+    func resolvedSubmissionDisplayHandle() -> UInt64 {
+        let shell = seyal_app_shell(appHandle)
+        for index in 0..<Int(shell.pane_count) {
+            let binding = seyal_app_pane_binding(appHandle, UInt32(index))
+            if binding.pane_lo == paneLo, binding.pane_hi == paneHi, binding.display_handle != 0 {
+                if binding.display_handle != displayHandle {
+                    _ = updateDisplayHandle(binding.display_handle)
+                }
+                return binding.display_handle
+            }
+        }
+        return displayHandle
+    }
+
+    /// Submit through this pane's display handle, then sync that pane's
+    /// Runtime Block timeline into ApplicationRoot so the card appears without
+    /// waiting for the next registry poll (#1484 sibling admission).
+    @discardableResult
+    func submitComposerCommandPinned(_ command: String) -> Int32 {
+        guard let bridge = historyBridge else { return -10 }
+        onFocus?()
+        let handle = resolvedSubmissionDisplayHandle()
+        let priorOverride = bridge.submissionDisplayHandleOverride
+        let priorFocused = bridge.windowFocusedDisplayHandle
+        if handle != 0 {
+            bridge.submissionDisplayHandleOverride = handle
+            bridge.windowFocusedDisplayHandle = handle
+        }
+        // Pane-scoped Runtime admission — not FOCUSED_DISPLAY_HANDLE (#1484).
+        let status = bridge.submitComposerCommand(command, forDisplayHandle: handle)
+        bridge.submissionDisplayHandleOverride = priorOverride
+        bridge.windowFocusedDisplayHandle = priorFocused
+        if status == 0 {
+            // Bounded drain until this pane's BlockTimeline admits a new Block
+            // (ComposerResult Accept is not Block presence).
+            let beforeCount = Int(seyal_app_composer_for_pane(appHandle, paneLo, paneHi).block_count)
+            if handle != 0 {
+                _ = bridge.selectDisplayHandle(handle)
+                for _ in 0..<64 {
+                    _ = seyal_bridge_poll_for(handle)
+                    bridge.publishHistoryRanges(forDisplayHandle: handle)
+                    _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+                    // Keep the pane host rebuild path warm for the primary
+                    // Controller (original pane) which previously only refreshed
+                    // on poll result==1 (#1484).
+                    bridge.onRegistryHandlePolled?(handle)
+                    let afterCount = Int(
+                        seyal_app_composer_for_pane(appHandle, paneLo, paneHi).block_count
+                    )
+                    if afterCount > beforeCount {
+                        break
+                    }
+                }
+            } else {
+                _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+            }
+            lastProjectionFingerprint = nil
+            reconcileFlowPresentation()
+        }
+        return status
+    }
+
+    @discardableResult
+    func submitCommittedTextPinned(_ command: String) -> Int32 {
+        guard let bridge = historyBridge else { return -10 }
+        onFocus?()
+        let handle = resolvedSubmissionDisplayHandle()
+        let priorOverride = bridge.submissionDisplayHandleOverride
+        let priorFocused = bridge.windowFocusedDisplayHandle
+        if handle != 0 {
+            bridge.submissionDisplayHandleOverride = handle
+            bridge.windowFocusedDisplayHandle = handle
+        }
+        let status = bridge.submitCommittedText(command)
+        bridge.submissionDisplayHandleOverride = priorOverride
+        bridge.windowFocusedDisplayHandle = priorFocused
+        return status
     }
 
     /// Focus / host-binding path: input ownership + composer chrome only.
@@ -699,11 +845,6 @@ final class SecondaryLivePaneHost: NSView {
             surface.applyRendererPresentation(.fullPane(mode))
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])
-            // Wiping Metal/history caches must also clear the settled request
-            // book. Otherwise return-to-Flow rebuilds skip HistoryRangeRequest
-            // for already-settled Block keys and leave permanently blank bodies
-            // (#1379 adversarial review B2).
-            historyProjectionRequests.discard(forDisplayHandle: displayHandle)
             composer.isHidden = true
             transcriptBottomToHost.isActive = false
             clearPreservedDocumentHeight()

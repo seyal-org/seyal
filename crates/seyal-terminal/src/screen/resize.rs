@@ -7,6 +7,7 @@ use crate::{
     grapheme_store::GraphemeStore,
     history::{range_entirely_before, HistoryBreakAfter, HistoryLine, HistoryStore, HistoryUnit},
     line::LineIdAllocator,
+    primary_blocks::types::RegionId,
     Cell, CellRole, LineId, TerminalError,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -40,8 +41,10 @@ impl Screen {
             return Err(TerminalError::LineIdentityExhausted);
         }
 
+        let unstructured = self.engine.unstructured_region();
         let mut next = vec![Cell::default(); usize::from(cols) * usize::from(rows)];
         let mut next_anchors = vec![None; usize::from(cols) * usize::from(rows)];
+        let mut next_regions = vec![unstructured; usize::from(cols) * usize::from(rows)];
         let mut next_breaks = vec![Some(HistoryBreakAfter::HardBreak); usize::from(rows)];
         let mut next_line_ids = vec![None; usize::from(rows)];
         let mut history_additions = Vec::new();
@@ -60,7 +63,7 @@ impl Screen {
             // column-only resize cannot eat scrollback spacers.
             let last_content_row = (0..old_rows).rev().find(|row| {
                 let start = usize::from(*row) * usize::from(old_cols);
-                self.cells[start..start + usize::from(old_cols)]
+                self.engine.store.grid_cells[start..start + usize::from(old_cols)]
                     .iter()
                     .any(|cell| cell.role != CellRole::Empty)
             });
@@ -72,6 +75,7 @@ impl Screen {
             };
             let mut source_lines: Vec<HistoryLine> = Vec::new();
             let mut source_cells = HashMap::new();
+            let mut source_regions = HashMap::<crate::HistoryAnchor, RegionId>::new();
             let mut source_offsets = HashMap::<LineId, u32>::new();
             let mut source_breaks = HashMap::<LineId, HistoryBreakAfter>::new();
             let mut cursor_source = crate::HistoryAnchor {
@@ -82,23 +86,25 @@ impl Screen {
                 let row_start = usize::from(row) * usize::from(old_cols);
                 let break_after =
                     self.row_breaks[usize::from(row)].unwrap_or(HistoryBreakAfter::HardBreak);
-                let cells = &self.cells[row_start..row_start + usize::from(old_cols)];
+                let cells =
+                    &self.engine.store.grid_cells[row_start..row_start + usize::from(old_cols)];
                 let mut row_has_units = false;
                 for (col, cell) in cells.iter().enumerate() {
                     if cell.role != CellRole::Lead {
                         continue;
                     }
                     row_has_units = true;
-                    let anchor = self.cell_anchors[row_start + col].unwrap_or_else(|| {
-                        let line_id = self.line_ids[usize::from(row)];
-                        let offset = source_offsets.entry(line_id).or_default();
-                        let anchor = crate::HistoryAnchor {
-                            line_id,
-                            unit_offset: *offset,
-                        };
-                        *offset = offset.saturating_add(1);
-                        anchor
-                    });
+                    let anchor =
+                        self.engine.store.grid_anchors[row_start + col].unwrap_or_else(|| {
+                            let line_id = self.line_ids[usize::from(row)];
+                            let offset = source_offsets.entry(line_id).or_default();
+                            let anchor = crate::HistoryAnchor {
+                                line_id,
+                                unit_offset: *offset,
+                            };
+                            *offset = offset.saturating_add(1);
+                            anchor
+                        });
                     let source_break = self
                         .source_breaks
                         .get(&anchor.line_id)
@@ -106,6 +112,14 @@ impl Screen {
                         .unwrap_or(break_after);
                     source_breaks.insert(anchor.line_id, source_break);
                     source_cells.insert(anchor, *cell);
+                    let region = self
+                        .engine
+                        .store
+                        .grid_regions
+                        .get(row_start + col)
+                        .copied()
+                        .unwrap_or(unstructured);
+                    source_regions.insert(anchor, region);
                     if row == self.cursor.row
                         && (col < usize::from(self.cursor.col)
                             || (self.cursor.pending_wrap && col <= usize::from(self.cursor.col)))
@@ -209,10 +223,15 @@ impl Screen {
                         }
                         next[start + col] = cell;
                         next_anchors[start + col] = Some(*anchor);
+                        let region = source_regions.get(anchor).copied().unwrap_or(unstructured);
+                        next_regions[start + col] = region;
                         if width == 2 {
                             next[start + col + 1] = Cell::continuation();
+                            next_regions[start + col + 1] = region;
                         }
                     } else if let Some(unit) = history_units.get(anchor) {
+                        // Already-sealed HistoryStore units keep ownership in
+                        // RegionGrid.sealed_rows; live slots stay unstructured.
                         width = usize::from(unit.width.max(1));
                         if col + width > usize::from(cols) {
                             break;
@@ -223,9 +242,11 @@ impl Screen {
                             .unwrap_or('\u{FFFD}');
                         next[start + col] = Cell::lead_inline(first, unit.width.max(1), unit.style);
                         next_anchors[start + col] = Some(*anchor);
+                        next_regions[start + col] = unstructured;
                         pending_history_cells.push((start + col, unit.clone()));
                         if width == 2 {
                             next[start + col + 1] = Cell::continuation();
+                            next_regions[start + col + 1] = unstructured;
                         }
                     } else {
                         continue;
@@ -298,9 +319,11 @@ impl Screen {
                 let new_start = usize::from(row) * usize::from(cols);
                 let count = usize::from(copy_cols);
                 next[new_start..new_start + count]
-                    .copy_from_slice(&self.cells[old_start..old_start + count]);
+                    .copy_from_slice(&self.engine.store.grid_cells[old_start..old_start + count]);
                 next_anchors[new_start..new_start + count]
-                    .copy_from_slice(&self.cell_anchors[old_start..old_start + count]);
+                    .copy_from_slice(&self.engine.store.grid_anchors[old_start..old_start + count]);
+                next_regions[new_start..new_start + count]
+                    .copy_from_slice(&self.engine.store.grid_regions[old_start..old_start + count]);
                 next_breaks[usize::from(row)] = self.row_breaks[usize::from(row)];
                 next_line_ids[usize::from(row)] = Some(self.line_ids[usize::from(row)]);
                 if cols < old_cols {
@@ -309,6 +332,7 @@ impl Screen {
                     if next[final_index].role == CellRole::Lead && next[final_index].width >= 2 {
                         next[final_index] = Cell::blank(self.pen.bg);
                         next_anchors[final_index] = None;
+                        next_regions[final_index] = unstructured;
                     }
                 }
             }
@@ -346,6 +370,7 @@ impl Screen {
             rows,
             cells: next,
             cell_anchors: next_anchors,
+            cell_regions: next_regions,
             line_ids: prepared_line_ids,
             row_breaks: next_breaks,
             source_breaks: next_source_breaks,
@@ -397,7 +422,7 @@ impl Screen {
             .filter(|cell| cell.role == CellRole::Lead)
             .map(|cell| cell.store_id)
             .collect::<HashSet<_>>();
-        for cell in &self.cells {
+        for cell in &self.engine.store.grid_cells {
             if cell.role == CellRole::Lead && !retained_store_ids.contains(&cell.store_id) {
                 Self::release_cell(*cell, store);
             }
@@ -410,8 +435,15 @@ impl Screen {
         let was_full_screen = self.region_is_full_screen();
         self.cols = prepared.cols;
         self.rows = prepared.rows;
-        self.cells = prepared.cells;
-        self.cell_anchors = prepared.cell_anchors;
+        self.engine
+            .replace_window_grid(
+                prepared.cols,
+                prepared.rows,
+                prepared.cells,
+                prepared.cell_anchors,
+                prepared.cell_regions,
+            )
+            .expect("prepared resize geometry is validated");
         self.line_ids = prepared.line_ids;
         self.row_breaks = prepared.row_breaks;
         self.source_breaks = prepared.source_breaks;
@@ -433,6 +465,7 @@ pub(crate) struct PreparedScreen {
     rows: u16,
     cells: Vec<Cell>,
     cell_anchors: Vec<Option<crate::HistoryAnchor>>,
+    cell_regions: Vec<RegionId>,
     line_ids: Vec<LineId>,
     row_breaks: Vec<Option<HistoryBreakAfter>>,
     source_breaks: HashMap<LineId, HistoryBreakAfter>,
@@ -452,6 +485,7 @@ impl PreparedScreen {
             rows: 0,
             cells: Vec::new(),
             cell_anchors: Vec::new(),
+            cell_regions: Vec::new(),
             line_ids: Vec::new(),
             row_breaks: Vec::new(),
             source_breaks: HashMap::new(),

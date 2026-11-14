@@ -24,27 +24,50 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 937
-issue = 1442
-reason = "Metal surface remains the thin historyRanges/hit-test owner; #1442 adds presentation-local Raw scroll offset fields and hit/history-except hooks that call into MetalSurfaceView+RawScrollback without inventing a second VT/history authority."
+acknowledged_loc = 965
+issue = 1484
+reason = "Metal surface remains the thin historyRanges/hit-test owner; #1484 keeps shell-exit HISTORY buffers across disconnect (LiveTail cleared only) and plan-owned clip dedup hooks without a second VT/history authority. Per-frame AX refresh is lazy (no GPU readback)."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
-acknowledged_loc = 873
-issue = 1379
-reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and splits live-tail vs history Flow paint counts so clear→exit ink stays history-only."
+acknowledged_loc = 909
+issue = 1484
+reason = "Metal update/present lifecycle stays one main-queue presenter; #1484 adds atlas-generation-aware HISTORY re-encode after reset without growing presenter authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 848
-issue = 1467
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
+acknowledged_loc = 989
+issue = 1484
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1484 adds content-relative mid-transcript scroll pins across focus ownership churn, restores them after setInputOwned, and keeps per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
 
 [[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/SecondaryLivePaneHost+Flow.swift"
+acknowledged_loc = 819
+issue = 1484
+reason = "Multipane Flow leaf owns plan-only publish, borrowed-bridge HISTORY, and transcript document sizing; #1484 floors document extent on Rust native-region height only, restores content-relative pins after geometry churn, and records lastPublishedTranscriptRegions from plan-derived clips for multipane paint diagnostics."
+[[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 815
-issue = 1467
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 focus Flow DirectInput on composer-status relay and rebuild Running cards when DirectInput status publishes without a second transcript authority."
+acknowledged_loc = 993
+issue = 1484
+reason = "Flow Blocks host remains the thin AppKit adapter for chrome cards + plan publish; #1484 demotes legacy multipane transcript AX ids, skips plan publish when secondary hosts own leaves, syncs AbsoluteY/LiveEnd before applyBlockViewportPlan, caches chrome body clips, and same-frame LiveTail release after HISTORY prepare."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
+acknowledged_loc = 703
+issue = 1484
+reason = "Chrome actions remain the thin FOCUS_PANE / split / tab adapter; #1484 forces multipane reconcile after FOCUS_PANE so windowFocusedDisplayHandle and composer AX ownership cannot stay stale across sibling submit."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/block_projection.rs"
+acknowledged_loc = 938
+issue = 1484
+reason = "Block projection FFI remains the single Flow clip export; #1484 plan-only path fails closed on HISTORY LineId emission, retains latest plan clips only, and drops card-clip dual authority."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/display.rs"
+acknowledged_loc = 894
+issue = 1484
+reason = "Display FFI remains the thin prepared-frame / history / viewport export surface; #1484 adds BlockViewportPlan header/item/clip accessors plus set_scroll_anchor for AppKit AbsoluteY/LiveEnd sync without a second display authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
@@ -126,9 +149,9 @@ reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests modu
 # surface so completed Flow Block spans cannot bleed after Raw clear.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/screen/ops.rs"
-acknowledged_loc = 915
-issue = 1379
-reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen impl after the #1020 resize-planner extraction; #1379 ED2 seal+remint+frontier clamp belongs with scroll-off seal so mid-command clear keeps post-clear LineIds without a second Screen authority."
+acknowledged_loc = 976
+issue = 1484
+reason = "Cursor/edit/scroll/SGR mutations stay one cohesive Screen impl after the #1020 resize-planner extraction; #1484 preserves Block RegionId on kept scroll/ICH/DCH slots (remint blanks only) so live_region_cells survive window shifts without timeline LineId seed."
 
 # #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
 # partitioned into print / execute / csi / osc siblings; all landed <= review_loc,
@@ -250,11 +273,14 @@ acknowledged_loc = 996
 issue = 1413
 reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1413 adds InvalidWorkspaceRoot/DuplicateWorkspace errors for ADR-028 CreateWorkspace while create/bind ops live in workspace_ops.rs."
 
-[[exception]]
+# ProductChromeHostView.swift dropped under 1000 LOC after #1484 focus
+# extraction to ProductChromeHostView+Focus.swift; exception removed.
+
+[[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1064
-issue = 1467
-responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1467/#1468 add per-pane Block-scoped DirectInput dock retraction and post-REPL Available reclaim on that same host rather than a second chrome authority."
+acknowledged_loc = 940
+issue = 1484
+reason = "Chrome façade stays one cold-path AppKit host for pane reconcile and multipane dock demote; #1484 extracted focus/DirectInput routing to ProductChromeHostView+Focus.swift so this file remains under 1000 LOC without a second chrome authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
@@ -265,9 +291,9 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 752
-issue = 1467
-reason = "Local display-client protocol proofs stay one module; #1467 adds DirectInput projection coverage beside existing type-45 Submit/Relay/Unavailable fixtures rather than a second client test file."
+acknowledged_loc = 798
+issue = 1484
+reason = "Local display-client protocol proofs stay one module; #1484 adds native-regions commit-before-plan-rebuild clip proof plus BlockNativeRegions/plan-index/window_rows harness fixtures."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
@@ -277,9 +303,15 @@ reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 admit Fl
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
-acknowledged_loc = 756
-issue = 1467
-reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1467 fences DirectInput composer Submit as Busy beside the existing Relay/Submit match without moving marker dispatch into a second module."
+acknowledged_loc = 932
+issue = 1484
+reason = "Composer admission, eligibility publish, and session Candidate/Offer cold-path stay one Runtime integration façade; #1484 drains VT attribution with Entry watermark + cumulative marker/mutation consume counts without a second journal consumer."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-terminal/src/terminal/tests.rs"
+acknowledged_loc = 723
+issue = 1484
+reason = "Core TerminalState VT/oracle suite stays one module after #1484 extracted attribution-yield and native-Block seal/scale proofs into sibling test modules."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_overlay.rs"
@@ -289,9 +321,9 @@ reason = "ADR-026 F4 overlay transitions, wire projection, and composer derivati
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_bootstrap.rs"
-acknowledged_loc = 703
-issue = 1398
-reason = "Spawn-time SSH session payload assembly stays one Runtime cold-path module; #1398 adds the remote TERM fallback assertion beside the existing OSC 133 / stty echo payload proofs without a second bootstrap test authority."
+acknowledged_loc = 742
+issue = 1484
+reason = "Session bootstrap stays one Runtime cold-path module; #1484 opens/closes native Block RegionIds on session StartPendingBlock/Complete and cancels provisional OSC arms on DropPending in parity with the local trusted path so nested SSH Blocks restore host RegionStore attribution."
 
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.
@@ -332,3 +364,9 @@ path = "crates/seyal-runtime/src/runtime/local/ingress.rs"
 acknowledged_loc = 982
 issue = 1388
 reason = "Input admission stays one ingress module. #1388 adds the fenced composer command path and the direct-input hold mapping; SessionConsent decoding lives in session_consent.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/local/mod.rs"
+acknowledged_loc = 820
+issue = 1484
+reason = "LocalDisplayClient remains the single per-display poll/apply façade; #1484 owns BlockViewportIndex + plan publish, AbsoluteY/LiveEnd scroll-anchor sync, and commit-before-rebuild native-regions apply so first-seen Blocks emit clips."

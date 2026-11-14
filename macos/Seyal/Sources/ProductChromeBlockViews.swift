@@ -1,5 +1,79 @@
 import AppKit
 
+/// Shared AX budget for Block body transcripts: keep the first line plus the
+/// newest lines that fit. 480 is the smallest limit that still exposes the
+/// full split-sibling acceptance body once padding is trimmed (#1484).
+enum BlockAccessibilityText {
+    static let limit = 480
+
+    static func trimTrailingPadding(_ line: String) -> String {
+        var end = line.endIndex
+        while end > line.startIndex {
+            let previous = line.index(before: end)
+            let scalar = line[previous]
+            if scalar != " " && scalar != "\0" { break }
+            end = previous
+        }
+        return String(line[..<end])
+    }
+
+    /// First line + newest-tail within `limit`. `line(i)` is 0-based.
+    static func summary(lineCount: Int, limit: Int = limit, line: (Int) -> String) -> String {
+        guard lineCount > 0 else { return "" }
+        let first = line(0)
+        if lineCount == 1 {
+            return first.count <= limit ? first : String(first.prefix(limit))
+        }
+        // Phase 1: collect newest lines while the whole text still fits.
+        var tail: [String] = []
+        var used = first.count
+        var reachedStart = false
+        for index in stride(from: lineCount - 1, through: 1, by: -1) {
+            let text = line(index)
+            let next = used + 1 + text.count
+            if next > limit { break }
+            tail.insert(text, at: 0)
+            used = next
+            if index == 1 {
+                reachedStart = true
+            }
+        }
+        if reachedStart {
+            return ([first] + tail).joined(separator: "\n")
+        }
+        // Phase 2: elide the middle — keep a short onset head and newest tail.
+        let separator = "\n…\n"
+        let head = String(first.prefix(max(limit / 4, 1)))
+        var budget = limit - head.count - separator.count
+        if budget <= 0 {
+            return String(first.prefix(limit))
+        }
+        while !tail.isEmpty {
+            let joined = tail.joined(separator: "\n")
+            if joined.count <= budget { break }
+            tail.removeFirst()
+        }
+        if tail.isEmpty {
+            let newest = line(lineCount - 1)
+            if newest.count <= budget {
+                return head + separator + newest
+            }
+            return head + separator + String(newest.suffix(budget))
+        }
+        // Prefer filling leftover budget with more newest lines when phase-1
+        // stopped early because of the full-text reserve.
+        var nextIndex = lineCount - 1 - tail.count
+        while nextIndex >= 1 {
+            let text = line(nextIndex)
+            let joinedCost = text.count + 1 + tail.joined(separator: "\n").count
+            if joinedCost > budget { break }
+            tail.insert(text, at: 0)
+            nextIndex -= 1
+        }
+        return head + separator + tail.joined(separator: "\n")
+    }
+}
+
 final class TranscriptClipView: NSClipView {
     override var isFlipped: Bool { true }
 }
@@ -217,11 +291,53 @@ final class CommandBlockView: NSView {
         bodyTranscript.setAccessibilityIdentifier(identifier)
     }
 
+    /// First non-empty body line, retained across LiveEnd page swaps so AX
+    /// summaries keep stream onset (#1484 SplitFromLivePane / FourPane).
+    private(set) var bodyAccessibilityOnsetLine: String = ""
+
+    var bodyAccessibilityIsEmpty: Bool {
+        bodyTranscript.stringValue.isEmpty
+    }
+
     func setBodyTranscript(_ text: String) {
-        guard bodyTranscript.stringValue != text else { return }
-        bodyTranscript.stringValue = text
-        // Bound AX payloads so tall Block bodies do not stall XCUI tree walks.
-        let ax = Self.accessibilitySummary(for: text)
+        // Prefer caller-budgeted `accessibilityTranscript()`; only summarize
+        // when raw text exceeds the AX limit so a second pass cannot drop the
+        // live-end tail (#1484 100k / LongBlock AX).
+        var ax = text.count <= BlockAccessibilityText.limit
+            ? text
+            : Self.accessibilitySummary(for: text)
+        if bodyAccessibilityOnsetLine.isEmpty {
+            let first = ax.split(whereSeparator: \.isNewline)
+                .map(String.init)
+                .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if let first { bodyAccessibilityOnsetLine = first }
+        } else if !ax.isEmpty, !ax.contains(bodyAccessibilityOnsetLine) {
+            // Prepend preserved onset so LiveEnd pages still expose line 1.
+            ax = bodyAccessibilityOnsetLine + "\n" + ax
+            if ax.count > BlockAccessibilityText.limit {
+                ax = Self.accessibilitySummary(for: ax)
+            }
+        }
+        // Never erase a populated body with a transient empty retain — multipane
+        // unfocused stream / focus-churn tests observe AX markers while HISTORY
+        // pages are still in flight (#1484 FlowSplitSibling / FocusChurn).
+        if ax.isEmpty, !bodyTranscript.stringValue.isEmpty { return }
+        // Never demote LiveEnd-rich AX back to an onset-only latch (#1484 FourPane).
+        let current = bodyTranscript.stringValue
+        func nonEmptyLines(_ text: String) -> Int {
+            text.split(whereSeparator: \.isNewline)
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .count
+        }
+        let currentLines = nonEmptyLines(current)
+        let newLines = nonEmptyLines(ax)
+        if currentLines > 1,
+           ax == bodyAccessibilityOnsetLine || (newLines <= 2 && newLines < currentLines)
+        {
+            return
+        }
+        guard current != ax else { return }
+        bodyTranscript.stringValue = ax
         bodyTranscript.setAccessibilityLabel(ax)
         bodyTranscript.setAccessibilityValue(ax)
     }
@@ -233,15 +349,22 @@ final class CommandBlockView: NSView {
         setAccessibilityValue(traits.joined(separator: ", "))
     }
 
-    private static func accessibilitySummary(for text: String, limit: Int = 240) -> String {
-        guard text.count > limit else { return text }
-        // Keep both command onset and the live/completed tail available to
-        // assistive technology. A tail-only summary made it impossible to
-        // verify the first output line after a long Block completed.
-        let prefixCount = limit / 10
-        let separator = "…\n"
-        let suffixCount = max(limit - prefixCount - separator.count, 0)
-        return String(text.prefix(prefixCount)) + separator + String(text.suffix(suffixCount))
+    /// Bound AX payloads so tall Block bodies do not stall XCUI tree walks,
+    /// while still exposing command onset and the live/completed tail (#1484).
+    /// Trailing cell padding is stripped per line first so short streamed
+    /// markers remain discoverable inside the budget (terminal rows are often
+    /// space-padded to the full grid width).
+    private static func accessibilitySummary(for text: String, limit: Int = BlockAccessibilityText.limit) -> String {
+        let trimmedLines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            BlockAccessibilityText.trimTrailingPadding(String(line))
+        }
+        // Drop trailing blank rows so COMPLETE/tail markers stay in budget.
+        var end = trimmedLines.count
+        while end > 0 && trimmedLines[end - 1].isEmpty {
+            end -= 1
+        }
+        let lines = Array(trimmedLines.prefix(end))
+        return BlockAccessibilityText.summary(lineCount: lines.count, limit: limit) { lines[$0] }
     }
 
     override func layout() {
@@ -249,8 +372,12 @@ final class CommandBlockView: NSView {
         bodyTranscript.frame = body.bounds
     }
 
-    func setOutputLines(_ lines: Int, cellHeight: CGFloat) {
+    func setOutputLines(_ lines: Int, cellHeight: CGFloat, expandOnly: Bool = false) {
         let height = max(cellHeight, 1) * CGFloat(max(lines, 1))
+        // Mid-transcript scroll retention measures body frame.minY. A later
+        // viewport-sized HISTORY page must not shrink a taller sealed body and
+        // yank that frame under a preserved scroll offset (#1484 FocusChurn).
+        if expandOnly, height + 0.5 < bodyHeight.constant { return }
         guard abs(bodyHeight.constant - height) > 0.5 else { return }
         bodyHeight.constant = height
     }

@@ -37,6 +37,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalAppBlockProjection>.size, 24)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED), 0)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY), 1)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS), 3)
         XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP), 2)
         let emptySpan = seyal_app_block_span(handle, 0)
         XCTAssertEqual(emptySpan.start_line, 0)
@@ -1117,13 +1118,14 @@ final class SeyalHostComponentTests: XCTestCase {
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
 
-        // Reproduce the post-⌘D defect: hidden liveContent composer still owns
-        // first responder after chrome reconcile with unchanged eligibility.
-        XCTAssertTrue(view.composer.focusEditor())
+        // Multipane demotes the legacy liveContent dock (`isHidden`); AppKit
+        // will not accept focusEditor() on that dock. Reproduce the post-⌘D
+        // defect by forcing FR onto its editor when possible, then prove
+        // routeFocus recovers to the visible pane-owned composer (#1484).
         let hiddenEditor = try XCTUnwrap(
             accessibilityChild(view.composer, identifier: "seyal-composer-editor")
         )
-        XCTAssertTrue(window.firstResponder === hiddenEditor)
+        _ = window.makeFirstResponder(hiddenEditor)
 
         view.routeFocus()
         let ownedHost = try XCTUnwrap(
@@ -1192,7 +1194,62 @@ final class SeyalHostComponentTests: XCTestCase {
 
         XCTAssertTrue(summary.contains("AXSTREAM-001"))
         XCTAssertTrue(summary.contains("AXSTREAM-100"))
-        XCTAssertLessThanOrEqual(summary.count, 240)
+        // Production AX budget is 480 chars (onset + tail); keep XCUI tree walks
+        // bounded while still proving first/last line retention (#1484).
+        XCTAssertLessThanOrEqual(summary.count, 480)
+
+        // Space-padded terminal rows must not burn the AX budget before middle
+        // stream markers (RunningFlow secondary retain).
+        let padded = (1...12).map { String(format: "stream1426 %02d", $0).padding(toLength: 80, withPad: " ", startingAt: 0) }
+            .joined(separator: "\n") + "\n" + "stream1426 COMPLETE".padding(toLength: 80, withPad: " ", startingAt: 0)
+        card.setBodyTranscript(padded)
+        let paddedSummary = try XCTUnwrap(transcript.accessibilityLabel() as? String)
+        XCTAssertTrue(paddedSummary.contains("stream1426 01"))
+        XCTAssertTrue(paddedSummary.contains("stream1426 09"))
+        XCTAssertTrue(paddedSummary.contains("stream1426 COMPLETE"))
+        XCTAssertLessThanOrEqual(paddedSummary.count, 480)
+        XCTAssertFalse(paddedSummary.contains("  "), "trimmed AX text must not keep row padding gaps")
+    }
+
+    @MainActor
+    func testAccessibilityTranscriptKeepsFirstAndNewestTailFromPaddedRows() throws {
+        func paddedRow(_ text: String) -> [NativeHistoryRange.Cell] {
+            let chars = Array(text.padding(toLength: 80, withPad: " ", startingAt: 0))
+            return chars.map { NativeHistoryRange.Cell(scalar: $0.unicodeScalars.first!.value, foreground: 0, background: 0, flags: 0) }
+        }
+        let rows = (1...100).map { paddedRow(String(format: "MP0-%03d", $0)) }
+        let range = NativeHistoryRange(
+            startLine: 1,
+            endLine: 100,
+            blockID: 1,
+            requestID: 1,
+            revision: 1,
+            rows: rows
+        )
+        let summary = range.accessibilityTranscript()
+        XCTAssertTrue(summary.hasPrefix("MP0-001") || summary.contains("MP0-001"))
+        XCTAssertTrue(summary.contains("MP0-077"))
+        XCTAssertTrue(summary.contains("MP0-100"))
+        XCTAssertFalse(summary.contains("  "))
+        XCTAssertLessThanOrEqual(summary.count, 480)
+
+        let siblingLines = (1...24).map { String(format: "splitstream1426 %02d", $0) }
+            + ["splitstream1426 COMPLETE"]
+        let siblingRows = siblingLines.map { line -> [NativeHistoryRange.Cell] in
+            Array(line).map {
+                NativeHistoryRange.Cell(scalar: $0.unicodeScalars.first!.value, foreground: 0, background: 0, flags: 0)
+            }
+        }
+        let sibling = NativeHistoryRange(
+            startLine: 1,
+            endLine: UInt64(siblingRows.count),
+            blockID: 2,
+            requestID: 2,
+            revision: 1,
+            rows: siblingRows
+        )
+        let siblingText = sibling.accessibilityTranscript()
+        XCTAssertEqual(siblingText, siblingLines.joined(separator: "\n"))
     }
 
     /// #1424: focus ownership updates must not recreate Block views or scroll.
@@ -2249,6 +2306,32 @@ final class SeyalHostComponentTests: XCTestCase {
             frame: NSRect(x: 0, y: 0, width: 320, height: 200),
             paneID: "pane-deferred-history-presentation"
         )
+        // Seed a visible live grid so beginValidationFrameInFlight can hold the
+        // single in-flight slot (Flow requires instanceBuffer; invisible
+        // surfaces coalesce updates as .deferred).
+        surface.renderer.setVisible(true)
+        var liveCell = SeyalPreparedCell()
+        liveCell.scalar = UInt32(ascii: "A")
+        liveCell.foreground = 0xffff_ffff
+        liveCell.background = 0xff10_0d0b
+        var liveDamage = DamageMask()
+        liveDamage.mark(row: 0)
+        XCTAssertEqual(
+            try [liveCell].withUnsafeBufferPointer { buffer in
+                try surface.renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        fullRebuild: true,
+                        damage: liveDamage
+                    ),
+                    backingScale: 1
+                )
+            },
+            .updated
+        )
         let range = NativeHistoryRange(
             startLine: 1,
             endLine: 1,
@@ -3211,8 +3294,19 @@ final class SeyalHostComponentTests: XCTestCase {
             "Expand-never-shrink frame can exceed fittingSize; scroll math must prefer frame"
         )
         XCTAssertTrue(
-            hostText.contains("regions.isEmpty, !blockCards.isEmpty"),
-            "publishBlockOutputFrame must not wipe history when Block cards still exist"
+            hostText.contains("applyBlockViewportPlan(")
+                && hostText.contains("displayHandle:"),
+            "publishBlockOutputFrame must paint via BlockViewportPlan only (no card-clip fallback)"
+        )
+        XCTAssertTrue(
+            hostText.contains("syncBlockViewportScrollAnchor")
+                && hostText.contains("seyal_bridge_block_viewport_set_scroll_anchor_for"),
+            "Flow publish must sync AppKit scroll into Rust AbsoluteY/LiveEnd plan anchor (G5)"
+        )
+        XCTAssertFalse(
+            hostText.contains("collectBlockOutputRegions(")
+                || hostText.contains("func collectBlockOutputRegions"),
+            "card-clip collectBlockOutputRegions must stay deleted from Flow publish"
         )
         let liveTail = sourceRoot.appendingPathComponent("MetalSurfaceView+LiveTail.swift")
         let liveText = (try? String(contentsOf: liveTail, encoding: .utf8)) ?? ""
@@ -5308,6 +5402,78 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(renderer.inspectFlowPaint().isClean)
     }
 
+    /// Sealed HISTORY bakes glyph-atlas UVs. After an atlas reset the next
+    /// encode must re-encode retained pages instead of sampling reused slots
+    /// (#1484 consistent-substitution garbling of sealed Blocks).
+    @MainActor
+    func testSealedHistoryReencodesAfterGlyphAtlasReset() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let renderer = try MetalTerminalRenderer(device: device)
+        renderer.setPresentationPlan(.flow())
+        func cell(_ scalar: UInt32) -> NativeHistoryRange.Cell {
+            NativeHistoryRange.Cell(scalar: scalar, foreground: 0x02e9_e1d8, background: 0, flags: 0)
+        }
+        let cellSize = renderer.cellPixelSize(backingScale: 1)
+        let clip = NSRect(x: 0, y: 0, width: cellSize.width * 2, height: cellSize.height)
+        try renderer.update(
+            historyRange: NativeHistoryRange(
+                startLine: 1, endLine: 1, blockID: 7, requestID: 1, revision: 1,
+                rows: [[cell(101), cell(114)]], sourceDisplayHandle: 0
+            ),
+            region: NativeTranscriptRegion(id: 7, origin: .zero, clip: clip),
+            backingScale: 1
+        )
+        renderer.setHistoryRegionOrder([7])
+        func historyUVs() throws -> [SIMD4<Float>] {
+            let region = try XCTUnwrap(renderer.historyRegions[7])
+            let pointer = region.buffer.contents().bindMemory(
+                to: TerminalInstance.self, capacity: region.instanceCount
+            )
+            return (0..<region.instanceCount).map { pointer[$0].uvRect }
+        }
+        let prepared = try historyUVs()
+        let metrics = renderer.glyphAtlas.metrics(backingScale: 1)
+
+        renderer.glyphAtlas.resetWhenGPUIdle()
+        let r = try renderer.glyphAtlas.lookup(scalar: 114, bold: false, backingScale: 1, cellMetrics: metrics)
+        XCTAssertEqual(r.uvRect, prepared[0], "precondition: reset reuses the first atlas slot")
+        XCTAssertEqual(try historyUVs(), prepared, "HISTORY still indexes the pre-reset atlas")
+
+        XCTAssertNotNil(renderer.renderOffscreenAndWait(width: cellSize.width * 2, height: cellSize.height))
+        let e = try renderer.glyphAtlas.lookup(scalar: 101, bold: false, backingScale: 1, cellMetrics: metrics)
+        XCTAssertEqual(try historyUVs(), [e.uvRect, r.uvRect], "encode must re-index the current atlas")
+        XCTAssertEqual(renderer.historyRegions[7]?.clip, clip, "re-encode keeps current placement")
+
+        let steady = try XCTUnwrap(renderer.historyRegions[7]?.buffer)
+        renderer.reencodeHistoryRegionsForCurrentAtlas()
+        XCTAssertTrue(renderer.historyRegions[7]?.buffer === steady, "matching generation must not re-upload")
+    }
+
+    /// #1484 P0: per-frame paths must not pay a synchronous GPU readback, and
+    /// HISTORY prepares must not zero the renderer's in-flight write gate.
+    func testFlowFrameHotPathHasNoGPUReadbackOrInFlightOverride() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let surface = try String(contentsOf: sources.appendingPathComponent("MetalSurfaceView.swift"), encoding: .utf8)
+        let history = try String(contentsOf: sources.appendingPathComponent("MetalSurfaceView+History.swift"), encoding: .utf8)
+        func body(of signature: String, in text: String) throws -> Substring {
+            let start = try XCTUnwrap(text.range(of: signature))
+            let end = text[start.upperBound...].range(of: "\n  func ")?.lowerBound ?? text.endIndex
+            return text[start.lowerBound..<end]
+        }
+        XCTAssertFalse(
+            try body(of: "func refreshRecoveryAccessibilityValue()", in: surface).contains("inspectFlowPaint"),
+            "AX refresh runs per frame; compose lazily on read"
+        )
+        XCTAssertFalse(
+            try body(of: "func renderHistoryRange(", in: history).contains("forceFlushHistoryPreparesForRetain"),
+            "HISTORY prepare must keep the in-flight gate"
+        )
+    }
+
     /// #865 / SPEC-008 §3.1: Flow transcript scroll handling republishes Block
     /// clips only. It must not change prepared-frame PTY size, cursor, or the
     /// last geometry proposal. Headed overflow scroll is covered by XCUI.
@@ -5501,6 +5667,135 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(unbound.end_line, 0)
         XCTAssertEqual(unbound.reserved0, 0)
         XCTAssertEqual(unbound.reserved1, 0)
+    }
+
+    func testNativeRegionsProjectionPaintsViaLiveTailNotHistoryIPC() throws {
+        // #1484 C/D/E: Flow paint is BlockViewportPlan-only; sealed clips use
+        // (0,0)+start_unit HISTORY wire; cards remain chrome/AX hosts.
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // SeyalTests/
+            .deletingLastPathComponent() // Tests/
+            .deletingLastPathComponent() // Seyal/
+            .appendingPathComponent("Sources", isDirectory: true)
+        let chrome = try String(
+            contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift"),
+            encoding: .utf8
+        )
+        let flow = try String(
+            contentsOf: sourceRoot.appendingPathComponent("SecondaryLivePaneHost+Flow.swift"),
+            encoding: .utf8
+        )
+        let plan = try String(
+            contentsOf: sourceRoot.appendingPathComponent("MetalSurfaceView+BlockViewportPlan.swift"),
+            encoding: .utf8
+        )
+        for text in [chrome, flow] {
+            XCTAssertTrue(
+                text.contains("applyBlockViewportPlan(")
+                    && text.contains("displayHandle:"),
+                "Flow hosts must publish via BlockViewportPlan"
+            )
+            XCTAssertTrue(
+                text.contains("seyal_bridge_block_viewport_set_scroll_anchor_for"),
+                "Flow hosts must sync AppKit scroll into AbsoluteY/LiveEnd before plan paint"
+            )
+            XCTAssertTrue(
+                text.contains("func applyBlockOutputProjection"),
+                "legacy projection hook remains a no-op for call-site stability"
+            )
+            if let applyRange = text.range(of: "func applyBlockOutputProjection") {
+                let applyEnd = text[applyRange.lowerBound...].range(of: "\n    func ")?.lowerBound
+                    ?? text.endIndex
+                let body = text[applyRange.lowerBound..<applyEnd]
+                XCTAssertFalse(
+                    body.contains("requestHistoryRange"),
+                    "applyBlockOutputProjection must not own HISTORY fetches after plan cutover"
+                )
+            }
+        }
+        XCTAssertTrue(
+            plan.contains("startLine: 0")
+                && plan.contains("endLine: 0")
+                && plan.contains("startUnit:"),
+            "Metal plan must request sealed-index HISTORY pages"
+        )
+        XCTAssertTrue(
+            plan.contains("forDisplayHandle: displayHandle"),
+            "plan sealed clips must address the plan displayHandle, not window focus alone"
+        )
+        XCTAssertTrue(
+            plan.contains("historyBridge: RustDisplayBridge?")
+                && plan.contains("bridge ?? historyBridge"),
+            "plan fetch must accept a pane-host borrowed bridge when surface.bridge is nil"
+        )
+        XCTAssertTrue(
+            flow.contains("historyBridge: historyBridge")
+                && flow.contains("notePlanClipHistoryResult"),
+            "pane host must pass borrowed bridge and settle its own plan-clip book"
+        )
+        XCTAssertFalse(
+            flow.contains("requestNativeCardHistoryFallback")
+                || plan.contains("func requestNativeCardHistoryFallback"),
+            "ADR-015: no card-driven HISTORY fallback"
+        )
+        XCTAssertTrue(
+            plan.contains("chromeBodyClips")
+                && (flow.contains("chromeBodyClips:") || chrome.contains("chromeBodyClips:")),
+            "chrome body clips may place plan-selected Blocks; plan still owns rows/HISTORY"
+        )
+        XCTAssertTrue(
+            flow.contains("max(rustBody, cardHeight)")
+                || chrome.contains("max(rustBody, cardHeight)"),
+            "document must host AppKit chrome headers until Rust chrome metrics exist"
+        )
+        let host = try String(
+            contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView.swift"),
+            encoding: .utf8
+        )
+        if let productChanged = host.range(of: "pane.onProductChanged = {") {
+            let end = host[productChanged.lowerBound...].range(of: "\n        }")?.lowerBound
+                ?? host.endIndex
+            let body = host[productChanged.lowerBound..<end]
+            XCTAssertTrue(
+                body.contains("refreshRunningBlockOutput()"),
+                "per-frame onProductChanged must refresh LiveTail/plan"
+            )
+            XCTAssertFalse(
+                body.contains("reconcileChrome()"),
+                "per-frame onProductChanged must not full-reconcile chrome"
+            )
+        } else {
+            XCTFail("ProductChromeHostView must wire pane.onProductChanged")
+        }
+        // Shipping AppDelegate uses MultiWindowHostController, which re-wraps
+        // onProductChanged — that wrap must also omit reconcileChrome (#1484).
+        let multi = try String(
+            contentsOf: sourceRoot.appendingPathComponent("MultiWindowHostController.swift"),
+            encoding: .utf8
+        )
+        if let wrap = multi.range(of: "liveHost.pane.onProductChanged = {") {
+            let end = multi[wrap.lowerBound...].range(of: "\n        }")?.lowerBound
+                ?? multi.endIndex
+            let body = multi[wrap.lowerBound..<end]
+            XCTAssertTrue(
+                body.contains("refreshProductHost?()"),
+                "MultiWindow must preserve ProductChrome frame refresh"
+            )
+            XCTAssertTrue(
+                body.contains("applyPendingEffects()"),
+                "MultiWindow must still drain window effects on product pulses"
+            )
+            XCTAssertFalse(
+                body.contains("reconcileChrome()"),
+                "MultiWindow onProductChanged must not full-reconcile every frame"
+            )
+        } else {
+            XCTFail("MultiWindowHostController must wrap pane.onProductChanged")
+        }
+        XCTAssertTrue(
+            chrome.contains("guard centerColumn.secondaryHosts.isEmpty else { return }"),
+            "legacy chrome publish must not compete with multipane pane-host plan paint"
+        )
     }
 
     @MainActor

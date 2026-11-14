@@ -157,7 +157,7 @@ impl Harness {
                 if client.buffered.len() >= total {
                     let frame = client.buffered.drain(..total).collect::<Vec<_>>();
                     let payload = if client.delivery_control
-                        && matches!(header.message_type, 12 | 13 | 21 | 26 | 27 | 28 | 35)
+                        && matches!(header.message_type, 12 | 13 | 21 | 26 | 27 | 28 | 35 | 48)
                     {
                         let envelope = decode_presentation_envelope(&frame)
                             .expect("negotiated presentation envelope");

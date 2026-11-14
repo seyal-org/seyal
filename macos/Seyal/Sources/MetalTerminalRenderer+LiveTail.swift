@@ -49,15 +49,77 @@ extension MetalTerminalRenderer {
             buffer: existing.buffer,
             instanceCount: existing.instanceCount,
             origin: nextOrigin,
-            clip: clip
+            clip: clip,
+            historySource: existing.historySource,
+            atlasGeneration: existing.atlasGeneration
         )
         needsPresent = true
         return true
     }
 
-    /// Completed-history regions followed by running live-tail clips.
+    /// Sealed HISTORY then LiveTail. Never dual-draw the same Block — LiveTail
+    /// owns Running paint until sealed HISTORY is prepared (#1484 Finding E).
     var orderedBlockRegions: [HistoryRenderRegion] {
-        historyRegionOrder.compactMap { historyRegions[$0] } + orderedLiveTailRegions
+        let liveIDs = Set(liveTail.order)
+        let historyOnly = historyRegionOrder.compactMap { id -> HistoryRenderRegion? in
+            guard !liveIDs.contains(id) else { return nil }
+            return historyRegions[id]
+        }
+        return historyOnly + orderedLiveTailRegions
+    }
+
+    /// True when sealed HISTORY GPU instances exist for `blockID`.
+    func hasPreparedHistoryRegion(blockID: UInt64) -> Bool {
+        historyRegions[blockID] != nil
+    }
+
+    /// Re-encodes sealed HISTORY whose baked atlas UVs predate the latest
+    /// atlas reset. Steady state is one generation compare per region; only a
+    /// reset re-uploads. Requires no command buffer sampling the atlas.
+    func reencodeHistoryRegionsForCurrentAtlas() {
+        let generation = glyphAtlas.stats.resets
+        guard historyRegions.values.contains(where: { $0.atlasGeneration != generation }) else {
+            return
+        }
+        flushDeferredHistoryPrepares()
+        for (id, region) in historyRegions where region.atlasGeneration != generation {
+            guard let source = region.historySource else {
+                historyRegions.removeValue(forKey: id)
+                continue
+            }
+            let placed = NativeTranscriptRegion(
+                id: id,
+                origin: CGPoint(x: CGFloat(region.origin.x), y: CGFloat(region.origin.y)),
+                clip: region.clip
+            )
+            do {
+                try applyHistoryPrepare(
+                    historyRange: source.historyRange,
+                    region: placed,
+                    backingScale: source.backingScale,
+                    cells: source.historyRange.rows.reduce(0) { $0 + min($1.count, 512) }
+                )
+            } catch {
+                // Blank beats sampling another glyph's atlas slot.
+                historyRegions.removeValue(forKey: id)
+            }
+        }
+    }
+
+    /// Relocate LiveTail draw metadata without rewriting instance buffers.
+    @discardableResult
+    func setLiveTailRegionGeometry(id: UInt64, origin: CGPoint, clip: CGRect) -> Bool {
+        guard let existing = liveTail.regions[id] else { return false }
+        let nextOrigin = SIMD2<Float>(Float(origin.x), Float(origin.y))
+        guard existing.origin != nextOrigin || existing.clip != clip else { return true }
+        liveTail.regions[id] = HistoryRenderRegion(
+            buffer: existing.buffer,
+            instanceCount: existing.instanceCount,
+            origin: nextOrigin,
+            clip: clip
+        )
+        needsPresent = true
+        return true
     }
 
     var orderedLiveTailRegions: [HistoryRenderRegion] {
@@ -139,7 +201,27 @@ extension MetalTerminalRenderer {
             needsPresent = true
             return
         }
-        forceLiveTailRefreshWhenIdle()
+        // Geometry-only moves: relocate existing LiveTail buffers. Cell updates
+        // stay on the damage path — avoid a second force:true rewrite in the
+        // same tick as setLiveTailBlocks (#1484 P0 seq flicker).
+        var relocatedAny = false
+        var missingBuffer = false
+        for (blockID, region) in map where liveTail.clips[blockID] != nil {
+            if setLiveTailRegionGeometry(
+                id: blockID,
+                origin: region.origin,
+                clip: region.clip
+            ) {
+                relocatedAny = true
+            } else {
+                missingBuffer = true
+            }
+        }
+        if missingBuffer {
+            forceLiveTailRefreshWhenIdle()
+        } else if relocatedAny {
+            needsPresent = true
+        }
     }
 
     /// Damage-driven refresh after a successful Candidate-D prepare.

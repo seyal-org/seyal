@@ -622,3 +622,102 @@ fn oversized_geometry_is_rejected_without_mutating_state() {
         .prepare_resize(MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS)
         .expect("max accepted geometry prepares");
 }
+
+#[test]
+fn shell_boundary_journals_in_wire_order_with_cell_mutations() {
+    use crate::primary_blocks::attribution::{MarkerKind, PrimaryEvent};
+
+    let mut terminal = TerminalState::new(8, 2).unwrap();
+    terminal
+        .feed(b"hi\x1b]133;C;00112233445566778899aabbccddeeff\x07out")
+        .unwrap();
+
+    let events = terminal.core.primary.engine.journal.events();
+    let mut saw_hi = false;
+    let mut saw_boundary = false;
+    let mut saw_out = false;
+    for event in events {
+        match event {
+            PrimaryEvent::CellMutation { version, .. } if version.unit_offset == 0 && !saw_hi => {
+                saw_hi = true;
+                assert!(!saw_boundary, "h must journal before CommandStart");
+            }
+            PrimaryEvent::ShellBoundaryCandidate {
+                marker: MarkerKind::CommandStart,
+                token_accepted: true,
+                ..
+            } => {
+                assert!(saw_hi, "CommandStart must follow prior print");
+                assert!(!saw_out, "CommandStart must precede post-marker print");
+                saw_boundary = true;
+            }
+            PrimaryEvent::CellMutation { .. } if saw_boundary => {
+                saw_out = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_hi && saw_boundary && saw_out);
+
+    let (_, region_h) = terminal.core.primary.engine.live_cell(0, 0).unwrap();
+    let (_, region_o) = terminal.core.primary.engine.live_cell(2, 0).unwrap();
+    assert_ne!(
+        region_h, region_o,
+        "bytes after CommandStart must leave unstructured"
+    );
+    assert_eq!(
+        region_o,
+        terminal.core.primary.engine.active_region(),
+        "post-marker print joins armed output region"
+    );
+}
+
+#[test]
+fn print_overwrite_mints_unit_version_through_primary_engine() {
+    // Binding fixture: C A D \r B → raster B A D; B must mint a new UnitVersion.
+    use crate::primary_blocks::attribution::PrimaryEvent;
+
+    let mut terminal = TerminalState::new(8, 2).unwrap();
+    terminal.feed(b"CAD\rB").unwrap();
+    assert_eq!(terminal.cell(0, 0).unwrap().character, 'B');
+    assert_eq!(terminal.cell(1, 0).unwrap().character, 'A');
+    assert_eq!(terminal.cell(2, 0).unwrap().character, 'D');
+
+    let (live, region) = terminal
+        .core
+        .primary
+        .engine
+        .live_cell(0, 0)
+        .expect("window map resolves col0");
+    assert_eq!(live.character, 'B');
+    assert_eq!(region, terminal.core.primary.engine.unstructured_region());
+
+    let mutations: Vec<_> = terminal
+        .core
+        .primary
+        .engine
+        .journal
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            PrimaryEvent::CellMutation { version, .. } => Some(*version),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        mutations.len() >= 4,
+        "CAD + B overwrite must journal lead writes: {}",
+        mutations.len()
+    );
+    let first_col0 = mutations
+        .iter()
+        .find(|v| v.unit_offset == 0)
+        .expect("C write");
+    let overwrite_col0 = mutations
+        .iter()
+        .rev()
+        .find(|v| v.unit_offset == 0)
+        .expect("B overwrite");
+    assert_eq!(first_col0.line_id, overwrite_col0.line_id);
+    assert!(overwrite_col0.content_generation > first_col0.content_generation);
+}

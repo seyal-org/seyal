@@ -72,25 +72,64 @@ enum IsolatedHostedRuntime {
 }
 
 extension XCUIApplication {
-  /// Grid-first Raw resting (#1438/#1445): Flow/Blocks XCUI must latch Flow via
-  /// the production `presentation.toggle_raw` chord (`cmd+enter`) when the
-  /// composer is absent or not hittable. No-ops when already on Flow.
-  /// Prefer unfocusing the terminal first so the chord is not swallowed as
-  /// composer/PTY input.
+  /// Blocks-first (#1426): supported shells rest in Flow. Treat the Blocks
+  /// transcript as the Flow oracle — the composer dock may be retracted while
+  /// Busy or Block-scoped DirectInput owns a Running Block (#1466), which is
+  /// still Flow and must not be mistaken for Raw resting.
+  ///
+  /// `presentation.toggle_raw` has no builtin Cmd+Enter / View menu admission
+  /// (`supported_shell_menu_and_builtins_do_not_expose_raw_presentation`). When
+  /// unsupported Raw offers palette "Use Flow", use that escape instead.
   func ensureFlowBlocksPresentation(timeout: TimeInterval = 8) {
+    let blocks = descendants(matching: .any)["seyal-blocks"].firstMatch
+    let transcript = descendants(matching: .any)["seyal-blocks-scroll"].firstMatch
     let composer = descendants(matching: .any)["seyal-composer"].firstMatch
-    if composer.waitForExistence(timeout: 1), composer.isHittable {
+
+    if flowBlocksSurfaceVisible(blocks: blocks, transcript: transcript) {
       return
     }
-    let chrome = descendants(matching: .any)["seyal-left-workspaces"].firstMatch
-    if chrome.waitForExistence(timeout: 2), chrome.isHittable {
-      chrome.click()
+    if composer.waitForExistence(timeout: min(1, timeout)), composer.isHittable {
+      return
     }
-    typeKey("\r", modifierFlags: .command)
+
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if flowBlocksSurfaceVisible(blocks: blocks, transcript: transcript) {
+        return
+      }
+      if composer.exists, composer.isHittable {
+        return
+      }
+      RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+    }
+
+    // Unsupported Raw may expose palette "Use Flow" (resting_palette_choice).
+    typeKey("k", modifierFlags: .command)
+    let palette = descendants(matching: .any)["seyal-command-palette"].firstMatch
+    if palette.waitForExistence(timeout: 2) {
+      typeText("Use Flow")
+      typeKey("\r", modifierFlags: [])
+      waitBrieflyForFlowLatch(0.4)
+      typeKey("\u{1b}", modifierFlags: []) // dismiss if still open
+    }
+
     XCTAssertTrue(
-      composer.waitForExistence(timeout: timeout),
-      "Cmd+Enter must latch Flow from Raw resting for Flow/Blocks XCUI"
+      flowBlocksSurfaceVisible(blocks: blocks, transcript: transcript)
+        || (composer.exists && composer.isHittable),
+      "Flow/Blocks XCUI must show the Blocks transcript (or a hittable composer); "
+        + "Busy/DirectInput may hide the dock without leaving Flow"
     )
+  }
+
+  private func flowBlocksSurfaceVisible(
+    blocks: XCUIElement,
+    transcript: XCUIElement
+  ) -> Bool {
+    blocks.exists && transcript.exists && transcript.frame.height > 120
+  }
+
+  private func waitBrieflyForFlowLatch(_ seconds: TimeInterval) {
+    RunLoop.current.run(until: Date().addingTimeInterval(seconds))
   }
 
   @discardableResult

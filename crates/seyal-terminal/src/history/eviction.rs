@@ -139,6 +139,7 @@ impl HistoryStore {
     pub(super) fn evict_to_cap(&mut self) {
         self.update_resident_bytes();
         let mut evicted = false;
+        self.last_evicted_line_ids.clear();
         while self.resident_bytes > HISTORY_PER_EXECUTION_BYTE_CAP {
             if self.segments.is_empty() {
                 if self.tail.is_empty() {
@@ -175,6 +176,7 @@ impl HistoryStore {
         let Some(segment) = self.segments.pop_front() else {
             return 0;
         };
+        self.last_evicted_line_ids.clear();
         self.record_evicted_segment(&segment);
         self.segments_resident_bytes = self
             .segments_resident_bytes
@@ -187,6 +189,7 @@ impl HistoryStore {
 
     pub(super) fn record_evicted_segment(&mut self, segment: &Segment) {
         for line_id in segment.lines.iter().map(|line| line.line_id) {
+            self.last_evicted_line_ids.push(line_id);
             let Some(last) = self.evicted_id_ranges.last_mut() else {
                 self.evicted_id_ranges.push(EvictedIdRange {
                     first: line_id,
@@ -207,6 +210,10 @@ impl HistoryStore {
             }
         }
         self.compact_evicted_id_ranges();
+    }
+
+    pub(crate) fn take_last_evicted_line_ids(&mut self) -> Vec<LineId> {
+        std::mem::take(&mut self.last_evicted_line_ids)
     }
 
     #[cfg(test)]

@@ -316,6 +316,12 @@ impl Runtime {
             #[cfg(target_os = "macos")]
             block_revision: 0,
             #[cfg(target_os = "macos")]
+            native_regions_revision: 0,
+            #[cfg(target_os = "macos")]
+            published_native_regions_stamp: None,
+            #[cfg(target_os = "macos")]
+            published_native_regions_attachments: HashSet::new(),
+            #[cfg(target_os = "macos")]
             published_composer_eligibility: None,
             #[cfg(target_os = "macos")]
             composer_status_revision: 0,
@@ -341,6 +347,9 @@ impl Runtime {
             offer_presentation_epoch: 0,
             #[cfg(target_os = "macos")]
             session_runtime: super::session_bootstrap::SessionRuntime::default(),
+            last_consumed_attribution_sequence: 0,
+            consumed_attribution_markers: 0,
+            consumed_attribution_mutations: 0,
         };
         let previous = self.by_token.insert(token, id);
         debug_assert!(previous.is_none());

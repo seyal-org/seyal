@@ -1165,11 +1165,19 @@ final class SeyalPaneSplitUITests: XCTestCase {
             "\(secondaryBlock.identifier)-body"
         ].firstMatch
         XCTAssertTrue(secondaryBody.waitForExistence(timeout: 8))
+        // Busy dock or DirectInput-hidden dock both prove the inactive Pane
+        // stayed on Flow/Blocks (not Raw) while the stream runs (#1466).
         let runningComposer = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "seyal-composer-", "busy")
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND (value == %@ OR value == %@)",
+                "seyal-composer-",
+                "busy",
+                "hidden"
+            )
         ).firstMatch
         XCTAssertTrue(
-            runningComposer.waitForExistence(timeout: 5),
+            runningComposer.waitForExistence(timeout: 5)
+                || element(app, "seyal-secondary-blocks").exists,
             "the inactive pane remains in Blocks while its command is still running"
         )
         let inactiveStreamScreenshot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
@@ -2078,9 +2086,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
         // Verify every numbered line in each owning Block and exactly one AX
         // Block per unique token, detecting both lost output and pane bleed.
-        // The Block AX summary retains the newest 240 characters. With these
-        // short unique markers, rows 77...100 fit in that tail, including the
-        // line lost by the headed focus-churn run at 62c10894.
+        // The Block AX summary keeps the first line plus the newest lines that
+        // fit in a 480-character budget. With these short unique markers, rows
+        // 77...100 fit in that tail, including the line lost by the headed
+        // focus-churn run at 62c10894.
         for (index, marker) in markers.enumerated() {
             let matchingBlocks = app.descendants(matching: .any).matching(
                 NSPredicate(
@@ -2124,7 +2133,7 @@ final class SeyalPaneSplitUITests: XCTestCase {
                     + "composer=\(composer.frame) body=\(body.frame) scroll=\(scroll.frame)"
             )
             let bodyText = "\(body.label) \(body.value ?? "")"
-            // The AX summary intentionally exposes only the newest 240
+            // The AX summary keeps onset plus the newest tail within 480
             // characters, so full-history retention is asserted by the
             // Runtime history projection and earlier smaller-stream tests.
             // Here verify the complete visible tail after focus churn.
@@ -2523,6 +2532,19 @@ final class SeyalPaneSplitUITests: XCTestCase {
         // cannot steal synthetic input after a Pane focus change.
         let focusedComposer = element(app, "seyal-composer")
         XCTAssertTrue(focusedComposer.waitForExistence(timeout: 8), "focused composer missing")
+        // After a Pane focus switch the dock can exist while still Busy/attaching.
+        // Paste+execute against a non-Available composer creates no Block.
+        let available = NSPredicate(format: "value == %@", "available")
+        let becameAvailable = expectation(
+            for: available,
+            evaluatedWith: focusedComposer,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [becameAvailable], timeout: 12),
+            .completed,
+            "focused composer never became available; value=\(focusedComposer.value ?? "nil")"
+        )
         let editor = focusedComposer.descendants(matching: .any)
             .matching(identifier: "seyal-composer-editor")
             .firstMatch

@@ -1,9 +1,10 @@
 //! Active screen grid, cursor, scroll region, and history-seal handoff.
 //!
-//! `Screen` is the sole authority for the live cell grid. Sibling modules add
-//! `impl Screen` blocks by responsibility; there is still exactly one `Screen`
-//! type and one live buffer.
+//! `Screen` owns VT cursor/modes/margins and history-seal orchestration.
+//! Canonical live cell *payload* is allocated only in
+//! `PrimaryBlockEngine` / `RegionStore` (ADR-009 native-Block target).
 
+mod history_seal;
 mod ops;
 mod resize;
 
@@ -15,6 +16,7 @@ use crate::{
     grapheme_store::GraphemeStore,
     history::{HistoryBreakAfter, HistoryLineRef, HistoryStore},
     line::LineIdAllocator,
+    primary_blocks::PrimaryBlockEngine,
     Cell, CellRole, CursorState, LineId, Style, TerminalError,
 };
 use std::collections::HashMap;
@@ -28,8 +30,8 @@ pub(in crate::screen) struct SavedCursor {
 pub(crate) struct Screen {
     pub(in crate::screen) cols: u16,
     pub(in crate::screen) rows: u16,
-    pub(in crate::screen) cells: Vec<Cell>,
-    pub(in crate::screen) cell_anchors: Vec<Option<crate::HistoryAnchor>>,
+    /// Canonical primary cell/source storage (sole physical cell allocator).
+    pub(crate) engine: PrimaryBlockEngine,
     pub(in crate::screen) line_ids: Vec<LineId>,
     pub(in crate::screen) row_breaks: Vec<Option<HistoryBreakAfter>>,
     pub(in crate::screen) source_breaks: HashMap<LineId, HistoryBreakAfter>,
@@ -74,8 +76,7 @@ impl Screen {
         Ok(Self {
             cols,
             rows,
-            cells: vec![Cell::default(); usize::from(cols) * usize::from(rows)],
-            cell_anchors: vec![None; usize::from(cols) * usize::from(rows)],
+            engine: PrimaryBlockEngine::new(cols, rows)?,
             line_ids: row_ids,
             row_breaks: vec![Some(HistoryBreakAfter::HardBreak); usize::from(rows)],
             source_breaks: HashMap::new(),
@@ -88,6 +89,27 @@ impl Screen {
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
         })
+    }
+
+    #[inline]
+    pub(in crate::screen) fn cells(&self) -> &[Cell] {
+        &self.engine.store.grid_cells
+    }
+
+    #[inline]
+    pub(in crate::screen) fn cells_mut(&mut self) -> &mut [Cell] {
+        &mut self.engine.store.grid_cells
+    }
+
+    #[inline]
+    pub(in crate::screen) fn cell_anchors(&self) -> &[Option<crate::HistoryAnchor>] {
+        &self.engine.store.grid_anchors
+    }
+
+    #[inline]
+    #[allow(dead_code)] // Resize/remap path retains mutable anchor access for ED2.
+    pub(in crate::screen) fn cell_anchors_mut(&mut self) -> &mut [Option<crate::HistoryAnchor>] {
+        &mut self.engine.store.grid_anchors
     }
 
     /// DECSTBM. Parameters are 1-based inclusive margins; `0` means default.
@@ -141,11 +163,11 @@ impl Screen {
     pub(crate) fn inherit_pen_for_clean_buffer(&mut self, pen: Style, store: &mut GraphemeStore) {
         self.pen = pen;
         self.release_all_payloads(store);
-        self.cells.fill(Cell::blank(pen.bg));
+        self.cells_mut().fill(Cell::blank(pen.bg));
     }
 
     pub(crate) fn release_all_payloads(&mut self, store: &mut GraphemeStore) {
-        for cell in &self.cells {
+        for cell in self.cells() {
             Self::release_cell(*cell, store);
         }
     }
@@ -168,7 +190,7 @@ impl Screen {
         if col >= self.cols || row >= self.rows {
             return None;
         }
-        Some(self.cells[self.index(col, row)])
+        Some(self.cells()[self.index(col, row)])
     }
 
     pub(crate) fn line_id(&self, row: u16) -> Option<LineId> {
@@ -202,12 +224,12 @@ impl Screen {
             return None;
         }
         let start = usize::from(row) * usize::from(self.cols);
-        Some(&self.cells[start..start + usize::from(self.cols)])
+        Some(&self.cells()[start..start + usize::from(self.cols)])
     }
 
     pub(crate) fn cell_anchor(&self, col: u16, row: u16) -> Option<crate::HistoryAnchor> {
         (col < self.cols && row < self.rows)
-            .then(|| self.cell_anchors[self.index(col, row)])
+            .then(|| self.cell_anchors()[self.index(col, row)])
             .flatten()
     }
 

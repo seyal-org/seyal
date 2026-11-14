@@ -29,6 +29,7 @@ mod disposition;
 mod history_blocks;
 mod ingress;
 mod listener;
+mod native_block_rows;
 mod provisioning;
 mod resize_resync;
 mod send;

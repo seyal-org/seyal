@@ -136,12 +136,19 @@ pub(super) fn classify_resync_scan_frame(
             Ok(ResyncScanFrame::DisplayRemainder)
         }
         MessageType::BlockTimeline
+        | MessageType::BlockNativeRegions
         | MessageType::Lifecycle
         | MessageType::CopiedText
         | MessageType::ViewportLineIds => {
+            // Type-48 BlockNativeRegions uses the same presentation envelope as
+            // BlockTimeline / ViewportLineIds under CAP_ATTACHMENT_DELIVERY_CONTROL
+            // (#1484). Omitting it here disconnects LocalDisplayClient during
+            // attach/resync when Runtime interleaves native-regions publishes.
             if matches!(
                 message_type,
-                MessageType::BlockTimeline | MessageType::ViewportLineIds
+                MessageType::BlockTimeline
+                    | MessageType::BlockNativeRegions
+                    | MessageType::ViewportLineIds
             ) {
                 validate_initial_presentation_envelope(
                     frame,

@@ -12,6 +12,10 @@ mod vt;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_attribution_yield;
+#[cfg(test)]
+mod tests_native_blocks;
 
 pub use resize::PreparedResize;
 pub use state::{

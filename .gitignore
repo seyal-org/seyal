@@ -16,8 +16,10 @@ node_modules/
 dist/
 .cache/
 
-# AI-SDLC developer framework (materialized by make bootstrap-agents)
+# AI-SDLC developer framework (materialized by make bootstrap-agents).
+# Match both a materialized directory and a worktree symlink.
 /.sdlc/framework/
+/.sdlc/framework
 
 # Coverage / test output
 coverage/

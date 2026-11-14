@@ -14,13 +14,13 @@
 ## 1. Executive decision
 
 1. Seyal uses one persistent, headless-capable **per-user Seyal Runtime** as the authority for local live terminal executions. (`R-001`, `R-004`)
-2. Each `TerminalExecution` owns exactly one terminal endpoint (POSIX PTY on macOS/Linux; future ConPTY adapter on Windows), child lifecycle, and one canonical Seyal `TerminalState` containing VT/parser modes, primary/alternate screens, logical history, reflow and damage. Block timeline authority is separate Runtime/workspace metadata keyed by `ExecutionId`. (`R-005`, `R-006`, `R-029`)
+2. Each `TerminalExecution` owns exactly one terminal endpoint (POSIX PTY on macOS/Linux; future ConPTY adapter on Windows), child lifecycle, and one canonical Seyal `TerminalState` containing VT/parser modes, primary/alternate screens, logical history, reflow and damage. Block **timeline** authority is separate Runtime/workspace metadata keyed by `ExecutionId`; accepted native-Block RegionGrids live inside that one `TerminalState` (`PrimaryBlockEngine`). (`R-005`, `R-006`, `R-029`, ADR-009)
 3. The GUI never owns or mirrors a second authoritative VT or grid. (`R-002`)
 4. The local desktop path must avoid synchronous IPC round trips / cross-process ping-pong on input, PTY output, VT mutation, damage, and presentation. (`R-003`)
 5. Local clients use compact binary control/input plus a platform-local derived display projection; remote/cloud clients use compact binary snapshot/delta streams derived from the same canonical state. (`R-003`, `R-031`)
 6. No daemon, process, I/O thread, Lua VM, glyph atlas, or renderer stack is created per pane. Runtime concurrency scales by measured load, while renderer resources scale mainly with visible surfaces. (`R-004`, `R-025`)
 7. **Headless decision: IMPLEMENT FROM M001.** (`R-001`)
-8. Blocks are structured metadata/presentation over one execution and its canonical history; a Block never implies another PTY, VT, grid, process, or transcript copy. (`R-006`)
+8. Blocks are Runtime timeline metadata plus canonical RegionGrid content inside one VT authority; a Block never implies another PTY, parser, VT engine, process, or transcript copy. (`R-006`, ADR-009)
 9. Alternate-screen/TUI applications remain real terminal applications using the same canonical `TerminalState`. (`R-007`)
 10. Agents and future multi-agent orchestration interact through stable capabilities/events and never own PTYs, terminal state, scrollback, or rendering. (`R-008`, `R-009`)
 11. The ADR-015 target keeps Rust authoritative for portable terminal/runtime logic **and** portable product/UI state and behavior; Swift + AppKit remains the thin in-repo host for inherently macOS-specific windowing, native event collection, IME, accessibility, clipboard/drag-drop, appearance/accessibility observation, native color/font/material realization, Metal and CoreText integration, bundled-helper launch, and bounded disposable native view/resource/cache state. (`R-010`, ADR-015)
@@ -235,7 +235,12 @@ Multi-client attach requires explicit resize authority. It must never degenerate
 
 ### 6.1 Block model
 
-A `Block` owns metadata, not terminal infrastructure. Block timeline authority lives in `seyal-workspace` / Runtime workspace metadata and is keyed by stable `ExecutionId` plus logical history anchors.
+Block **timeline** authority (IDs, lifecycle, trust/scope metadata) lives in
+`seyal-workspace` / Runtime workspace metadata keyed by stable `ExecutionId`.
+Accepted native-Block target (ADR-009 / #1480 / #1482): canonical prompt/command
+and output **RegionGrids** live inside the one `TerminalState` `PrimaryBlockEngine`
+through one `RegionStore` and non-owning `VTWindowMap`. A Block never owns an
+independent PTY, parser, VT semantic engine, child, renderer, or copied transcript.
 
 Typical Block fields may include:
 
@@ -255,20 +260,25 @@ presentation state
 A Block must not own:
 
 ```text
-PTY
-VT parser
-terminal grid
-alternate grid
-child process
-renderer
-private copy of full output
+independent PTY / child process
+independent VT parser or mode/cursor engine
+independent alternate-screen engine
+independent renderer
+private copied transcript / second writable primary grid
 ```
 
-Block metadata observes execution/history asynchronously. Terminal progress must not synchronously depend on Block lifecycle or semantic extraction.
+A Block **may** own RegionGrid content identity (prompt/command and output regions)
+inside the single `PrimaryBlockEngine` / `RegionStore`. Block timeline metadata
+observes lifecycle asynchronously. Terminal progress must not synchronously depend
+on Block presentation, IPC, or semantic extraction.
 
 ### 6.2 Current mutable Block
 
-A shell-integrated execution may have one current mutable terminal Block representing the current command/prompt lifecycle. Completed Blocks become immutable metadata references over stable logical history ranges.
+A shell-integrated execution may have one current mutable terminal Block representing
+the current command/prompt lifecycle. Completed Blocks retain RegionGrid content
+through the shared HistoryStore once sealed under ADR-010 rules; lifecycle metadata
+remains Runtime-owned. History-range-only cards are the legacy shipping model until
+the single-owner native-Block cutover.
 
 When shell integration is missing, Seyal still behaves as a correct raw terminal; Block boundaries degrade gracefully and may use coarse session/activity boundaries instead of guessed command truth.
 
@@ -707,7 +717,7 @@ Terminal fundamentals must work without cloud/licensing/telemetry.
 
 1. Exactly one authoritative terminal state per execution.
 2. A pane/window/tab never owns a PTY by virtue of presentation.
-3. Blocks never imply a second PTY/VT/grid/process and Block timeline authority remains outside `TerminalExecution`.
+3. Blocks never imply a second PTY/parser/VT engine/process; Block timeline metadata remains Runtime-owned outside the PTY path, while accepted native Block RegionGrids live inside the one `TerminalState` / `PrimaryBlockEngine`.
 4. Agents never own terminal infrastructure.
 5. Terminal I/O/rendering never synchronously waits for agents, persistence, cloud, analytics, telemetry, licensing or Lua.
 6. No synchronous IPC request/response ping-pong belongs in the local terminal hot path.
@@ -838,7 +848,7 @@ Stop implementation and require architecture review if any of these appear:
 | daemon added too late | M001 already launches through Runtime |
 | daemon/process/thread per pane | bounded shared Runtime architecture |
 | display JSON/serialized cells | binary/shared derived projection |
-| Blocks own grids/PTys | Block is workspace/runtime metadata/index only |
+| Blocks own independent PTY/parser/VT engines | One TerminalExecution authority; RegionGrids only inside PrimaryBlockEngine |
 | semantic transcript becomes canonical | terminal logical history remains canonical |
 | agent/Lua/persistence on hot path | asynchronous/cold boundaries only |
 | huge per-pane renderer allocation | resources scale by visible surfaces |
@@ -865,7 +875,7 @@ GUI VT mirror               = forbidden
 headless                     = implemented from M001
 local hot path               = no synchronous IPC ping-pong
 per-pane daemon/thread       = forbidden by default
-Blocks                       = metadata/index over canonical history
+Blocks                       = Runtime timeline metadata + TerminalState RegionGrids (ADR-009)
 live TUI                     = same PTY/VT alternate-screen state
 agents                       = capability consumers, never terminal owners
 attention/approvals          = structured global model

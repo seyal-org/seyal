@@ -21,11 +21,11 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::DisplayCache,
     local_ipc::framing::{
-        encode_frame, BlockTimeline, ComposerEligibility, ComposerResult, ComposerResultCode,
-        ComposerStatus, ComposerTarget, ComposerTargetMode, CreateExecutionResult, ErrorCode,
-        ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot, Lifecycle, MessageType, Role,
-        SessionOffer, SessionOverlayWire, SessionStatus, TerminateExecutionResult, HEADER_LEN,
-        MAX_FRAME_PAYLOAD,
+        encode_frame, BlockNativeRegions, BlockTimeline, ComposerEligibility, ComposerResult,
+        ComposerResultCode, ComposerStatus, ComposerTarget, ComposerTargetMode,
+        CreateExecutionResult, ErrorCode, ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot,
+        Lifecycle, MessageType, Role, SessionOffer, SessionOverlayWire, SessionStatus,
+        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::BlockState,
     AttachmentId, ExecutionId,
@@ -146,6 +146,22 @@ pub struct LocalDisplayClient {
     pub(crate) input_failure: Option<InputAdmissionFailure>,
     pub(crate) resize_failure: Option<ResizeFailure>,
     pub(crate) block_timeline: BlockTimeline,
+    /// Latest native Block RegionId map (#1484). Empty until Runtime publishes.
+    pub(crate) block_native_regions: BlockNativeRegions,
+    /// Per-display Block height index + scroll geometry (#1484 Findings A+B).
+    /// Derived from content metrics; never TerminalState authority.
+    pub(crate) block_viewport_index: crate::viewport::BlockViewportIndex,
+    /// Latest Rust-owned viewport plan for Metal (Finding C).
+    pub(crate) block_viewport_plan: Option<crate::viewport::BlockViewportPlan>,
+    pub(crate) block_viewport_presentation_epoch: u64,
+    /// Last plan-build paint identity: `(block_id, header, output, sealed_rows)`.
+    /// Live `row_count` ticks that only grow heights do not bump
+    /// `presentation_epoch` (#1484 P0 seq / HISTORY retain).
+    pub(crate) last_plan_native_paint_identity: Vec<(u64, u64, u64, u32)>,
+    pub(crate) block_viewport_scroll_anchor: crate::viewport::ScrollAnchor,
+    /// AppKit-reported visible window height in presentation rows. When set,
+    /// overrides PTY geometry for plan window selection (G5 AbsoluteY sync).
+    pub(crate) block_viewport_window_rows: Option<u32>,
     pub(crate) command_blocks_supported: bool,
     pub(crate) last_composer_result: Option<ComposerResult>,
     /// Latest Runtime-published composer eligibility for this attachment
@@ -284,6 +300,151 @@ impl LocalDisplayClient {
 
     /// Read-only, bounded Runtime metadata. The terminal display cache remains
     /// independent and authoritative for cells/pixels.
+    pub fn block_native_regions(&self) -> &BlockNativeRegions {
+        &self.block_native_regions
+    }
+
+    /// Per-display indexed transcript height (Finding A). Preferred over the
+    /// Runtime-authored `BlockNativeRegions.total_height` wire field.
+    pub fn block_viewport_total_height(&self) -> u64 {
+        self.block_viewport_index.total_height()
+    }
+
+    /// Rebuild the per-display viewport index + plan from the already-committed
+    /// `block_native_regions` map. Callers must assign the map first so plan
+    /// clips see the new RegionIds (#1484 FourPane type-48 lag).
+    pub(crate) fn apply_block_native_regions_to_viewport(&mut self) {
+        // Height = sealed ownership rows + live on-window rows for each Block.
+        // Ordinary output updates heights in place (O(log B) per Block) when
+        // timeline order is unchanged; structural reorder still replace_all.
+        let incoming: Vec<(u64, u32)> = self
+            .block_native_regions
+            .records
+            .iter()
+            .map(|record| {
+                let height = record
+                    .sealed_rows
+                    .saturating_add(u32::from(record.row_count));
+                (record.block_id, height)
+            })
+            .collect();
+        let order_unchanged = self.block_viewport_index.len() == incoming.len()
+            && self
+                .block_viewport_index
+                .ordered_ids()
+                .iter()
+                .zip(incoming.iter().map(|(id, _)| id))
+                .all(|(a, b)| a == b);
+        if order_unchanged {
+            for (id, height) in incoming {
+                let _ = self.block_viewport_index.set_height(id, height);
+            }
+        } else {
+            self.block_viewport_index.replace_all(incoming);
+        }
+        let next_identity: Vec<(u64, u64, u64, u32)> = self
+            .block_native_regions
+            .records
+            .iter()
+            .map(|r| (r.block_id, r.header_region, r.output_region, r.sealed_rows))
+            .collect();
+        // Bump presentation_epoch only when sealed RegionIds / ownership change.
+        // Live row_count growth keeps epoch stable so Metal retains HISTORY.
+        let bump_epoch = next_identity != self.last_plan_native_paint_identity
+            || self.block_viewport_plan.is_none();
+        self.last_plan_native_paint_identity = next_identity;
+        self.rebuild_block_viewport_plan_with_epoch(bump_epoch);
+    }
+
+    /// Sync AppKit scroll into the Rust plan anchor (G5). `live_end` keeps the
+    /// plan pinned to the transcript tail; otherwise `absolute_y` is the
+    /// presentation-row origin of the visible window. `window_rows` is the
+    /// AppKit viewport height in presentation rows (minimum 1).
+    pub fn set_block_viewport_scroll_anchor(
+        &mut self,
+        live_end: bool,
+        absolute_y: u64,
+        window_rows: u32,
+    ) {
+        let next_anchor = if live_end {
+            crate::viewport::ScrollAnchor::LiveEnd
+        } else {
+            crate::viewport::ScrollAnchor::AbsoluteY(absolute_y)
+        };
+        let next_window = window_rows.max(1);
+        let unchanged = self.block_viewport_scroll_anchor == next_anchor
+            && self.block_viewport_window_rows == Some(next_window);
+        self.block_viewport_scroll_anchor = next_anchor;
+        self.block_viewport_window_rows = Some(next_window);
+        if !unchanged || self.block_viewport_plan.is_none() {
+            // Scroll-only: keep presentation_epoch so Metal retains overlapping
+            // HISTORY pages across near-end AbsoluteY/LiveEnd flips (#1484 100k).
+            self.rebuild_block_viewport_plan_with_epoch(false);
+        }
+    }
+
+    /// Rebuild the Metal-facing plan from the current per-display index (C).
+    /// `bump_epoch` is false for scroll-only AbsoluteY/LiveEnd updates so
+    /// Metal can retain overlapping HISTORY pages across near-end scrolls.
+    #[allow(dead_code)] // bumping wrapper retained for structural callers / tests
+    pub(crate) fn rebuild_block_viewport_plan(&mut self) {
+        self.rebuild_block_viewport_plan_with_epoch(true);
+    }
+
+    pub(crate) fn rebuild_block_viewport_plan_with_epoch(&mut self, bump_epoch: bool) {
+        if bump_epoch {
+            self.block_viewport_presentation_epoch =
+                self.block_viewport_presentation_epoch.saturating_add(1);
+        }
+        let window_rows = self
+            .block_viewport_window_rows
+            .unwrap_or_else(|| u32::from(self.committed_geometry.rows.max(1)))
+            .max(1);
+        let records: Vec<_> = self
+            .block_native_regions
+            .records
+            .iter()
+            .map(|r| {
+                (
+                    r.block_id,
+                    r.header_region,
+                    r.output_region,
+                    r.sealed_rows,
+                    r.first_row,
+                    r.row_count,
+                )
+            })
+            .collect();
+        let execution_key = u64::from_le_bytes(
+            self.execution_id.to_bytes()[..8]
+                .try_into()
+                .expect("ExecutionId is 16 bytes"),
+        );
+        let display_key = u64::from_le_bytes(
+            self.attachment_id.to_bytes()[..8]
+                .try_into()
+                .expect("AttachmentId is 16 bytes"),
+        );
+        self.block_viewport_plan = Some(crate::viewport::BlockViewportPlan::build(
+            crate::viewport::BlockViewportPlanRequest {
+                execution_id: execution_key,
+                display_handle: display_key,
+                presentation_epoch: self.block_viewport_presentation_epoch,
+                source_generation: self.block_native_regions.revision,
+                block_revision: self.block_timeline.revision,
+                content_generation: self.block_native_regions.revision,
+                scroll_anchor: self.block_viewport_scroll_anchor,
+                index: &self.block_viewport_index,
+                window_rows,
+                records: &records,
+            },
+        ));
+    }
+
+    pub fn block_viewport_plan(&self) -> Option<&crate::viewport::BlockViewportPlan> {
+        self.block_viewport_plan.as_ref()
+    }
+
     pub fn block_timeline(&self) -> &BlockTimeline {
         &self.block_timeline
     }
@@ -458,7 +619,10 @@ impl LocalDisplayClient {
         start_unit: u32,
     ) -> Result<(), ClientError> {
         self.require_controller()?;
-        if block_id == 0 || start_line == 0 || end_line < start_line {
+        // Finding E: (0, 0) is sealed-row indexed retrieval; start_unit is the
+        // sealed index from BlockViewportPlan clipping.
+        let sealed_index_mode = start_line == 0 && end_line == 0;
+        if block_id == 0 || (!sealed_index_mode && (start_line == 0 || end_line < start_line)) {
             return Err(ClientError::Protocol);
         }
         let request_id = self.next_history_request_id;
@@ -608,6 +772,17 @@ fn reconstruction_probe_client_with_stream(
             revision: 0,
             records: Vec::new(),
         },
+        block_native_regions: BlockNativeRegions {
+            revision: 0,
+            total_height: 0,
+            records: Vec::new(),
+        },
+        block_viewport_index: crate::viewport::BlockViewportIndex::default(),
+        block_viewport_plan: None,
+        block_viewport_presentation_epoch: 0,
+        last_plan_native_paint_identity: Vec::new(),
+        block_viewport_scroll_anchor: crate::viewport::ScrollAnchor::LiveEnd,
+        block_viewport_window_rows: None,
         command_blocks_supported: false,
         last_composer_result: None,
         composer_status: None,

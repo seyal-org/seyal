@@ -33,6 +33,10 @@ pub struct HistoryRangeRequest {
     pub max_cells: u32,
     /// Lead cells to skip from the start of the line range. Zero is the
     /// M001-compatible beginning of the first in-range line.
+    ///
+    /// When `start_line == 0 && end_line == 0` (Finding E sealed-index mode),
+    /// this is instead the sealed-row index from `BlockViewportPlan` clipping
+    /// and must not be interpreted as a LineId-span lead skip.
     pub start_unit: u32,
 }
 
@@ -60,12 +64,13 @@ impl HistoryRangeRequest {
         let block_id = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
         let start_line = u64::from_le_bytes(bytes[32..40].try_into().unwrap());
         let end_line = u64::from_le_bytes(bytes[40..48].try_into().unwrap());
+        // Finding E: (0, 0) selects sealed-row indexed retrieval via start_unit.
+        let sealed_index_mode = start_line == 0 && end_line == 0;
         if bytes[50..52] != [0; 2]
             || bytes[60..64] != [0; 4]
             || request_id == 0
             || block_id == 0
-            || start_line == 0
-            || end_line < start_line
+            || (!sealed_index_mode && (start_line == 0 || end_line < start_line))
         {
             return Err(FramingError::MalformedPayload);
         }

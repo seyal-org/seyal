@@ -44,6 +44,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// Encoded Flow history is on-screen without a Candidate-D live frame
   /// (shell-exit retain). Must not satisfy SPEC-009 renderer-ready / Usable.
   var hasRetainedHistoryPresentation = false
+  /// Marks recovery/paint AX diagnostic stale; composed on next AX read so the
+  /// synchronous GPU sample never runs per Candidate-D frame (#1484 P0 lag).
+  var recoveryAccessibilityValueStale = false
   var presentationState = PresentationRecoveryState()
   var presentationRetryScheduled = false
   var presentationRetryTimer: Timer?
@@ -65,10 +68,27 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var lastRenderError: Error?
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
   var historyRenderPageKeys: [UInt64: NativeHistoryRenderPageKey] = [:]
+  /// Plan-owned sealed-index HISTORY dedup (Finding C/E). Keys encode the
+  /// clipping window; wire requests stay `(0,0)+start_unit`.
+  var planClipRequestBook = HistoryProjectionRequestBook()
   /// Latest geometry installed for the active Flow transcript. Frame revisions
   /// can advance for unrelated runtime updates; identical regions need no new
   /// Metal history preparation.
   var lastTranscriptFrameRegions: [NativeTranscriptRegion]?
+  /// Last successfully applied BlockViewportPlan header signature.
+  /// Height-only growth invalidates via `totalExtent` (epoch stays stable).
+  /// Do not key on type-48 `content_generation` — it bumps every tick (#1484).
+  /// `chromeClipFingerprint` invalidates when AppKit body placement moves.
+  var lastAppliedViewportPlanSignature: (
+    handle: UInt64,
+    epoch: UInt64,
+    scrollY: UInt64,
+    visible: UInt32,
+    clipping: UInt32,
+    totalExtent: UInt64,
+    clipCount: UInt32,
+    chromeClipFingerprint: UInt64
+  )?
   private(set) var transcriptDisplayHandle: UInt64 = 0
   var lastProposedGeometry = CGRect.null
   var proposingGeometry = false
@@ -159,6 +179,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
           // only re-encodes ranges already stored here; dropping this store
           // leaves Block bodies empty even after Runtime history arrives.
           self.retainHistoryRange(range)
+          self.notePlanClipHistoryResult(range)
           if let onHistoryRangeChanged {
             onHistoryRangeChanged(range)
           } else {
@@ -261,6 +282,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     guard handle != transcriptDisplayHandle else { return }
     transcriptDisplayHandle = handle
     lastTranscriptFrameRegions = nil
+    lastAppliedViewportPlanSignature = nil
     historyRenderPageKeys.removeAll(keepingCapacity: true)
     renderer.removeHistoryRegions(except: [])
     renderer.clearLiveTailPresentation()
@@ -268,6 +290,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       $0.displayHandle == handle
     }
     renderer.requestPresent()
+  }
+
+  /// Bind the Controller handle on first transcript publish without wiping
+  /// already-retained HISTORY pages (#1484 blank Metal / AX-only bodies).
+  func ensureTranscriptDisplayHandle(_ handle: UInt64) {
+    guard handle != 0, transcriptDisplayHandle == 0 else { return }
+    transcriptDisplayHandle = handle
   }
 
   var terminalExecutionIdentity: String? {
@@ -294,43 +323,25 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     ))
   }
 
-  /// Makes the authoritative recovery state observable to VoiceOver and to
-  /// native acceptance automation without introducing a second terminal
-  /// model or changing the Runtime protocol.
-  ///
-  /// Prepared-frame rows/columns/cursor are mirrored read-only so headed
-  /// Flow-scroll acceptance (#865 / SPEC-008 §3.1) can prove transcript
-  /// scrolling does not mutate PTY size or terminal cursor state.
+  /// Marks the recovery/paint diagnostic AX value stale; composed on the next
+  /// AX read. Its `history-gpu-ink` field needs a synchronous offscreen render
+  /// plus full-surface readback, which must never run per Candidate-D frame
+  /// (#1484 P0 lag / flicker).
   func refreshRecoveryAccessibilityValue() {
-    let connection = terminalBridgeIsConnected ? "usable" : "disconnected"
-    let runtime = terminalRuntimeIdentity ?? "none"
-    let execution = terminalExecutionIdentity ?? "none"
-    let attachment = terminalAttachmentIdentity ?? "none"
-    let alternate = lastAlternateScreen == true ? "true" : "false"
-    let paint = renderer.inspectFlowPaint()
-    let flowPaint = paint.accessibilityToken
-    // history-instances / history-regions-painted expose Metal Block-body
-    // glyphs so XCUI fails when AX titles/bodies exist but paint is blank or
-    // collapsed onto one card (#1379 false-green).
-    let historyInstances = paint.historyInstanceCount
-    let historyRegionsPainted = paint.paintedHistoryRegionCount
-    let historyClips = paint.historyClipsDistinct ? "ok" : "collapse"
-    let geometry: String
-    if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
-      geometry =
-        "rows=\(frame.rows) columns=\(frame.columns) "
-        + "cursor=\(frame.cursor_row),\(frame.cursor_column) "
-        + "cursor-visible=\(frame.cursor_visible != 0 ? "true" : "false")"
-    } else {
-      geometry = "rows=0 columns=0 cursor=0,0 cursor-visible=false"
+    recoveryAccessibilityValueStale = true
+  }
+
+  override func accessibilityValue() -> Any? {
+    if recoveryAccessibilityValueStale {
+      recoveryAccessibilityValueStale = false
+      super.setAccessibilityValue(composeRecoveryAccessibilityValue())
     }
-    setAccessibilityValue(
-      "process=\(ProcessInfo.processInfo.processIdentifier) connection=\(connection) "
-        + "runtime=\(runtime) execution=\(execution) "
-        + "attachment=\(attachment) alternate-screen=\(alternate) "
-        + "\(geometry) flow-paint=\(flowPaint) history-instances=\(historyInstances) "
-        + "history-regions-painted=\(historyRegionsPainted) history-clips=\(historyClips)"
-    )
+    return super.accessibilityValue()
+  }
+
+  override func setAccessibilityValue(_ value: Any?) {
+    recoveryAccessibilityValueStale = false
+    super.setAccessibilityValue(value)
   }
 
   static func identityString(
@@ -494,8 +505,15 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func updateVisibility() {
     let renderable = shouldRender
-    let becameRenderable = renderable && !self.renderable
-    self.renderable = renderable
+    // Shell-exit retained HISTORY must keep the glyph atlas + instance buffers
+    // even when AppKit briefly reports occlusion (headed XCUI behind the
+    // runner). setVisible(false) previously released them and left offscreen
+    // inspect counts with a blank on-screen layer (#1484 clear→exit).
+    let keepRetainedHistory =
+      hasRetainedHistoryPresentation && !renderer.historyRegionOrder.isEmpty
+    let gpuVisible = renderable || keepRetainedHistory
+    let becameRenderable = gpuVisible && !self.renderable
+    self.renderable = gpuVisible
     if isNativeInteractionProbe {
       // SPEC §10 probes: first-responder / AX / IME only — no Metal display
       // link or full-size drawable alongside the qualification soak bridge.
@@ -503,25 +521,27 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       renderer.setVisible(false)
       return
     }
-    if renderable {
+    if gpuVisible {
       if let metalLayer = layer as? CAMetalLayer {
         installMetalDisplayLink(on: metalLayer)
       }
       forceNextFrame = true
-      startAutomaticBridgeRecoveryIfNeeded()
-      // A connected recovery can reach Restoring before AppKit accepts its
-      // first-responder/IME handoff. Retry that deferred presentation step on
-      // later visibility/activation changes, even when no new PTY frame lands.
-      if recoveryPresentationPending, hasPreparedState {
-        _ = advanceRecoveryPresentationIfReady()
+      if renderable {
+        startAutomaticBridgeRecoveryIfNeeded()
+        // A connected recovery can reach Restoring before AppKit accepts its
+        // first-responder/IME handoff. Retry that deferred presentation step on
+        // later visibility/activation changes, even when no new PTY frame lands.
+        if recoveryPresentationPending, hasPreparedState {
+          _ = advanceRecoveryPresentationIfReady()
+        }
       }
     } else {
       invalidateMetalDisplayLink()
       invalidatePreparedPresentation()
     }
 
-    renderer.setVisible(renderable)
-    if renderable {
+    renderer.setVisible(gpuVisible)
+    if gpuVisible {
       // Showing is the explicit recovery boundary for an exhausted GPU
       // completion failure series. Reconstruct from the latest committed
       // Candidate-D state; never request PTY-byte replay.
@@ -533,7 +553,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       {
         lastRenderError = nil
       }
-      bridge?.publishCurrentFrame()
+      if renderable {
+        bridge?.publishCurrentFrame()
+      }
       if canPresentSurface, !presentationState.exhausted {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
@@ -685,25 +707,42 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let retainHistory = recoveryAppHandle != 0 && seyal_app_retains_flow_history(recoveryAppHandle) != 0
     // Always drop running primary clips on disconnect. Retained history must
     // not share the surface with the last prepared viewport after clear→exit
-    // (#1379): that leftover frame paints loose text/cursor over Block cards.
-    // Drop Metal history *buffers* (and any deferred prepares) too — keep
-    // historyRanges rows so chrome can re-encode against settled AppKit clips.
+    // (#1379): that leftover Candidate-D frame paints loose text/cursor over
+    // Block cards. Keep already-prepared HISTORY Metal buffers when Rust
+    // retains Flow history — wiping them made shell-exit AX-only because the
+    // live BlockViewportPlan is gone and cannot rebuild clips (#1484).
     clearLiveTailPresentation()
-    lastTranscriptFrameRegions = nil
-    renderer.removeHistoryRegions(except: [])
     cancelPresentationRetries()
     resetPreparationRecovery()
-    // Live Candidate-D readiness must not linger into reconnect/New shell
-    // (SPEC-009 §8.2.2 / §10). History present uses the retained flag only
-    // when Rust still retains Flow history.
     hasPreparedState = false
-    hasRetainedHistoryPresentation = retainHistory && !historyRanges.isEmpty
-    onTimelineChanged?()
-    if retainHistory, shouldRender, hasRetainedHistoryPresentation {
-      renderer.requestPresent()
-      beginPresentationAttemptSeries()
-      armMetalDisplayLink()
-    } else if !retainHistory {
+    if retainHistory {
+      // LiveTail/present may still hold framesInFlight; force deferred HISTORY
+      // prepares through so inspectFlowPaint is not stuck at instances=0.
+      renderer.forceFlushHistoryPreparesForRetain()
+      hasRetainedHistoryPresentation = !historyRanges.isEmpty || !renderer.historyRegions.isEmpty
+      onTimelineChanged?()
+      renderer.forceFlushHistoryPreparesForRetain()
+      // rebuildBlocks may prune ranges/buffers to the ended timeline; if Metal
+      // buffers were dropped, re-encode from remaining retained rows against
+      // the last plan frame (and stack any revealed floor-hidden Blocks).
+      if renderer.historyRegions.isEmpty, !historyRanges.isEmpty {
+        reencodeRetainedHistoryAfterDisconnect()
+        renderer.forceFlushHistoryPreparesForRetain()
+      }
+      hasRetainedHistoryPresentation = !renderer.historyRegions.isEmpty
+      if hasRetainedHistoryPresentation {
+        updateVisibility()
+        renderer.requestPresent()
+        beginPresentationAttemptSeries()
+        armMetalDisplayLink()
+      }
+    } else {
+      lastTranscriptFrameRegions = nil
+      lastAppliedViewportPlanSignature = nil
+      renderer.removeHistoryRegions(except: [])
+      historyRenderPageKeys.removeAll(keepingCapacity: true)
+      hasRetainedHistoryPresentation = false
+      onTimelineChanged?()
       // Presentation retries / retained flag already cleared above. Do not
       // call invalidatePreparedPresentation — it would also drop
       // hasRetainedHistoryPresentation after a late retain latch and wipe

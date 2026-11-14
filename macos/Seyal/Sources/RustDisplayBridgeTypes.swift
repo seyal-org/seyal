@@ -108,19 +108,36 @@ struct NativeHistoryRange: Equatable {
     self.sourceDisplayHandle = sourceDisplayHandle
   }
 
-  /// Plain text of retained history rows. Accessibility only; Metal still paints.
-  var transcriptText: String {
-    rows.map { row in
-      row.map { cell in
+  /// Bounded AX transcript: trim per-row padding, drop trailing blank rows, then
+  /// keep the first line plus the newest lines that fit. Avoids rebuilding a
+  /// full padded string for tall Blocks during history continuation (#1484).
+  func accessibilityTranscript(limit: Int = BlockAccessibilityText.limit) -> String {
+    func rowText(_ row: [Cell]) -> String {
+      var parts: [String] = []
+      parts.reserveCapacity(row.count)
+      for cell in row {
         if !cell.graphemeUtf8.isEmpty,
           let text = String(data: cell.graphemeUtf8, encoding: .utf8)
         {
-          return text
+          parts.append(text)
+          continue
         }
-        guard let scalar = Unicode.Scalar(cell.scalar), scalar.value != 0 else { return "" }
-        return String(scalar)
-      }.joined()
-    }.joined(separator: "\n")
+        guard let scalar = Unicode.Scalar(cell.scalar), scalar.value != 0 else {
+          parts.append("")
+          continue
+        }
+        parts.append(String(scalar))
+      }
+      return BlockAccessibilityText.trimTrailingPadding(parts.joined())
+    }
+    var end = rows.count
+    while end > 0 && rowText(rows[end - 1]).isEmpty {
+      end -= 1
+    }
+    guard end > 0 else { return "" }
+    return BlockAccessibilityText.summary(lineCount: end, limit: limit) { index in
+      rowText(rows[index])
+    }
   }
 }
 

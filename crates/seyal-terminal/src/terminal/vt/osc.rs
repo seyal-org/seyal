@@ -3,6 +3,7 @@
 use super::super::state::{SessionShellKind, ShellIntegrationEvent, ShellIntegrationToken};
 use super::TerminalCore;
 use crate::presentation::{parse_osc_presentation, HostPresentationEvent};
+use crate::primary_blocks::attribution::{MarkerKind, UnitVersion};
 use crate::LineId;
 
 impl TerminalCore {
@@ -104,10 +105,59 @@ impl TerminalCore {
             self.record_deferred();
             return;
         };
+        // Atomic (shell_events, journal marker) admit — Finding F / D1.
+        // Never enqueue Runtime-visible shell events without journal causality,
+        // and never journal without a paired shell_events slot.
         if self.shell_events.len() == self.shell_events.capacity() {
             self.record_deferred();
             return;
         }
+        if self.journal_shell_boundary(&event).is_err() {
+            self.record_deferred();
+            return;
+        }
         self.shell_events.push_back(event);
+        // D3: request Runtime observe before continuing a tall same-read burst.
+        self.attribution_observe_yield = true;
+    }
+
+    fn journal_shell_boundary(&mut self, event: &ShellIntegrationEvent) -> Result<(), ()> {
+        let cursor = self.primary.cursor(self.modes.cursor_visible);
+        let (marker, line) = match event {
+            ShellIntegrationEvent::PromptStarted { .. } => {
+                (MarkerKind::PromptStart, self.current_line())
+            }
+            ShellIntegrationEvent::CommandStarted { line, .. } => (MarkerKind::CommandStart, *line),
+            ShellIntegrationEvent::CommandFinished { line, .. } => {
+                (MarkerKind::CommandFinished, *line)
+            }
+            ShellIntegrationEvent::Readiness { .. } => return Ok(()),
+        };
+        let unit_offset = self
+            .primary
+            .cell_anchor(cursor.col, cursor.row)
+            .map(|anchor| u64::from(anchor.unit_offset))
+            .unwrap_or(0);
+        let content_generation = self.primary.engine.unit_generation_at(line, unit_offset);
+        let version = UnitVersion {
+            line_id: line,
+            unit_offset,
+            content_generation,
+        };
+        // Journal first; arm regions only after successful admit so a refused
+        // marker cannot leave dangling prompt/output ownership (D1).
+        self.primary
+            .engine
+            .record_shell_boundary(marker, version, cursor.col, None, true)?;
+        match marker {
+            MarkerKind::PromptStart => {
+                let _ = self.primary.engine.arm_prompt_start_header();
+            }
+            MarkerKind::CommandStart => {
+                let _ = self.primary.engine.arm_command_start_output();
+            }
+            MarkerKind::CommandFinished => {}
+        }
+        Ok(())
     }
 }

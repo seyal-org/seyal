@@ -66,6 +66,49 @@ impl Runtime {
         )
     }
 
+    /// Best-effort after-display metadata. Queue pressure drops the frame
+    /// instead of tearing down the connection (coalescable maps only).
+    pub(super) fn try_send_attachment_after_display_frame(
+        &mut self,
+        token: u64,
+        attachment_id: AttachmentId,
+        bytes: Vec<u8>,
+    ) -> bool {
+        let negotiated = self.connection_has_delivery_control(token);
+        let sequence = negotiated
+            .then(|| self.resume_sequence(token, attachment_id))
+            .flatten();
+        if negotiated && sequence.is_none() {
+            return false;
+        }
+        let sequence = sequence.unwrap_or(0);
+        let bytes = if negotiated {
+            match framing::envelope_presentation_frame(&bytes, attachment_id, sequence) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    self.close_local_connection(token);
+                    return false;
+                }
+            }
+        } else {
+            bytes
+        };
+        let queued = self.local_ipc.as_mut().is_some_and(|state| {
+            if negotiated {
+                state
+                    .server
+                    .enqueue_attachment_after_display(token, attachment_id, bytes)
+                    .is_ok()
+            } else {
+                state.server.enqueue_after_display(token, bytes).is_ok()
+            }
+        });
+        if !queued {
+            return false;
+        }
+        self.sync_local_writable(token)
+    }
+
     /// Queue an un-enveloped frame behind one negotiated attachment's own
     /// presentation output. Lifecycle carries its ExecutionId directly; its
     /// transport ordering, rather than a presentation envelope, scopes it.

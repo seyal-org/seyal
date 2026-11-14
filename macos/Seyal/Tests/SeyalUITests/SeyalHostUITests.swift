@@ -1078,7 +1078,6 @@ final class SeyalHostUITests: XCTestCase {
         let composer = app.descendants(matching: .any)["seyal-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
         let available = NSPredicate(format: "value == 'available'")
-        let busy = NSPredicate(format: "value == 'busy'")
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: available, evaluatedWith: composer, handler: nil)],
@@ -1097,14 +1096,34 @@ final class SeyalHostUITests: XCTestCase {
             composer.firstMatch.typeText("sleep 2")
             app.typeKey("\r", modifierFlags: [])
         }
-        // Runtime publishes Busy at admission; the host only relays it.
+        // Runtime publishes Busy at admission (Pending). Once zsh preexec names
+        // the Running Block, ADR-009 DirectInput retracts the dock (#1468) and
+        // may remove it from AX. Either Busy or hidden proves the shell left
+        // Available while sleep owned it.
+        let leftAvailable = expectation(
+            for: NSPredicate { _, _ in
+                guard composer.firstMatch.exists else { return true }
+                let value = (composer.firstMatch.value as? String) ?? ""
+                return value == "busy" || value == "hidden"
+            },
+            evaluatedWith: nil,
+            handler: nil
+        )
         XCTAssertEqual(
-            XCTWaiter.wait(
-                for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],
-                timeout: 4
-            ),
+            XCTWaiter.wait(for: [leftAvailable], timeout: 4),
             .completed,
             "composer stayed \(composer.value ?? "nil") while sleep 2 owned the shell"
+        )
+        let sleepBlock = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier MATCHES %@ AND label CONTAINS %@",
+                "seyal-block-[0-9]+",
+                "sleep 2"
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            sleepBlock.waitForExistence(timeout: 4),
+            "sleep 2 must run as a Runtime Block"
         )
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed during busy relay")
         // The next trusted prompt re-enables it, with the draft cleared by
@@ -1347,19 +1366,10 @@ final class SeyalHostUITests: XCTestCase {
     /// screen, or a Raw-only launch, looks like a normal terminal and is a fail.
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
         app.ensureFlowBlocksPresentation(timeout: timeout)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
         XCTAssertTrue(
-            composer.waitForExistence(timeout: timeout),
-            "XCUI must run as Flow/Blocks; composer missing — UI looks like a normal terminal"
-        )
-        XCTAssertTrue(
-            composer.firstMatch.isHittable,
-            "XCUI must run as Flow/Blocks; composer not hittable — UI looks like a normal terminal"
-        )
-        XCTAssertTrue(
-            blocks.waitForExistence(timeout: 5),
+            blocks.waitForExistence(timeout: timeout),
             "XCUI must run as Flow/Blocks; seyal-blocks missing — UI looks like a normal terminal"
         )
         XCTAssertTrue(
@@ -1371,6 +1381,15 @@ final class SeyalHostUITests: XCTestCase {
             120,
             "Flow transcript must fill the Pane; a short or hidden transcript is a raw-terminal launch"
         )
+        // Busy / DirectInput may retract the dock; Blocks remain the Flow oracle.
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        if composer.exists {
+            let value = composer.value as? String ?? ""
+            XCTAssertTrue(
+                composer.isHittable || value == "busy" || value == "hidden" || value == "relay",
+                "composer AX must stay a Flow dock state when present; value=\(value)"
+            )
+        }
         XCTAssertTrue(
             app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
             "Core Terminal left panel stays visible alongside Flow composer/Blocks (#922)"
@@ -1795,7 +1814,12 @@ final class SeyalHostUITests: XCTestCase {
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
         let execute = app.descendants(matching: .any)["seyal-composer-execute"]
         let available = NSPredicate(format: "value == 'available'")
-        let busy = NSPredicate(format: "value == 'busy'")
+        // Warp-like DirectInput retracts the Busy dock (`isHidden`); XCUI may
+        // keep a stale `available` AX value on the hidden Group. Treat Busy
+        // admission as value==busy/hidden or a non-hittable retracted dock (#1484).
+        let busyOrRetracted = NSPredicate(
+            format: "value == 'busy' OR value == 'hidden' OR hittable == 0"
+        )
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
         XCTAssertEqual(
             XCTWaiter.wait(
@@ -1805,31 +1829,38 @@ final class SeyalHostUITests: XCTestCase {
             .completed,
             "composer never became available; value=\(composer.value ?? "nil")"
         )
-        XCTAssertTrue(editor.waitForExistence(timeout: 5))
-        editor.firstMatch.click()
-        editor.firstMatch.typeText("sleep 8")
-        editor.firstMatch.typeKey("\r", modifierFlags: [])
+        // Use the same submit path as other Host UI cases so Return reaches the
+        // composer editor (not a stale Metal surface) before Busy/DirectInput (#1484).
+        submitComposerCommand(app, "sleep 8")
         XCTAssertEqual(
             XCTWaiter.wait(
-                for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],
+                for: [expectation(for: busyOrRetracted, evaluatedWith: composer, handler: nil)],
                 timeout: 6
             ),
             .completed,
-            "composer stayed \(composer.value ?? "nil") while sleep owned the shell"
+            "composer stayed \(composer.value ?? "nil") hittable=\(composer.firstMatch.isHittable) while sleep owned the shell"
         )
-        XCTAssertTrue(execute.firstMatch.exists)
-        XCTAssertFalse(execute.firstMatch.isEnabled, "busy must disable native execute")
-        let busyValue = (composer.firstMatch.value as? String) ?? ""
-        XCTAssertFalse(
-            busyValue.contains("sleep"),
-            "admission/error AX must not leak the draft; value=\(busyValue)"
-        )
-        execute.firstMatch.click()
-        XCTAssertEqual(
-            composer.firstMatch.value as? String,
-            "busy",
-            "disabled execute must not admit a second command"
-        )
+        if composer.firstMatch.isHittable {
+            XCTAssertTrue(execute.firstMatch.exists)
+            XCTAssertFalse(execute.firstMatch.isEnabled, "busy must disable native execute")
+            let busyValue = (composer.firstMatch.value as? String) ?? ""
+            XCTAssertFalse(
+                busyValue.contains("sleep"),
+                "admission/error AX must not leak the draft; value=\(busyValue)"
+            )
+            execute.firstMatch.click()
+            XCTAssertTrue(
+                busyOrRetracted.evaluate(with: composer.firstMatch),
+                "disabled execute must not admit a second command; value=\(composer.firstMatch.value ?? "nil")"
+            )
+        } else {
+            // DirectInput retracted the Busy dock; there is no execute surface to
+            // disable — Metal owns the Running Block keys (#1468 / #1484).
+            XCTAssertFalse(
+                execute.firstMatch.exists && execute.firstMatch.isHittable,
+                "retracted Busy dock must not leave a hittable execute control"
+            )
+        }
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertEqual(
             XCTWaiter.wait(

@@ -87,6 +87,12 @@ extension ProductChromeHostView {
         action.target_execution_lo = lo
         action.target_execution_hi = hi
         _ = seyal_app_apply(pane.appHandle, &action)
+        // FOCUS_PANE often leaves ApplicationRoot snapshot.generation unchanged,
+        // so performChromeReconcile's generation short-circuit would skip
+        // reconcilePaneHosts / windowFocusedDisplayHandle / composer AX ownership.
+        // Multipane sibling submit then hits a stale leaf (#1484 / #1426).
+        let shell = seyal_app_shell(pane.appHandle)
+        reconcilePaneHosts(paneCount: Int(shell.pane_count))
         reconcileChrome()
         routeFocus()
     }
@@ -146,12 +152,13 @@ extension ProductChromeHostView {
 
     /// Close Terminal finishes after Lifecycle::Finalized; frames stop so
     /// onFrameChanged never rebuilds the Pane tab strip or drains DestroyWindow
-    /// effects. Must call `pane.onProductChanged` (MultiWindow wraps it to
-    /// applyPendingEffects + syncDestroyAgainstSnapshot), not reconcile alone.
+    /// effects. `onProductChanged` drains MultiWindow effects; chrome reconcile
+    /// is explicit (no longer folded into every frame's onProductChanged).
     func schedulePostTerminalCloseReconcile() {
         let refresh: () -> Void = { [weak self] in
             guard let self else { return }
             self.pane.onProductChanged?()
+            self.reconcileChrome()
             self.routeFocus()
         }
         refresh()
@@ -179,6 +186,7 @@ extension ProductChromeHostView {
                 schedulePostTerminalCloseReconcile()
             } else {
                 pane.onProductChanged?()
+                reconcileChrome()
                 routeFocus()
             }
         } else {

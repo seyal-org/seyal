@@ -17,11 +17,18 @@ use super::APPS;
 
 /// Fail closed: host must not invent a history range or draw terminal pixels.
 pub const SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED: u16 = 0;
-/// Completed Block: request the inclusive trusted history span.
+/// Completed Block: inclusive trusted history span (ABI retained; Flow emit
+/// path is fail-closed — hosts must still recognize the kind).
+#[allow(dead_code)] // C ABI / SeyalApp.h parity; production Flow never emits this kind.
 pub const SEYAL_APP_BLOCK_PROJECTION_HISTORY: u16 = 1;
 /// Running Block: clip the damage-driven prepared primary frame into the
 /// Block output region. Not a Pane-wide live grid.
 pub const SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP: u16 = 2;
+/// Native Block RegionGrids (#1484): `start_line` = header RegionId,
+/// `end_line` = output RegionId; `reserved0`/`reserved1` = on-window
+/// `first_row`/`row_count` for primary-frame clips (0 = off-window). Hosts
+/// that do not understand this kind must fail closed.
+pub const SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS: u16 = 3;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -80,9 +87,52 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
                 PresentationMode::Flow
             }
         };
-        // Running PRIMARY_CLIP needs ViewportLineIds from the Pane's owning
-        // client (matched by fence attachment/execution), never another Pane's
-        // ambient ACTIVE_HANDLE. History/fail-closed paths need no client.
+        // Completed Blocks: prefer NATIVE_REGIONS whenever Runtime pushed a
+        // RegionId map entry. On-window uses LiveTail clips; sealed off-window
+        // uses reserved1 = sealed_rows and RegionId-keyed content fetch (no
+        // Swift LineId HISTORY reconstruction). Running PRIMARY_CLIP needs
+        // ViewportLineIds from the Pane's owning client.
+        if !running
+            && let Some(native) =
+                with_fence_matched_client(fence.execution, fence.attachment, |client| {
+                    client
+                        .block_native_regions()
+                        .records
+                        .iter()
+                        .find(|record| {
+                            let mut lo = [0u8; 8];
+                            lo.copy_from_slice(&block.id.to_bytes()[..8]);
+                            record.block_id == u64::from_le_bytes(lo)
+                                && (record.row_count > 0 || record.sealed_rows > 0)
+                        })
+                        .map(|record| {
+                            // reserved0 = u16::MAX marks sealed off-window paint
+                            // (not a LiveTail primary-frame clip). On-window keeps
+                            // first_row even when it is 0.
+                            // reserved1 carries max(on-window, sealed) so history
+                            // request books reopen as sealed grows and never settle
+                            // on a short live-window clip alone (#1484 MP0).
+                            let (reserved0, reserved1) = if record.row_count > 0 {
+                                (
+                                    record.first_row,
+                                    u32::from(record.row_count).max(record.sealed_rows),
+                                )
+                            } else {
+                                (u16::MAX, record.sealed_rows)
+                            };
+                            SeyalAppBlockProjection {
+                                kind: SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS,
+                                reserved0,
+                                reserved1,
+                                start_line: record.header_region,
+                                end_line: record.output_region,
+                            }
+                        })
+                })
+                .flatten()
+        {
+            return native;
+        }
         let projection = if running {
             with_fence_matched_client(fence.execution, fence.attachment, |client| {
                 match project_block_output_until(
@@ -118,13 +168,10 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
                 start_line: clip.start_line,
                 end_line: 0,
             },
-            LiveTailProjection::History(span) => SeyalAppBlockProjection {
-                kind: SEYAL_APP_BLOCK_PROJECTION_HISTORY,
-                reserved0: 0,
-                reserved1: 0,
-                start_line: span.start_line,
-                end_line: span.end_line,
-            },
+            // Finding D/E: Flow must not reconstruct completed Blocks via LineId
+            // HISTORY. Native RegionId map → NATIVE_REGIONS above; otherwise
+            // fail-closed until Runtime publishes RegionIds (no Swift HISTORY).
+            LiveTailProjection::History(_span) => SeyalAppBlockProjection::fail_closed(),
             LiveTailProjection::FailClosed => SeyalAppBlockProjection::fail_closed(),
         }
     })
@@ -240,6 +287,7 @@ mod tests {
         assert_eq!(offset_of!(SeyalAppBlockProjection, reserved1), 4);
         assert_eq!(offset_of!(SeyalAppBlockProjection, start_line), 8);
         assert_eq!(offset_of!(SeyalAppBlockProjection, end_line), 16);
+        assert_eq!(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS, 3);
     }
 
     #[test]
@@ -316,9 +364,10 @@ mod tests {
         });
 
         let completed = seyal_app_block_projection(handle, 0);
-        assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(completed.start_line, 10);
-        assert_eq!(completed.end_line, 12);
+        assert_eq!(
+            completed.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED,
+            "completed without native RegionIds must not use LineId HISTORY"
+        );
 
         let running = seyal_app_block_projection(handle, 1);
         assert_eq!(running.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
@@ -437,15 +486,10 @@ mod tests {
         });
 
         let completed = seyal_app_block_projection(handle, 0);
-        assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(completed.start_line, 10);
-        assert_eq!(completed.end_line, 12);
-        // ExecutionEnded settles the Running Block with end=start so History
-        // projects instead of FailClosed (clear→exit must not collapse bodies).
+        assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
+        // ExecutionEnded without native RegionIds stays fail-closed (Finding D/E).
         let settled = seyal_app_block_projection(handle, 1);
-        assert_eq!(settled.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(settled.start_line, 20);
-        assert_eq!(settled.end_line, 20);
+        assert_eq!(settled.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
 
         APPS.with(|apps| {
             let mut apps = apps.borrow_mut();
@@ -464,13 +508,9 @@ mod tests {
             );
         });
         let retained = seyal_app_block_projection(handle, 0);
-        assert_eq!(retained.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(retained.start_line, 10);
-        assert_eq!(retained.end_line, 12);
+        assert_eq!(retained.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
         let settled_unbound = seyal_app_block_projection(handle, 1);
-        assert_eq!(settled_unbound.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
-        assert_eq!(settled_unbound.start_line, 20);
-        assert_eq!(settled_unbound.end_line, 20);
+        assert_eq!(settled_unbound.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 
@@ -602,15 +642,291 @@ mod tests {
         });
         let completed_host = seyal_app_block_projection(handle, 0);
         let completed_session = seyal_app_block_projection(handle, 1);
-        assert_eq!(completed_host.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(completed_host.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
         assert_eq!(
-            (completed_host.start_line, completed_host.end_line),
-            (10, 29)
+            completed_session.kind,
+            SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED
         );
-        assert_eq!(completed_session.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+
+        crate::ffi::CLIENTS.with(|clients| {
+            clients.borrow_mut().remove(&owner);
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn completed_on_window_block_projects_native_regions() {
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let bind = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 1,
+            flags: FLAG_TARGET_CONTROLLER,
+            fence_pane_lo: snap.pane_lo,
+            fence_pane_hi: snap.pane_hi,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: snap.epoch,
+            target_execution_lo: 1,
+            target_execution_hi: 0,
+            target_attachment_lo: 2,
+            target_attachment_hi: 0,
+            target_generation: 1,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            state
+                .root
+                .apply(AppAction::SelectRestingPresentation {
+                    fence: state.root.fence(),
+                    raw: false,
+                })
+                .unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: Some(vec![RuntimeBlockRecord {
+                        id: BlockId::from_bytes({
+                            let mut bytes = [0u8; 16];
+                            bytes[..8].copy_from_slice(&7u64.to_le_bytes());
+                            bytes
+                        }),
+                        command: "echo native".into(),
+                        start_line: 10,
+                        end_line: Some(12),
+                        running: false,
+                        exit_status: Some(0),
+                        canvas_floor: false,
+                        scope: seyal_protocol::framing::BlockScope::Local,
+                    }]),
+                })
+                .unwrap();
+        });
+
+        let owner = owned_client(1, 2, 3, vec![10, 11, 12]);
+        crate::ffi::CLIENTS.with(|clients| {
+            let mut clients = clients.borrow_mut();
+            let client = clients.get_mut(&owner).unwrap();
+            client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+                revision: 1,
+                total_height: 3,
+                records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                    block_id: 7,
+                    header_region: 100,
+                    output_region: 101,
+                    first_row: 2,
+                    row_count: 3,
+                    sealed_rows: 0,
+                }],
+            };
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(owner));
+
+        let projection = seyal_app_block_projection(handle, 0);
+        assert_eq!(projection.kind, SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS);
+        assert_eq!(projection.start_line, 100);
+        assert_eq!(projection.end_line, 101);
+        assert_eq!(projection.reserved0, 2);
+        assert_eq!(projection.reserved1, 3);
+
+        crate::ffi::CLIENTS.with(|clients| {
+            clients.borrow_mut().remove(&owner);
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn completed_on_window_projects_max_of_clip_and_sealed_rows() {
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let bind = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 1,
+            flags: FLAG_TARGET_CONTROLLER,
+            fence_pane_lo: snap.pane_lo,
+            fence_pane_hi: snap.pane_hi,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: snap.epoch,
+            target_execution_lo: 1,
+            target_execution_hi: 0,
+            target_attachment_lo: 2,
+            target_attachment_hi: 0,
+            target_generation: 1,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            state
+                .root
+                .apply(AppAction::SelectRestingPresentation {
+                    fence: state.root.fence(),
+                    raw: false,
+                })
+                .unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: Some(vec![RuntimeBlockRecord {
+                        id: BlockId::from_bytes({
+                            let mut bytes = [0u8; 16];
+                            bytes[..8].copy_from_slice(&8u64.to_le_bytes());
+                            bytes
+                        }),
+                        command: "seq".into(),
+                        start_line: 10,
+                        end_line: Some(12),
+                        running: false,
+                        exit_status: Some(0),
+                        canvas_floor: false,
+                        scope: seyal_protocol::framing::BlockScope::Local,
+                    }]),
+                })
+                .unwrap();
+        });
+
+        let owner = owned_client(1, 2, 3, vec![10, 11, 12]);
+        crate::ffi::CLIENTS.with(|clients| {
+            let mut clients = clients.borrow_mut();
+            let client = clients.get_mut(&owner).unwrap();
+            client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+                revision: 1,
+                total_height: 100,
+                records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                    block_id: 8,
+                    header_region: 100,
+                    output_region: 101,
+                    first_row: 2,
+                    row_count: 3,
+                    sealed_rows: 100,
+                }],
+            };
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(owner));
+
+        let projection = seyal_app_block_projection(handle, 0);
+        assert_eq!(projection.kind, SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS);
+        assert_eq!(projection.reserved0, 2);
         assert_eq!(
-            (completed_session.start_line, completed_session.end_line),
-            (30, 40)
+            projection.reserved1, 100,
+            "history/AX books must key on sealed count, not the live clip alone"
+        );
+
+        crate::ffi::CLIENTS.with(|clients| {
+            clients.borrow_mut().remove(&owner);
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn sealed_off_window_blocks_project_native_regions_not_history() {
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let bind = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 1,
+            flags: FLAG_TARGET_CONTROLLER,
+            fence_pane_lo: snap.pane_lo,
+            fence_pane_hi: snap.pane_hi,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: snap.epoch,
+            target_execution_lo: 1,
+            target_execution_hi: 0,
+            target_attachment_lo: 2,
+            target_attachment_hi: 0,
+            target_generation: 1,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            state
+                .root
+                .apply(AppAction::SelectRestingPresentation {
+                    fence: state.root.fence(),
+                    raw: false,
+                })
+                .unwrap();
+            let fence = state.root.fence();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: Some(vec![RuntimeBlockRecord {
+                        id: BlockId::from_bytes({
+                            let mut bytes = [0u8; 16];
+                            bytes[..8].copy_from_slice(&11u64.to_le_bytes());
+                            bytes
+                        }),
+                        command: "seq 1 100".into(),
+                        start_line: 10,
+                        end_line: Some(40),
+                        running: false,
+                        exit_status: Some(0),
+                        canvas_floor: false,
+                        scope: seyal_protocol::framing::BlockScope::Local,
+                    }]),
+                })
+                .unwrap();
+        });
+
+        let owner = owned_client(1, 2, 3, vec![10, 11, 12]);
+        crate::ffi::CLIENTS.with(|clients| {
+            let mut clients = clients.borrow_mut();
+            let client = clients.get_mut(&owner).unwrap();
+            client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+                revision: 2,
+                total_height: 30,
+                records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                    block_id: 11,
+                    header_region: 200,
+                    output_region: 201,
+                    first_row: 0,
+                    row_count: 0,
+                    sealed_rows: 30,
+                }],
+            };
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(owner));
+
+        let projection = seyal_app_block_projection(handle, 0);
+        assert_eq!(projection.kind, SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS);
+        assert_eq!(projection.start_line, 200);
+        assert_eq!(projection.end_line, 201);
+        assert_eq!(projection.reserved0, u16::MAX, "sealed sentinel");
+        assert_eq!(projection.reserved1, 30);
+        assert_ne!(
+            projection.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY,
+            "sealed native Blocks must not reconstruct via LineId HISTORY"
         );
 
         crate::ffi::CLIENTS.with(|clients| {

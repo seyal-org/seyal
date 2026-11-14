@@ -114,11 +114,19 @@ final class RustDisplayBridge {
   let requestedExecutionIdentity: String?
   let allowsImplicitExecutionBootstrap: Bool
   var requestedHistoryRanges:
-    [PaneHistoryRequestKey: (blockID: UInt64, startLine: UInt64, endLine: UInt64)] = [:]
+    [PaneHistoryRequestKey: (
+      blockID: UInt64, startLine: UInt64, endLine: UInt64, startUnit: UInt32,
+      /// Sealed-index plan window end (`startUnit + row_count`). 0 = uncapped
+      /// legacy LineId continuation.
+      clipEndUnit: UInt32
+    )] = [:]
   var historyRevisions: [PaneHistoryRequestKey: (revision: UInt64, requestID: UInt64)] = [:]
   var historyContinuations:
     [PaneHistoryRequestKey: (startUnit: UInt32, range: NativeHistoryRange)] = [:]
-  var lastComposerResultRequestID: UInt64 = 0
+  /// Per-Controller last published ComposerResult request id. A single global
+  /// id dropped the original pane's first result after a sibling also used
+  /// request_id 1 (#1484 multipane).
+  var lastComposerResultRequestIDByHandle: [UInt64: UInt64] = [:]
   var composerStatusRelayTracker = ComposerStatusRelayTracker()
 
   init(
@@ -342,7 +350,7 @@ final class RustDisplayBridge {
     historyRevisions.removeAll(keepingCapacity: false)
     historyContinuations.removeAll(keepingCapacity: false)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: true)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)
@@ -390,7 +398,7 @@ final class RustDisplayBridge {
     historyRevisions.removeAll(keepingCapacity: false)
     historyContinuations.removeAll(keepingCapacity: false)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: true)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)
@@ -430,7 +438,7 @@ final class RustDisplayBridge {
     runtimeBlockMetadata = nil
     discardHistoryRequests(forDisplayHandle: lostHandle)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: true)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)

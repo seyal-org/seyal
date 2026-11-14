@@ -64,34 +64,56 @@ extension ProductChromeHostView {
         if snapshotPublishesBlockScopedDirectInput(snapshot) {
             return focusBlockScopedDirectInputSurface()
         }
+        // After CLOSE_PALETTE the query field can still be first responder while
+        // hidden; resign before focusing the Flow composer (#1484).
+        resignOverlayFirstResponderIfNeeded()
+        let recoveryPending = pane.inputSurface.recoveryPresentationPending
         if !centerColumn.secondaryHosts.isEmpty {
             let shell = seyal_app_shell(pane.appHandle)
-            guard seyal_app_eligibility_for_pane(
+            let paneMode = seyal_app_composer_for_pane(
                 pane.appHandle,
                 shell.focused_pane_lo,
                 shell.focused_pane_hi
-            ) == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
-            seyal_app_composer_for_pane(
+            ).mode
+            let flow = seyal_app_eligibility_for_pane(
                 pane.appHandle,
                 shell.focused_pane_lo,
                 shell.focused_pane_hi
-            ).mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+            ) == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            // Recovery may reclaim the pane editor before eligibility settles;
+            // otherwise require Flow and a non-Hidden composer mode.
+            guard recoveryPending || (flow
+                && paneMode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue))
             else {
                 return false
             }
-            return activeComposer.focusEditor()
+            return activeComposer.focusEditor(allowHidden: recoveryPending)
         }
-        return composer.focusEditor()
+        // Unbound / pre-attach chrome reports Hidden until Runtime eligibility
+        // arrives; still reclaim the editor so CLOSE_PALETTE does not leave FR
+        // on the dismissed query field (#1484).
+        return composer.focusEditor(allowHidden: recoveryPending)
+    }
+
+    /// Resign first responder when it still sits inside a dismissed overlay.
+    private func resignOverlayFirstResponderIfNeeded() {
+        guard let fr = window?.firstResponder as? NSView else { return }
+        if fr === commandPalette || fr.isDescendant(of: commandPalette)
+            || fr === historyOverlay || fr.isDescendant(of: historyOverlay)
+        {
+            window?.makeFirstResponder(nil)
+        }
     }
 
     func commandPaletteDidDismiss() {
+        resignOverlayFirstResponderIfNeeded()
         guard pane.inputSurface.recoveryPresentationPending else {
             routeFocus()
             return
         }
         pane.inputSurface.syncInputRoutePresentation()
         pane.inputSurface.resetComposerRecoveryFocusRetries()
-        _ = advanceRecoveryAfterPaletteFocus(
+        let recovered = advanceRecoveryAfterPaletteFocus(
             requestFocus: { [weak self] in
                 self?.pane.inputSurface.requestComposerFocusForRecovery() ?? false
             },
@@ -99,6 +121,15 @@ extension ProductChromeHostView {
                 _ = self?.pane.inputSurface.advanceRecoveryPresentationIfReady()
             }
         )
+        // If the first recovery focus attempt is deferred (layout/key window),
+        // still reclaim the Flow composer now so CLOSE_PALETTE is not stuck on
+        // the dismissed palette query (#1484 headed automation).
+        if !recovered {
+            resignOverlayFirstResponderIfNeeded()
+            if !requestComposerFocusIfPaletteAllows() {
+                routeFocus()
+            }
+        }
     }
 
     @discardableResult

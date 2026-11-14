@@ -25,7 +25,10 @@ extension MetalSurfaceView {
   }
 
   func armMetalDisplayLink() {
-    guard shouldRender,
+    // Retained Flow HISTORY must arm even when AppKit occlusion briefly clears
+    // shouldRender (headed XCUI). Otherwise shell-exit keeps CPU instances with
+    // a blank on-screen drawable (#1484).
+    guard (shouldRender || hasRetainedHistoryPresentation),
       canPresentSurface,
       presentationState.pending,
       !presentationState.exhausted,
@@ -66,7 +69,7 @@ extension MetalSurfaceView {
     link.isPaused = true
     renderer.drainGPUCompletionsIfNeeded()
 
-    guard shouldRender,
+    guard (shouldRender || hasRetainedHistoryPresentation),
       canPresentSurface,
       renderer.persistentDisplayFailure == nil,
       !presentationState.exhausted,

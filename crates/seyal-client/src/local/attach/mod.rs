@@ -9,9 +9,10 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::{empty_cache, DisplayKind},
     local_ipc::framing::{
-        Attach, Attached, BlockTimeline, CreateExecutionRequest, CreateExecutionResult,
-        CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader, MessageType, Resync,
-        Role, TerminateExecutionRequest, TerminateExecutionResult, CAP_COMMAND_BLOCKS, HEADER_LEN,
+        Attach, Attached, BlockNativeRegions, BlockTimeline, CreateExecutionRequest,
+        CreateExecutionResult, CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader,
+        MessageType, Resync, Role, TerminateExecutionRequest, TerminateExecutionResult,
+        CAP_COMMAND_BLOCKS, HEADER_LEN,
     },
     AttachmentId, ExecutionId,
 };
@@ -821,6 +822,17 @@ impl LocalDisplayClient {
                 revision: 0,
                 records: Vec::new(),
             },
+            block_native_regions: BlockNativeRegions {
+                revision: 0,
+                total_height: 0,
+                records: Vec::new(),
+            },
+            block_viewport_index: crate::viewport::BlockViewportIndex::default(),
+            block_viewport_plan: None,
+            block_viewport_presentation_epoch: 0,
+            last_plan_native_paint_identity: Vec::new(),
+            block_viewport_scroll_anchor: crate::viewport::ScrollAnchor::LiveEnd,
+            block_viewport_window_rows: None,
             command_blocks_supported,
             last_composer_result: None,
             composer_status: None,

@@ -20,7 +20,8 @@ extension SecondaryLivePaneHost {
             return
         }
         // Preserve scroll across projection rebuilds so focus/reconcile churn
-        // does not jump the transcript (#1424).
+        // does not jump the transcript (#1424). Prefer an intentional
+        // mid-transcript pin over a transient contentView origin.
         let savedScrollState: PaneTranscriptScrollState = {
             if restoresScrollForDisplayHandleChange {
                 restoresScrollForDisplayHandleChange = false
@@ -29,9 +30,16 @@ extension SecondaryLivePaneHost {
             }
             return currentTranscriptScrollState()
         }()
-        let savedOffsetY = savedScrollState.offsetY
-        let savedFollowing = savedScrollState.followsLiveEnd
-        let savedDocumentHeight = savedScrollState.documentHeight
+        let savedOffsetY = pinnedTranscriptOffsetY.map {
+            documentOffsetY(forContentOffset: $0)
+        } ?? savedScrollState.offsetY
+        let savedFollowing = pinnedTranscriptOffsetY != nil ? false : savedScrollState.followsLiveEnd
+        let savedDocumentHeight = max(
+            savedScrollState.documentHeight,
+            pinnedTranscriptOffsetY.map {
+                documentOffsetY(forContentOffset: $0) + transcript.contentView.bounds.height + 1
+            } ?? 0
+        )
         let previousCards = blockCards
         blockCards.removeAll(keepingCapacity: true)
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
@@ -76,7 +84,6 @@ extension SecondaryLivePaneHost {
             let detail = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
             let promptRow = seyal_app_copy(appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
-            let lines = outputLineCount(projection: projection)
             let card = CommandBlockStackReconciler.reuseOrCreate(
                 blockID: blockID,
                 previousCards: previousCards,
@@ -88,7 +95,7 @@ extension SecondaryLivePaneHost {
                     detail: detail,
                     state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                     cellHeight: cellHeight,
-                    lines: lines,
+                    lines: outputLineCount(projection: projection),
                     session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
                 )
             }
@@ -99,7 +106,6 @@ extension SecondaryLivePaneHost {
                 state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
                 session: row.flags & UInt16(SEYAL_APP_BLOCK_SESSION) != 0
             )
-            card.setOutputLines(lines, cellHeight: cellHeight)
             card.canRequestSessionBootstrap = blockID != 0 && blockID == requestableSessionHost
             card.onRequestSessionBootstrap = card.canRequestSessionBootstrap
                 ? { [weak self, sessionDisplayHandle, blockID, sessionRevision = sessionSurface.revision] in
@@ -163,17 +169,16 @@ extension SecondaryLivePaneHost {
             card.onSelect = { [weak self] _ in
                 self?.onFocus?()
             }
+            let lines = outputLineCount(projection: projection)
             if blockID != 0,
                let retainedRange = surface.retainedHistoryRange(
                    blockID: blockID,
                    displayHandle: displayHandle
                ) {
-                card.setBodyTranscript(retainedRange.transcriptText)
-                card.setOutputLines(
-                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
-                    cellHeight: surface.terminalPresentationCellSize().height
-                )
+                card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
+            // Reserve chrome body height for plan→card placement (#1484 manual).
+            card.setOutputLines(lines, cellHeight: cellHeight)
             if blockID != 0 {
                 blockCards[blockID] = card
                 applyBlockOutputProjection(blockID: blockID, projection: projection)
@@ -186,7 +191,6 @@ extension SecondaryLivePaneHost {
         )
         // Bridgeless surfaces: discard through the borrowed window bridge,
         // scoped to this pane's own handle (#1426 residual).
-        historyProjectionRequests.retain(blockIDs: retained, forDisplayHandle: displayHandle)
         historyBridge?.discardHistoryRequests(except: retained, forDisplayHandle: displayHandle)
         surface.removeTranscriptRegions(except: retained)
         followingLiveEnd = savedFollowing
@@ -195,8 +199,15 @@ extension SecondaryLivePaneHost {
         publishBlockOutputFrame()
         if visibleIndex == 0 {
             // Empty/cleared canvas: never leave a blank scrollable transcript
-            // from a prior preserved document height (#1424).
+            // from a prior preserved document height or test/orphan spacers
+            // still arranged in the stack (#1424).
             clearPreservedDocumentHeight()
+            blocks.arrangedSubviews
+                .filter { $0 !== transcriptLeadingSpacer }
+                .forEach {
+                    blocks.removeArrangedSubview($0)
+                    $0.removeFromSuperview()
+                }
             syncTranscriptDocumentSize()
             setTranscriptDocumentOffsetY(0)
             followingLiveEnd = true
@@ -226,6 +237,9 @@ extension SecondaryLivePaneHost {
             }
             setTranscriptDocumentOffsetY(savedOffsetY)
             followingLiveEnd = savedFollowing
+            if !savedFollowing {
+                pinnedTranscriptOffsetY = transcriptContentOffsetY(documentOffsetY: savedOffsetY)
+            }
         }
         lastBlockCount = visibleIndex
         rememberTranscriptScrollState()
@@ -295,18 +309,19 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
-            card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
             if let retainedRange = surface.retainedHistoryRange(
                 blockID: row.id_lo,
                 displayHandle: displayHandle
             ) {
-                card.setBodyTranscript(retainedRange.transcriptText)
-                card.setOutputLines(
-                    CommandBlockView.visibleOutputLineCount(retainedRange.transcriptText),
-                    cellHeight: cellHeight
-                )
+                card.setBodyTranscript(retainedRange.accessibilityTranscript())
             }
-            applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
+            card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
+            // Sealed NATIVE only — Running PRIMARY_CLIP paints via LiveTail (#1484).
+            if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+                || projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY)
+            {
+                applyBlockOutputProjection(blockID: row.id_lo, projection: projection)
+            }
         }
         syncTranscriptDocumentSize()
     }
@@ -320,35 +335,19 @@ extension SecondaryLivePaneHost {
             return Int(min(projection.end_line - projection.start_line + 1, 512))
         case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP):
             return max(Int(projection.reserved1), 1)
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS):
+            // Cap chrome height — sealed extent is not the AppKit body floor.
+            return max(min(Int(projection.reserved1), 128), 1)
         default:
             return 1
         }
     }
 
+    /// Flow Block output fetches are owned by `applyBlockViewportPlan` (C/D/E).
     func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
-        guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
-              projection.start_line > 0,
-              projection.end_line >= projection.start_line,
-              displayHandle != 0
-        else { return }
-        // Surfaces intentionally have bridge == nil; borrow the window bridge
-        // and address this pane's Controller (#1424).
-        let key = HistoryProjectionRequestKey(
-            displayHandle: displayHandle,
-            blockID: blockID,
-            startLine: projection.start_line,
-            endLine: projection.end_line
-        )
-        guard historyProjectionRequests.begin(key) else { return }
-        let result = historyBridge?.requestHistoryRange(
-            forDisplayHandle: displayHandle,
-            startLine: projection.start_line,
-            endLine: projection.end_line,
-            blockID: blockID
-        ) ?? -10
-        if result != 0 {
-            historyProjectionRequests.retry(key)
-        }
+        guard displayHandle != 0 else { return }
+        _ = blockID
+        _ = projection
     }
 
     /// Deliver a completed history range into this leaf's Metal surface + card.
@@ -356,33 +355,67 @@ extension SecondaryLivePaneHost {
         guard range.sourceDisplayHandle == 0 || range.sourceDisplayHandle == displayHandle else {
             return
         }
-        let key = HistoryProjectionRequestKey(
-            displayHandle: range.sourceDisplayHandle == 0 ? displayHandle : range.sourceDisplayHandle,
-            blockID: range.blockID,
-            startLine: range.startLine,
-            endLine: range.endLine
-        )
-        guard !range.rows.isEmpty else {
-            historyProjectionRequests.retry(key)
-            return
-        }
-        historyProjectionRequests.receive(key, status: range.status)
+        // Settle this pane surface's plan-clip book. Replies arrive on the
+        // window bridge's owning surface; without this, a pane host that
+        // requested via `historyBridge` never hears back (#1484 multipane).
+        surface.notePlanClipHistoryResult(range)
+        // Finding D/ADR-015: retain for AX + Metal prepare from plan geometry.
+        // Do not resize cards, re-layout, or force LiveEnd scroll on every page
+        // (seq flicker / jump root cause).
+        guard !range.rows.isEmpty else { return }
         surface.retainHistoryRange(range)
         let cellHeight = surface.terminalPresentationCellSize().height
         if let card = blockCards[range.blockID] {
-            card.setBodyTranscript(range.transcriptText)
-            card.setOutputLines(
-                CommandBlockView.visibleOutputLineCount(range.transcriptText),
-                cellHeight: cellHeight
+            card.setBodyTranscript(range.accessibilityTranscript())
+            let lines = nativeProjection(blockID: range.blockID)
+                .map { outputLineCount(projection: $0) }
+                ?? min(max(range.rows.count, 1), 128)
+            card.setOutputLines(lines, cellHeight: cellHeight)
+            layoutSubtreeIfNeeded()
+            refreshCachedChromeBodyClips()
+        }
+        if let planRegion = surface.currentTranscriptRegion(blockID: range.blockID) {
+            surface.renderHistoryRange(range, region: planRegion)
+        } else {
+            surface.renderHistoryRange(range)
+        }
+        if surface.liveTailBlockIDs().contains(range.blockID) {
+            publishLiveTailBlocks()
+        }
+    }
+
+    func nativeProjection(blockID: UInt64) -> SeyalAppBlockProjection? {
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        for index in 0..<Int(composerSnap.block_count) {
+            let row = seyal_app_block_row_for_pane(appHandle, paneLo, paneHi, UInt32(index))
+            guard row.id_lo == blockID else { continue }
+            let projection = seyal_app_block_projection_for_pane(
+                appHandle, paneLo, paneHi, UInt32(index)
             )
+            guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS) else {
+                return nil
+            }
+            return projection
         }
-        layoutSubtreeIfNeeded()
-        publishBlockOutputFrame()
-        syncTranscriptDocumentSize()
-        publishBlockOutputFrame()
-        if followingLiveEnd {
-            scrollTranscriptToLiveEnd()
+        return nil
+    }
+
+    func nativeProjectionMinimumRows(blockID: UInt64) -> Int? {
+        guard let projection = nativeProjection(blockID: blockID) else { return nil }
+        return max(Int(projection.reserved1), 1)
+    }
+
+    func hasRunningPrimaryClip() -> Bool {
+        let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        for index in 0..<Int(composerSnap.block_count) {
+            let projection = seyal_app_block_projection_for_pane(
+                appHandle, paneLo, paneHi, UInt32(index)
+            )
+            if projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP) {
+                return true
+            }
         }
+        return false
     }
 
     func publishLiveTailBlocks() {
@@ -390,9 +423,18 @@ extension SecondaryLivePaneHost {
         if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {
+            let released = surface.liveTailBlockIDs()
             surface.setLiveTailBlocks([:])
+            if !released.isEmpty, displayHandle != 0 {
+                surface.reopenPlanClipsAfterLiveTailRelease(
+                    blockIDs: released,
+                    displayHandle: displayHandle
+                )
+            }
             return
         }
+        let previousLive = surface.liveTailBlockIDs()
+        let previousClips = surface.liveTailClips()
         let composerSnap = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
         var live: [UInt64: LiveTailClip] = [:]
         for index in 0..<Int(composerSnap.block_count) {
@@ -403,18 +445,98 @@ extension SecondaryLivePaneHost {
                 paneHi,
                 UInt32(index)
             )
-            guard row.id_lo != 0,
-                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
-                  projection.start_line > 0,
-                  projection.reserved1 > 0
+            guard row.id_lo != 0, projection.reserved1 > 0 else { continue }
+            let nativeCompleted =
+                projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_NATIVE_REGIONS)
+            if nativeCompleted {
+                // Hold LiveTail until sealed HISTORY GPU is ready — no blank gap.
+                if !surface.hasPreparedHistoryRegion(blockID: row.id_lo),
+                   let held = previousClips[row.id_lo]
+                {
+                    live[row.id_lo] = held
+                }
+                continue
+            }
+            guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP)
             else { continue }
             live[row.id_lo] = LiveTailClip(
-                startLine: projection.start_line,
+                startLine: max(projection.start_line, 1),
                 firstRow: projection.reserved0,
                 rowCount: UInt16(min(projection.reserved1, UInt32(UInt16.max)))
             )
         }
         surface.setLiveTailBlocks(live)
+        let released = previousLive.subtracting(live.keys)
+        // Reopen settled plan clips so the next plan tick can fetch sealed
+        // HISTORY — no card-driven LiveEnd fallback (#1484 ADR-015).
+        if !released.isEmpty, displayHandle != 0 {
+            surface.reopenPlanClipsAfterLiveTailRelease(
+                blockIDs: released,
+                displayHandle: displayHandle
+            )
+        }
+    }
+
+    /// Push AppKit transcript scroll into the Rust plan anchor before Metal
+    /// consumes clips (G5 AbsoluteY). Mirrors ProductChrome.
+    func syncBlockViewportScrollAnchor() {
+        let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
+        let spacer = transcriptLeadingSpacerHeightValue
+        let scrollY = transcript.contentView.bounds.origin.y
+        let viewportH = max(transcript.contentView.bounds.height, 1)
+        let contentTop = max(scrollY - spacer, 0)
+        var absoluteY = UInt64((contentTop / cellHeight).rounded(.down))
+        let windowRows = UInt32(max(1, (viewportH / cellHeight).rounded(.up)))
+        let maxY = max(transcriptDocumentScrollHeight() - viewportH, 0)
+        let inLiveEndNeighborhood = scrollY >= maxY - viewportH
+        // Reader following live end must keep the LiveEnd plan — never emit an
+        // AbsoluteY onset window that latches thin AX pages (#1484 FourPane).
+        if followingLiveEnd {
+            _ = seyal_bridge_block_viewport_set_scroll_anchor_for(
+                displayHandle,
+                1,
+                0,
+                windowRows
+            )
+            return
+        }
+        var liveEnd = isNearLiveEnd() || inLiveEndNeighborhood
+        // Tall AppKit chrome (reserved1) can outrun the sealed index. Clamp
+        // AbsoluteY into the Rust extent so the plan cannot sit past content
+        // with visible_count=0 while cards already exist (#1484 FocusChurn).
+        let rustExtent = seyal_bridge_native_regions_total_height_for(displayHandle)
+        if rustExtent > 0 {
+            let maxOrigin = rustExtent > UInt64(windowRows)
+                ? rustExtent - UInt64(windowRows)
+                : 0
+            if absoluteY > maxOrigin {
+                absoluteY = maxOrigin
+                liveEnd = true
+            }
+        }
+        _ = seyal_bridge_block_viewport_set_scroll_anchor_for(
+            displayHandle,
+            liveEnd ? 1 : 0,
+            absoluteY,
+            windowRows
+        )
+    }
+
+    func refreshCachedChromeBodyClips() {
+        var next: [UInt64: NSRect] = [:]
+        next.reserveCapacity(blockCards.count)
+        for (blockID, card) in blockCards {
+            card.layoutSubtreeIfNeeded()
+            let raw = card.convert(card.body.frame, to: surface)
+            guard raw.width > 1, raw.height > 1 else { continue }
+            next[blockID] = NSRect(
+                x: raw.origin.x.rounded(.down),
+                y: raw.origin.y.rounded(.down),
+                width: max(raw.width.rounded(.down), 1),
+                height: max(raw.height.rounded(.down), 1)
+            )
+        }
+        cachedChromeBodyClips = next
     }
 
     func publishBlockOutputFrame() {
@@ -422,87 +544,42 @@ extension SecondaryLivePaneHost {
         let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         guard !direct, displayHandle != 0 else { return }
-        var regions = collectBlockOutputRegions()
-        if regions.isEmpty, !blockCards.isEmpty {
-            layoutSubtreeIfNeeded()
-            regions = collectBlockOutputRegions()
-            if regions.isEmpty {
-                if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
-                    blockOutputZeroClipRetries += 1
-                    DispatchQueue.main.async { [weak self] in
-                        self?.publishBlockOutputFrame()
-                    }
-                }
-                return
+        // Plan owns selection/rows/HISTORY; chrome clips only place content.
+        syncBlockViewportScrollAnchor()
+        // Settled cache only — per-frame layoutSubtree/convert thrashed plan
+        // signatures and made simple echo laggy (#1484 P0).
+        if cachedChromeBodyClips.isEmpty, !blockCards.isEmpty {
+            refreshCachedChromeBodyClips()
+        }
+        if surface.applyBlockViewportPlan(
+            displayHandle: displayHandle,
+            chromeBodyClips: cachedChromeBodyClips,
+            historyBridge: historyBridge
+        ) {
+            blockOutputZeroClipRetries = 0
+            lastPublishedTranscriptRegions = surface.currentTranscriptRegions()
+            surface.refreshRecoveryAccessibilityValue()
+            if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",
+               lastVisibleHistoryPixelCount == 0,
+               Date().timeIntervalSince(lastHistoryPixelSampleAt) >= 0.5
+            {
+                lastHistoryPixelSampleAt = Date()
+                lastVisibleHistoryPixelCount = surface.inspectFlowPaint(sampleGPU: true).opaquePixelsInsideClips
+            }
+            return
+        }
+        // LiveTail owns running paint; empty sealed plan mid-stream is normal.
+        if !surface.liveTailBlockIDs().isEmpty || blockCards.isEmpty {
+            blockOutputZeroClipRetries = 0
+            return
+        }
+        // Plan absent during sealed revision churn — bounded retry only.
+        if blockOutputZeroClipRetries < Self.blockOutputZeroClipRetryLimit {
+            blockOutputZeroClipRetries += 1
+            DispatchQueue.main.async { [weak self] in
+                self?.publishBlockOutputFrame()
             }
         }
-        blockOutputZeroClipRetries = 0
-        regions.sort { $0.id < $1.id }
-        lastPublishedTranscriptRegions = regions
-        transcriptFrameRevision &+= 1
-        surface.setTranscriptFrame(
-            NativeTranscriptFrame(
-                revision: transcriptFrameRevision,
-                regions: regions,
-                surfaceIdentity: ObjectIdentifier(surface)
-            )
-        )
-        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"] == "1",
-           lastVisibleHistoryPixelCount == 0,
-           Date().timeIntervalSince(lastHistoryPixelSampleAt) >= 0.5
-        {
-            lastHistoryPixelSampleAt = Date()
-            lastVisibleHistoryPixelCount = surface.inspectFlowPaint(sampleGPU: true).opaquePixelsInsideClips
-        }
-    }
-
-    private func collectBlockOutputRegions() -> [NativeTranscriptRegion] {
-        var regions: [NativeTranscriptRegion] = []
-        for (blockID, card) in blockCards {
-            let clip = card.body.convert(card.body.bounds, to: surface)
-            guard clip.width > 0, clip.height > 0 else { continue }
-            let historyRows: Range<Int>?
-            let historyRequestID: UInt64
-            let historyRevision: UInt64
-            if let range = surface.retainedHistoryRange(
-                blockID: blockID,
-                displayHandle: displayHandle
-            ) {
-                let visibleBody = card.body.convert(surface.bounds, from: surface)
-                    .intersection(card.body.bounds)
-                let cellHeight = max(surface.terminalPresentationCellSize().height, 1)
-                let firstVisibleRow = HistoryRenderWindow.firstVisibleRow(
-                    documentBounds: card.body.bounds,
-                    visibleBounds: visibleBody,
-                    isFlipped: card.body.isFlipped,
-                    cellHeight: cellHeight
-                )
-                let visibleRowCount = Int((visibleBody.height / cellHeight).rounded(.up))
-                historyRows = HistoryRenderWindow(
-                    totalRows: range.rows.count,
-                    firstVisibleRow: firstVisibleRow,
-                    visibleRowCount: visibleRowCount
-                ).rows
-                historyRequestID = range.requestID
-                historyRevision = range.revision
-            } else {
-                historyRows = nil
-                historyRequestID = 0
-                historyRevision = 0
-            }
-            regions.append(
-                NativeTranscriptRegion(
-                    id: blockID,
-                    displayHandle: displayHandle,
-                    origin: clip.origin,
-                    clip: clip,
-                    historyRows: historyRows,
-                    historyRequestID: historyRequestID,
-                    historyRevision: historyRevision
-                )
-            )
-        }
-        return regions
     }
 
     /// Mirrors `ProductChromeHostView+Blocks.syncTranscriptDocumentSize`: when
@@ -517,34 +594,81 @@ extension SecondaryLivePaneHost {
     /// left a permanent dead zone below cards once content shrank after
     /// growing tall.
     func syncTranscriptDocumentSize() {
-        let shouldFollowLiveEnd = followingLiveEnd
+        let shouldFollowLiveEnd = followingLiveEnd && pinnedTranscriptOffsetY == nil
+        let pinnedContentOffset = pinnedTranscriptOffsetY
+        let documentHeightBefore = blocks.frame.height
+        let spacerBefore = transcriptLeadingSpacerHeightValue
         isProgrammaticTranscriptScroll = true
         defer {
+            let documentHeightAfter = blocks.frame.height
+            let spacerAfter = transcriptLeadingSpacerHeightValue
+            let geometryChanged =
+                abs(documentHeightAfter - documentHeightBefore) > 0.5
+                || abs(spacerAfter - spacerBefore) > 0.5
             isProgrammaticTranscriptScroll = false
-            if shouldFollowLiveEnd {
+            // Re-apply a mid-transcript pin only when document geometry changed;
+            // unconditional restore fights live XCUI/user scrolling (#1484).
+            if let pinnedContentOffset, geometryChanged {
+                followingLiveEnd = false
+                setTranscriptDocumentOffsetY(
+                    documentOffsetY(forContentOffset: pinnedContentOffset)
+                )
+            } else if shouldFollowLiveEnd, !isNearLiveEnd() {
                 scrollTranscriptToLiveEnd()
             }
         }
         layoutSubtreeIfNeeded()
         let fitted = blocks.fittingSize
         let hasCards = !blockCards.isEmpty
-        let contentHeight = transcriptCardsContentHeight()
+        let cardHeight = transcriptCardsContentHeight()
+        let rustRows = seyal_bridge_native_regions_total_height_for(displayHandle)
+        let cellHeight = surface.terminalPresentationCellSize().height
+        let rustBody = rustRows > 0 ? CGFloat(rustRows) * cellHeight : 0
+        // Rust owns terminal rows; AppKit chrome headers still need document
+        // room until Rust publishes chrome metrics (#1484 manual top-paint).
+        let contentHeight: CGFloat = hasCards ? max(rustBody, cardHeight) : 0
         let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
         let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
-        let preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
+        var preservedHeight = preservedDocumentHeightConstraint?.constant ?? 0
+        // While the reader holds a mid-transcript pin, never let transient
+        // rebuild/HISTORY settle shrink the document below that offset.
+        // Set the constraint inline — do not call preserveDocumentHeight here
+        // (it re-enters syncTranscriptDocumentSize).
+        if let pinnedContentOffset, hasCards {
+            // Ensure the document can host the content-relative pin after spacer
+            // recompute: documentOffset = contentOffset + leading.
+            let pinFloor = max(contentHeight, max(pinnedContentOffset, 0) + viewportHeight + 1)
+            let needed = max(preservedHeight, pinFloor)
+            if needed > preservedHeight + 0.5 {
+                clearPreservedDocumentHeight()
+                let constraint = blocks.heightAnchor.constraint(
+                    greaterThanOrEqualToConstant: needed
+                )
+                constraint.priority = .defaultHigh
+                constraint.isActive = true
+                preservedDocumentHeightConstraint = constraint
+                preservedHeight = needed
+            }
+        }
         let spacers = TranscriptDocumentSizing.spacerHeights(
             contentHeight: contentHeight,
             viewportHeight: viewportHeight,
             preservedDocumentHeight: preservedHeight
         )
+        var layoutChanged = false
         if abs(transcriptLeadingSpacerHeight.constant - spacers.leading) > 0.5 {
             transcriptLeadingSpacerHeight.constant = spacers.leading
             layoutSubtreeIfNeeded()
+            layoutChanged = true
         }
         if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - spacers.document) > 0.5 {
             blocks.setFrameSize(NSSize(width: width, height: spacers.document))
             transcript.reflectScrolledClipView(transcript.contentView)
             layoutSubtreeIfNeeded()
+            layoutChanged = true
+        }
+        if layoutChanged || cachedChromeBodyClips.count != blockCards.count {
+            refreshCachedChromeBodyClips()
         }
     }
 
@@ -597,6 +721,7 @@ extension SecondaryLivePaneHost {
     func scrollTranscriptToLiveEnd() {
         isProgrammaticTranscriptScroll = true
         defer { isProgrammaticTranscriptScroll = false }
+        pinnedTranscriptOffsetY = nil
         let visible = transcript.contentView.bounds
         let maxY = max(transcriptDocumentScrollHeight() - visible.height, 0)
         transcript.contentView.scroll(to: NSPoint(x: visible.origin.x, y: maxY))

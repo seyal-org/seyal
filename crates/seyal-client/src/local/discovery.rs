@@ -14,8 +14,8 @@ use seyal_runtime::{
             encode_frame, ClientHello, ErrorCode, ErrorMessage, MessageType, ServerHello,
             CAP_ATTACHMENT_DELIVERY_CONTROL, CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS,
             CAP_CORRELATED_RESIZE, CAP_EXECUTION_PROVISIONING, CAP_EXTENDED_TERMINAL_KEY,
-            CAP_GRAPHEME_DISPLAY, CAP_SEMANTIC_TERMINAL_KEY, CAP_SESSION_BOOTSTRAP,
-            CAP_VIEWPORT_LINE_IDS,
+            CAP_GRAPHEME_DISPLAY, CAP_NATIVE_BLOCK_REGIONS, CAP_SEMANTIC_TERMINAL_KEY,
+            CAP_SESSION_BOOTSTRAP, CAP_VIEWPORT_LINE_IDS,
         },
     },
     pass8::CAP_BLOCK_METADATA,
@@ -237,7 +237,8 @@ pub(crate) fn requested_capabilities(
             0
         }
         | if request_viewport_line_ids {
-            CAP_VIEWPORT_LINE_IDS
+            // Native RegionId maps travel with the modern Flow client surface.
+            CAP_VIEWPORT_LINE_IDS | CAP_NATIVE_BLOCK_REGIONS
         } else {
             0
         }

@@ -66,6 +66,19 @@ pub(in crate::runtime) struct Entry {
     pub(in crate::runtime) block_timeline: CommandBlockTimeline,
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) block_revision: u64,
+    /// Monotonic revision for `BlockNativeRegions` publishes (timeline + display).
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) native_regions_revision: u64,
+    /// Last published native-regions content stamp (`total_height`, records).
+    /// Skips redundant after-display frames that would flood the control queue.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) published_native_regions_stamp:
+        Option<(u64, Vec<crate::local_ipc::framing::NativeBlockRegions>)>,
+    /// Attachments that already received the current native-regions stamp.
+    /// Late/secondary pane attaches must still receive type-48 even when the
+    /// content stamp is unchanged (#1484 multipane).
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) published_native_regions_attachments: HashSet<AttachmentId>,
     /// The composer eligibility last published to attached clients, and the
     /// monotonic revision that fences it. `None` until the first publish.
     #[cfg(target_os = "macos")]
@@ -102,6 +115,12 @@ pub(in crate::runtime) struct Entry {
     /// Session secret S, challenge K, and the session mechanism-5 machine.
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) session_runtime: super::session_bootstrap::SessionRuntime,
+    /// Last StreamSequence observed by Finding F journal consume (D7).
+    /// Written on every drain so release builds cannot treat consume as a no-op.
+    pub(in crate::runtime) last_consumed_attribution_sequence: u64,
+    /// Cumulative drained journal events observed by D7 consume.
+    pub(in crate::runtime) consumed_attribution_markers: u64,
+    pub(in crate::runtime) consumed_attribution_mutations: u64,
 }
 
 #[cfg(target_os = "macos")]

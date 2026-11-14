@@ -96,7 +96,12 @@ BlockTimeline
   = seyal-workspace / Runtime workspace metadata keyed by ExecutionId + logical history anchors
 ```
 
-Workspace association never makes Workspace the PTY/VT owner. Blocks never own PTY/VT/grid/process/output copies, and PTY → VT → TerminalState → damage progress never synchronously waits for Workspace/Block/agent/context persistence.
+Workspace association never makes Workspace the PTY/VT owner. Blocks never own an
+independent PTY, parser, VT semantic engine, child, renderer, or copied transcript.
+Accepted native-Block target (ADR-009 / #1480 / #1482): RegionGrids live inside the
+one `TerminalState` `PrimaryBlockEngine` via one `RegionStore` and non-owning
+`VTWindowMap`. PTY → VT → TerminalState → damage progress never synchronously waits
+for Workspace/Block/agent/context persistence.
 
 ## M002 terminal-state extensions
 

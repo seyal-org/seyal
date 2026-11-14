@@ -1,7 +1,6 @@
 import Foundation
 import Metal
 import QuartzCore
-
 /// Main-queue-only Metal presenter.
 ///
 /// Intentionally **not** `@MainActor`: CAMetalDisplayLink and other AppKit
@@ -197,9 +196,22 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 requestCurrentFrameIfNeeded()
             }
         } else {
-            needsPresent = false
+            // Keep retained Flow HISTORY buffers across occlusion flaps so
+            // shell-exit paint is not wiped while XCUI / Spaces hide the window
+            // (#1484). Live-only surfaces still release immediately.
+            let keepHistory = !historyRegionOrder.isEmpty
+            if !keepHistory {
+                needsPresent = false
+            }
             if framesInFlight == 0 {
-                releaseDedicatedResources()
+                if keepHistory {
+                    // Drop live grid only; HISTORY instances + atlas stay.
+                    instanceBuffer = nil
+                    instanceCount = 0
+                    liveTail = LiveTailRenderState()
+                } else {
+                    releaseDedicatedResources()
+                }
             } else {
                 releaseWhenIdle = true
             }
@@ -285,7 +297,9 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             damage.markAll(rows: frame.rows)
         }
 
-        if scaleChanged {
+        // nil metrics means releaseDedicatedResources already reset the atlas;
+        // a second reset would orphan HISTORY prepared since then (#1484).
+        if scaleChanged, currentMetrics != nil {
             glyphAtlas.resetWhenGPUIdle()
         }
         if geometryChanged || instanceBuffer == nil {
@@ -497,9 +511,27 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             buffer: buffer,
             instanceCount: outputIndex,
             origin: SIMD2<Float>(Float(region.origin.x), Float(region.origin.y)),
-            clip: region.clip
+            clip: region.clip,
+            historySource: DeferredHistoryPrepare(
+                historyRange: historyRange,
+                region: region,
+                backingScale: backingScale
+            ),
+            atlasGeneration: glyphAtlas.stats.resets
         )
-        needsPresent = instanceBuffer != nil || !presentationPlan.drawsLiveGrid
+        // Completed NATIVE Blocks may have no live grid (`instanceBuffer == nil`
+        // while `drawsLiveGrid` is still true). History alone must still arm
+        // present or OCR sees a blank body with AX text (#1484 100k).
+        needsPresent = instanceBuffer != nil
+            || !historyRegions.isEmpty
+            || !presentationPlan.drawsLiveGrid
+    }
+
+    /// Shell-exit retain: stop treating in-flight LiveTail frames as a gate so
+    /// deferred HISTORY pages become inspectable glyphs (#1484 false-green).
+    func forceFlushHistoryPreparesForRetain() {
+        framesInFlight = 0
+        flushDeferredHistoryPrepares()
     }
 
     func flushDeferredHistoryPrepares() {
@@ -687,6 +719,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     func present(drawable: any CAMetalDrawable, presentsToDisplay: Bool = true) -> Bool {
         dispatchPrecondition(condition: .onQueue(.main))
         drainGPUCompletionsIfNeeded()
+        reencodeHistoryRegionsForCurrentAtlas()
         guard visible,
               persistentDisplayFailure == nil,
               needsPresent,
@@ -782,11 +815,18 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         guard width > 0, height > 0 else {
             return nil
         }
+        if framesInFlight == 0 {
+            reencodeHistoryRegionsForCurrentAtlas()
+        }
         if presentationPlan.drawsLiveGrid {
             guard instanceBuffer != nil, instanceCount > 0, glyphAtlas.texture != nil else {
                 return nil
             }
         } else if !orderedBlockRegions.isEmpty {
+            // Ensure atlas texture before HISTORY-only offscreen encode (#1484).
+            if glyphAtlas.texture == nil {
+                _ = try? glyphAtlas.ensureTextureForRendering()
+            }
             guard glyphAtlas.texture != nil else { return nil }
         }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(

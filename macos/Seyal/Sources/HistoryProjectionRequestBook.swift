@@ -7,9 +7,10 @@ struct HistoryProjectionRequestKey: Hashable {
     let endLine: UInt64
 }
 
-/// Deduplicates stable completed-Block history requests across registry polls.
-/// A request stays remembered after its reply so an unchanged projection does
-/// not repeatedly refill the shared bridge queue during focus churn.
+/// Bounded HISTORY request dedup for plan-owned sealed clips and component
+/// tests. Production Flow chrome hosts do not own fetches (#1484 Finding D);
+/// `MetalSurfaceView.applyBlockViewportPlan` uses this so identical clips are
+/// not re-requested every display frame (#1484 100k).
 struct HistoryProjectionRequestBook {
     private var inFlight = Set<HistoryProjectionRequestKey>()
     private var settled = Set<HistoryProjectionRequestKey>()
@@ -18,6 +19,18 @@ struct HistoryProjectionRequestBook {
         guard !inFlight.contains(key), !settled.contains(key) else { return false }
         inFlight.insert(key)
         return true
+    }
+
+    /// True when any in-flight key shares this Controller + Block.
+    func hasInFlight(displayHandle: UInt64, blockID: UInt64) -> Bool {
+        inFlight.contains { $0.displayHandle == displayHandle && $0.blockID == blockID }
+    }
+
+    /// True when a settled key shares this Controller + Block (and nothing is
+    /// still in flight for it).
+    func hasSettled(displayHandle: UInt64, blockID: UInt64) -> Bool {
+        !hasInFlight(displayHandle: displayHandle, blockID: blockID)
+            && settled.contains { $0.displayHandle == displayHandle && $0.blockID == blockID }
     }
 
     mutating func complete(_ key: HistoryProjectionRequestKey) {
@@ -29,9 +42,20 @@ struct HistoryProjectionRequestBook {
         settled.insert(key)
     }
 
-    mutating func receive(_ key: HistoryProjectionRequestKey, status: UInt32) {
+    mutating func receive(
+        _ key: HistoryProjectionRequestKey,
+        status: UInt32,
+        deliveredRows: Int? = nil,
+        minimumRows: Int? = nil
+    ) {
         switch status {
         case 0:
+            // NATIVE books key endLine to sealed/content row count. A short
+            // Complete must stay retryable so sealed growth can reopen (#1484).
+            if let deliveredRows, let minimumRows, minimumRows > 0, deliveredRows < minimumRows {
+                retry(key)
+                return
+            }
             complete(key)
         case 1:
             // Truncated history is still being continued by RustDisplayBridge.

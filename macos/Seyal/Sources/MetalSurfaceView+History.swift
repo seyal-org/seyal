@@ -13,26 +13,105 @@ struct NativeHistoryRenderPageKey: Equatable {
 }
 
 extension MetalSurfaceView {
-  func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    bridge?.requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID) ?? -10
+  func requestHistoryRange(
+    startLine: UInt64,
+    endLine: UInt64,
+    blockID: UInt64,
+    startUnit: UInt32 = 0
+  ) -> Int32 {
+    guard let bridge else { return -10 }
+    let handle = bridge.windowFocusedDisplayHandle != 0
+      ? bridge.windowFocusedDisplayHandle
+      : bridge.clientHandle
+    return bridge.requestHistoryRange(
+      forDisplayHandle: handle,
+      startLine: startLine,
+      endLine: endLine,
+      blockID: blockID,
+      startUnit: startUnit,
+      unitLimit: 0
+    )
+  }
+
+  func requestSealedViewportClip(blockID: UInt64, displayHandle: UInt64) -> Int32 {
+    bridge?.requestSealedViewportClip(forDisplayHandle: displayHandle, blockID: blockID) ?? -10
+  }
+
+  func liveTailBlockIDs() -> Set<UInt64> {
+    Set(renderer.liveTail.clips.keys)
+  }
+
+  func liveTailClips() -> [UInt64: LiveTailClip] {
+    renderer.liveTail.clips
+  }
+
+  /// Sealed HISTORY instances ready for Metal — hold LiveTail until this is true.
+  func hasPreparedHistoryRegion(blockID: UInt64) -> Bool {
+    renderer.hasPreparedHistoryRegion(blockID: blockID)
+  }
+
+  /// Plan-owned transcript regions from the last successful BlockViewportPlan.
+  func currentTranscriptRegions() -> [NativeTranscriptRegion] {
+    lastTranscriptFrameRegions ?? []
+  }
+
+  func currentTranscriptRegion(blockID: UInt64) -> NativeTranscriptRegion? {
+    lastTranscriptFrameRegions?.first(where: { $0.id == blockID })
+  }
+
+  func reopenPlanClipsAfterLiveTailRelease(blockIDs: Set<UInt64>, displayHandle: UInt64) {
+    guard displayHandle != 0 else { return }
+    for blockID in blockIDs where blockID != 0 {
+      planClipRequestBook.retry(
+        HistoryProjectionRequestKey(
+          displayHandle: displayHandle,
+          blockID: blockID,
+          startLine: 0,
+          endLine: 0
+        )
+      )
+    }
   }
 
   func retainHistoryRange(_ range: NativeHistoryRange) {
-    historyRanges[
-      PaneBlockKey(
-        paneID: paneID,
-        displayHandle: range.sourceDisplayHandle,
-        blockID: range.blockID
-      )
-    ] = range
+    // Finding E/D: store the latest plan-bounded sealed clip only — never a
+    // dual-key legacy retain or monotonic full-Block accumulation.
+    let handle = range.sourceDisplayHandle
+    let key = PaneBlockKey(
+      paneID: paneID,
+      displayHandle: handle,
+      blockID: range.blockID
+    )
+    let incomingAx = range.accessibilityTranscript()
+    if incomingAx.isEmpty { return }
+    if let previous = historyRanges[key],
+       !previous.accessibilityTranscript().isEmpty,
+       previous.startLine > range.startLine
+    {
+      return
+    }
+    historyRanges[key] = range
   }
 
   func retainedHistoryRange(blockID: UInt64, displayHandle: UInt64 = 0) -> NativeHistoryRange? {
-    historyRanges[PaneBlockKey(paneID: paneID, displayHandle: displayHandle, blockID: blockID)]
+    let exact = PaneBlockKey(paneID: paneID, displayHandle: displayHandle, blockID: blockID)
+    if let range = historyRanges[exact] { return range }
+    if displayHandle != 0 {
+      return historyRanges[PaneBlockKey(paneID: paneID, displayHandle: 0, blockID: blockID)]
+    }
+    return historyRanges.first(where: {
+      $0.key.paneID == paneID && $0.key.blockID == blockID
+    })?.value
   }
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
     bridge?.discardHistoryRequests(except: historyExceptPreservingRawScrollback(blockIDs))
+    let handle = transcriptDisplayHandle != 0
+      ? transcriptDisplayHandle
+      : (bridge?.windowFocusedDisplayHandle ?? bridge?.clientHandle ?? 0)
+    if handle != 0 {
+      planClipRequestBook.retain(blockIDs: blockIDs, forDisplayHandle: handle)
+    }
   }
 
   /// Installs a bounded Runtime history projection in this Pane's Metal renderer.
@@ -116,12 +195,19 @@ extension MetalSurfaceView {
         // Geometry-only scrolls reuse the prepared page; content/page changes
         // below prepare a fresh bounded buffer even when the clip is unchanged.
       } else {
+        // Defers while a drawable is in flight; GPU completion applies it and
+        // requests a fresh frame. Never zero framesInFlight on this path (#1484).
         try renderer.update(historyRange: page, region: rendererRegion, backingScale: scale)
         historyRenderPageKeys[range.blockID] = key
       }
+      // Direct prepare (applyHistoryRange) must register order — inspectFlowPaint
+      // only counts historyRegionOrder entries (#1484 clear→exit false-green).
+      if !renderer.historyRegionOrder.contains(range.blockID) {
+        renderer.setHistoryRegionOrder(renderer.historyRegionOrder + [range.blockID])
+      }
       // History-only Flow has no Candidate-D live frame and cannot mark the renderer Usable.
       hasRetainedHistoryPresentation = true
-      if shouldRender {
+      if shouldRender || hasRetainedHistoryPresentation {
         renderer.requestPresent()
         beginPresentationAttemptSeries()
         armMetalDisplayLink()
@@ -130,6 +216,55 @@ extension MetalSurfaceView {
     } catch {
       historyRenderPageKeys.removeValue(forKey: range.blockID)
       lastRenderError = error
+    }
+  }
+
+  /// Re-install HISTORY Metal instances after shell-exit when buffers were
+  /// pruned but `historyRanges` still hold RegionId pages.
+  func reencodeRetainedHistoryAfterDisconnect() {
+    var order: [UInt64] = []
+    var encodedRegions: [NativeTranscriptRegion] = []
+    for region in lastTranscriptFrameRegions ?? [] {
+      let range = historyRanges[
+        PaneBlockKey(
+          paneID: paneID,
+          displayHandle: region.displayHandle,
+          blockID: region.id
+        )
+      ] ?? historyRanges.first(where: {
+        $0.key.paneID == paneID && $0.key.blockID == region.id
+      })?.value
+      guard let range, !range.rows.isEmpty else { continue }
+      renderHistoryRange(range, region: region)
+      if !order.contains(region.id) {
+        order.append(region.id)
+      }
+      encodedRegions.append(region)
+    }
+    let cellHeight = max(terminalPresentationCellSize().height, 1)
+    var stackY = bounds.height
+    for (key, range) in historyRanges.sorted(by: { $0.key.blockID < $1.key.blockID })
+    where key.paneID == paneID {
+      guard !order.contains(key.blockID), !range.rows.isEmpty else { continue }
+      let rowCount = max(range.rows.count, 1)
+      let height = min(CGFloat(rowCount) * cellHeight, max(bounds.height * 0.4, cellHeight))
+      stackY -= height
+      var region = NativeTranscriptRegion(
+        id: key.blockID,
+        origin: .zero,
+        clip: NSRect(x: 0, y: stackY, width: max(bounds.width, 1), height: height),
+        historyRows: 0..<rowCount,
+        historyRequestID: range.requestID,
+        historyRevision: range.revision
+      )
+      region.displayHandle = key.displayHandle
+      renderHistoryRange(range, region: region)
+      order.append(key.blockID)
+      encodedRegions.append(region)
+    }
+    renderer.setHistoryRegionOrder(order)
+    if !encodedRegions.isEmpty {
+      lastTranscriptFrameRegions = encodedRegions
     }
   }
 }

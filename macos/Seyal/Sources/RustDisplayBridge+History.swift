@@ -19,25 +19,62 @@ extension RustDisplayBridge {
     forDisplayHandle handle: UInt64,
     startLine: UInt64,
     endLine: UInt64,
-    blockID: UInt64
+    blockID: UInt64,
+    startUnit: UInt32 = 0,
+    unitLimit: UInt32 = 0
   ) -> Int32 {
     guard isConnected, handle != 0 else { return -4 }
-    guard blockID > 0, startLine > 0, endLine >= startLine else { return -4 }
+    // Finding E: (0, 0) is sealed-row indexed retrieval; startUnit is the
+    // sealed index from BlockViewportPlan clipping.
+    let sealedIndexMode = startLine == 0 && endLine == 0
+    guard blockID > 0, sealedIndexMode || (startLine > 0 && endLine >= startLine) else {
+      return -4
+    }
     // Address the named Controller directly. `seyal_bridge_select` only moves
     // poll/flush; focused history FFI would hit FOCUSED_DISPLAY_HANDLE (#1426).
     let requestID = seyal_bridge_next_history_request_id_for(handle)
     guard requestID != 0 else { return -4 }
     let result = finishAddressedMutation(
       seyal_bridge_request_history_range_for(
-        handle, blockID, startLine, endLine, 512, 131_072, 0),
+        handle, blockID, startLine, endLine, 512, 131_072, startUnit),
       forDisplayHandle: handle
     )
     if result == 0 {
       let requestKey = PaneHistoryRequestKey(
         displayHandle: handle, paneID: paneID, requestID: requestID)
-      requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
+      let clipEnd: UInt32 =
+        sealedIndexMode && unitLimit > 0
+        ? startUnit &+ unitLimit
+        : 0
+      requestedHistoryRanges[requestKey] = (
+        blockID, startLine, endLine, startUnit, clipEnd
+      )
     }
     return result
+  }
+
+  /// Request visible sealed rows for one Block from the current viewport plan.
+  func requestSealedViewportClip(forDisplayHandle handle: UInt64, blockID: UInt64) -> Int32 {
+    var clip = SeyalBlockViewportClip()
+    if seyal_bridge_block_viewport_clip_for(handle, blockID, &clip) != 0, clip.row_count > 0 {
+      return requestHistoryRange(
+        forDisplayHandle: handle,
+        startLine: 0,
+        endLine: 0,
+        blockID: blockID,
+        startUnit: clip.first_row,
+        unitLimit: clip.row_count
+      )
+    }
+    // Plan has no sealed clip yet — fetch from sealed index 0 (bounded page).
+    return requestHistoryRange(
+      forDisplayHandle: handle,
+      startLine: 0,
+      endLine: 0,
+      blockID: blockID,
+      startUnit: 0,
+      unitLimit: 512
+    )
   }
 
   /// Discard this bridge's own focused-Controller stale requests.
@@ -83,6 +120,8 @@ extension RustDisplayBridge {
   func publishHistoryRanges(forDisplayHandle handle: UInt64) {
     guard isConnected, handle != 0 else { return }
     let pending = requestedHistoryRanges.filter { $0.key.displayHandle == handle }
+    // Idle typing/echo polls must not pay FFI when no HISTORY is outstanding.
+    guard !pending.isEmpty else { return }
     for (requestKey, request) in Array(pending) {
       let metadata = seyal_bridge_history_range_peek_for_handle(
         handle, request.blockID, requestKey.requestID)
@@ -132,7 +171,6 @@ extension RustDisplayBridge {
         sourceDisplayHandle: handle
       )
       let previous = historyContinuations[requestKey]
-      let merged = mergeHistoryRange(previous?.range, chunk)
       let leads = historyLeadCount(rows)
       _ = seyal_bridge_history_range_consume_for_handle(
         handle, metadata.block_id, metadata.request_id)
@@ -140,25 +178,56 @@ extension RustDisplayBridge {
       historyRevisions.removeValue(forKey: requestKey)
       historyContinuations.removeValue(forKey: requestKey)
       let truncated = metadata.reserved == 1
-      if truncated, leads > 0, isConnected {
-        let nextStart = (previous?.startUnit ?? 0) + leads
-        let nextID = seyal_bridge_next_history_request_id_for(handle)
-        if nextID != 0 {
-          let continued = finishAddressedMutation(
-            seyal_bridge_request_history_range_for(
-              handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
-              nextStart),
-            forDisplayHandle: handle
-          )
-          if continued == 0 {
-            let nextKey = PaneHistoryRequestKey(
-              displayHandle: handle, paneID: paneID, requestID: nextID)
-            requestedHistoryRanges[nextKey] = request
-            historyContinuations[nextKey] = (nextStart, merged)
+      // Finding E sealed-index mode: advance by delivered sealed rows, not
+      // padded lead counts (Unicode/reflow). Legacy LineId spans still use
+      // lead-count continuation. Plan windows must not Truncate-merge the
+      // whole Block (#1484 100k).
+      let sealedIndexMode = request.startLine == 0 && request.endLine == 0
+      let pageAdvance: UInt32 = sealedIndexMode
+        ? UInt32(rows.count)
+        : leads
+      let published: NativeHistoryRange
+      if sealedIndexMode {
+        published = NativeHistoryRange(
+          startLine: UInt64(request.startUnit),
+          endLine: UInt64(request.startUnit) &+ UInt64(rows.count),
+          blockID: chunk.blockID,
+          requestID: chunk.requestID,
+          revision: chunk.revision,
+          rows: chunk.rows,
+          status: chunk.status,
+          sourceDisplayHandle: chunk.sourceDisplayHandle
+        )
+      } else {
+        published = mergeHistoryRange(previous?.range, chunk)
+      }
+      if truncated, pageAdvance > 0, isConnected {
+        let baseUnit = previous?.startUnit ?? request.startUnit
+        let nextStart = baseUnit &+ pageAdvance
+        let withinPlanWindow =
+          request.clipEndUnit == 0 || nextStart < request.clipEndUnit
+        if withinPlanWindow {
+          let nextID = seyal_bridge_next_history_request_id_for(handle)
+          if nextID != 0 {
+            let continued = finishAddressedMutation(
+              seyal_bridge_request_history_range_for(
+                handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
+                nextStart),
+              forDisplayHandle: handle
+            )
+            if continued == 0 {
+              let nextKey = PaneHistoryRequestKey(
+                displayHandle: handle, paneID: paneID, requestID: nextID)
+              requestedHistoryRanges[nextKey] = (
+                request.blockID, request.startLine, request.endLine, nextStart,
+                request.clipEndUnit
+              )
+              historyContinuations[nextKey] = (nextStart, published)
+            }
           }
         }
       }
-      onHistory(merged)
+      onHistory(published)
     }
   }
 

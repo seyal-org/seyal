@@ -77,6 +77,9 @@ pub(crate) use types::{
     SeyalHistoryRow, SeyalHistorySidecar, SeyalPass9DiagSnapshot, SeyalPreparedFrame,
     SeyalRecoveryResult, SeyalSessionSurface,
 };
+pub use types::{
+    SeyalBlockViewportClip, SeyalBlockViewportPlanHeader, SeyalBlockViewportVisibleItem,
+};
 
 #[allow(unused_imports)]
 pub use app::pane_recovery::{
@@ -91,7 +94,8 @@ pub use app::{
     seyal_app_block_projection, seyal_app_block_projection_for_pane, seyal_app_block_row,
     seyal_app_block_row_for_pane, seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row,
     seyal_app_composer, seyal_app_composer_for_pane, seyal_app_copy, seyal_app_create,
-    seyal_app_destroy, seyal_app_eligibility_for_pane, seyal_app_invoke_workspace_command,
+    seyal_app_destroy, seyal_app_eligibility, seyal_app_block_scoped_direct_input,
+    seyal_app_eligibility_for_pane, seyal_app_invoke_workspace_command,
     seyal_app_last_error, seyal_app_leave_offer, seyal_app_native_effect, seyal_app_option_as_alt,
     seyal_app_palette, seyal_app_palette_row, seyal_app_pane_binding, seyal_app_pane_divider,
     seyal_app_pane_leaf, seyal_app_pane_region, seyal_app_propose_pane_geometry,
@@ -110,21 +114,25 @@ pub use attach_wakeup::{
 #[allow(unused_imports)]
 pub use display::{
     seyal_bridge_block_count, seyal_bridge_block_record, seyal_bridge_block_timeline_revision,
-    seyal_bridge_composer_result, seyal_bridge_composer_status, seyal_bridge_ensure_prepared,
-    seyal_bridge_ensure_prepared_for, seyal_bridge_execution_block_metadata,
-    seyal_bridge_flush_writable, seyal_bridge_flush_writable_for, seyal_bridge_frame,
-    seyal_bridge_frame_for, seyal_bridge_history_range_consume,
-    seyal_bridge_history_range_consume_for_handle, seyal_bridge_history_range_peek_for,
-    seyal_bridge_history_range_peek_for_handle, seyal_bridge_history_range_row_for,
-    seyal_bridge_history_range_row_for_handle, seyal_bridge_history_range_sidecar_for,
-    seyal_bridge_history_range_sidecar_for_handle, seyal_bridge_next_composer_request_id,
-    seyal_bridge_next_history_request_id, seyal_bridge_next_history_request_id_for,
-    seyal_bridge_poll, seyal_bridge_poll_for, seyal_bridge_request_history_range,
-    seyal_bridge_request_history_range_for, seyal_bridge_session_consent,
-    seyal_bridge_session_copy, seyal_bridge_session_request_for_handle,
-    seyal_bridge_session_surface, seyal_bridge_session_surface_for_handle,
-    seyal_bridge_viewport_start_line_id, seyal_bridge_viewport_start_line_id_for,
-    seyal_bridge_wants_write, seyal_bridge_wants_write_for,
+    seyal_bridge_block_viewport_clip_at_for, seyal_bridge_block_viewport_clip_for,
+    seyal_bridge_block_viewport_plan_header_for, seyal_bridge_block_viewport_set_scroll_anchor_for,
+    seyal_bridge_block_viewport_visible_at_for, seyal_bridge_composer_result,
+    seyal_bridge_composer_status, seyal_bridge_ensure_prepared, seyal_bridge_ensure_prepared_for,
+    seyal_bridge_execution_block_metadata, seyal_bridge_flush_writable,
+    seyal_bridge_flush_writable_for, seyal_bridge_frame, seyal_bridge_frame_for,
+    seyal_bridge_history_range_consume, seyal_bridge_history_range_consume_for_handle,
+    seyal_bridge_history_range_peek_for, seyal_bridge_history_range_peek_for_handle,
+    seyal_bridge_history_range_row_for, seyal_bridge_history_range_row_for_handle,
+    seyal_bridge_history_range_sidecar_for, seyal_bridge_history_range_sidecar_for_handle,
+    seyal_bridge_native_regions_total_height, seyal_bridge_native_regions_total_height_for,
+    seyal_bridge_next_composer_request_id, seyal_bridge_next_history_request_id,
+    seyal_bridge_next_history_request_id_for, seyal_bridge_poll, seyal_bridge_poll_for,
+    seyal_bridge_request_history_range, seyal_bridge_request_history_range_for,
+    seyal_bridge_session_consent, seyal_bridge_session_copy,
+    seyal_bridge_session_request_for_handle, seyal_bridge_session_surface,
+    seyal_bridge_session_surface_for_handle, seyal_bridge_viewport_start_line_id,
+    seyal_bridge_viewport_start_line_id_for, seyal_bridge_wants_write,
+    seyal_bridge_wants_write_for,
 };
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]
@@ -137,8 +145,9 @@ pub use errors::{
 pub use input::{
     seyal_bridge_copied_text, seyal_bridge_copied_text_consume, seyal_bridge_mouse_cell,
     seyal_bridge_propose_geometry, seyal_bridge_retry_resize, seyal_bridge_submit_composer,
-    seyal_bridge_submit_host_search, seyal_bridge_submit_host_selection, seyal_bridge_submit_key,
-    seyal_bridge_submit_mouse, seyal_bridge_submit_paste, seyal_bridge_submit_utf8,
+    seyal_bridge_submit_composer_for, seyal_bridge_submit_host_search,
+    seyal_bridge_submit_host_selection, seyal_bridge_submit_key, seyal_bridge_submit_mouse,
+    seyal_bridge_submit_paste, seyal_bridge_submit_utf8,
 };
 #[allow(unused_imports)]
 pub use launch_policy::{
@@ -185,7 +194,7 @@ pub(crate) fn set_focused_display_handle(handle: u64) {
     FOCUSED_DISPLAY_HANDLE.with(|focused| focused.set(handle));
 }
 
-fn focused_display_handle_if_live() -> u64 {
+pub(crate) fn focused_display_handle_if_live() -> u64 {
     let focused = FOCUSED_DISPLAY_HANDLE.with(Cell::get);
     if focused != 0 && with_client(focused, |_| ()).is_some() {
         focused
@@ -444,8 +453,8 @@ mod adversarial_ffi_misuse_tests {
     use super::{
         seyal_bridge_adopt_handle, seyal_bridge_disconnect_handle, seyal_bridge_frame,
         seyal_bridge_poll, seyal_bridge_select, seyal_bridge_set_runtime_dir,
-        seyal_bridge_submit_composer, seyal_bridge_submit_paste, seyal_bridge_submit_utf8,
-        SeyalPreparedFrame,
+        seyal_bridge_submit_composer, seyal_bridge_submit_composer_for, seyal_bridge_submit_paste,
+        seyal_bridge_submit_utf8, SeyalPreparedFrame,
     };
 
     #[test]
@@ -470,6 +479,10 @@ mod adversarial_ffi_misuse_tests {
     fn submit_composer_rejects_null_or_empty() {
         assert_eq!(unsafe { seyal_bridge_submit_composer(ptr::null(), 0) }, -4);
         assert_eq!(unsafe { seyal_bridge_submit_composer(ptr::null(), 3) }, -4);
+        assert_eq!(
+            unsafe { seyal_bridge_submit_composer_for(0, ptr::null(), 0) },
+            -4
+        );
     }
 
     #[test]

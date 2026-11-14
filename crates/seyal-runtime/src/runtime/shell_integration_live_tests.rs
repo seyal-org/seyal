@@ -78,9 +78,12 @@ fn spawn(label: &str, user_rc: &str, program: Option<(&str, &[&str])>) -> Harnes
         .args(args.iter().copied())
         .clear_environment()
         .env("HOME", &home)
-        .env("PATH", "/usr/bin:/bin")
+        // Include Homebrew so headed-app matrix tools (nvim/tmux/python) resolve.
+        .env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
         .env("HISTFILE", home.join(".zsh_history"))
-        .env("LANG", "C");
+        .env("LANG", "C")
+        .env("TERM", "xterm-256color")
+        .env("TMPDIR", std::env::temp_dir());
     let id = runtime
         .create_execution(command, WindowSize::cells(80, 24).expect("size"))
         .expect("spawn");
@@ -781,6 +784,141 @@ fn multi_line_is_one_block_via_bracketed_paste_and_refused_without_it() {
     assert_eq!(h.submit("echo one\necho two"), ComposerAdmission::Invalid);
     assert_eq!(h.state(), IntegrationState::AtPrompt);
     assert!(h.records().is_empty());
+}
+
+#[test]
+fn nvim_alternate_screen_keeps_native_regions_and_restores_primary() {
+    let nvim = [
+        "/opt/homebrew/bin/nvim",
+        "/usr/local/bin/nvim",
+        "/usr/bin/nvim",
+    ]
+    .into_iter()
+    .find(|path| Path::new(path).is_file());
+    let Some(nvim) = nvim else {
+        eprintln!("skipped: nvim not available");
+        return;
+    };
+    let mut h = spawn("nvim", PLAIN_RC, None);
+    h.wait_at_prompt();
+    let cmd = format!("{nvim} -u NONE -c 'set noswapfile' /dev/null");
+    assert!(matches!(h.submit(&cmd), ComposerAdmission::Accepted(_)));
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id]
+            .execution
+            .terminal()
+            .modes()
+            .alternate_screen
+    });
+    let nvim_rec = h.runtime.entries[&h.id]
+        .block_timeline
+        .records()
+        .find(|record| record.command.contains("nvim"))
+        .expect("nvim Block");
+    assert!(nvim_rec.header_region.is_some() && nvim_rec.output_region.is_some());
+    let nvim_output = nvim_rec.output_region.expect("nvim output");
+    // Alternate TUI owns the screen; composer must not stay Available.
+    assert_eq!(h.submit("echo should-busy"), ComposerAdmission::Busy);
+    // Exit nvim: ESC :q!
+    h.direct(b"\x1b:q!\r");
+    h.pump_until(|runtime, id| {
+        !runtime.entries[&id]
+            .execution
+            .terminal()
+            .modes()
+            .alternate_screen
+            && runtime.entries[&id].integration == IntegrationState::AtPrompt
+    });
+    let (nvim_lifecycle, nvim_header) = {
+        let completed = h.runtime.entries[&h.id]
+            .block_timeline
+            .records()
+            .find(|record| record.command.contains("nvim"))
+            .expect("nvim completed");
+        (completed.lifecycle, completed.header_region)
+    };
+    assert!(matches!(
+        nvim_lifecycle,
+        CommandBlockLifecycle::Completed { .. }
+    ));
+    // Local shell after TUI: fresh Block must not reuse nvim RegionIds.
+    assert!(matches!(
+        h.submit("echo after-nvim"),
+        ComposerAdmission::Accepted(_)
+    ));
+    h.wait_block_completed(1);
+    let after = h.runtime.entries[&h.id]
+        .block_timeline
+        .records()
+        .find(|record| record.command == "echo after-nvim")
+        .expect("after-nvim");
+    assert_ne!(after.output_region, Some(nvim_output));
+    assert_ne!(after.header_region, nvim_header);
+}
+
+#[test]
+fn tmux_version_block_opens_distinct_native_regions() {
+    // Attach/detach alternate-screen remains a headed G7 gate. This live PTY
+    // proof covers native RegionId ownership for a real tmux binary invocation.
+    let tmux = [
+        "/opt/homebrew/bin/tmux",
+        "/usr/local/bin/tmux",
+        "/usr/bin/tmux",
+    ]
+    .into_iter()
+    .find(|path| Path::new(path).is_file());
+    let Some(tmux) = tmux else {
+        eprintln!("skipped: tmux not available");
+        return;
+    };
+    let mut h = spawn("tmux-ver", PLAIN_RC, None);
+    h.wait_at_prompt();
+    let cmd = format!("{tmux} -V");
+    assert!(matches!(h.submit(&cmd), ComposerAdmission::Accepted(_)));
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id].block_timeline.records().any(|record| {
+            record.command.contains("tmux")
+                && matches!(
+                    record.lifecycle,
+                    CommandBlockLifecycle::Completed {
+                        exit_status: Some(0)
+                    }
+                )
+        })
+    });
+    let (tmux_header, tmux_output) = {
+        let tmux_rec = h.runtime.entries[&h.id]
+            .block_timeline
+            .records()
+            .find(|record| record.command.contains("tmux"))
+            .expect("tmux Block");
+        (
+            tmux_rec.header_region.expect("tmux header"),
+            tmux_rec.output_region.expect("tmux output"),
+        )
+    };
+    assert!(matches!(
+        h.submit("echo after-tmux"),
+        ComposerAdmission::Accepted(_)
+    ));
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id].block_timeline.records().any(|record| {
+            record.command == "echo after-tmux"
+                && matches!(
+                    record.lifecycle,
+                    CommandBlockLifecycle::Completed {
+                        exit_status: Some(0)
+                    }
+                )
+        })
+    });
+    let after = h.runtime.entries[&h.id]
+        .block_timeline
+        .records()
+        .find(|record| record.command == "echo after-tmux")
+        .expect("after-tmux");
+    assert_ne!(after.output_region, Some(tmux_output));
+    assert_ne!(after.header_region, Some(tmux_header));
 }
 
 #[test]

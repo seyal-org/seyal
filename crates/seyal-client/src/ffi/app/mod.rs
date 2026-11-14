@@ -625,6 +625,33 @@ pub extern "C" fn seyal_app_focus_history_seq(handle: u64) -> u64 {
     })
 }
 
+/// Presentation eligibility without cloning screen text / AX trees
+/// (`seyal_app_snapshot`). Key-path for DirectInput admission (#1484 P0).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_eligibility(handle: u64) -> u16 {
+    use crate::app::PresentationEligibility;
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return pane_composer::eligibility_code(PresentationEligibility::Unbound);
+        };
+        pane_composer::eligibility_code(state.root.presentation_eligibility())
+    })
+}
+
+/// Block-scoped DirectInput flag without a full snapshot clone (#1484 P0).
+/// Non-zero when Flow DirectInput may admit keys for the focused Controller.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_block_scoped_direct_input(handle: u64) -> u8 {
+    APPS.with(|apps| {
+        u8::from(
+            apps.borrow()
+                .get(&handle)
+                .is_some_and(|state| state.root.block_scoped_direct_input_eligible()),
+        )
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_accessibility(handle: u64) -> SeyalAppAccessibility {
     APPS.with(|apps| {

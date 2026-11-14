@@ -139,11 +139,36 @@ impl LocalDisplayClient {
                         }
                         .map_err(|_| ClientError::Protocol)?;
                         if timeline.revision >= self.block_timeline.revision {
-                            metadata_changed = timeline.revision > self.block_timeline.revision;
+                            // OR-assign: a later same-revision frame in this
+                            // poll must not clear an earlier metadata bump
+                            // (e.g. type-48 native regions) or primary drain
+                            // skips onRegistryHandlePolled (#1484 original pane).
+                            metadata_changed |= timeline.revision > self.block_timeline.revision;
                             let retained =
                                 timeline.records.iter().map(|record| record.id).collect();
                             self.purge_history_for_blocks(&retained);
                             self.block_timeline = timeline;
+                        }
+                    }
+                    MessageType::BlockNativeRegions => {
+                        let payload = if has_presentation_envelope {
+                            decode_presentation_envelope(frame)
+                                .map_err(|_| ClientError::Protocol)?
+                                .payload
+                        } else {
+                            &frame[HEADER_LEN..]
+                        };
+                        let map =
+                            seyal_runtime::local_ipc::framing::BlockNativeRegions::decode(payload)
+                                .map_err(|_| ClientError::Protocol)?;
+                        if map.revision >= self.block_native_regions.revision {
+                            // Commit the map before plan rebuild — rebuild reads
+                            // `block_native_regions.records` for RegionIds/clips.
+                            // Applying first left first-seen Blocks with
+                            // output_region=0 and empty clipping (#1484 FourPane).
+                            self.block_native_regions = map;
+                            self.apply_block_native_regions_to_viewport();
+                            metadata_changed = true;
                         }
                     }
                     MessageType::ComposerResult => {

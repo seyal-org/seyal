@@ -293,6 +293,31 @@ impl Runtime {
             };
             changed |= self.dispatch_shell_integration_event(id, event)?;
         }
+        // Consume wire-ordered attribution journal after marker dispatch so the
+        // bounded VT journal cannot retain events across observe turns (#1484).
+        // Finding F / D7: drained PrimaryEvents are inspected for StreamSequence
+        // causality and trusted-marker counts — never silently discarded.
+        // Production overflow refuses new admissions and keeps Block ownership;
+        // only F06 fault-inject fail-closed ends the active output region.
+        if let Some(entry) = self.entries.get_mut(&id) {
+            let fail_closed = entry.execution.attribution_journal_fail_closed_overflow();
+            let events = entry.execution.drain_attribution_journal();
+            let prior = entry.last_consumed_attribution_sequence;
+            if let Some(summary) = consume_attribution_journal_events(&events, prior) {
+                // D7 ownership: watermark + cumulative counts drive Entry state
+                // and gate idempotent re-observe of already-consumed sequences.
+                entry.last_consumed_attribution_sequence = summary.watermark;
+                entry.consumed_attribution_markers = entry
+                    .consumed_attribution_markers
+                    .saturating_add(summary.markers);
+                entry.consumed_attribution_mutations = entry
+                    .consumed_attribution_mutations
+                    .saturating_add(summary.mutations);
+            }
+            if fail_closed {
+                entry.execution.end_native_block_output();
+            }
+        }
         let session_alternate = {
             let entry = self
                 .entries
@@ -389,6 +414,17 @@ impl Runtime {
             .get_mut(&id)
             .ok_or(RuntimeError::UnknownExecution)?;
         while entry.execution.take_shell_integration_event().is_some() {}
+        let events = entry.execution.drain_attribution_journal();
+        let prior = entry.last_consumed_attribution_sequence;
+        if let Some(summary) = consume_attribution_journal_events(&events, prior) {
+            entry.last_consumed_attribution_sequence = summary.watermark;
+            entry.consumed_attribution_markers = entry
+                .consumed_attribution_markers
+                .saturating_add(summary.markers);
+            entry.consumed_attribution_mutations = entry
+                .consumed_attribution_mutations
+                .saturating_add(summary.mutations);
+        }
         Ok(())
     }
 
@@ -671,6 +707,73 @@ pub(super) fn complete_timeline_block(
         .is_ok()
 }
 
+/// Result of D7 journal consume — release-visible ownership bookkeeping.
+struct AttributionConsumeSummary {
+    watermark: u64,
+    markers: u64,
+    mutations: u64,
+}
+
+/// Deterministic journal consumption after shell_events dispatch (#1484 F / D7).
+///
+/// Drains are ownership barriers: every event strictly after `prior_watermark`
+/// advances the Entry's observed StreamSequence watermark and cumulative
+/// marker/mutation counts (release-visible; prior watermark is read to skip
+/// already-consumed sequences). Debug builds also assert marker token_accepted
+/// and strict sequence monotonicity. Capacity barriers refuse new admits while
+/// prior events remain undrained — there is no separate "finalized" flag.
+fn consume_attribution_journal_events(
+    events: &[seyal_exec::PrimaryEvent],
+    prior_watermark: u64,
+) -> Option<AttributionConsumeSummary> {
+    if events.is_empty() {
+        return None;
+    }
+    let mut last_sequence = None;
+    let mut markers = 0u64;
+    let mut mutations = 0u64;
+    for event in events {
+        let sequence = match event {
+            seyal_exec::PrimaryEvent::CellMutation { sequence, .. } => *sequence,
+            seyal_exec::PrimaryEvent::ShellBoundaryCandidate {
+                sequence,
+                token_accepted,
+                ..
+            } => {
+                debug_assert!(
+                    *token_accepted,
+                    "journaled shell boundary must carry token_accepted from VT admit"
+                );
+                *sequence
+            }
+        };
+        // Idempotent ownership: already-consumed sequences do not re-count.
+        if sequence.0 <= prior_watermark {
+            continue;
+        }
+        match event {
+            seyal_exec::PrimaryEvent::CellMutation { .. } => {
+                mutations = mutations.saturating_add(1);
+            }
+            seyal_exec::PrimaryEvent::ShellBoundaryCandidate { .. } => {
+                markers = markers.saturating_add(1);
+            }
+        }
+        if let Some(prev) = last_sequence {
+            debug_assert!(
+                sequence > prev,
+                "StreamSequence must be strictly monotonic across drained events"
+            );
+        }
+        last_sequence = Some(sequence);
+    }
+    last_sequence.map(|seq| AttributionConsumeSummary {
+        watermark: seq.0.max(prior_watermark),
+        markers,
+        mutations,
+    })
+}
+
 /// Apply one trusted local-scope event and carry out its Block effects.
 /// Returns whether published Block metadata changed.
 #[cfg(target_os = "macos")]
@@ -689,16 +792,27 @@ pub(super) fn apply_local_integration_event(entry: &mut Entry, event: Integratio
                     .start(pending.block_id, pending.command, line.0)
                     .is_ok()
                 {
+                    if let Ok((header, output)) = entry
+                        .execution
+                        .begin_native_block_output(pending.block_id.raw())
+                    {
+                        let _ = entry.block_timeline.set_native_regions(
+                            pending.block_id,
+                            header,
+                            output,
+                        );
+                    }
                     entry.integration = entry.integration.block_started(pending.block_id);
                     changed = true;
                 }
-                // On failure the shell is still usable; no stale Running state
-                // is published and the state stays Running(none).
             }
             Effect::DropPending => {
                 entry.pending_composer = None;
+                // Provisional OSC arm may have redirected writes; restore outer.
+                entry.execution.cancel_pending_native_output();
             }
             Effect::Complete(block_id, exit, line) => {
+                entry.execution.end_native_block_output();
                 changed |= complete_timeline_block(entry, block_id, exit, line);
             }
         }
@@ -709,6 +823,68 @@ pub(super) fn apply_local_integration_event(entry: &mut Entry, event: Integratio
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
+    use seyal_exec::{
+        BlockId, CellHandle, LineId, MarkerKind, PrimaryEvent, RegionId, StreamSequence,
+        UnitVersion,
+    };
+
+    #[test]
+    fn d7_consume_advances_watermark_and_cumulative_counts() {
+        // Finding F / D7: Entry watermark is read to skip already-consumed
+        // sequences; focused counters prove ownership bookkeeping.
+        let events = vec![
+            PrimaryEvent::CellMutation {
+                sequence: StreamSequence(1),
+                version: UnitVersion {
+                    line_id: LineId(1),
+                    unit_offset: 0,
+                    content_generation: 1,
+                },
+                handle: CellHandle {
+                    page: 0,
+                    slot: 0,
+                    generation: 1,
+                },
+                region: RegionId(1),
+            },
+            PrimaryEvent::ShellBoundaryCandidate {
+                sequence: StreamSequence(2),
+                marker: MarkerKind::PromptStart,
+                block: Some(BlockId(1)),
+                version: UnitVersion {
+                    line_id: LineId(1),
+                    unit_offset: 0,
+                    content_generation: 1,
+                },
+                column: 0,
+                token_accepted: true,
+            },
+            PrimaryEvent::CellMutation {
+                sequence: StreamSequence(3),
+                version: UnitVersion {
+                    line_id: LineId(1),
+                    unit_offset: 1,
+                    content_generation: 1,
+                },
+                handle: CellHandle {
+                    page: 0,
+                    slot: 1,
+                    generation: 1,
+                },
+                region: RegionId(1),
+            },
+        ];
+        let first = consume_attribution_journal_events(&events, 0).expect("consume");
+        assert_eq!(first.watermark, 3);
+        assert_eq!(first.markers, 1);
+        assert_eq!(first.mutations, 2);
+        // Re-observe with prior watermark must not double-count.
+        assert!(consume_attribution_journal_events(&events, 3).is_none());
+        let partial = consume_attribution_journal_events(&events, 1).expect("tail");
+        assert_eq!(partial.watermark, 3);
+        assert_eq!(partial.markers, 1);
+        assert_eq!(partial.mutations, 1);
+    }
 
     #[test]
     fn single_line_submission_is_raw_bytes_plus_return() {
