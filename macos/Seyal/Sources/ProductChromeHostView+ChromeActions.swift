@@ -87,6 +87,13 @@ extension ProductChromeHostView {
         action.target_execution_lo = lo
         action.target_execution_hi = hi
         _ = seyal_app_apply(pane.appHandle, &action)
+        // FOCUS_PANE does not bump ApplicationRoot snapshot generation, so the
+        // chrome early-return would skip host ownership + window focus handle.
+        // Reconcile pane hosts before routeFocus so DirectInput can borrow the
+        // matching Controller (#1476 node→split→refocus).
+        let shell = seyal_app_shell(pane.appHandle)
+        lastFocusedPane = (lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
+        reconcilePaneHosts(paneCount: Int(shell.pane_count))
         reconcileChrome()
         routeFocus()
     }

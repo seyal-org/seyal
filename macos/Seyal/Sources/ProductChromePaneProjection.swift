@@ -66,9 +66,9 @@ extension ProductChromeHostView {
         let sharedBridge = pane.inputSurface.bridge
         let focusedDisplayHandle =
             bindings.first { $0.focused && $0.displayHandle != 0 }?.displayHandle ?? 0
-        // Publish window focus before leaf DirectInput sync so Metal
-        // `allowsDirectTerminalKeys` sees the matching Controller handle.
-        wireRegistryFrameRouting(focusedDisplayHandle: focusedDisplayHandle)
+        // Flip inputOwned before composer-status republish (#1471). Status
+        // handlers refresh every host; a stale inputOwned sibling calls
+        // focusEditor() and steals keys from the focused DirectInput REPL.
         centerColumn.reconcileSecondaryLiveHosts(
             bindings: bindings,
             historyBridge: sharedBridge
@@ -80,6 +80,8 @@ extension ProductChromeHostView {
             // arrive through noteRegistryPolled → reconcileFlowPresentation.
             host.reconcileFocusOwnershipPresentation()
         }
+        // Window focus handle + status republish after ownership is correct.
+        wireRegistryFrameRouting(focusedDisplayHandle: focusedDisplayHandle)
         // After leaf ownership + forced composer status republish, reclaim Metal
         // FR for Block-scoped DirectInput (generation-stable status alone will
         // not call performChromeReconcile's eligibility routeFocus).

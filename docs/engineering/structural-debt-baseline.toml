@@ -31,20 +31,20 @@ reason = "Metal surface remains the thin historyRanges/hit-test owner; #1442 add
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
 acknowledged_loc = 873
-issue = 1379
-reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and splits live-tail vs history Flow paint counts so clear→exit ink stays history-only."
+issue = 1476
+reason = "Metal update/present lifecycle stays one main-queue presenter; #1379 clears deferred prepares on wipe, allows history-only requestPresent, and splits live-tail vs history Flow paint counts so clear→exit ink stays history-only; #1476 defaults resting RendererPlan to Flow so new surfaces do not paint Raw full-grid white before host apply."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/SecondaryLivePaneHost.swift"
-acknowledged_loc = 848
-issue = 1467
-reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority."
+acknowledged_loc = 851
+issue = 1476
+reason = "The pane host owns its independent transcript viewport and per-terminal-tab scroll state; #1467/#1468 borrow InteractiveMetalSurfaceView for Flow DirectInput keys and keep per-pane Busy-dock retraction under Block-scoped DirectInput without a second PTY/VT authority; #1476 matches RendererPlan to the Flow/Raw branch and republishes frames after plan apply so quiet REPLs refill live-tail."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+Blocks.swift"
-acknowledged_loc = 815
-issue = 1467
-reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 focus Flow DirectInput on composer-status relay and rebuild Running cards when DirectInput status publishes without a second transcript authority."
+acknowledged_loc = 817
+issue = 1476
+reason = "The Blocks host owns native Block projection and viewport-to-Metal history paging; #1467/#1468 focus Flow DirectInput on composer-status relay and rebuild Running cards when DirectInput status publishes without a second transcript authority; #1476 resolves RendererPlan from the same snapshot eligibility used for the Flow/Raw branch (no fromApp race)."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/history.rs"
@@ -84,9 +84,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1136
-issue = 1467
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 exposes block_scoped_direct_input on the same AppHandle snapshot façade rather than a second ABI module."
+ceiling_loc = 1138
+issue = 1476
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 exposes block_scoped_direct_input on the same AppHandle snapshot façade rather than a second ABI module; #1476 registers the renderer_plan sibling so RendererPlan flags publish through the same AppHandle façade without a second ABI root."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/mod.rs"
