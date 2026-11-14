@@ -241,6 +241,14 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         51 => Ok(AppAction::ClosePalette { fence }),
         52 => super::pane_composer::decode_runtime_composer_status(action, fence),
         86 => super::pane_composer::decode_interact_with_running_block(action, fence),
+        87 => Ok(AppAction::RerunBlock {
+            fence,
+            id: BlockId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            composer_epoch: action.target_generation,
+        }),
         53 => Ok(AppAction::CancelRecovery),
         54 => Ok(AppAction::AdvanceRecoveryStage {
             stage: match action.reserved & 0xffff {

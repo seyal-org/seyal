@@ -7,8 +7,12 @@ extension XCTestCase {
         in app: XCUIApplication, submitCommand: (String) -> Void
     ) throws {
         let token = String(UUID().uuidString.prefix(8))
-        let scriptURL = URL(fileURLWithPath: "/tmp/s1049-\(token).sh")
-        let startedURL = URL(fileURLWithPath: "/tmp/s1049-\(token).ran")
+        // XCUI runners are sandboxed and cannot create fixtures under `/tmp`
+        // (NSCocoaErrorDomain 513). Use the runner temporary directory; the
+        // non-sandboxed app/Runtime can still exec and write the started latch.
+        let fixtureRoot = FileManager.default.temporaryDirectory
+        let scriptURL = fixtureRoot.appendingPathComponent("s1049-\(token).sh")
+        let startedURL = fixtureRoot.appendingPathComponent("s1049-\(token).ran")
         try """
         trap 'printf "\\033[?1049l"' EXIT
         : > \(startedURL.path)
@@ -83,11 +87,11 @@ final class SeyalHostUITests: XCTestCase {
 
     func testApplicationLaunchesOnePaneHost() throws {
         let app = hostedApp()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        app.ensureRunningForegroundForAttach(message: "Seyal.app left foreground after launch")
         // Attach/resize used to recurse into SIGSEGV within ~250ms of a real
         // `open`. Chrome existence is not enough; the process must stay up.
         RunLoop.current.run(until: Date().addingTimeInterval(2))
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed after launch")
+        app.ensureRunningForegroundForAttach(message: "Seyal.app exited or stayed background after launch settle")
         let chrome = app.descendants(matching: .any)["seyal-product-chrome"]
         XCTAssertTrue(chrome.waitForExistence(timeout: 10))
         let pane = app.descendants(matching: .any)["seyal-thin-pane"]
@@ -1075,7 +1079,8 @@ final class SeyalHostUITests: XCTestCase {
         }
         let app = hostedApp()
         waitForUsablePty(in: app)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
+        proveTrustedComposerIntegration(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
         let available = NSPredicate(format: "value == 'available'")
         let busy = NSPredicate(format: "value == 'busy'")
@@ -1087,24 +1092,24 @@ final class SeyalHostUITests: XCTestCase {
             .completed,
             "composer never became available at the first prompt; value=\(composer.value ?? "nil")"
         )
-        composer.firstMatch.click()
-        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
-        if editor.waitForExistence(timeout: 2), editor.firstMatch.isHittable {
-            editor.firstMatch.click()
-            editor.firstMatch.typeText("sleep 2")
-            editor.firstMatch.typeKey("\r", modifierFlags: [])
-        } else {
-            composer.firstMatch.typeText("sleep 2")
-            app.typeKey("\r", modifierFlags: [])
-        }
+        composer.click()
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 5), "composer editor missing")
+        editor.click()
+        editor.typeText("sleep 2")
+        XCTAssertTrue(execute.waitForExistence(timeout: 2))
+        XCTAssertTrue(execute.isEnabled, "execute must be enabled with a draft")
+        execute.click()
         // Runtime publishes Busy at admission; the host only relays it.
+        // Pending submit keeps Busy until ComposerResult is drained (#1474).
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],
-                timeout: 4
+                timeout: 6
             ),
             .completed,
-            "composer stayed \(composer.value ?? "nil") while sleep 2 owned the shell"
+            "composer stayed \(composer.value ?? "nil") editor=\(editor.value ?? "nil") while sleep 2 owned the shell"
         )
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed during busy relay")
         // The next trusted prompt re-enables it, with the draft cleared by
@@ -1291,7 +1296,9 @@ final class SeyalHostUITests: XCTestCase {
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        // Sequential headed XCUI / IDE focus steal can BackgroundSuspend the
+        // next launch; reclaim frontmost before attach waits (#1474).
+        app.ensureRunningForegroundForAttach()
         let presentation = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
         let terminal = app.descendants(matching: .any)["terminal-input"]
         if presentation.waitForExistence(timeout: 2) {
@@ -1321,10 +1328,8 @@ final class SeyalHostUITests: XCTestCase {
                 "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
             )
         }
-        XCTAssertEqual(
-            app.state,
-            .runningForeground,
-            "Seyal.app crashed while waiting for the PTY/runtime attach"
+        app.ensureRunningForegroundForAttach(
+            message: "Seyal.app left foreground while waiting for the PTY/runtime attach"
         )
         // #1065: Rust RecoveryCoordinator owns reconnect policy; the host only
         // executes effects (driveRecovery PerformAttempt/adopt) and projects
@@ -1354,9 +1359,15 @@ final class SeyalHostUITests: XCTestCase {
             composer.waitForExistence(timeout: timeout),
             "XCUI must run as Flow/Blocks; composer missing — UI looks like a normal terminal"
         )
-        XCTAssertTrue(
-            composer.firstMatch.isHittable,
-            "XCUI must run as Flow/Blocks; composer not hittable — UI looks like a normal terminal"
+        let hittable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: composer.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [hittable], timeout: timeout),
+            .completed,
+            "XCUI must run as Flow/Blocks; composer not hittable — value=\(composer.value ?? "nil") frame=\(composer.firstMatch.frame)"
         )
         XCTAssertTrue(
             blocks.waitForExistence(timeout: 5),
@@ -1791,9 +1802,10 @@ final class SeyalHostUITests: XCTestCase {
         }
         let app = hostedApp()
         waitForUsablePty(in: app)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
-        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
-        let execute = app.descendants(matching: .any)["seyal-composer-execute"]
+        proveTrustedComposerIntegration(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+        let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
         let available = NSPredicate(format: "value == 'available'")
         let busy = NSPredicate(format: "value == 'busy'")
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
@@ -1806,31 +1818,37 @@ final class SeyalHostUITests: XCTestCase {
             "composer never became available; value=\(composer.value ?? "nil")"
         )
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
-        editor.firstMatch.click()
-        editor.firstMatch.typeText("sleep 8")
-        editor.firstMatch.typeKey("\r", modifierFlags: [])
+        editor.click()
+        editor.typeText("sleep 8")
+        XCTAssertTrue(execute.waitForExistence(timeout: 2))
+        XCTAssertTrue(execute.isEnabled, "execute must be enabled with a draft")
+        execute.click()
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],
                 timeout: 6
             ),
             .completed,
-            "composer stayed \(composer.value ?? "nil") while sleep owned the shell"
+            "composer stayed \(composer.value ?? "nil") editor=\(editor.value ?? "nil") while sleep owned the shell"
         )
-        XCTAssertTrue(execute.firstMatch.exists)
-        XCTAssertFalse(execute.firstMatch.isEnabled, "busy must disable native execute")
-        let busyValue = (composer.firstMatch.value as? String) ?? ""
+        XCTAssertTrue(execute.exists)
+        XCTAssertFalse(execute.isEnabled, "busy must disable native execute")
+        let busyValue = (composer.value as? String) ?? ""
         XCTAssertFalse(
             busyValue.contains("sleep"),
             "admission/error AX must not leak the draft; value=\(busyValue)"
         )
-        execute.firstMatch.click()
+        execute.click()
         XCTAssertEqual(
-            composer.firstMatch.value as? String,
+            composer.value as? String,
             "busy",
             "disabled execute must not admit a second command"
         )
-        XCTAssertEqual(app.state, .runningForeground)
+        // IDE focus steal during long Busy can leave RunningBackgroundSuspended;
+        // recover before the Available wait (#1474).
+        app.ensureRunningForegroundForAttach(
+            message: "Seyal.app left foreground during busy admission"
+        )
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [expectation(for: available, evaluatedWith: composer, handler: nil)],
@@ -1931,6 +1949,28 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// Unsupported shells keep composer `available` forever and never emit
+    /// Blocks. Busy cases must prove trusted zsh integration first (#1474).
+    private func proveTrustedComposerIntegration(in app: XCUIApplication) {
+        let marker = "seyal-busy-trust-\(String(UUID().uuidString.prefix(8)))"
+        submitComposerCommand(app, "printf '\(marker)\\n'")
+        let body = app.descendants(matching: .any)["seyal-block-0-body"].firstMatch
+        XCTAssertTrue(
+            body.waitForExistence(timeout: 12),
+            "trusted zsh integration must publish a Flow Block before Busy cases; shell may be Unsupported"
+        )
+        let available = NSPredicate(format: "value == 'available'")
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: available, evaluatedWith: composer, handler: nil)],
+                timeout: 12
+            ),
+            .completed,
+            "composer must return to available after trust probe; value=\(composer.value ?? "nil")"
+        )
+    }
+
     private func submitComposerCommand(_ app: XCUIApplication, _ command: String) {
         let composer = app.descendants(matching: .any)["seyal-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 12))
@@ -1943,10 +1983,15 @@ final class SeyalHostUITests: XCTestCase {
         )
         composer.firstMatch.click()
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        let execute = app.descendants(matching: .any)["seyal-composer-execute"].firstMatch
         if editor.waitForExistence(timeout: 2), editor.firstMatch.isHittable {
             editor.firstMatch.click()
             editor.firstMatch.typeText(command)
-            editor.firstMatch.typeKey("\r", modifierFlags: [])
+            if execute.exists, execute.isEnabled {
+                execute.click()
+            } else {
+                editor.firstMatch.typeKey("\r", modifierFlags: [])
+            }
         } else {
             composer.firstMatch.typeText(command)
             app.typeKey("\r", modifierFlags: [])
@@ -2025,6 +2070,96 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-1"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(create.exists && create.isHittable, "Workspace creation remains available with multiple Layouts")
         XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// #867 / ADR-009 Blocks-default: supported Flow shells omit manual Raw
+    /// palette verbs. Raw remains an automatic fallback path, not a resting
+    /// choice on trusted shells (#1426).
+    func testSupportedFlowPaletteOmitsUseRawTerminal() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        assertFlowBlocksOrFail(in: app)
+
+        let palette = app.descendants(matching: .any)["seyal-command-palette"]
+        app.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "⌘K opens the Rust-backed palette")
+        let queryField = app.descendants(matching: .any)["seyal-command-palette-query"]
+        XCTAssertTrue(queryField.waitForExistence(timeout: 5))
+        queryField.firstMatch.click()
+        queryField.firstMatch.typeText("Use Raw Terminal")
+        let row = app.descendants(matching: .any)["seyal-command-palette-row-0"]
+        if row.waitForExistence(timeout: 2) {
+            XCTAssertNotEqual(
+                row.label,
+                "Use Raw Terminal",
+                "trusted Flow must not offer Use Raw Terminal; got \(row.label)"
+            )
+        }
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        assertFlowBlocksOrFail(in: app)
+    }
+
+    /// #867: alternate-screen TUI takes the Pane and returns to Flow on the
+    /// same ExecutionId (Blocks-default resting policy after #1426).
+    func testTuiTakeoverReturnsToFlowPreservingExecution() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let before = terminal.firstMatch.value as? String ?? ""
+        let executionBefore = identityToken(before, key: "execution=")
+        XCTAssertFalse(executionBefore.isEmpty, "usable attach must name an execution")
+
+        try exerciseBoundedAlternateScreen(in: app) { command in
+            submitComposerCommand(app, command)
+        }
+
+        assertFlowBlocksOrFail(in: app)
+        let after = terminal.firstMatch.value as? String ?? ""
+        XCTAssertEqual(
+            identityToken(after, key: "execution="),
+            executionBefore,
+            "TUI exit back to Flow must keep the same ExecutionId"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        XCTAssertTrue(composer.isHittable, "leaving TUI must restore Flow composer")
+    }
+
+    /// #867: GUI relaunch restores one Flow presentation owner on the same
+    /// Runtime execution without creating a second terminal surface.
+    func testReconnectRestoresSinglePresentationOwner() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let before = terminal.firstMatch.value as? String ?? ""
+        let executionBefore = identityToken(before, key: "execution=")
+        XCTAssertFalse(executionBefore.isEmpty)
+
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 8))
+        app.launch()
+        waitForUsablePty(in: app)
+        let after = terminal.firstMatch.value as? String ?? ""
+        XCTAssertEqual(
+            identityToken(after, key: "execution="),
+            executionBefore,
+            "reconnect must keep the same Runtime execution"
+        )
+        assertFlowBlocksOrFail(in: app)
+        XCTAssertEqual(
+            app.descendants(matching: .any)["seyal-recovery"].firstMatch.value as? String,
+            "connected"
+        )
+        XCTAssertEqual(
+            app.descendants(matching: .any).matching(identifier: "terminal-input").count,
+            1,
+            "reconnect must not create a duplicate terminal surface"
+        )
+    }
+
+    private func identityToken(_ value: String, key: String) -> String {
+        guard let range = value.range(of: key) else { return "" }
+        let rest = value[range.upperBound...]
+        return rest.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
     }
 
     /// W4b / W7: production window admission + last-window close quits headed app

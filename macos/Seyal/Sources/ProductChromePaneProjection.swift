@@ -80,6 +80,10 @@ extension ProductChromeHostView {
             // arrive through noteRegistryPolled → reconcileFlowPresentation.
             host.reconcileFocusOwnershipPresentation()
         }
+        // Multipane Flow: only leaf hosts may advertise `seyal-composer`. The
+        // hidden liveContent dock kept the same AX id and stole XCUI submit
+        // after optimistic accept was removed (#1474 / #1424).
+        restoreLegacyComposerAccessibilityIfNeeded()
         // After leaf ownership + forced composer status republish, reclaim Metal
         // FR for Block-scoped DirectInput (generation-stable status alone will
         // not call performChromeReconcile's eligibility routeFocus).
@@ -91,7 +95,20 @@ extension ProductChromeHostView {
     func wireRegistryFrameRouting(focusedDisplayHandle: UInt64) {
         guard let bridge = pane.inputSurface.bridge else { return }
         bridge.onRegistryHandlePolled = { [weak self] displayHandle in
-            self?.centerColumn.secondaryHost(displayHandle: displayHandle)?.noteRegistryPolled()
+            guard let self else { return }
+            // Sync Candidate-D Blocks only for the Pane's *selected* terminal
+            // Controller. Matching `host.displayHandle` alone lets an unselected
+            // tab's empty timeline wipe the selected tab's Accept (#1474).
+            for host in self.centerColumn.secondaryHosts {
+                let live = host.liveBindingDisplayHandleForRegistry()
+                guard live != 0, live == displayHandle else { continue }
+                if host.displayHandle != live {
+                    _ = host.updateDisplayHandle(live)
+                } else {
+                    host.noteRegistryPolled(clientHandle: live)
+                }
+                return
+            }
         }
         guard bridge.windowFocusedDisplayHandle != focusedDisplayHandle else { return }
         bridge.windowFocusedDisplayHandle = focusedDisplayHandle

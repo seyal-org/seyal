@@ -508,16 +508,33 @@ final class SeyalSSHSessionUITests: XCTestCase {
         waitForComposerValue(composer, expectedComposerValue, timeout: 20)
         let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
-        // Relay keeps the same text view first responder as it moves into the
-        // live Block. Clicking the parent card would select the Block; type
-        // directly into the already-focused editor in that state.
-        if expectedComposerValue == "available" {
-            XCTAssertTrue(editor.isHittable, "the docked composer editor must be hittable")
-            editor.click()
-        }
-        editor.typeText(command)
+        // Paste avoids XCUI typeText dropping characters (`command` → `c`) under
+        // headed load (#1474). Re-click after paste so Return reaches the editor.
+        XCTAssertTrue(editor.isHittable, "the composer editor must be hittable")
+        editor.click()
+        let previous = NSPasteboard.general.string(forType: .string)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        editor.typeKey("a", modifierFlags: [.command])
+        editor.typeKey("v", modifierFlags: [.command])
+        editor.click()
+        let needle = String(command.prefix(12))
+        let pasted = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", needle),
+            evaluatedWith: editor,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [pasted], timeout: 5),
+            .completed,
+            "composer draft missing after paste; value=\(editor.value ?? "nil")"
+        )
         beforeSubmit?(editor)
-        editor.typeText("\n")
+        editor.typeKey("\r", modifierFlags: [])
+        if let previous {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(previous, forType: .string)
+        }
         let cleared = expectation(
             for: NSPredicate(format: "value == nil OR value == ''"),
             evaluatedWith: editor,

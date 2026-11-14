@@ -2,6 +2,10 @@ import AppKit
 
 final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTextInputClient {
     private let appHandle: UInt64
+    /// When set, eligibility/wheel scroll use this Pane rather than the
+    /// ApplicationRoot focused snapshot (unfocused Raw/TUI siblings).
+    private let boundPaneLo: UInt64?
+    private let boundPaneHi: UInt64?
     private let optionAsAlt: Bool
     private var composition = CompositionDocument()
     /// When true, `unmarkText` clears preedit without PTY admission (#866).
@@ -29,8 +33,16 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var activationRecoveryNotificationScheduled = false
     private static let maxComposerRecoveryFocusAttempts = 8
 
-    init(frame frameRect: NSRect, appHandle: UInt64, paneID: String = "m001-pane") {
+    init(
+        frame frameRect: NSRect,
+        appHandle: UInt64,
+        paneID: String = "m001-pane",
+        paneLo: UInt64? = nil,
+        paneHi: UInt64? = nil
+    ) {
         self.appHandle = appHandle
+        self.boundPaneLo = paneLo
+        self.boundPaneHi = paneHi
         self.optionAsAlt = seyal_app_option_as_alt(appHandle) != 0
         super.init(
             frame: frameRect,
@@ -270,7 +282,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             super.scrollWheel(with: event)
             return
         }
-        let eligibility = seyal_app_snapshot(appHandle).eligibility
+        let eligibility = paneEligibility
         let alternate = terminalCurrentFrame()?.alternate_screen != 0
         if prefersRawLocalScrollback(eligibility: eligibility, alternateScreen: alternate),
             abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
@@ -335,7 +347,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             return
         }
 
-        let eligibility = seyal_app_snapshot(appHandle).eligibility
+        let eligibility = paneEligibility
         let alternate = terminalCurrentFrame()?.alternate_screen != 0
         if prefersRawLocalScrollback(eligibility: eligibility, alternateScreen: alternate),
             let pageDelta = Self.rawScrollPageDelta(for: event)
@@ -677,9 +689,17 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             && snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
     }
 
+    /// Eligibility for this surface's Pane (bound secondary) or focused root.
+    private var paneEligibility: UInt16 {
+        if let lo = boundPaneLo, let hi = boundPaneHi {
+            return seyal_app_eligibility_for_pane(appHandle, lo, hi)
+        }
+        return seyal_app_snapshot(appHandle).eligibility
+    }
+
     /// Full-Pane Raw/TUI only — mouse reports and Raw local scrollback.
     private var allowsFullPaneDirectTerminal: Bool {
-        let eligibility = seyal_app_snapshot(appHandle).eligibility
+        let eligibility = paneEligibility
         return eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
     }

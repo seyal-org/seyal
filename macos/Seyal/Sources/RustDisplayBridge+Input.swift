@@ -86,8 +86,16 @@ extension RustDisplayBridge {
   }
 
   @discardableResult
-  func submitComposerCommand(_ text: String) -> Int32 {
-    guard isConnected, selectPresentedClient() else {
+  func submitComposerCommand(_ text: String, requestID: UInt64 = 0) -> Int32 {
+    guard isConnected else {
+      onStatusChanged()
+      return -10
+    }
+    // Pin the presented Controller explicitly. `seyal_bridge_submit_composer`
+    // follows FOCUSED_DISPLAY_HANDLE, which can lag pane/tab focus and accept
+    // on a sibling timeline while clearing the focused Pane's pending (#1474).
+    let handle = submissionTargetDisplayHandle()
+    guard handle != 0 else {
       onStatusChanged()
       return -10
     }
@@ -99,12 +107,20 @@ extension RustDisplayBridge {
     let count = UInt32(byteCount)
     let result =
       text.utf8.withContiguousStorageIfAvailable { buffer -> Int32 in
-        seyal_bridge_submit_composer(buffer.baseAddress, count)
+        seyal_bridge_submit_composer_for(handle, buffer.baseAddress, count, requestID)
       }
       ?? Array(text.utf8).withUnsafeBufferPointer { buffer in
-        seyal_bridge_submit_composer(buffer.baseAddress, count)
+        seyal_bridge_submit_composer_for(handle, buffer.baseAddress, count, requestID)
       }
-    return finishMutation(result)
+    return finishAddressedMutation(result, forDisplayHandle: handle)
+  }
+
+  /// Controller targeted by pane-local submit overrides, else window focus,
+  /// else this bridge's primary handle.
+  func submissionTargetDisplayHandle() -> UInt64 {
+    if submissionDisplayHandleOverride != 0 { return submissionDisplayHandleOverride }
+    if windowFocusedDisplayHandle != 0 { return windowFocusedDisplayHandle }
+    return clientHandle
   }
 
   @discardableResult
@@ -319,6 +335,16 @@ extension RustDisplayBridge {
       // Publish this poll source before selecting the focused presentation
       // client. Pane-local Block ids are only meaningful on their Controller.
       publishHistoryRanges(forDisplayHandle: polledHandle)
+      // Multipane leaf hosts (including the Pane that still owns clientHandle)
+      // sync Candidate-D Blocks through this registry hook. Skipping it left
+      // the primary Controller's SecondaryLivePaneHost without noteRegistryPolled
+      // after split, so sibling submits painted Blocks but the original Pane's
+      // markers never appeared in AX (#1474 / #1424).
+      onRegistryHandlePolled?(polledHandle)
+      // Publish the polled Controller's Accept before focus selection so a
+      // stale focused-display client cannot steal the request id (#1474).
+      publishComposerResult(forDisplayHandle: polledHandle)
+      publishBlockCopy()
       _ = selectPresentedClient()
       publishComposerResult()
       publishComposerStatus()

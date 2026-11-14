@@ -1,4 +1,5 @@
 mod attach;
+mod block_copy;
 mod composer_submit;
 mod delivery_state;
 mod delivery_wire;
@@ -32,6 +33,7 @@ use seyal_runtime::{
 };
 
 use crate::block_cache::{quarantine_epoch, BlockCache};
+use block_copy::PendingBlockCopy;
 
 #[cfg(test)]
 use seyal_runtime::local_ipc::framing::{
@@ -162,6 +164,12 @@ pub struct LocalDisplayClient {
     pub(crate) history_requests: HashMap<u64, (u64, u64, u64)>,
     pub(crate) next_history_request_id: u64,
     pub(crate) copied_text: Vec<u8>,
+    /// Last Block-copy text built from a held history range (#1010 / #1474).
+    pub(crate) history_copy_text: String,
+    /// In-flight Block pasteboard copy. Range/kind/command stay in Rust.
+    pub(crate) pending_block_copy: Option<PendingBlockCopy>,
+    /// Completed Block copy awaiting host pasteboard write.
+    pub(crate) completed_block_copy: Option<(u64, String)>,
     /// Connection-local SPEC-006 §21.5 sent/highest-error bounds. Zero means none.
     /// `last_admitted` is the highest V2 ID accepted into the outbound FIFO.
     /// `last_sent` advances only after that frame is fully written to the socket.
@@ -384,15 +392,33 @@ impl LocalDisplayClient {
         );
         // Type 45 is the negotiated composer fact. Type 23 is the legacy
         // Busy/Available fallback used only when no ComposerTarget has arrived.
+        // Submit+Busy (local scope) is the admission race: status flips to Busy
+        // before the matching Unavailable target frame is applied; projecting
+        // Available here would overwrite a local Busy latch (#1474 headed busy).
+        // Trusted session prompts are Session-scope Submit while the host Block
+        // keeps type 23 Busy — that resting state must project Available so SSH
+        // session Blocks can accept the next command (#1474 / ADR-026).
         let code = match (
             self.session_bootstrap_negotiated,
-            self.composer_target.map(|target| target.mode),
+            self.composer_target,
+            status.eligibility,
         ) {
-            (true, Some(ComposerTargetMode::Submit)) => 1,
-            (true, Some(ComposerTargetMode::Relay)) => 4,
-            (true, Some(ComposerTargetMode::DirectInput)) => 5,
-            (true, Some(ComposerTargetMode::Unavailable)) => 2,
-            _ => match status.eligibility {
+            (true, Some(target), _)
+                if target.mode == ComposerTargetMode::Submit
+                    && target.scope == seyal_runtime::local_ipc::framing::BlockScope::Session =>
+            {
+                1
+            }
+            (true, Some(target), ComposerEligibility::Busy)
+                if target.mode == ComposerTargetMode::Submit =>
+            {
+                2
+            }
+            (true, Some(target), _) if target.mode == ComposerTargetMode::Submit => 1,
+            (true, Some(target), _) if target.mode == ComposerTargetMode::Relay => 4,
+            (true, Some(target), _) if target.mode == ComposerTargetMode::DirectInput => 5,
+            (true, Some(target), _) if target.mode == ComposerTargetMode::Unavailable => 2,
+            (_, _, eligibility) => match eligibility {
                 ComposerEligibility::Available => 1,
                 ComposerEligibility::Busy => 2,
                 ComposerEligibility::Unsupported => 3,
@@ -432,6 +458,13 @@ impl LocalDisplayClient {
         request_id: u64,
     ) -> Option<&HistoryRangeSnapshot> {
         self.history_ranges.get(&(block_id, request_id))
+    }
+
+    /// Builds pasteboard text for one held history response (#1010 / #1474).
+    pub fn history_range_text(&mut self, block_id: u64, request_id: u64) -> Option<&str> {
+        let range = self.history_ranges.get(&(block_id, request_id))?;
+        self.history_copy_text = crate::history_text::plain_text(range);
+        Some(&self.history_copy_text)
     }
 
     /// Drops one copied history response after the native consumer has
@@ -617,6 +650,9 @@ fn reconstruction_probe_client_with_stream(
         history_requests: HashMap::new(),
         next_history_request_id: 1,
         copied_text: Vec::new(),
+        history_copy_text: String::new(),
+        pending_block_copy: None,
+        completed_block_copy: None,
         last_admitted_v2_action_id: 0,
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,

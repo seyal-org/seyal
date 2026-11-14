@@ -248,6 +248,14 @@ typedef struct SeyalCopiedText {
 SeyalCopiedText seyal_bridge_copied_text(void);
 int32_t seyal_bridge_copied_text_consume(void);
 int32_t seyal_bridge_submit_composer(const uint8_t *bytes, uint32_t len);
+/* ComposerCommand on one registry Controller without changing focus (#1474).
+ * request_id: ApplicationRoot pending id, or 0 to allocate on the Controller. */
+int32_t seyal_bridge_submit_composer_for(
+    uint64_t handle,
+    const uint8_t *bytes,
+    uint32_t len,
+    uint64_t request_id
+);
 int32_t seyal_bridge_request_history_range(
     uint64_t block_id,
     uint64_t start_line,
@@ -287,6 +295,17 @@ SeyalHistorySidecar seyal_bridge_history_range_sidecar_for_handle(
     uint64_t block_id,
     uint64_t request_id
 );
+/* Plain UTF-8 of a held history response for Block Copy (#1010 / #1474). */
+SeyalHistorySidecar seyal_bridge_history_range_text_for(uint64_t block_id, uint64_t request_id);
+typedef struct SeyalBlockCopy {
+    uint64_t block_id;
+    const uint8_t *utf8;
+    uint32_t len;
+    uint32_t reserved;
+} SeyalBlockCopy;
+/* Completed Rust-composed Block pasteboard text; empty when none ready. */
+SeyalBlockCopy seyal_bridge_take_block_copy(void);
+SeyalBlockCopy seyal_bridge_take_block_copy_for(uint64_t handle);
 uint8_t seyal_bridge_history_range_consume(uint64_t block_id, uint64_t request_id);
 uint8_t seyal_bridge_history_range_consume_for_handle(
     uint64_t handle,
@@ -294,6 +313,8 @@ uint8_t seyal_bridge_history_range_consume_for_handle(
     uint64_t request_id
 );
 SeyalComposerResult seyal_bridge_composer_result(void);
+/* ComposerResult for one registry Controller without changing focus (#1474). */
+SeyalComposerResult seyal_bridge_composer_result_for(uint64_t handle);
 SeyalComposerStatus seyal_bridge_composer_status(void);
 SeyalComposerTarget seyal_bridge_composer_target(void);
 SeyalComposerTarget seyal_bridge_composer_target_for_handle(uint64_t handle);
@@ -354,6 +375,7 @@ int32_t seyal_bridge_ensure_prepared_for(uint64_t handle);
 uint64_t seyal_bridge_block_timeline_revision(void);
 uint64_t seyal_bridge_next_composer_request_id(void);
 uint32_t seyal_bridge_block_count(void);
+uint32_t seyal_bridge_block_count_for(uint64_t handle);
 SeyalBlockRecord seyal_bridge_block_record(uint32_t index);
 void seyal_bridge_disconnect(void);
 

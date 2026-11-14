@@ -69,16 +69,22 @@ final class CommandBlockView: NSView {
         didSet {
             guard oldValue != canInteractWithRunningProgram else { return }
             interactButton.isHidden = !canInteractWithRunningProgram
-            if canInteractWithRunningProgram {
-                statusTrailingToHeader.isActive = false
-                statusTrailingToInteractButton.isActive = true
-            } else {
-                statusTrailingToInteractButton.isActive = false
-                statusTrailingToHeader.isActive = true
-            }
+            updateHeaderTrailingActions()
         }
     }
     var onInteractWithRunningProgram: (() -> Void)?
+    /// Rust-projected seam Rerun (#1010 / #1474). Availability is owned by Rust.
+    var canRerun = false {
+        didSet {
+            guard oldValue != canRerun else { return }
+            rerunButton.isHidden = !canRerun
+            updateHeaderTrailingActions()
+        }
+    }
+    var onRerun: (() -> Void)?
+    /// Rust-projected Copy menu kinds (#1010 / #1474). Host only dispatches.
+    var onCopyAction: ((UInt16) -> Void)?
+    var copyMenuEnabled: (command: Bool, output: Bool, both: Bool) = (false, false, false)
     /// Flow DirectInput: click the Running Block to focus Metal (#1468).
     var onRequestDirectInputFocus: (() -> Void)?
     /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
@@ -96,12 +102,16 @@ final class CommandBlockView: NSView {
     private let command = NSTextField(labelWithString: "")
     private let status = NSTextField(labelWithString: "")
     private let interactButton = NSButton(title: "Interact", target: nil, action: nil)
+    private let rerunButton = NSButton(title: "Rerun", target: nil, action: nil)
     private let seam = NSView()
     private var state: UInt16
     private var bodyHeight: NSLayoutConstraint!
     private var seamTopConstraint: NSLayoutConstraint!
     private var statusTrailingToHeader: NSLayoutConstraint!
     private var statusTrailingToInteractButton: NSLayoutConstraint!
+    private var statusTrailingToRerunButton: NSLayoutConstraint!
+    private var interactTrailingToHeader: NSLayoutConstraint!
+    private var interactTrailingToRerun: NSLayoutConstraint!
     private var theme: NativeTheme?
 
     static func visibleOutputLineCount(_ text: String) -> Int {
@@ -153,6 +163,15 @@ final class CommandBlockView: NSView {
         interactButton.setAccessibilityIdentifier("seyal-running-program-interact")
         interactButton.isHidden = true
         interactButton.translatesAutoresizingMaskIntoConstraints = false
+        rerunButton.isBordered = false
+        rerunButton.bezelStyle = .inline
+        rerunButton.font = .systemFont(ofSize: 11, weight: .medium)
+        rerunButton.target = self
+        rerunButton.action = #selector(rerunFromSeam)
+        rerunButton.setAccessibilityLabel("Rerun")
+        rerunButton.setAccessibilityIdentifier("seyal-block-rerun")
+        rerunButton.isHidden = true
+        rerunButton.translatesAutoresizingMaskIntoConstraints = false
         seam.translatesAutoresizingMaskIntoConstraints = false
         seam.wantsLayer = true
         header.translatesAutoresizingMaskIntoConstraints = false
@@ -166,6 +185,7 @@ final class CommandBlockView: NSView {
         header.addSubview(command)
         header.addSubview(status)
         header.addSubview(interactButton)
+        header.addSubview(rerunButton)
         header.wantsLayer = true
         header.layer?.cornerRadius = 6
         addSubview(header)
@@ -181,6 +201,18 @@ final class CommandBlockView: NSView {
             lessThanOrEqualTo: interactButton.leadingAnchor,
             constant: -8
         )
+        statusTrailingToRerunButton = status.trailingAnchor.constraint(
+            lessThanOrEqualTo: rerunButton.leadingAnchor,
+            constant: -8
+        )
+        interactTrailingToHeader = interactButton.trailingAnchor.constraint(
+            equalTo: header.trailingAnchor,
+            constant: -8
+        )
+        interactTrailingToRerun = interactButton.trailingAnchor.constraint(
+            equalTo: rerunButton.leadingAnchor,
+            constant: -8
+        )
         NSLayoutConstraint.activate([
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -191,7 +223,10 @@ final class CommandBlockView: NSView {
             command.leadingAnchor.constraint(equalTo: self.prompt.trailingAnchor, constant: 8),
             command.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             statusTrailingToHeader,
-            interactButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -8),
+            rerunButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -8),
+            rerunButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            rerunButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            interactTrailingToHeader,
             interactButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             interactButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
             status.centerYAnchor.constraint(equalTo: header.centerYAnchor),
@@ -206,6 +241,25 @@ final class CommandBlockView: NSView {
             seam.bottomAnchor.constraint(equalTo: bottomAnchor),
             seam.heightAnchor.constraint(equalToConstant: 1),
         ])
+    }
+
+    private func updateHeaderTrailingActions() {
+        statusTrailingToHeader.isActive = false
+        statusTrailingToInteractButton.isActive = false
+        statusTrailingToRerunButton.isActive = false
+        interactTrailingToHeader.isActive = false
+        interactTrailingToRerun.isActive = false
+        if canRerun && canInteractWithRunningProgram {
+            interactTrailingToRerun.isActive = true
+            statusTrailingToInteractButton.isActive = true
+        } else if canRerun {
+            statusTrailingToRerunButton.isActive = true
+        } else if canInteractWithRunningProgram {
+            interactTrailingToHeader.isActive = true
+            statusTrailingToInteractButton.isActive = true
+        } else {
+            statusTrailingToHeader.isActive = true
+        }
     }
 
     @available(*, unavailable)
@@ -285,6 +339,9 @@ final class CommandBlockView: NSView {
         if canInteractWithRunningProgram {
             children.append(interactButton)
         }
+        if canRerun {
+            children.append(rerunButton)
+        }
         children.append(bodyTranscript)
         return children
     }
@@ -297,6 +354,9 @@ final class CommandBlockView: NSView {
         // Keep the explicit Running Block action interactive. Returning the
         // Block for every child hit previously swallowed NSButton mouse events.
         if hit === interactButton || hit?.isDescendant(of: interactButton) == true {
+            return hit
+        }
+        if hit === rerunButton || hit?.isDescendant(of: rerunButton) == true {
             return hit
         }
         return hit == nil ? nil : self
@@ -319,7 +379,9 @@ final class CommandBlockView: NSView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard canRequestSessionBootstrap || canInteractWithRunningProgram else {
+        let hasCopy = copyMenuEnabled.command || copyMenuEnabled.output || copyMenuEnabled.both
+        guard canRequestSessionBootstrap || canInteractWithRunningProgram || canRerun || hasCopy
+        else {
             return super.menu(for: event)
         }
         let menu = NSMenu()
@@ -331,6 +393,42 @@ final class CommandBlockView: NSView {
             )
             interact.target = self
             menu.addItem(interact)
+        }
+        if canRerun {
+            let rerun = NSMenuItem(
+                title: "Rerun",
+                action: #selector(rerunFromSeam),
+                keyEquivalent: ""
+            )
+            rerun.target = self
+            menu.addItem(rerun)
+        }
+        if copyMenuEnabled.command {
+            let item = NSMenuItem(
+                title: "Copy command",
+                action: #selector(copyCommandFromMenu),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
+        if copyMenuEnabled.output {
+            let item = NSMenuItem(
+                title: "Copy output",
+                action: #selector(copyOutputFromMenu),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
+        if copyMenuEnabled.both {
+            let item = NSMenuItem(
+                title: "Copy command + output",
+                action: #selector(copyBothFromMenu),
+                keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
         }
         if canRequestSessionBootstrap {
         let enable = NSMenuItem(
@@ -346,6 +444,22 @@ final class CommandBlockView: NSView {
 
     @objc private func interactWithRunningProgramFromMenu() {
         onInteractWithRunningProgram?()
+    }
+
+    @objc private func rerunFromSeam() {
+        onRerun?()
+    }
+
+    @objc private func copyCommandFromMenu() {
+        onCopyAction?(UInt16(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND))
+    }
+
+    @objc private func copyOutputFromMenu() {
+        onCopyAction?(UInt16(SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT))
+    }
+
+    @objc private func copyBothFromMenu() {
+        onCopyAction?(UInt16(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT))
     }
 
     @objc private func requestSessionBootstrapFromMenu() {
@@ -372,6 +486,7 @@ final class CommandBlockView: NSView {
             seam.layer?.backgroundColor = theme.seam.cgColor
         }
         interactButton.contentTintColor = theme.accent
+        rerunButton.contentTintColor = theme.accent
     }
 }
 

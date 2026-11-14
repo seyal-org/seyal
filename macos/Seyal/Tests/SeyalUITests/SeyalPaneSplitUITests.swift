@@ -1865,8 +1865,10 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let newTerminal = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier CONTAINS %@", "-new-terminal")
         ).firstMatch
-        XCTAssertTrue(newTerminal.waitForExistence(timeout: 8))
-        newTerminal.click()
+        XCTAssertTrue(newTerminal.waitForExistence(timeout: 8), "focused Pane must expose New Terminal")
+        let newTerminalID = newTerminal.identifier
+        XCTAssertFalse(newTerminalID.isEmpty, "New Terminal must advertise a stable AX id")
+        click(app, newTerminalID)
         let twoTabs = expectation(for: NSPredicate(format: "count == 2"), evaluatedWith: terminalTabs, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [twoTabs], timeout: 20), .completed, "New Terminal adds a pane-local tab")
         XCTAssertFalse(element(app, "seyal-pane-region-1").exists, "New Terminal does not split the PaneTree")
@@ -2362,8 +2364,36 @@ final class SeyalPaneSplitUITests: XCTestCase {
     }
 
     private func click(_ app: XCUIApplication, _ identifier: String) {
-        let control = element(app, identifier)
-        XCTAssertTrue(control.waitForExistence(timeout: 8), "\(identifier) is shown")
+        let matches = app.descendants(matching: .any).matching(identifier: identifier)
+        XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 8), "\(identifier) is shown")
+        // Prefer a laid-out hittable match when duplicate ids exist (per-pane
+        // strips). Zero-frame firstMatch clicks spawned extra Seyal windows and
+        // stranded Block markers on the wrong surface (#1474).
+        var control = matches.firstMatch
+        let count = matches.count
+        if count > 1 {
+            for index in 0..<count {
+                let candidate = matches.element(boundBy: index)
+                let frame = candidate.frame
+                if candidate.exists, candidate.isHittable, frame.width > 1, frame.height > 1 {
+                    control = candidate
+                    break
+                }
+            }
+        }
+        let framed = expectation(
+            for: NSPredicate { _, _ in
+                let frame = control.frame
+                return frame.width > 1 && frame.height > 1
+            },
+            evaluatedWith: nil,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [framed], timeout: 4),
+            .completed,
+            "\(identifier) must have a non-zero frame before click; frame=\(control.frame)"
+        )
         control.click()
     }
 
@@ -2480,26 +2510,51 @@ final class SeyalPaneSplitUITests: XCTestCase {
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         // Multipane Flow hides liveContent/`terminal-input`; readiness is the
         // focused presentation host + composer (#1424). Raw resting is cold
         // default (#1445), so latch Flow before requiring composer.
-        let presentation = element(app, "seyal-pane-presentation-host")
+        app.ensureRunningForegroundForAttach()
+        // Prefer firstMatch: New Terminal briefly exposes more than one Metal
+        // surface with the same id before focus ownership retags (#1474).
+        let presentation = app.descendants(matching: .any)
+            .matching(identifier: "seyal-pane-presentation-host")
+            .firstMatch
         if presentation.waitForExistence(timeout: 2) {
             app.ensureFlowBlocksPresentation(timeout: timeout)
             XCTAssertTrue(
                 element(app, "seyal-composer").waitForExistence(timeout: timeout),
                 "focused Flow presentation host must expose a composer"
             )
-            XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for multipane Flow")
+            // Composer AX alone can win before the focused Controller is bound.
+            // Wait for a real execution identity so Execute reaches a live PTY
+            // (#1474 pane-local tabs / focus-churn marker routing). All-zero
+            // placeholders from unbound hosts must not count as ready.
+            let unbound = "execution=" + String(repeating: "0", count: 32)
+            let bound = expectation(
+                for: NSPredicate(
+                    format: "value CONTAINS %@ AND NOT value CONTAINS %@",
+                    "execution=",
+                    unbound
+                ),
+                evaluatedWith: presentation,
+                handler: nil
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [bound], timeout: timeout),
+                .completed,
+                "focused presentation host must bind an execution before submit; AX=\(presentation.value ?? "nil")"
+            )
+            app.ensureRunningForegroundForAttach(
+                message: "Seyal.app left foreground while waiting for multipane Flow"
+            )
             return
         }
-        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
+        app.ensureRunningForegroundForAttach()
         XCTAssertEqual(result, .completed, "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")")
         app.ensureFlowBlocksPresentation(timeout: timeout)
     }
@@ -2557,9 +2612,24 @@ final class SeyalPaneSplitUITests: XCTestCase {
         guard expectBlock else { return }
         let marker = blockMarker ?? blockMarkerToken(in: command) ?? command
         let block = anyPaneBlock(in: app, containing: marker)
-        XCTAssertTrue(
-            block.waitForExistence(timeout: 10),
-            "the selected execution records its own submitted command; marker=\(marker)"
+        if block.waitForExistence(timeout: 10) { return }
+        let composerAX = (focusedComposer.value as? String) ?? "nil"
+        let hostAX = (element(app, "seyal-pane-presentation-host").value as? String) ?? "nil"
+        let editorAX = (editor.value as? String) ?? "nil"
+        let blockLabels = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES %@", "^(seyal-block|seyal-secondary-block)-[0-9]+$")
+        ).allElementsBoundByIndex.prefix(8).map {
+            "\($0.identifier):\(($0.label as String?) ?? "")"
+        }.joined(separator: " | ")
+        let listLabels = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES %@", "^(seyal-blocks|seyal-secondary-blocks)$")
+        ).allElementsBoundByIndex.prefix(4).map {
+            "\($0.identifier):\(($0.label as String?) ?? "")"
+        }.joined(separator: " | ")
+        XCTFail(
+            "the selected execution records its own submitted command; marker=\(marker) "
+                + "composer=\(composerAX) host=\(hostAX) editor=\(editorAX) "
+                + "blocks=[\(blockLabels)] lists=[\(listLabels)]"
         )
     }
 

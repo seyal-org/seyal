@@ -107,13 +107,13 @@ final class SeyalDividerDragUITests: XCTestCase {
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        app.ensureRunningForegroundForAttach()
         let presentation = element(app, "seyal-pane-presentation-host")
         if presentation.waitForExistence(timeout: 2) {
             // Raw resting is cold default (#1445); latch Flow before requiring composer.
             app.ensureFlowBlocksPresentation(timeout: timeout)
             XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: timeout))
-            XCTAssertEqual(app.state, .runningForeground)
+            app.ensureRunningForegroundForAttach()
             return
         }
         let terminal = app.descendants(matching: .any)["terminal-input"]
@@ -121,7 +121,7 @@ final class SeyalDividerDragUITests: XCTestCase {
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
+        app.ensureRunningForegroundForAttach()
         XCTAssertEqual(result, .completed, "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")")
         app.ensureFlowBlocksPresentation(timeout: timeout)
     }

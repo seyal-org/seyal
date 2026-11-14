@@ -27,6 +27,18 @@ pub extern "C" fn seyal_bridge_block_count() -> u32 {
         .unwrap_or(0)
 }
 
+/// Candidate-D Block count for one adopted Controller. Multipane / pane-local
+/// tabs must not peek the focused-display client when waiting for a just-
+/// accepted BlockTimeline (#1474).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_count_for(handle: u64) -> u32 {
+    super::with_client(handle, |client| {
+        u32::try_from(client.block_timeline().records.len()).ok()
+    })
+    .flatten()
+    .unwrap_or(0)
+}
+
 /// Returns a borrowed record from the current Runtime-owned replacement
 /// cache. The command pointer is valid until the next bridge poll/disconnect.
 #[unsafe(no_mangle)]
@@ -225,6 +237,69 @@ fn history_range_sidecar_from_client(
     }
 }
 
+/// Plain UTF-8 of a held history response for Block Copy (#1010 / #1474).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_text_for(
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistorySidecar {
+    with_display_client_mut(
+        |client| match client.history_range_text(block_id, request_id) {
+            Some(text) => SeyalHistorySidecar {
+                bytes: text.as_ptr(),
+                len: text.len() as u32,
+                reserved: 0,
+            },
+            None => SeyalHistorySidecar::empty(),
+        },
+    )
+    .unwrap_or_else(SeyalHistorySidecar::empty)
+}
+
+/// Completed Rust-owned Block pasteboard text (#1010 / #1474).
+#[repr(C)]
+pub struct SeyalBlockCopy {
+    pub block_id: u64,
+    pub utf8: *const u8,
+    pub len: u32,
+    pub reserved: u32,
+}
+
+impl SeyalBlockCopy {
+    const fn empty() -> Self {
+        Self {
+            block_id: 0,
+            utf8: core::ptr::null(),
+            len: 0,
+            reserved: 0,
+        }
+    }
+}
+
+/// Take one completed Block pasteboard string. Empty when none is ready.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_take_block_copy() -> SeyalBlockCopy {
+    seyal_bridge_take_block_copy_for(super::display_handle())
+}
+
+/// Take a completed Block pasteboard string from one registry Controller.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_take_block_copy_for(handle: u64) -> SeyalBlockCopy {
+    super::with_client_mut(handle, |client| match client.take_block_copy() {
+        Some((block_id, text)) => {
+            client.history_copy_text = text;
+            SeyalBlockCopy {
+                block_id,
+                utf8: client.history_copy_text.as_ptr(),
+                len: client.history_copy_text.len() as u32,
+                reserved: 0,
+            }
+        }
+        None => SeyalBlockCopy::empty(),
+    })
+    .unwrap_or_else(SeyalBlockCopy::empty)
+}
+
 /// Consumes a previously peeked response after its rows have been copied by
 /// the native consumer. Identity is always the typed block/request pair.
 #[unsafe(no_mangle)]
@@ -246,12 +321,9 @@ pub extern "C" fn seyal_bridge_history_range_consume_for_handle(
     .unwrap_or(0)
 }
 
-/// Copies the latest Runtime ComposerResult into a typed C value. No command
-/// text crosses this boundary; request ID is the only submission identity.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
-    with_display_client(|client| client.last_composer_result())
-        .flatten()
+fn composer_result_from_client(client: &LocalDisplayClient) -> SeyalComposerResult {
+    client
+        .last_composer_result()
         .map(|result| SeyalComposerResult {
             request_id: result.request_id,
             block_id: result.block_id,
@@ -264,6 +336,23 @@ pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
             },
             reserved: [0; 7],
         })
+        .unwrap_or_else(SeyalComposerResult::empty)
+}
+
+/// Copies the latest Runtime ComposerResult into a typed C value. No command
+/// text crosses this boundary; request ID is the only submission identity.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
+    with_display_client(composer_result_from_client).unwrap_or_else(SeyalComposerResult::empty)
+}
+
+/// ComposerResult for one adopted Controller without requiring the focused
+/// display route. Multipane must publish the polled/presented handle's result
+/// so a stale focused-display client cannot clear another Pane's pending
+/// request with a sibling's Accept (#1474 / #1424).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_composer_result_for(handle: u64) -> SeyalComposerResult {
+    super::with_client(handle, composer_result_from_client)
         .unwrap_or_else(SeyalComposerResult::empty)
 }
 

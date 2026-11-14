@@ -347,7 +347,7 @@ impl ApplicationRoot {
         }
     }
 
-    fn alternate_screen_for_pane(&self, pane: PaneId) -> bool {
+    pub(super) fn alternate_screen_for_pane(&self, pane: PaneId) -> bool {
         #[cfg(target_os = "macos")]
         {
             self.pane_client_raws

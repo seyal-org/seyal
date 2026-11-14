@@ -1,11 +1,10 @@
 import AppKit
 import XCTest
 
-/// Headed #824 workload evidence on the ADR-015 thin host.
+/// Headed #824 / #1474 workload evidence on the ADR-015 thin host.
 /// Metal does not expose PTY bytes as AX text. These cases prove Flow/Blocks
-/// stays the headed oracle through high-volume output, alternate-screen return,
-/// Unicode composer submit, and GUI relaunch reconnect. They are not a
-/// raw-terminal Vim/htop/tmux oracle.
+/// stays the headed oracle through high-volume output, alternate-screen return
+/// (less/top/nvim/tmux/htop), Unicode composer submit, and GUI relaunch reconnect.
 @MainActor
 final class SeyalHostWorkloadUITests: XCTestCase {
     override func setUp() {
@@ -245,6 +244,11 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             .completed,
             "a second completed Block must stay a separate card before exit"
         )
+        // Title/label can match the printf argument before history lands. Wait for
+        // body AX so disconnect cannot strand an empty card with no Metal source
+        // (#1379 Defect B race with fast exit).
+        waitForBlockBodyText(app, index: 0, text: "seyal-1171-exit-before", timeout: 8)
+        waitForBlockBodyText(app, index: 1, text: "seyal-1171-exit-second", timeout: 8)
 
         submitComposerCommand(app, "exit 7")
 
@@ -633,6 +637,148 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "m003-real-top-flow-return")
     }
 
+    func testRealNvimSessionTakesOverAndReturnsToFlow() throws {
+        let nvimPath = "/opt/homebrew/bin/nvim"
+        guard FileManager.default.isExecutableFile(atPath: nvimPath) else {
+            throw XCTSkip("nvim is not installed on this macOS test host")
+        }
+        func killNvim() {
+            let kill = Process()
+            kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            kill.arguments = ["-x", "nvim"]
+            try? kill.run()
+            kill.waitUntilExit()
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer { killNvim() }
+
+        // --clean isolates config/swap; quit via external SIGTERM because XCUI
+        // :q! delivery is flaky under TUI focus (Escape/:q! can miss command mode).
+        submitComposerCommand(app, "\(nvimPath) --clean -n")
+        let enteredTUI = expectation(
+            for: NSPredicate(format: "isHittable == false"), evaluatedWith: composer, handler: nil
+        )
+        let entered = XCTWaiter.wait(for: [enteredTUI], timeout: 12)
+        if entered != .completed {
+            XCTAssertTrue(terminal.waitForExistence(timeout: 5), "nvim must attach a live surface")
+        }
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5), "nvim must retain the live terminal surface")
+        killNvim()
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 15), .completed,
+            "terminating nvim must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-nvim-flow-return")
+    }
+
+    func testRealTmuxSessionTakesOverAndReturnsToFlow() throws {
+        let tmuxPath = "/opt/homebrew/bin/tmux"
+        guard FileManager.default.isExecutableFile(atPath: tmuxPath) else {
+            throw XCTSkip("tmux is not installed on this macOS test host")
+        }
+        let sessionName = "seyal1474-xcui-tmux"
+        func killTmuxSession() {
+            let kill = Process()
+            kill.executableURL = URL(fileURLWithPath: tmuxPath)
+            kill.arguments = ["kill-session", "-t", sessionName]
+            try? kill.run()
+            kill.waitUntilExit()
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer { killTmuxSession() }
+
+        submitComposerCommand(app, "\(tmuxPath) new-session -A -s \(sessionName)")
+        let enteredTUI = expectation(
+            for: NSPredicate(format: "isHittable == false"), evaluatedWith: composer, handler: nil
+        )
+        let entered = XCTWaiter.wait(for: [enteredTUI], timeout: 12)
+        if entered != .completed {
+            let interact = app.buttons["seyal-running-program-interact"]
+            XCTAssertTrue(
+                !composer.isHittable || interact.exists || terminal.exists,
+                "tmux must enter TUI or remain available through its running Block"
+            )
+            if composer.isHittable, interact.isHittable {
+                interact.click()
+            }
+        }
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5), "tmux must retain the live terminal surface")
+        // Ctrl-b is Seyal's TUI chord prefix (SPEC-024) and is not echoed to the
+        // PTY, so detach keys cannot reach tmux. Kill the session from outside:
+        // the attached client exits and Flow must restore.
+        killTmuxSession()
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 15), .completed,
+            "killing the tmux session must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-tmux-flow-return")
+    }
+
+    func testRealHtopSessionReturnsToFlow() throws {
+        let htopPath = "/opt/homebrew/bin/htop"
+        guard FileManager.default.isExecutableFile(atPath: htopPath) else {
+            throw XCTSkip("htop is not installed on this macOS test host")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer {
+            if app.state == .runningForeground,
+               !composer.isHittable || app.buttons["seyal-running-program-interact"].exists
+            {
+                let interact = app.buttons["seyal-running-program-interact"]
+                if interact.isHittable { interact.click() }
+                if terminal.isHittable { terminal.click() }
+                app.typeText("q")
+            }
+        }
+
+        submitComposerCommand(app, htopPath)
+        let interact = app.buttons["seyal-running-program-interact"]
+        let startDeadline = Date().addingTimeInterval(12)
+        while Date() < startDeadline, composer.isHittable, !interact.exists {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(
+            !composer.isHittable || interact.exists,
+            "htop must either enter its requested TUI or remain available through its running Block"
+        )
+        if composer.isHittable {
+            XCTAssertTrue(interact.isHittable, "Flow keeps its composer while htop does not enter alternate screen")
+            interact.click()
+        }
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.click()
+        app.typeText("q")
+
+        let returnedToFlow = expectation(
+            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returnedToFlow], timeout: 12), .completed,
+            "q in the actual htop TUI must restore the Flow composer"
+        )
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "m003-real-htop-flow-return")
+    }
+
     func testGuiRelaunchReconnectsWithoutKillingExecution() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
@@ -698,22 +844,16 @@ final class SeyalHostWorkloadUITests: XCTestCase {
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         // Headed sequential XCUI can leave the next launch BackgroundSuspended when
         // the IDE steals focus; activate before PTY attach or hittable chrome fails.
-        app.activate()
+        app.ensureRunningForegroundForAttach()
         let terminal = app.descendants(matching: .any)["terminal-input"]
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        if app.state != .runningForeground {
-            app.activate()
-        }
-        XCTAssertEqual(
-            app.state,
-            .runningForeground,
-            "Seyal.app left foreground while waiting for PTY attach (state=\(app.state.rawValue))"
+        app.ensureRunningForegroundForAttach(
+            message: "Seyal.app left foreground while waiting for PTY attach"
         )
         XCTAssertEqual(
             result,
@@ -866,7 +1006,18 @@ final class SeyalHostWorkloadUITests: XCTestCase {
             composer.waitForExistence(timeout: timeout),
             "XCUI must stay on Flow/Blocks; composer missing — UI looks like a normal terminal"
         )
-        XCTAssertTrue(composer.firstMatch.isHittable, "XCUI must keep composer hittable")
+        // DirectInput dock retract can clear for a quiet command after existence;
+        // wait for the Ready hittable dock instead of sampling one frame (#1474).
+        let hittable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: composer.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [hittable], timeout: timeout),
+            .completed,
+            "XCUI must keep composer hittable; value=\(composer.value ?? "nil") frame=\(composer.firstMatch.frame)"
+        )
         XCTAssertTrue(blocks.waitForExistence(timeout: 5), "XCUI must keep seyal-blocks")
         XCTAssertTrue(transcript.waitForExistence(timeout: 5), "XCUI must keep the transcript")
         XCTAssertGreaterThan(transcript.firstMatch.frame.height, 120, "transcript must remain a full Flow surface")

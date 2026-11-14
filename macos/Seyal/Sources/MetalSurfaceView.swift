@@ -259,7 +259,20 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// Canonical retained ranges remain keyed by Pane + display handle for reuse.
   func activateTranscriptDisplayHandle(_ handle: UInt64) {
     guard handle != transcriptDisplayHandle else { return }
+    // Disconnect clears the live client handle to 0. Do not abandon the last
+    // Controller key or wipe Metal buffers while retained Flow history still
+    // maps to that handle — chrome must re-encode against the same keys
+    // (#1379 Defect B: history-instances=0 with AX body text).
+    if handle == 0,
+      transcriptDisplayHandle != 0,
+      historyRanges.keys.contains(where: { $0.displayHandle == transcriptDisplayHandle })
+    {
+      return
+    }
     transcriptDisplayHandle = handle
+    // Drop Raw local-scrollback latch so a wiped history region cannot leave
+    // drawsLiveGrid false and paint a blank pane after handle switch.
+    clearRawScrollbackFollowTail()
     lastTranscriptFrameRegions = nil
     historyRenderPageKeys.removeAll(keepingCapacity: true)
     renderer.removeHistoryRegions(except: [])
@@ -688,8 +701,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     // (#1379): that leftover frame paints loose text/cursor over Block cards.
     // Drop Metal history *buffers* (and any deferred prepares) too — keep
     // historyRanges rows so chrome can re-encode against settled AppKit clips.
+    // Clear page keys with the wipe (same as activateTranscriptDisplayHandle):
+    // a stale key can make renderHistoryRange take the geometry-only path
+    // against a missing buffer and leave AX body text with blank Metal paint
+    // after shell exit (#1379 Defect B false-green).
     clearLiveTailPresentation()
     lastTranscriptFrameRegions = nil
+    historyRenderPageKeys.removeAll(keepingCapacity: true)
     renderer.removeHistoryRegions(except: [])
     cancelPresentationRetries()
     resetPreparationRecovery()
@@ -788,8 +806,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     ) ?? -10
   }
 
-  func terminalSubmitComposerCommand(_ text: String) -> Int32 {
-    bridge?.submitComposerCommand(text) ?? -10
+  func terminalSubmitComposerCommand(_ text: String, requestID: UInt64 = 0) -> Int32 {
+    bridge?.submitComposerCommand(text, requestID: requestID) ?? -10
   }
 
   func terminalNextComposerRequestID() -> UInt64 {

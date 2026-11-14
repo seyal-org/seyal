@@ -50,17 +50,28 @@ impl ApplicationRoot {
         if !self.pane_authorities.contains_key(&pane) {
             return PresentationEligibility::Unbound;
         }
-        let Some(mode) = self
-            .shell
-            .snapshot()
+        // Candidate-D alternate screen is per display client. Unfocused panes
+        // never receive focused Refresh; project TUI from that pane's cache so
+        // background nvim/htop still leave Flow chrome (#867 / #1474).
+        if self.alternate_screen_for_pane(pane) {
+            return PresentationEligibility::Tui;
+        }
+        let shell = self.shell.snapshot();
+        let Some(candidate) = shell
             .windows
             .iter()
             .flat_map(|window| &window.tabs)
             .flat_map(|tab| &tab.panes)
             .find(|candidate| candidate.id == pane)
-            .map(|candidate| candidate.presentation_mode)
         else {
             return PresentationEligibility::Unbound;
+        };
+        // Prefer resting when shell still latches temporary TUI without live
+        // alternate-screen evidence (unfocused takeover exit).
+        let mode = if candidate.presentation_mode == PresentationMode::Tui {
+            candidate.resting_presentation_mode
+        } else {
+            candidate.presentation_mode
         };
         match mode {
             PresentationMode::Flow => PresentationEligibility::Flow,
@@ -125,6 +136,10 @@ impl ApplicationRoot {
     pub(super) fn recompute_resting(&mut self) {
         // Blocks-first: trusted sessions rest in Flow automatically. Raw is
         // reserved for the safe fallback when integration is unsupported.
+        // Derive from the focused Pane's ComposerState so a sibling's
+        // Unsupported relay cannot force Raw onto a Flow-capable Pane.
+        let focused = self.shell.snapshot().focused_pane;
+        self.integration_unsupported = self.composer.pane_integration_unsupported(focused);
         self.resting = if self.integration_unsupported {
             PresentationMode::Raw
         } else {

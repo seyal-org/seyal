@@ -152,6 +152,28 @@ impl ApplicationRoot {
             .map_err(composer_error)
     }
 
+    /// Apply a Runtime ComposerResult to a specific Pane without requiring
+    /// focused fence authority. Multipane leaf accepts must clear pending on
+    /// the submitting Pane even when a sibling briefly holds focus (#1474).
+    pub fn apply_composer_result_for_pane(
+        &mut self,
+        pane: seyal_core::PaneId,
+        request_id: u64,
+        accepted: bool,
+    ) -> Result<(), AppError> {
+        if !self.pane_known(pane) {
+            return Err(AppError::UnknownPane);
+        }
+        self.composer
+            .apply(ComposerAction::ApplyResult {
+                pane,
+                request_id,
+                accepted,
+            })
+            .map(|_| ())
+            .map_err(composer_error)
+    }
+
     pub(super) fn focused_blocks(&self) -> Vec<crate::composer::BlockProjection> {
         let pane = self.shell.snapshot().focused_pane;
         self.composer
@@ -168,6 +190,44 @@ impl ApplicationRoot {
             .apply(ChromeAction::SelectBlock { id, blocks }, &shell)
             .map(|_| ())
             .map_err(chrome_error)
+    }
+
+    /// Rerun (#1010 / #1474): load a finished focused-Pane Block's
+    /// Runtime-published command as the draft. Fails closed unless the
+    /// composer is Available with an empty draft (same gate as `block_actions`).
+    pub(super) fn rerun_block(
+        &mut self,
+        fence: AppFence,
+        id: BlockId,
+        composer_epoch: u64,
+    ) -> Result<(), AppError> {
+        self.require_fence(fence)?;
+        let block = self
+            .focused_blocks()
+            .into_iter()
+            .find(|block| block.id == id)
+            .ok_or(AppError::UnknownBlock)?;
+        if block.state == crate::composer::BlockPresentationState::Running {
+            return Err(AppError::BlockRunning);
+        }
+        let snap = self
+            .composer
+            .snapshot(fence.pane)
+            .map_err(|_| AppError::ComposerUnavailable)?;
+        if snap.mode != crate::composer::ComposerMode::Available {
+            return Err(AppError::ComposerUnavailable);
+        }
+        if !snap.draft.is_empty() {
+            return Err(AppError::ComposerDraftOccupied);
+        }
+        self.composer
+            .apply(ComposerAction::SetDraft {
+                pane: fence.pane,
+                text: block.command,
+                epoch: composer_epoch,
+            })
+            .map(|_| ())
+            .map_err(composer_error)
     }
 
     /// History recall is fenced like every other pane-sensitive composer
@@ -262,10 +322,12 @@ impl ApplicationRoot {
         {
             self.interactive_raw_target = None;
         }
-        if let Some(eligibility) = eligibility {
-            self.integration_unsupported = eligibility == RuntimeComposerEligibility::Unsupported;
+        if eligibility.is_some() {
             self.recompute_resting();
-            self.derive_presentation(self.alternate_screen)?;
+            // Only the focused Pane drives active presentation authority.
+            if fence.pane == self.focused_pane_id() {
+                self.derive_presentation(self.alternate_screen)?;
+            }
         }
         Ok(())
     }

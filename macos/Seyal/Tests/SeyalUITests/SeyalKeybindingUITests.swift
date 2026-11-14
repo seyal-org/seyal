@@ -266,7 +266,16 @@ final class SeyalKeybindingUITests: XCTestCase {
     private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
         assertFlowChromeExists(in: app, timeout: timeout)
         let composer = app.descendants(matching: .any)["seyal-composer"]
-        XCTAssertTrue(composer.firstMatch.isHittable, "composer must stay hittable on Flow")
+        let hittable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: composer.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [hittable], timeout: timeout),
+            .completed,
+            "composer must stay hittable on Flow; value=\(composer.value ?? "nil")"
+        )
     }
 
     private func waitBriefly(_ seconds: TimeInterval) {

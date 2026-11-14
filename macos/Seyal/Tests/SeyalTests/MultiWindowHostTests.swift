@@ -308,7 +308,8 @@ final class MultiWindowHostTests: XCTestCase {
                     && ($0.representedObject as? UInt16) != KeybindingShortcutRealization.windowSelectOrdinal
             }
 
-        XCTAssertEqual(projectedItems.count, 15)
+        // Catalog menu rows include chrome toggles (#922 / #1474): Sidebar + Inspector.
+        XCTAssertEqual(projectedItems.count, 17)
         XCTAssertEqual(projectedItems.filter { $0.title == "New Terminal" }.count, 1)
         XCTAssertEqual(
             Set(projectedItems.compactMap { $0.representedObject as? UInt16 }),
@@ -328,6 +329,8 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertTrue(projectedItems.contains { $0.title == "Split Down" })
         XCTAssertFalse(projectedItems.contains { $0.title == "Toggle Raw" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Toggle TUI" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Toggle Sidebar" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Toggle Inspector" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Go to…" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Previous Tab" })
         XCTAssertTrue(projectedItems.contains { $0.title == "Next Tab" })

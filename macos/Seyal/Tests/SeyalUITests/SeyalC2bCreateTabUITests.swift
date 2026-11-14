@@ -275,7 +275,7 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        app.ensureRunningForegroundForAttach()
         let terminal = app.descendants(matching: .any)["terminal-input"]
         let presentation = app.descendants(matching: .any)["seyal-pane-presentation-host"].firstMatch
         if presentation.waitForExistence(timeout: 2) {
@@ -283,7 +283,7 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
             let hostReady = expectation(for: hostUsable, evaluatedWith: presentation, handler: nil)
             if XCTWaiter.wait(for: [hostReady], timeout: min(timeout, 8)) == .completed {
                 app.ensureFlowBlocksPresentation(timeout: timeout)
-                XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
+                app.ensureRunningForegroundForAttach()
                 return
             }
         }
@@ -291,7 +291,7 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
         let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
+        app.ensureRunningForegroundForAttach()
         XCTAssertEqual(
             result,
             .completed,

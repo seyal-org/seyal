@@ -61,7 +61,14 @@ extension RustDisplayBridge {
     // Geometry and keys already follow the focused Pane. The prepared frame
     // must too, without seyal_bridge_select moving this bridge's readiness fd.
     let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
-    let frame = seyal_bridge_frame_for(handle)
+    var frame = seyal_bridge_frame_for(handle)
+    // On focus/tab switch the handle can still be registered while its Metal
+    // instance buffer is empty. Prepare once then, not on every frame tick —
+    // unconditional prepare races cold attach and can tear down the Controller.
+    if frame.cells == nil || frame.cell_count == 0 {
+      guard seyal_bridge_ensure_prepared_for(handle) == 0 else { return nil }
+      frame = seyal_bridge_frame_for(handle)
+    }
     guard frame.cells != nil, frame.cell_count > 0 else { return nil }
     return frame
   }
@@ -189,12 +196,19 @@ extension RustDisplayBridge {
   }
 
   func publishComposerResult() {
-    guard isConnected, selectPresentedClient() else { return }
-    let result = seyal_bridge_composer_result()
-    guard result.request_id != 0,
-      result.request_id != lastComposerResultRequestID
-    else { return }
-    lastComposerResultRequestID = result.request_id
+    publishComposerResult(forDisplayHandle: submissionTargetDisplayHandle())
+  }
+
+  /// Publish ComposerResult for an explicit registry Controller.
+  func publishComposerResult(forDisplayHandle handle: UInt64) {
+    guard isConnected, handle != 0 else { return }
+    // Read the presented Controller's result by handle. Focused-display peek
+    // mis-attributed a sibling Accept onto the focused Pane's pending id and
+    // cleared the draft with no local Block (#1474 pane-local tabs).
+    let result = seyal_bridge_composer_result_for(handle)
+    let last = lastComposerResultRequestIDByHandle[handle] ?? 0
+    guard result.request_id != 0, result.request_id != last else { return }
+    lastComposerResultRequestIDByHandle[handle] = result.request_id
     let code: NativeComposerResult.Code
     switch result.code {
     case 0: code = .accepted
@@ -207,7 +221,8 @@ extension RustDisplayBridge {
       NativeComposerResult(
         requestID: result.request_id,
         blockID: result.block_id,
-        code: code
+        code: code,
+        sourceDisplayHandle: handle
       ))
   }
 }

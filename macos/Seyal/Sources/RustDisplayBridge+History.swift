@@ -72,6 +72,24 @@ extension RustDisplayBridge {
     historyContinuations = historyContinuations.filter { $0.key.displayHandle != handle }
   }
 
+  /// Deliver a completed Rust-owned Block pasteboard string, if any (#1010 / #1474).
+  func publishBlockCopy() {
+    guard isConnected else { return }
+    // Match the Controller that accepted `seyal_app_request_block_copy`
+    // (focused Pane's pane_client_raw), not a stale global display selection.
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    let copy = handle != 0
+      ? seyal_bridge_take_block_copy_for(handle)
+      : seyal_bridge_take_block_copy()
+    guard copy.len > 0, let bytes = copy.utf8 else { return }
+    let text = String(
+      decoding: UnsafeBufferPointer(start: bytes, count: Int(copy.len)),
+      as: UTF8.self
+    )
+    onHistoryCopy?(copy.block_id, text)
+    onCopiedText?(text)
+  }
+
   /// Publish buffered history for the focused/presented Controller.
   func publishHistoryRanges() {
     let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
@@ -164,7 +182,12 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitCommittedText(_ text: String) -> Int32 {
-    guard isConnected, selectPresentedClient() else {
+    guard isConnected else {
+      onStatusChanged()
+      return -10
+    }
+    let handle = submissionTargetDisplayHandle()
+    guard handle != 0 else {
       onStatusChanged()
       return -10
     }
@@ -174,7 +197,6 @@ extension RustDisplayBridge {
       return -14
     }
     let count = UInt32(byteCount)
-    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
     let result =
       text.utf8.withContiguousStorageIfAvailable { buffer -> Int32 in
         seyal_bridge_submit_utf8_for(handle, buffer.baseAddress, count)
@@ -182,7 +204,7 @@ extension RustDisplayBridge {
       ?? Array(text.utf8).withUnsafeBufferPointer { buffer in
         seyal_bridge_submit_utf8_for(handle, buffer.baseAddress, count)
       }
-    return finishMutation(result)
+    return finishAddressedMutation(result, forDisplayHandle: handle)
   }
 
   /// Empty paste is invalid (`-4`); UTF-8 above `MAX_INPUT_BYTES` is CommitTooLarge (`-14`).

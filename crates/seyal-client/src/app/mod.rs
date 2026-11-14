@@ -187,6 +187,12 @@ pub enum AppError {
     ExecutionNotUnpresented,
     /// Attachment delivery suspend/resume failed. ABI 62.
     DeliveryControlFailed,
+    /// Rerun refused because the Block is still Running. ABI 63.
+    BlockRunning,
+    /// Rerun refused because the composer is not Available. ABI 64.
+    ComposerUnavailable,
+    /// Rerun refused because the composer draft is non-empty. ABI 65.
+    ComposerDraftOccupied,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -531,6 +537,17 @@ impl ApplicationRoot {
     #[cfg(target_os = "macos")]
     pub fn pane_client_raw(&self, pane: PaneId) -> Option<u64> {
         self.pane_client_raws.get(&pane).copied()
+    }
+
+    /// Pin this Pane's Controller after a handle-addressed Block sync so a
+    /// later shell reconcile cannot rebind to a stale tab client and wipe the
+    /// projected timeline (#1474 pane-local tabs / multipane Accept).
+    #[cfg(target_os = "macos")]
+    pub(crate) fn pin_pane_client_raw(&mut self, pane: PaneId, raw: u64) {
+        if raw == 0 || !self.pane_known(pane) {
+            return;
+        }
+        self.pane_client_raws.insert(pane, raw);
     }
 
     /// Whether the pane's Controller still accepts a nonblocking poll (unrelated

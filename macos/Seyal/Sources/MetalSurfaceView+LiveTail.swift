@@ -23,13 +23,11 @@ extension MetalSurfaceView {
     // History replies can arrive after the first geometry publish. Allow an
     // identical frame through until each retained range has a renderer region;
     // otherwise the Block keeps AX text but its Metal body stays blank.
+    // Use retainedHistoryRange so handle-0 publishes after shell-exit still
+    // detect unprepared Metal buffers against Controller-keyed rows (#1379).
     let hasUnpreparedHistory = frame.regions.contains { region in
-      let key = PaneBlockKey(
-        paneID: paneID,
-        displayHandle: region.displayHandle,
-        blockID: region.id
-      )
-      return historyRanges[key] != nil && renderer.historyRegions[region.id] == nil
+      retainedHistoryRange(blockID: region.id, displayHandle: region.displayHandle) != nil
+        && renderer.historyRegions[region.id] == nil
     }
     guard lastTranscriptFrameRegions != frame.regions || hasUnpreparedHistory else { return }
     lastTranscriptFrameRegions = frame.regions
@@ -46,13 +44,10 @@ extension MetalSurfaceView {
     // reuses a page, while a page/revision change rebuilds its GPU instances.
     for region in frame.regions {
       guard
-        let range = historyRanges[
-          PaneBlockKey(
-            paneID: paneID,
-            displayHandle: region.displayHandle,
-            blockID: region.id
-          )
-        ]
+        let range = retainedHistoryRange(
+          blockID: region.id,
+          displayHandle: region.displayHandle
+        )
       else {
         continue
       }

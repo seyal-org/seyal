@@ -3,15 +3,14 @@ import AppKit
 @MainActor
 extension ProductChromeHostView {
     @objc func transcriptDidScroll() {
-        guard !isProgrammaticTranscriptScroll else {
-            publishBlockOutputFrame()
-            return
+        // Latch follow-tail synchronously. Deferring lets a concurrent
+        // stream/history rebuild see a stale followingLiveEnd and yank scroll.
+        if !isProgrammaticTranscriptScroll {
+            followingLiveEnd = isNearLiveEnd()
         }
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isProgrammaticTranscriptScroll else { return }
-            self.followingLiveEnd = self.isNearLiveEnd()
-            self.publishBlockOutputFrame()
-            self.positionInlineComposerAtCurrentCursor()
+        publishBlockOutputFrame()
+        if !isProgrammaticTranscriptScroll {
+            positionInlineComposerAtCurrentCursor()
         }
     }
 
@@ -37,7 +36,12 @@ extension ProductChromeHostView {
     private var activeBlockDisplayHandle: UInt64 {
         let bridge = pane.inputSurface.bridge
         let focusedHandle = bridge?.windowFocusedDisplayHandle ?? 0
-        return focusedHandle != 0 ? focusedHandle : bridge?.clientHandle ?? 0
+        if focusedHandle != 0 { return focusedHandle }
+        if let client = bridge?.clientHandle, client != 0 { return client }
+        // Shell-exit disconnect clears clientHandle. Keep publishing Block clips
+        // against the last transcript Controller so retained historyRanges
+        // re-encode into Metal instead of AX-only false-green (#1379 Defect B).
+        return pane.inputSurface.transcriptDisplayHandle
     }
 
     func setupTranscriptTopSpacer() {
@@ -58,9 +62,16 @@ extension ProductChromeHostView {
 
     func installTimelineChangeHandler() {
         pane.inputSurface.onTimelineChanged = { [weak self] in
-            self?.projectRuntimeBlocks()
-            self?.reconcileChrome()
-            self?.refreshRunningBlockOutput()
+            guard let self else { return }
+            // Multipane leaf hosts sync Candidate-D Blocks via
+            // noteRegistryPolled on the owning Controller. APPLY_RUNTIME_BLOCKS
+            // through the focused fence can overwrite a pane timeline from the
+            // wrong active client after tab/focus churn (#1474 / #1424).
+            if self.centerColumn.secondaryHosts.isEmpty {
+                self.projectRuntimeBlocks()
+            }
+            self.reconcileChrome()
+            self.refreshRunningBlockOutput()
         }
     }
 
@@ -226,6 +237,7 @@ extension ProductChromeHostView {
         // churn does not yank intentional history scroll (#1379 / #1424 parity).
         let savedOffsetY = transcript.contentView.bounds.origin.y
         let savedFollowing = followingLiveEnd
+        let savedDocumentHeight = transcriptDocumentScrollHeight()
         let previousCards = blockCards
         blockCards.removeAll(keepingCapacity: true)
         let composer = seyal_app_composer(pane.appHandle)
@@ -309,7 +321,9 @@ extension ProductChromeHostView {
                     self?.sessionBootstrap.reconcile()
                 }
                 : nil
-            configureRunningProgramInteraction(for: card, blockID: blockID, flags: row.flags)
+            configureRunningProgramInteraction(
+                for: card, blockID: blockID, flags: row.flags,
+                blockIndex: UInt32(index), idLo: row.id_lo, idHi: row.id_hi)
             visibleIndex += 1
             if blockID != 0,
                let retainedRange = pane.inputSurface.retainedHistoryRange(
@@ -344,15 +358,39 @@ extension ProductChromeHostView {
         // execution's cells under a reused Block id, while clear→exit can
         // still re-materialize pre-clear bodies.
         pane.inputSurface.removeTranscriptRegions(except: retained)
+        if visibleIndex == 0 {
+            clearPreservedDocumentHeight()
+        }
         syncTranscriptDocumentSize()
         publishBlockOutputFrame()
         publishLiveTailBlocks()
+        if visibleIndex == 0 {
+            followingLiveEnd = true
+            lastBlockCount = 0
+            applyComposerPlacement()
+            return
+        }
         if savedFollowing {
+            clearPreservedDocumentHeight()
             scrollTranscriptToLiveEnd()
         } else {
             // Keep the reader's intentional history offset across rebuilds.
-            // Expand-only document sizing (syncTranscriptDocumentSize) keeps
-            // the prior document height as a floor for this restore.
+            // Preserve prior document extent so stream/history growth cannot
+            // collapse the scrollable range under a mid-history viewport.
+            let currentContentHeight = TranscriptDocumentSizing.contentHeight(
+                arrangedSubviews: blocks.arrangedSubviews,
+                leadingSpacer: transcriptLeadingSpacer,
+                spacing: blocks.spacing,
+                edgeInsets: blocks.edgeInsets
+            )
+            let viewportFloor = blockCards.isEmpty ? 0 : transcript.contentView.bounds.height
+            let currentDocumentMinimumHeight = max(max(currentContentHeight, viewportFloor), 1)
+            if savedDocumentHeight > currentDocumentMinimumHeight + 0.5 {
+                preserveDocumentHeight(savedDocumentHeight)
+            } else {
+                clearPreservedDocumentHeight()
+            }
+            syncTranscriptDocumentSize()
             isProgrammaticTranscriptScroll = true
             defer { isProgrammaticTranscriptScroll = false }
             let maxY = max(transcriptDocumentScrollHeight() - transcript.contentView.bounds.height, 0)
@@ -374,8 +412,7 @@ extension ProductChromeHostView {
             if self.followingLiveEnd {
                 self.scrollTranscriptToLiveEnd()
             }
-            self.publishBlockOutputFrame()
-        }
+            self.publishBlockOutputFrame()        }
     }
 
     func applyComposerPlacement() {
@@ -427,8 +464,10 @@ extension ProductChromeHostView {
         if shouldRestoreEditorFocus { routeFocus() }
     }
 
-    /// Hide the Pane dock and fill the transcript to the Pane bottom while
+    /// Retract the Pane dock and fill the transcript to the Pane bottom while
     /// Block-scoped DirectInput owns keys in the Running Block live region.
+    /// Keep the composer in the AX tree (`alphaValue = 0`, not `isHidden`) so
+    /// Busy admission stays readable as `busy` during sleep/REPL (#1474).
     func presentDirectInputMergedBlockSurface() {
         if composerInlineBlockID != 0 {
             composerInlineBlockID = 0
@@ -437,7 +476,9 @@ extension ProductChromeHostView {
         }
         NSLayoutConstraint.deactivate(composerDockConstraints)
         setRelayTranscriptViewportBottomAnchored(true)
-        composer.isHidden = true
+        composer.isHidden = false
+        composer.alphaValue = 0
+        composer.reconcile()
         layoutSubtreeIfNeeded()
         syncTranscriptDocumentSize()
         if followingLiveEnd {
@@ -454,8 +495,14 @@ extension ProductChromeHostView {
             composer.translatesAutoresizingMaskIntoConstraints = false
         }
         composer.translatesAutoresizingMaskIntoConstraints = false
+        // DirectInput deactivates dock constraints. Unhide + re-activate before
+        // reconcile so a missed placement cannot leave a zero-frame AX target
+        // (`inf,inf,0,0`) that XCUI treats as exists-but-not-hittable (#1474).
         NSLayoutConstraint.activate(composerDockConstraints)
+        composer.isHidden = false
+        composer.alphaValue = 1
         composer.reconcile()
+        layoutSubtreeIfNeeded()
         if restoreFocus { routeFocus() }
     }
 
@@ -649,53 +696,6 @@ extension ProductChromeHostView {
         // live end so the newly submitted Block stays hittable.
         if followingLiveEnd {
             scrollTranscriptToLiveEnd()
-        }
-    }
-
-    /// AppKit scrolls with `documentView.frame`; `blocks.fittingSize` is the
-    /// authoritative content height once `layoutSubtreeIfNeeded()` has run
-    /// (every call site updates card heights before calling this). When at
-    /// least one real Block card is present, the document floors at the
-    /// scroll viewport height — never below it — so sparse Flow content
-    /// never under-fills the visible transcript area, while a
-    /// viewport-sized leading spacer (not a Block card) absorbs that slack
-    /// and pushes real Blocks down to hug the composer, Warp-style (#1426
-    /// follow-up). A genuinely empty canvas (no cards at all) must still
-    /// collapse toward zero rather than hold a blank scrollable viewport
-    /// (#1424); the viewport floor is skipped in that case so a cleared
-    /// transcript never regains a preserved/blank scroll extent. This
-    /// replaced an older "expand, never shrink" policy (#1379) that also
-    /// left a permanent dead zone below cards once content shrank after
-    /// growing tall; the viewport floor keeps the same anti-collapse intent
-    /// for non-empty content without that stale-gap regression.
-    func syncTranscriptDocumentSize() {
-        layoutSubtreeIfNeeded()
-        let fitted = blocks.fittingSize
-        // Measure the arranged cards themselves. NSStackView.fittingSize can
-        // retain the stretched document height after a previous tall stream;
-        // subtracting the spacer from that stale value leaves short Blocks
-        // stranded above the composer instead of bottom-docking them (#1426).
-        let hasCards = !blockCards.isEmpty
-        let contentHeight = hasCards
-            ? TranscriptDocumentSizing.contentHeight(
-                arrangedSubviews: blocks.arrangedSubviews,
-                leadingSpacer: transcriptLeadingSpacer,
-                spacing: blocks.spacing,
-                edgeInsets: blocks.edgeInsets
-            )
-            : 0
-        let viewportHeight = hasCards ? transcript.contentView.bounds.height : 0
-        let width = max(fitted.width, transcript.contentView.bounds.width, blocks.frame.width)
-        let height = max(contentHeight, viewportHeight, 1)
-        let spacerHeight = max(height - contentHeight, 0)
-        if abs(transcriptLeadingSpacerHeight.constant - spacerHeight) > 0.5 {
-            transcriptLeadingSpacerHeight.constant = spacerHeight
-            layoutSubtreeIfNeeded()
-        }
-        if abs(blocks.frame.width - width) > 0.5 || abs(blocks.frame.height - height) > 0.5 {
-            blocks.setFrameSize(NSSize(width: width, height: height))
-            transcript.reflectScrolledClipView(transcript.contentView)
-            layoutSubtreeIfNeeded()
         }
     }
 

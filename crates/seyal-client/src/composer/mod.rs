@@ -7,6 +7,7 @@
 //! [`ComposerSnapshot`]. Do not call this from the PTY→VT→damage path. Do not
 //! invent Block completions.
 
+mod block_actions;
 mod history;
 
 use std::collections::HashMap;
@@ -17,6 +18,10 @@ use seyal_protocol::framing::BlockScope;
 
 use crate::presentation::{InputRoute, PresentationMode};
 
+pub use block_actions::{
+    block_actions, composer_admits_rerun, BlockActionKind, BlockActionPlacement,
+    BlockActionProjection,
+};
 use history::{HistoryOverlay, PaneHistory};
 pub use history::{HistoryOverlaySnapshot, HISTORY_CAPACITY, HISTORY_VISIBLE_ROWS};
 
@@ -496,6 +501,26 @@ impl ComposerState {
                     }
                     composer.pending_is_relay = false;
                     composer.draft.clear();
+                    // Host apply can clear pending before the Runtime Busy
+                    // status frame is polled (quiet commands like `sleep` emit
+                    // no PTY bytes to wake the read source). Latch Busy while
+                    // the last published fact is still Available so AX/mode
+                    // cannot flash Available between accept and the next
+                    // eligibility publish. Unsupported stays Available by
+                    // design and must not be overridden here.
+                    if matches!(
+                        composer
+                            .runtime_eligibility
+                            .map(|(eligibility, _)| eligibility),
+                        Some(RuntimeComposerEligibility::Available) | None
+                    ) {
+                        let revision = composer
+                            .runtime_eligibility
+                            .map(|(_, revision)| revision.saturating_add(1))
+                            .unwrap_or(1);
+                        composer.runtime_eligibility =
+                            Some((RuntimeComposerEligibility::Busy, revision));
+                    }
                 }
                 composer.bump_epoch();
                 Ok(None)
@@ -670,6 +695,15 @@ impl ComposerState {
             history_count: composer.history.len(),
             history: composer.overlay_snapshot(),
         })
+    }
+
+    /// True when this Pane's latest Runtime eligibility is Unsupported.
+    /// Used by presentation resting so a sibling's Raw fallback cannot leak.
+    pub fn pane_integration_unsupported(&self, pane: PaneId) -> bool {
+        self.panes
+            .get(&pane)
+            .and_then(|composer| composer.runtime_eligibility)
+            .is_some_and(|(eligibility, _)| eligibility == RuntimeComposerEligibility::Unsupported)
     }
 
     /// Sticky per-pane shell-exit latch (#1379 Defect B). Absent panes have not ended.

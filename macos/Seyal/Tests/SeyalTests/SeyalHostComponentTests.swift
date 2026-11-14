@@ -263,6 +263,78 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .textArea)
     }
 
+    /// #867 / ADR-009 Blocks-default: supported Flow omits Use Raw Terminal
+    /// from the palette (#1426). TUI still promotes Metal first responder.
+    @MainActor
+    func testSupportedFlowPaletteOmitsUseRawTerminalAndTuiPromotesMetal() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+        )
+
+        var open = SeyalAppAction()
+        open.version = bind.version
+        open.size = bind.size
+        open.kind = UInt16(SEYAL_APP_ACTION_OPEN_PALETTE.rawValue)
+        open.applySnapshotFence(seyal_app_snapshot(handle))
+        XCTAssertEqual(seyal_app_apply(handle, &open), 0)
+
+        let query = Array("Use Raw Terminal".utf8)
+        var setQuery = SeyalAppAction()
+        setQuery.version = bind.version
+        setQuery.size = bind.size
+        setQuery.kind = UInt16(SEYAL_APP_ACTION_SET_PALETTE_QUERY.rawValue)
+        setQuery.applySnapshotFence(seyal_app_snapshot(handle))
+        query.withUnsafeBufferPointer { buffer in
+            setQuery.payload = buffer.baseAddress
+            setQuery.payload_len = UInt32(buffer.count)
+            XCTAssertEqual(seyal_app_apply(handle, &setQuery), 0)
+        }
+
+        let palette = seyal_app_palette(handle)
+        XCTAssertEqual(
+            palette.row_count,
+            0,
+            "supported Flow must not project Use Raw Terminal palette rows"
+        )
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+        )
+
+        var refresh = SeyalAppAction()
+        refresh.version = bind.version
+        refresh.size = bind.size
+        refresh.kind = UInt16(SEYAL_APP_ACTION_REFRESH.rawValue)
+        refresh.applySnapshotFence(seyal_app_snapshot(handle))
+        refresh.flags |= UInt16(SEYAL_APP_FLAG_ALTERNATE_SCREEN)
+        XCTAssertEqual(seyal_app_apply(handle, &refresh), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        )
+        let surface = InteractiveMetalSurfaceView(frame: .zero, appHandle: handle)
+        surface.syncInputRoutePresentation()
+        XCTAssertTrue(surface.acceptsFirstResponder)
+        XCTAssertTrue(surface.isAccessibilityElement())
+        XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .textArea)
+    }
+
     @MainActor
     func testFailedAdmissionAnnouncesWithoutClearingRustDraft() {
         let handle = seyal_app_create()
@@ -1374,7 +1446,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotNil(host.preservedDocumentHeightConstraint)
         XCTAssertGreaterThan(host.transcriptDocumentOffsetY, 100)
 
-        host.invalidateProjectionCacheForTests()
+        host.invalidateProjectionCache()
         host.reconcileFlowPresentation()
         XCTAssertNil(
             host.preservedDocumentHeightConstraint,
@@ -2268,6 +2340,9 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         var frameRequested = false
         surface.renderer.onNeedsCurrentFrame = { frameRequested = true }
+        // Offscreen unit surfaces stay invisible until attached; the in-flight
+        // gate still needs a visible renderer to exercise GPU deferral.
+        surface.renderer.setVisible(true)
         surface.renderer.setPresentationPlan(.flow())
         surface.renderer.requestPresent()
         XCTAssertTrue(surface.renderer.beginValidationFrameInFlight())
@@ -3235,6 +3310,108 @@ final class SeyalHostComponentTests: XCTestCase {
             "shell-exit history present must not reuse hasPreparedState for SPEC-009 Usable"
         )
         XCTAssertTrue(
+            metalText.contains("Clear page keys with the wipe"),
+            "disconnect retain wipe must clear historyRenderPageKeys before buffer drop (#1379 Defect B)"
+        )
+        XCTAssertTrue(
+            metalText.contains("Do not abandon the last"),
+            "activateTranscriptDisplayHandle(0) must not wipe retained Controller history (#1379 Defect B)"
+        )
+        // activateTranscriptDisplayHandle + disconnect retain both wipe buffers;
+        // each path must clear page keys or shell-exit can geometry-only reuse.
+        let pageKeyClears = metalText.components(separatedBy: "historyRenderPageKeys.removeAll").count - 1
+        XCTAssertGreaterThanOrEqual(
+            pageKeyClears,
+            2,
+            "handle-switch and disconnect retain must both clear historyRenderPageKeys"
+        )
+        XCTAssertTrue(
+            hostText.contains("return pane.inputSurface.transcriptDisplayHandle"),
+            "shell-exit must keep Block clip publishes on the last transcript handle (#1379 Defect B)"
+        )
+        let composerResult = sourceRoot.appendingPathComponent(
+            "ProductChromeHostView+ComposerResult.swift"
+        )
+        let composerResultText = (try? String(contentsOf: composerResult, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            composerResultText.contains("distributeComposerResult"),
+            "ComposerResult must route to the owning multipane leaf (#1474)"
+        )
+        XCTAssertTrue(
+            composerResultText.contains("seyal_app_apply_composer_result_for_pane"),
+            "multipane ComposerResult must clear pending without stealing focus fence"
+        )
+        XCTAssertTrue(
+            composerResultText.contains("Bind Accept to the Controller that produced it"),
+            "multipane Accept must not fall through to a sibling pending request_id"
+        )
+        XCTAssertTrue(
+            composerResultText.contains("seyal_bridge_block_count_for"),
+            "Accept wait must peek the producing Controller timeline, not focused-display"
+        )
+        let bridgeFrame = sourceRoot.appendingPathComponent("RustDisplayBridge+Frame.swift")
+        let bridgeFrameText = (try? String(contentsOf: bridgeFrame, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            bridgeFrameText.contains("lastComposerResultRequestIDByHandle"),
+            "ComposerResult dedup must be per-Controller handle for multipane"
+        )
+        XCTAssertTrue(
+            bridgeFrameText.contains("seyal_bridge_composer_result_for(handle)"),
+            "ComposerResult must read the owning Controller, not focused-display peek"
+        )
+        XCTAssertTrue(
+            bridgeFrameText.contains("sourceDisplayHandle: handle"),
+            "ComposerResult must carry the source Controller for multipane accept routing"
+        )
+        let bridgeInput = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
+        let bridgeInputText = (try? String(contentsOf: bridgeInput, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            bridgeInputText.contains("seyal_bridge_submit_composer_for(handle"),
+            "Composer submit must address the leaf Controller, not FOCUSED_DISPLAY_HANDLE"
+        )
+        XCTAssertTrue(
+            composerResultText.contains("retirePrimaryAccessibilityIdentity"),
+            "legacy dock must retire seyal-composer AX while pane hosts own Flow"
+        )
+        let projection = sourceRoot.appendingPathComponent("ProductChromePaneProjection.swift")
+        let projectionText = (try? String(contentsOf: projection, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            projectionText.contains("restoreLegacyComposerAccessibilityIfNeeded"),
+            "pane host reconcile must keep legacy dock AX retired in multipane Flow"
+        )
+        XCTAssertTrue(
+            projectionText.contains("liveBindingDisplayHandleForRegistry()"),
+            "registry Block sync must follow the selected terminal, not stale displayHandle"
+        )
+        XCTAssertTrue(
+            projectionText.contains("empty timeline wipe"),
+            "unselected terminal tabs must not replace the selected tab's Block projection"
+        )
+        let blocksHost = sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift")
+        let blocksHostText = (try? String(contentsOf: blocksHost, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            blocksHostText.contains("composer.isHidden = false"),
+            "DirectInput end must unhide the dock before reconcile (#1474 zero-frame hittable)"
+        )
+        let runningInput = sourceRoot.appendingPathComponent(
+            "ProductChromeHostView+RunningProgramInput.swift"
+        )
+        let runningInputText = (try? String(contentsOf: runningInput, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            runningInputText.contains("applyComposerPlacement()"),
+            "DirectInput handoff must restore dock placement, not only routeFocus"
+        )
+        let historySurface = sourceRoot.appendingPathComponent("MetalSurfaceView+History.swift")
+        let historySurfaceText = (try? String(contentsOf: historySurface, encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            historySurfaceText.contains("Prefer the durable transcript handle"),
+            "retainedHistoryRange must resolve Controller-keyed rows after clientHandle clears"
+        )
+        XCTAssertTrue(
+            liveText.contains("retainedHistoryRange(blockID: region.id, displayHandle: region.displayHandle)"),
+            "setTranscriptFrame must re-encode via retainedHistoryRange after shell-exit"
+        )
+        XCTAssertTrue(
             hostText.contains("removeTranscriptRegions(except: retained)"),
             "rebuildBlocks must prune historyRanges to the timeline Block id set"
         )
@@ -3295,8 +3472,8 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertEqual(
             historyText.components(separatedBy: "finishAddressedMutation(").count - 1,
-            2,
-            "initial and continuation requests must share the per-Controller failure boundary"
+            3,
+            "history request, truncated continuation, and addressed submitCommittedText share the per-Controller failure boundary"
         )
         let inputPath = sourceRoot.appendingPathComponent("RustDisplayBridge+Input.swift")
         let inputText = (try? String(contentsOf: inputPath, encoding: .utf8)) ?? ""
@@ -3593,6 +3770,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(
             inputText.contains("publishHistoryRanges(forDisplayHandle: polledHandle)"),
             "polling an unfocused Controller must publish its own completed history"
+        )
+        XCTAssertTrue(
+            inputText.contains("onRegistryHandlePolled?(polledHandle)"),
+            "primary Controller polls must notify multipane leaf hosts (#1474)"
         )
     }
 
@@ -4477,6 +4658,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(optInFlow(handle), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        // Accept latches Busy until Runtime publishes the next Available
+        // prompt (`composer` ApplyResult). Mirror the FFI `accepted_submit`
+        // helper: restore Available between recorded history rows.
+        var nextAvailableRevision: UInt64 = 100
         for command in commands {
             let bound = seyal_app_snapshot(handle)
             let composer = seyal_app_composer(handle)
@@ -4497,7 +4682,7 @@ final class SeyalHostComponentTests: XCTestCase {
             submit.size = bind.size
             submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
             submit.applySnapshotFence(bound)
-            submit.target_generation = composer.epoch
+            submit.target_generation = seyal_app_composer(handle).epoch
             XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
             var result = SeyalAppAction()
             result.version = bind.version
@@ -4507,6 +4692,12 @@ final class SeyalHostComponentTests: XCTestCase {
             result.target_execution_lo = seyal_app_composer(handle).request_id
             result.reserved = 1
             XCTAssertEqual(seyal_app_apply(handle, &result), 0)
+            let revision = nextAvailableRevision
+            nextAvailableRevision += 1
+            XCTAssertEqual(
+                relayComposerStatus(handle, eligibility: 1, revision: revision),
+                0
+            )
         }
         return handle
     }

@@ -79,6 +79,8 @@ final class RustDisplayBridge {
   let onError: ErrorHandler
   var onStatusChanged: StatusHandler
   var onCopiedText: ((String) -> Void)?
+  /// Delivered when Rust finishes a Block pasteboard copy (#1010 / #1474).
+  var onHistoryCopy: ((UInt64, String) -> Void)?
   /// Notifies the multi-live host after a non-primary registry handle is polled
   /// (#936) so a secondary Metal surface can present without changing focus.
   var onRegistryHandlePolled: ((UInt64) -> Void)?
@@ -118,7 +120,10 @@ final class RustDisplayBridge {
   var historyRevisions: [PaneHistoryRequestKey: (revision: UInt64, requestID: UInt64)] = [:]
   var historyContinuations:
     [PaneHistoryRequestKey: (startUnit: UInt32, range: NativeHistoryRange)] = [:]
-  var lastComposerResultRequestID: UInt64 = 0
+  /// Per-Controller ComposerResult dedup. Multipane Controllers each allocate
+  /// request ids from 1; a single window-global last id dropped sibling
+  /// accepts and left pane-local markers missing (#1474 Gate 2).
+  var lastComposerResultRequestIDByHandle: [UInt64: UInt64] = [:]
   var composerStatusRelayTracker = ComposerStatusRelayTracker()
 
   init(
@@ -342,7 +347,7 @@ final class RustDisplayBridge {
     historyRevisions.removeAll(keepingCapacity: false)
     historyContinuations.removeAll(keepingCapacity: false)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: false)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)
@@ -390,7 +395,7 @@ final class RustDisplayBridge {
     historyRevisions.removeAll(keepingCapacity: false)
     historyContinuations.removeAll(keepingCapacity: false)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: false)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)
@@ -430,7 +435,7 @@ final class RustDisplayBridge {
     runtimeBlockMetadata = nil
     discardHistoryRequests(forDisplayHandle: lostHandle)
     lastTimelineRevision = 0
-    lastComposerResultRequestID = 0
+    lastComposerResultRequestIDByHandle.removeAll(keepingCapacity: false)
     clearComposerStatus()
     runtimeIdentityWords = (0, 0)
     attachmentIdentityWords = (0, 0)
@@ -551,10 +556,12 @@ final class RustDisplayBridge {
           // unfocused multipane Flow leaves receive completed Block bodies (#1424/#1426).
           self.publishHistoryRanges(forDisplayHandle: handle)
           self.onRegistryHandlePolled?(handle)
+          // Always publish this Controller's ComposerResult by handle so a
+          // focused-display lag cannot apply a sibling Accept (#1474).
+          self.publishComposerResult(forDisplayHandle: handle)
           if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
             self.runtimeBlockMetadata = self.currentBlockMetadata()
             self.publishHistoryRanges(forDisplayHandle: handle)
-            self.publishComposerResult()
             self.publishComposerStatus()
             let revision = seyal_bridge_block_timeline_revision()
             if revision != self.lastTimelineRevision {

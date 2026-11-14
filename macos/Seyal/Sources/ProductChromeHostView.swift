@@ -65,10 +65,10 @@ final class ProductChromeHostView: NSView {
     var lastEligibility: UInt16 = .max
     var lastProjectedExecution = (lo: UInt64(0), hi: UInt64(0))
     var lastBlockCount: Int = 0
-    /// Live-end follow for Flow transcript. New Blocks and async history-body
-    /// growth keep the viewport pinned only while the user was already at the
-    /// live end; intentional history scroll must not be yanked forward.
+    /// Follow live end only while the user was already pinned there.
     var followingLiveEnd = true
+    /// Mid-history document-height floor so rebuilds cannot collapse scroll.
+    var preservedDocumentHeightConstraint: NSLayoutConstraint?
     var isProgrammaticTranscriptScroll = false
     var isReconcilingChrome = false
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
@@ -371,8 +371,9 @@ final class ProductChromeHostView: NSView {
         NSLayoutConstraint.activate(paneFollowsTranscript)
         applyShellChrome(seyal_app_chrome(pane.appHandle))
 
-        composer.onSubmitComposer = { [weak self] command in
-            self?.pane.inputSurface.terminalSubmitComposerCommand(command) ?? -10
+        composer.onSubmitComposer = { [weak self] command, requestID in
+            self?.pane.inputSurface.terminalSubmitComposerCommand(command, requestID: requestID)
+                ?? -10
         }
         composer.onSubmitRaw = { [weak self] command in
             self?.pane.inputSurface.terminalSubmitCommittedText(command) ?? -10
@@ -423,12 +424,19 @@ final class ProductChromeHostView: NSView {
             self.applyHistoryRange(range)
         }
         pane.inputSurface.onComposerResultChanged = { [weak self] result in
+            guard let self else { return }
             let accepted = result.code == .accepted || result.code == .unsupported
-            self?.composer.applyComposerResult(requestID: result.requestID, accepted: accepted)
-            if !accepted {
-                self?.composer.presentAdmissionFailure(result.code)
-            }
-            self?.reconcileChrome()
+            // Multipane leaf composers own SUBMIT pending after Execute. Draining
+            // only the legacy dock left pane hosts Busy with no Block AX after
+            // optimistic accept was removed (#1474 / #1424).
+            self.distributeComposerResult(
+                requestID: result.requestID,
+                accepted: accepted,
+                failureCode: accepted ? nil : result.code,
+                sourceDisplayHandle: result.sourceDisplayHandle,
+                blockID: result.blockID
+            )
+            self.reconcileChrome()
         }
         installComposerStatusHandler()
         pane.onProductChanged = { [weak self] in
@@ -664,9 +672,11 @@ final class ProductChromeHostView: NSView {
     }
 
     /// Focused Pane Metal surface for Flow DirectInput / Raw / TUI keys.
+    /// Multipane Raw/TUI covers the host with liveContent (#867 / #1474).
     func focusedInputSurface() -> InteractiveMetalSurfaceView {
         let shell = seyal_app_shell(pane.appHandle)
         if !centerColumn.secondaryHosts.isEmpty,
+            centerColumn.liveContent.isHidden,
             let host = centerColumn.presentationHost(
                 paneLo: shell.focused_pane_lo,
                 paneHi: shell.focused_pane_hi

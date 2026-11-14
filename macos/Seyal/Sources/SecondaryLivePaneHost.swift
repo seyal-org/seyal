@@ -113,7 +113,9 @@ final class SecondaryLivePaneHost: NSView {
         surface = InteractiveMetalSurfaceView(
             frame: .zero,
             appHandle: appHandle,
-            paneID: String(format: "live-%016llx%016llx", paneHi, paneLo)
+            paneID: String(format: "live-%016llx%016llx", paneHi, paneLo),
+            paneLo: paneLo,
+            paneHi: paneHi
         )
         composer = ComposerBridgeView(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
         composer.boundDisplayHandle = displayHandle
@@ -121,6 +123,11 @@ final class SecondaryLivePaneHost: NSView {
         surface.activateTranscriptDisplayHandle(displayHandle)
         surface.onEnsureDirectInputBridge = { [weak self] in
             self?.ensureDirectInputBridgeBorrow()
+        }
+        // Unfocused Flow↔TUI from Candidate-D alt-screen (#867 / #1474).
+        surface.onAlternateScreenChanged = { [weak self] _ in
+            self?.reconcileFlowPresentation()
+            self?.onCommandConsumed?()
         }
         translatesAutoresizingMaskIntoConstraints = true
         clipsToBounds = true
@@ -157,12 +164,37 @@ final class SecondaryLivePaneHost: NSView {
             self?.onFocus?()
         }
         // Bridgeless surfaces borrow the window bridge; submit must still reach
-        // the focused Controller so Flow commands and TUI entry work (#1424).
-        composer.onSubmitComposer = { [weak self] command in
-            self?.historyBridge?.submitComposerCommand(command) ?? -10
+        // this Pane's Controller. Pin window focus to `displayHandle` at the
+        // submit boundary so a stale focused-handle after Pane/tab switches
+        // cannot send Flow commands to a sibling timeline (#1474 / #1424).
+        composer.onSubmitComposer = { [weak self] command, requestID in
+            guard let self, let bridge = self.historyBridge else { return -10 }
+            // Tab switches can update presentation AX before `displayHandle` is
+            // refreshed; resolve the live binding handle at the submit boundary
+            // (#1474 pane-local terminal tabs).
+            let handle = self.liveBindingDisplayHandle()
+            guard handle != 0 else { return -10 }
+            if handle != self.displayHandle {
+                _ = self.updateDisplayHandle(handle)
+            }
+            let priorOverride = bridge.submissionDisplayHandleOverride
+            bridge.windowFocusedDisplayHandle = handle
+            bridge.submissionDisplayHandleOverride = handle
+            defer { bridge.submissionDisplayHandleOverride = priorOverride }
+            return bridge.submitComposerCommand(command, requestID: requestID)
         }
         composer.onSubmitRaw = { [weak self] command in
-            self?.historyBridge?.submitCommittedText(command) ?? -10
+            guard let self, let bridge = self.historyBridge else { return -10 }
+            let handle = self.liveBindingDisplayHandle()
+            guard handle != 0 else { return -10 }
+            if handle != self.displayHandle {
+                _ = self.updateDisplayHandle(handle)
+            }
+            let priorOverride = bridge.submissionDisplayHandleOverride
+            bridge.windowFocusedDisplayHandle = handle
+            bridge.submissionDisplayHandleOverride = handle
+            defer { bridge.submissionDisplayHandleOverride = priorOverride }
+            return bridge.submitCommittedText(command)
         }
         composer.onCommandConsumed = { [weak self] in
             self?.reconcileFlowPresentation()
@@ -422,7 +454,20 @@ final class SecondaryLivePaneHost: NSView {
 
     /// Called when the shared primary bridge polls this registry handle.
     func noteRegistryPolled() {
-        _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+        noteRegistryPolled(clientHandle: displayHandle)
+    }
+
+    /// Sync Candidate-D Blocks from an explicit Controller. After ComposerAccept
+    /// the source handle is authoritative even if `pane_client_raw` briefly
+    /// still names another terminal tab (#1474).
+    func noteRegistryPolled(clientHandle: UInt64) {
+        if clientHandle != 0 {
+            _ = seyal_app_sync_pane_runtime_blocks_from_client(
+                appHandle, paneLo, paneHi, clientHandle
+            )
+        } else {
+            _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+        }
         publishFrame()
         reconcileFlowPresentation()
     }
@@ -479,8 +524,8 @@ final class SecondaryLivePaneHost: NSView {
         rebuildBlocks()
     }
 
-    /// Test seam: force the next reconcile to rebuild Blocks from projection.
-    func invalidateProjectionCacheForTests() {
+    /// Force the next Flow reconcile to rebuild Block cards from projection.
+    func invalidateProjectionCache() {
         lastProjectionFingerprint = nil
         lastAppliedEligibility = nil
     }
@@ -553,7 +598,14 @@ final class SecondaryLivePaneHost: NSView {
     /// Unfocused panes still retract the Busy dock while their REPL owns mode 3.
     private func focusBlockScopedDirectInputIfEligible() {
         let direct = panePublishesBlockScopedDirectInput
-        applyDirectInputMergedLayout(direct)
+        let paneComposer = seyal_app_composer_for_pane(appHandle, paneLo, paneHi)
+        let available = paneComposer.mode == UInt16(SEYAL_APP_COMPOSER_AVAILABLE.rawValue)
+        let relay = paneComposer.mode == UInt16(SEYAL_APP_COMPOSER_RELAY.rawValue)
+        // Sticky Running targets can outlive Available. Never leave the dock at
+        // alpha 0 after the prompt returns — XCUI submit then hits a nil
+        // hitTest (#1474 pane-local tabs).
+        let retractDock = direct && !available && !relay
+        applyDirectInputMergedLayout(retractDock)
         ensureDirectInputBridgeBorrow()
         guard inputOwned else {
             // Never stop the shared Controller bridge; only drop the borrow.
@@ -564,7 +616,7 @@ final class SecondaryLivePaneHost: NSView {
             return
         }
         surface.syncInputRoutePresentation()
-        guard direct else {
+        guard retractDock else {
             _ = composer.focusEditor()
             return
         }
@@ -581,7 +633,8 @@ final class SecondaryLivePaneHost: NSView {
             if !transcriptBottomToHost.isActive {
                 transcriptBottomToHost.isActive = true
             }
-            composer.isHidden = true
+            composer.isHidden = false
+            composer.alphaValue = 0
         } else {
             if transcriptBottomToHost.isActive {
                 transcriptBottomToHost.isActive = false
@@ -589,6 +642,10 @@ final class SecondaryLivePaneHost: NSView {
             if !transcriptBottomToComposer.isActive {
                 transcriptBottomToComposer.isActive = true
             }
+            // Unhide before reconcile so a stale DirectInput hide cannot leave
+            // the leaf dock at a zero frame after constraints return (#1474).
+            composer.isHidden = false
+            composer.alphaValue = 1
             composer.reconcile()
         }
         needsLayout = true
@@ -654,6 +711,26 @@ final class SecondaryLivePaneHost: NSView {
             return String(format: "%016llx%016llx", binding.execution_hi, binding.execution_lo)
         }
         return String(repeating: "0", count: 32)
+    }
+
+    /// Selected terminal's Controller for this Pane from the live shell binding.
+    private func liveBindingDisplayHandle() -> UInt64 {
+        let paneCount = Int(seyal_app_shell(appHandle).pane_count)
+        for index in 0..<paneCount {
+            let binding = seyal_app_pane_binding(appHandle, UInt32(index))
+            guard binding.pane_lo == paneLo, binding.pane_hi == paneHi else { continue }
+            // A known Pane with no adopted client yet must not report 0 when the
+            // host still holds the prior Controller — tab select can briefly
+            // clear pane_client_raw before the replacement attach lands (#1474).
+            return binding.display_handle != 0 ? binding.display_handle : displayHandle
+        }
+        return displayHandle
+    }
+
+    /// Registry-poll seam: expose the live shell binding handle so a shared
+    /// bridge can route Candidate-D sync when `displayHandle` lags a tab select.
+    func liveBindingDisplayHandleForRegistry() -> UInt64 {
+        liveBindingDisplayHandle()
     }
 
     private func updateAvailabilityPresentation() {

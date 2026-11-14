@@ -79,17 +79,36 @@ extension XCUIApplication {
   /// composer/PTY input.
   func ensureFlowBlocksPresentation(timeout: TimeInterval = 8) {
     let composer = descendants(matching: .any)["seyal-composer"].firstMatch
-    if composer.waitForExistence(timeout: 1), composer.isHittable {
-      return
+    if composer.waitForExistence(timeout: 1) {
+      if composer.isHittable {
+        return
+      }
+      // Busy / Block-scoped DirectInput retracts the dock on Flow. Waiting for
+      // Available+hittable avoids Cmd+Enter toggling into Raw (#1474).
+      // XCUIApplication extensions cannot use XCTestCase.expectation(for:).
+      let dockReadyDeadline = Date().addingTimeInterval(timeout)
+      while Date() < dockReadyDeadline {
+        if composer.isHittable {
+          let value = (composer.value as? String) ?? ""
+          if value == "available" || value == "relay" || value.isEmpty {
+            return
+          }
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+      }
     }
     let chrome = descendants(matching: .any)["seyal-left-workspaces"].firstMatch
     if chrome.waitForExistence(timeout: 2), chrome.isHittable {
       chrome.click()
     }
     typeKey("\r", modifierFlags: .command)
+    let latchDeadline = Date().addingTimeInterval(timeout)
+    while Date() < latchDeadline, !(composer.exists && composer.isHittable) {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+    }
     XCTAssertTrue(
-      composer.waitForExistence(timeout: timeout),
-      "Cmd+Enter must latch Flow from Raw resting for Flow/Blocks XCUI"
+      composer.exists && composer.isHittable,
+      "Cmd+Enter must latch a hittable Flow composer; value=\(composer.value ?? "nil") frame=\(composer.frame)"
     )
   }
 
@@ -122,7 +141,28 @@ extension XCUIApplication {
         IsolatedHostedRuntime.writeShellConfig()
     }
     launch()
+    // Activate before waiting: Cursor/Xcode focus steal often leaves a fresh
+    // launch in RunningBackground, and waiting alone will not promote it.
+    ensureRunningForegroundForAttach()
     return self
+  }
+
+  /// Distinguishes process death from IDE/focus steal. `runningBackground` is
+  /// recoverable via `activate()`; `notRunning` is a real exit.
+  func ensureRunningForegroundForAttach(
+    message: String = "Seyal.app left foreground during PTY/runtime attach"
+  ) {
+    if state == .notRunning {
+      XCTFail("\(message) (process exited)")
+      return
+    }
+    if state != .runningForeground {
+      activate()
+    }
+    XCTAssertTrue(
+      wait(for: .runningForeground, timeout: 10),
+      "\(message) (state=\(state.rawValue))"
+    )
   }
 
   private func stripIsolatedRuntimeLaunchArguments() {
