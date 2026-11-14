@@ -1,6 +1,6 @@
 # ADR-018 — Native window and tab lifecycle, identity and ordering
 
-- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1000. An author or agent comment is not that acceptance. **#1447 macOS quit-confirm / Dock-reopen-terminal amendment is Proposed** until its acceptance PR merges with independent non-author maintainer acceptance; until then the amendment section (§12) is not normative and authorizes no implementation. An author or agent comment is not that acceptance.
+- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1000. An author or agent comment is not that acceptance. **#1447 macOS quit-confirm / Dock-reopen-terminal amendment is Proposed** until its acceptance PR merges with independent non-author maintainer acceptance; until then the amendment section (§12) is not normative and authorizes no implementation. An author or agent comment is not that acceptance. **ADR-029 (#1487 / PR #1488) is Accepted** for in-window sidebar containment. Its §1.1 / §2.2 / §7 / §11.4 replacement becomes implementation authority only when SPEC-032 is accepted. Until then this ADR's containment remains in force.
 - **Date:** 2026-09-24
 - **Issue:** #1000 (refinement); parent umbrella #674; epic #665; amendment #1447
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-009, ADR-015, SPEC-004, SPEC-005, SPEC-006, SPEC-008, SPEC-009, [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md), [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)

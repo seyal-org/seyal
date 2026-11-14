@@ -1,11 +1,12 @@
-# ADR-028 — Window sidebar of open workspaces
+# ADR-029 — Window sidebar of open workspaces
 
-- **Status:** Proposed. Not authority and authorizes no production implementation until merged as Accepted by a non-author maintainer.
+- **Status:** Accepted on merge of PR #1488 by non-author maintainer @mahboobmonnamd under #1487. An author or agent comment is not that acceptance. The merged file was misnumbered ADR-028; this record renames it to ADR-029. ADR-028 remains the workspace-root decision under #1409. ADR-027 remains reserved for #1385.
 - **Date:** 2026-11-14
 - **Issue:** #1487
-- **Numbering note:** ADR-027 remains reserved for the persistent remote companion (#1385). This decision is ADR-028.
+- **Companion specification:** [`SPEC-032`](../specs/SPEC-032-WINDOW-SIDEBAR-WORKSPACES.md). Reducer and migration steps in that spec are normative when its acceptance PR is merged by a non-author maintainer. Until then ADR-018 containment remains the implementation authority.
+- **Numbering note:** ADR-029. Do not reuse ADR-028.
 - **Scope:** Presentation containment inside one window: an ordered sidebar of open workspaces, in-place selection, and one pane tree per workspace.
-- **Depends on:** Accepted ADR-005, ADR-007, ADR-009, ADR-015, ADR-017, ADR-018, ADR-019, ADR-021. Proposed ADR-025 / SPEC-031 for pane-local terminal surfaces.
+- **Depends on:** Accepted ADR-005, ADR-007, ADR-009, ADR-015, ADR-017, ADR-018, ADR-019, ADR-021, and ADR-028 (workspace root and `CreateWorkspace` only). Proposed ADR-025 / SPEC-031 for pane-local terminal surfaces.
 - **Does not own:** browser panels, workspace groups, notification rings, freeform canvas, a socket API, a second terminal engine, or durable layout persistence (ADR-007 P4 / proposed ADR-023).
 
 ## 1. Context
@@ -84,7 +85,7 @@ A workspace that already has one Seyal Tab keeps that tab's pane tree as the wor
 
 A workspace that already has more than one Seyal Tab keeps the active tab's pane tree. Every execution bound only to a non-active tab stays live and becomes unpresented. Those tabs' layouts are not preserved and are not turned into extra workspaces. Rehoming an execution into a newly minted workspace would change ADR-007 ownership and is out of scope.
 
-No migration runs until this ADR is accepted and a companion specification names the exact reducer steps. Until then the current ADR-018 containment remains in force.
+The reducer steps for that migration are SPEC-032. They run only after SPEC-032 is accepted. Until then the current ADR-018 containment remains in force.
 
 ## 3. Security and hot path
 
@@ -132,7 +133,7 @@ On acceptance, and only then:
 - ADR-018 §1.1, §2.2, §7, and §11.4 are amended to the containment in §2. The one-workspace-per-window lifetime binding is removed.
 - ADR-019 drops `Tab` from `ResourceAddress`. ADR-021's pane-tree operations are scoped to the workspace pane tree rather than to a Seyal Tab.
 - The UI shell scaffold's Workspaces / Tabs switcher and `ui/SEYAL-UI-ARCHITECTURE-001.md` §4 are updated to the sidebar model.
-- A companion specification defines the reducer, the migration in §2.4, accessibility identifiers, and the tests in §3.
-- An implementation issue may then become Ready. That issue is not this ADR's pull request.
+- SPEC-032 defines the reducer, the migration in §2.4, accessibility identifiers, and the tests in §3.
+- An implementation issue may become Ready only after SPEC-032 is accepted. That issue is not this ADR's pull request and not the numbering-correction pull request.
 
-This document authorizes no production Rust or Swift.
+This acceptance authorizes no production Rust or Swift in the architecture record. Implementation waits on a Ready issue.

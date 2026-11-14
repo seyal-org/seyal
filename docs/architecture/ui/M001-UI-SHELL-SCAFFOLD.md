@@ -98,6 +98,8 @@ The normal preview therefore leaves renderer/Runtime terminal authority unattach
 
 ## Workspace and Tab navigation
 
+ADR-029's accepted sidebar lists open workspaces in one window and switches that window's pane tree in place. That replacement is implementation authority only after SPEC-032 is accepted. Until then the model below remains in force.
+
 The frozen compact navigation model is:
 
 ```text
