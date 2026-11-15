@@ -83,6 +83,13 @@ This directory is the canonical entry point for Seyal foundation architecture.
 - Source briefs preserve research inputs and historical requirements only.
 - Git history and pull requests preserve superseded wording; duplicate `-v2`, `-final`, `-new`, `-amendment`, or correction documents are not required.
 
+**ADR-009 amendment proposal #1493:** The product owner directed a Raw-only
+production presentation and suspension of Blocks on 2026-11-15. Its separate
+architecture PR proposes to supersede the current Blocks-first resting policy
+and retain stable `Screen` storage. The proposal becomes normative only when
+that PR is accepted; specifications and the M004 launch matrix are reconciled
+after acceptance. It does not claim that the Raw release gate has passed.
+
 ## Canonical ownership for M001
 
 ```text
