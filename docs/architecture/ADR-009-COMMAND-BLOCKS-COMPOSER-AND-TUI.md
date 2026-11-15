@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426; Blocks-default for supported shells accepted 2026-11-06 under #1426; **Accepted** Block-scoped direct-input amendment under #1466 (product-owner acceptance 2026-11-08; normative on merge of architecture-only PR #1469)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426); Blocks-default 2026-11-06 (#1426); Block-scoped direct-input Accepted 2026-11-08 (#1466 / PR #1469)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426; Blocks-default for supported shells accepted 2026-11-06 under #1426; **Accepted** Block-scoped direct-input amendment under #1466 (product-owner acceptance 2026-11-08; normative on merge of architecture-only PR #1469); **Proposed** Raw-only production presentation amendment under #1493 (not normative before separate architecture-PR acceptance)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426); Blocks-default 2026-11-06 (#1426); Block-scoped direct-input Accepted 2026-11-08 (#1466 / PR #1469); proposed Raw-only amendment 2026-11-15 (#1493)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1758,4 +1758,136 @@ Block `b`:
    focus/IME routing).
 4. Withdraw Interact-as-required for local REPLs once those Issues are Done;
    keep Interact/Raw only where this contract does not apply.
+
+## Proposed 2026-11-15 amendment — Raw-only production presentation and Screen baseline
+
+**Status:** The product owner accepted the Raw-only direction on 2026-11-15.
+This ADR amendment is proposed under #1493 and becomes normative only after
+independent non-author review and merge of a separate architecture-only PR. It
+does not establish that Raw terminal usability or v1 market readiness has
+passed.
+
+### Problem and conflict
+
+The accepted 2026-11-06 Blocks-first default depends on the Flow/Blocks surface
+being a reliable everyday terminal. The #1485 candidate failed headed product
+acceptance: after `seq 1 10000`, later `pwd`/`ls` activity redrew existing
+output in place, with large blank regions and unstable command attribution.
+The product owner confirmed that the visible failure is flashing/redrawing,
+not duplicate output. Focused tests do not override that rendered-pixel failure.
+
+The same candidate moved primary-screen storage from the stable `Screen` path
+to RegionGrid. The matched comparison recorded in #1493 used the same Apple M5
+Pro / macOS 27.0.1 / arm64 machine and release builds:
+
+- parser-feed throughput on 28.2 MB was 29.32 MB/s for `Screen`, and 19.57 / 20.47 MB/s for RegionGrid, about 30–33% lower;
+- the matched `vt_scroll_state` 20,000-iteration run took 162 / 203 ms for `Screen` at 80×24 / 120×40, and 472 / 630 ms for RegionGrid, about 2.9–3.1× slower;
+- at 50,000 iterations, `Screen` completed 80×24 in 399 ms while RegionGrid full-screen scroll took 90 seconds. The candidate run stopped before the 120×40 case.
+
+This rejects the current RegionGrid implementation as the production storage
+path. The comparison identifies possible eviction-amplification code paths but
+does not include a profiler trace proving a sole root cause. It does not reject
+every possible future RegionGrid design.
+
+The comparison does not complete every #1493 experiment. The retained record
+does not include byte-for-byte output and screenshot replay, keyboard-to-pixel
+p50/p95, frame time, CPU/RSS, allocation/copy counts, or the candidate's
+120×40 / 50,000-iteration result. Those rows must be completed and compared
+with the agreed G9 ceilings before the architecture issue is accepted. The
+90-second run is enough to reject this candidate as the storage baseline, not
+to claim the full performance matrix or establish a root cause.
+
+### Proposed decision
+
+1. **Raw is the only production resting presentation while Blocks are suspended.**
+   Every new Pane and supported or unsupported shell session uses the full-Pane
+   conventional terminal grid and direct-terminal input. Shell integration may
+   remain available as additive metadata, but its presence or status cannot
+   select Flow or composer presentation.
+2. **Suspend Flow/Blocks as a production presentation.** The product does not
+   offer Flow as a resting default or opt-in during this suspension. A later
+   reintroduction requires a separate accepted architecture decision and the
+   headed promotion gate below. Do not delete unrelated Block metadata solely
+   because its presentation is suspended.
+3. **Keep the stable `Screen` storage path as the production baseline.** The
+   RegionGrid implementation from closed-unmerged PR #1485 is not retained as
+   the active production path. Reconsideration requires a separate scoped
+   decision supported by exact-output/VT correctness and matched memory and
+   responsiveness evidence against `Screen`.
+4. **Keep one authority.** Raw, live TUI, and any future Flow presentation
+   remain views over the same `TerminalExecution`, PTY, Rust VT and
+   `TerminalState`. This change creates no second grid/parser/PTY or copied
+   transcript.
+5. **Keep Rust as product authority.** Rust owns presentation policy,
+   viewport/scroll state, selection, hit-testing and renderer intent under
+   ADR-015. Swift remains a thin AppKit, IME, accessibility and Metal adapter;
+   it does not own document height, card geometry or competing scroll state.
+6. **Keep TUI as same-execution alternate-screen takeover.** TUI entry/exit,
+   native mouse reporting and resize continue to follow ADR-004/010/011 and
+   the applicable specifications. Panes and terminal tabs remain isolated.
+
+Raw terminal operation is independent of trusted shell integration. A trusted
+shell cursor-position protocol is a separate scoped contract; it must be
+specified and security-reviewed before implementation and cannot inject
+command text or weaken the ordinary input fence.
+
+### Alternatives considered
+
+1. **Raw-only production presentation with Blocks suspended:** proposed under
+   the product owner's direction. It removes the unaccepted Blocks surface
+   from the v1 terminal path while keeping the same execution and VT authority.
+2. **Raw as default with Flow/Blocks available as an opt-in:** rejected for
+   this proposal because it keeps an unaccepted presentation on the production
+   path and leaves its ownership and reliability unresolved.
+3. **Keep Blocks-first and continue repairing the hybrid presentation:**
+   rejected for the current v1 path after the #1485 candidate failed headed
+   acceptance. Reopening remains possible only through a separate accepted
+   decision and the headed gate below.
+4. **Select RegionGrid from its architecture proposal alone:** rejected. The
+   current candidate's matched parser/scroll results are materially slower
+   than stable `Screen`; a future RegionGrid design must bring new evidence.
+
+### Supersession and affected authority
+
+On acceptance, this amendment supersedes the 2026-11-06 Blocks-first supported-
+shell default and its dependent split-created Flow, tab-wide Flow, and
+Block-scoped direct-input policies while Blocks remain suspended. It also
+supersedes #1482's RegionGrid primary-storage decision to the extent it makes
+RegionGrid or Block-owned regions the production terminal-storage authority.
+ADR-004's single authoritative `TerminalState` invariant remains in force;
+`Screen` remains the production storage baseline until a separately reviewed
+storage decision demonstrates parity. It restates
+the earlier grid-first Raw direction in ADR-009 while making Flow unavailable
+during the suspension. It does not weaken the single-execution,
+VT/history/Unicode/input, Metal, or Rust-ownership invariants.
+
+After acceptance, reconcile ADR-004/010 and update SPEC-008 (and SPEC-024 only if its current text
+conflicts), the M004 market-readiness matrix, the User Guide, and the affected
+Issues before returning #1492 to Ready for its remaining implementation scope.
+Explicitly reconcile #1482, #1484, #1440 and any active candidate that could
+restore Flow. Preserve closed-unmerged PR #1485 and its checkpoint branch as
+evidence; do not alter or transplant that work. The M004 Blocks/composer row
+must be amended through product/roadmap authority rather than silently marked
+green by suspending the feature.
+
+### Flow/Blocks reopening gate
+
+Flow/Blocks may return only after a separate accepted decision and exact
+packaged-candidate evidence demonstrates:
+
+- every command/output body renders once without blank, stale, flashing or
+  in-place redraw frames, including `seq 1 10000` followed by new commands and
+  sustained `seq 1 100000`;
+- stable scrollback, reader anchoring, resize/reflow, selection/copy, pane/tab
+  focus and reconnect, and TUI entry/exit;
+- correct input and IME ownership, with no Raw viewport underneath or beside
+  Flow;
+- latency, frame time, CPU, RSS and throughput at or better than the agreed
+  Raw baseline under matched workloads;
+- headed product-owner acceptance and independent architecture/rendering
+  review.
+
+An architecture-only PR accepting this amendment authorizes downstream
+specification reconciliation and implementation planning. It does not claim
+that Raw acceptance criteria, M002/M003, or the M004 release gates are complete.
 
