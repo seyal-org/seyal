@@ -230,6 +230,7 @@ impl LocalDisplayClient {
         modifiers: TerminalKeyV2Modifiers,
         col: u16,
         row: u16,
+        click_count: u8,
         action_id: u32,
     ) -> Result<(), ClientError> {
         self.require_controller()?;
@@ -244,6 +245,7 @@ impl LocalDisplayClient {
             modifiers,
             col,
             row,
+            click_count,
         };
         if event.validate().is_err() {
             return Err(ClientError::Protocol);

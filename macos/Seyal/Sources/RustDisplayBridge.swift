@@ -10,6 +10,14 @@ final class RustDisplayBridge {
     isTerminalPollResult(result) || result == -4 || result == -18
   }
 
+  nonisolated static func submissionHandle(override: UInt64, focused: UInt64, client: UInt64)
+    -> UInt64
+  {
+    if override != 0 { return override }
+    if focused != 0 { return focused }
+    return client
+  }
+
   typealias FrameHandler = @MainActor (SeyalPreparedFrame) -> Void
   typealias TimelineHandler = @MainActor () -> Void
   typealias HistoryHandler = @MainActor (NativeHistoryRange) -> Void
@@ -479,14 +487,11 @@ final class RustDisplayBridge {
   /// readiness client afterward so poll stays on this bridge's own fd.
   @discardableResult
   func selectPresentedClient() -> Bool {
-    let handle: UInt64
-    if submissionDisplayHandleOverride != 0 {
-      handle = submissionDisplayHandleOverride
-    } else if windowFocusedDisplayHandle != 0 {
-      handle = windowFocusedDisplayHandle
-    } else {
-      handle = clientHandle
-    }
+    let handle = Self.submissionHandle(
+      override: submissionDisplayHandleOverride,
+      focused: windowFocusedDisplayHandle,
+      client: clientHandle
+    )
     guard isConnected, handle != 0 else { return false }
     return seyal_bridge_select(handle) == 0
   }

@@ -413,6 +413,8 @@ pub struct TerminalMouse {
     pub modifiers: TerminalKeyV2Modifiers,
     pub col: u16,
     pub row: u16,
+    /// Left-click count (1–3) on a press; zero for other events/buttons.
+    pub click_count: u8,
 }
 
 impl TerminalMouse {
@@ -428,13 +430,14 @@ impl TerminalMouse {
         out.extend_from_slice(&self.modifiers.bits().to_le_bytes());
         out.extend_from_slice(&self.col.to_le_bytes());
         out.extend_from_slice(&self.row.to_le_bytes());
-        out.extend_from_slice(&[0u8; 4]);
+        out.push(self.click_count);
+        out.extend_from_slice(&[0u8; 3]);
         out
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, FramingError> {
         exact_len(bytes, Self::WIRE_LEN)?;
-        if bytes[28..32] != [0u8; 4] {
+        if bytes[29..32] != [0u8; 3] {
             return Err(FramingError::MalformedPayload);
         }
         let value = Self {
@@ -448,6 +451,7 @@ impl TerminalMouse {
             .ok_or(FramingError::MalformedPayload)?,
             col: u16::from_le_bytes(bytes[24..26].try_into().unwrap()),
             row: u16::from_le_bytes(bytes[26..28].try_into().unwrap()),
+            click_count: bytes[28],
         };
         value.validate()?;
         Ok(value)
@@ -462,7 +466,11 @@ impl TerminalMouse {
             TerminalMouseKind::Move => self.button <= 3,
             TerminalMouseKind::Wheel => (64..=67).contains(&self.button),
         };
-        if button_ok {
+        let click_count_ok = match (self.kind, self.button) {
+            (TerminalMouseKind::Press, 0) => (1..=3).contains(&self.click_count),
+            _ => self.click_count == 0,
+        };
+        if button_ok && click_count_ok {
             Ok(())
         } else {
             Err(FramingError::MalformedPayload)

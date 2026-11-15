@@ -153,7 +153,7 @@ impl ApplicationRoot {
             WorkspaceCommandId::PaneEqualizeFocused => self.equalize_focused(),
             WorkspaceCommandId::PaneEqualizeTab => self.equalize_tab(),
             WorkspaceCommandId::PresentationSetFlow => {
-                self.transition_presentation(PresentationMode::Flow)
+                self.transition_presentation(PresentationMode::Raw)
             }
             WorkspaceCommandId::PresentationSetRaw => {
                 self.transition_presentation(PresentationMode::Raw)
@@ -162,13 +162,7 @@ impl ApplicationRoot {
                 self.transition_presentation(PresentationMode::Tui)
             }
             WorkspaceCommandId::PresentationToggleRaw => {
-                let mode = self.presentation.snapshot().mode;
-                let next = if mode == PresentationMode::Raw {
-                    PresentationMode::Flow
-                } else {
-                    PresentationMode::Raw
-                };
-                self.transition_presentation(next)
+                self.transition_presentation(PresentationMode::Raw)
             }
             WorkspaceCommandId::PresentationToggleTui => {
                 let mode = self.presentation.snapshot().mode;

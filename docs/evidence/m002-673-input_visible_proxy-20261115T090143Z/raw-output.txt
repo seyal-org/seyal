@@ -1,0 +1,15 @@
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass7_input_resize.rs (target/release/deps/pass7_input_resize-528a572fab7c0f8a)
+pass7_input_resize m002_contract gate=input_visible_proxy cohort=1 warmups=20 samples=100 out=/Users/mahboob/.codex/worktrees/8394/seyal-commercial/oss/seyal/.worktrees/seyal-issue-1492/docs/evidence/m002-673-input_visible_proxy-20261115T090143Z/cohorts/1.toml boundary=native_input_admission_to_client_display_cache_proxy performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass7_input_resize.rs (target/release/deps/pass7_input_resize-528a572fab7c0f8a)
+pass7_input_resize m002_contract gate=input_visible_proxy cohort=2 warmups=20 samples=100 out=/Users/mahboob/.codex/worktrees/8394/seyal-commercial/oss/seyal/.worktrees/seyal-issue-1492/docs/evidence/m002-673-input_visible_proxy-20261115T090143Z/cohorts/2.toml boundary=native_input_admission_to_client_display_cache_proxy performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass7_input_resize.rs (target/release/deps/pass7_input_resize-528a572fab7c0f8a)
+pass7_input_resize m002_contract gate=input_visible_proxy cohort=3 warmups=20 samples=100 out=/Users/mahboob/.codex/worktrees/8394/seyal-commercial/oss/seyal/.worktrees/seyal-issue-1492/docs/evidence/m002-673-input_visible_proxy-20261115T090143Z/cohorts/3.toml boundary=native_input_admission_to_client_display_cache_proxy performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass7_input_resize.rs (target/release/deps/pass7_input_resize-528a572fab7c0f8a)
+pass7_input_resize m002_contract gate=input_visible_proxy cohort=4 warmups=20 samples=100 out=/Users/mahboob/.codex/worktrees/8394/seyal-commercial/oss/seyal/.worktrees/seyal-issue-1492/docs/evidence/m002-673-input_visible_proxy-20261115T090143Z/cohorts/4.toml boundary=native_input_admission_to_client_display_cache_proxy performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass7_input_resize.rs (target/release/deps/pass7_input_resize-528a572fab7c0f8a)
+pass7_input_resize m002_contract gate=input_visible_proxy cohort=5 warmups=20 samples=100 out=/Users/mahboob/.codex/worktrees/8394/seyal-commercial/oss/seyal/.worktrees/seyal-issue-1492/docs/evidence/m002-673-input_visible_proxy-20261115T090143Z/cohorts/5.toml boundary=native_input_admission_to_client_display_cache_proxy performance_claim=false

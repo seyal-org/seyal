@@ -294,8 +294,8 @@ impl ShellState {
             }],
             selected_terminal_tab: None,
             allows_implicit_execution_bootstrap: true,
-            presentation_mode: crate::presentation::PresentationMode::Flow,
-            resting_presentation_mode: crate::presentation::PresentationMode::Flow,
+            presentation_mode: crate::presentation::PresentationMode::Raw,
+            resting_presentation_mode: crate::presentation::PresentationMode::Raw,
         };
         let mut pane = pane;
         pane.selected_terminal_tab = pane.terminal_tabs.first().map(|row| row.id);

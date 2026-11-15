@@ -104,6 +104,43 @@ fn encode_terminal_key(key: WireTerminalKey, modes: ModeState) -> Vec<u8> {
 }
 
 impl Runtime {
+    fn submit_raw_input(
+        &mut self,
+        execution_id: crate::ExecutionId,
+        bytes: Vec<u8>,
+    ) -> Result<(), RuntimeError> {
+        let ends_prompt = bytes.iter().any(|byte| matches!(byte, b'\r' | b'\n'));
+        #[cfg(target_os = "macos")]
+        let prompt_anchor = self.entries.get(&execution_id).and_then(|entry| {
+            (entry.prompt_ready
+                && entry.prompt_anchor.is_none()
+                && !entry.execution.terminal().modes().alternate_screen)
+                .then(|| {
+                    let cursor = entry.execution.terminal().cursor();
+                    VisualPos {
+                        col: cursor.col,
+                        row: cursor.row,
+                    }
+                })
+        });
+
+        self.input_ingress(execution_id)?.try_submit(bytes)?;
+
+        #[cfg(target_os = "macos")]
+        if let Some(entry) = self.entries.get_mut(&execution_id) {
+            if entry.prompt_anchor.is_none() {
+                entry.prompt_anchor = prompt_anchor;
+            }
+            if ends_prompt {
+                entry.prompt_ready = false;
+                entry.prompt_anchor = None;
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = ends_prompt;
+        Ok(())
+    }
+
     pub(super) fn fatal_terminal_key_v2(&mut self, token: u64) {
         self.send_error(
             token,
@@ -146,17 +183,8 @@ impl Runtime {
                 return;
             }
         };
-        match self.input_ingress(execution_id) {
-            Ok(ingress) => {
-                if let Err(error) = ingress.try_submit(input.bytes.to_vec()) {
-                    self.send_error(token, direct_input_error(&error), MessageType::Input as u16);
-                }
-            }
-            Err(_) => self.send_error(
-                token,
-                ErrorCode::InvalidExecution,
-                MessageType::Input as u16,
-            ),
+        if let Err(error) = self.submit_raw_input(execution_id, input.bytes.to_vec()) {
+            self.send_error(token, direct_input_error(&error), MessageType::Input as u16);
         }
     }
 
@@ -215,17 +243,8 @@ impl Runtime {
                 return;
             }
         };
-        match self.input_ingress(execution_id) {
-            Ok(ingress) => {
-                if let Err(error) = ingress.try_submit(wrapped) {
-                    self.send_error(token, direct_input_error(&error), MessageType::Paste as u16);
-                }
-            }
-            Err(_) => self.send_error(
-                token,
-                ErrorCode::InvalidExecution,
-                MessageType::Paste as u16,
-            ),
+        if let Err(error) = self.submit_raw_input(execution_id, wrapped) {
+            self.send_error(token, direct_input_error(&error), MessageType::Paste as u16);
         }
     }
 
@@ -277,21 +296,12 @@ impl Runtime {
             return;
         };
         let bytes = encode_terminal_key(key, modes);
-        match self.input_ingress(execution_id) {
-            Ok(ingress) => {
-                if let Err(error) = ingress.try_submit(bytes) {
-                    self.send_error(
-                        token,
-                        direct_input_error(&error),
-                        MessageType::TerminalKey as u16,
-                    );
-                }
-            }
-            Err(_) => self.send_error(
+        if let Err(error) = self.submit_raw_input(execution_id, bytes) {
+            self.send_error(
                 token,
-                ErrorCode::InvalidExecution,
+                direct_input_error(&error),
                 MessageType::TerminalKey as u16,
-            ),
+            );
         }
     }
 
@@ -436,7 +446,7 @@ impl Runtime {
             );
             return;
         }
-        let encoded = {
+        let (encoded, prompt_edit) = {
             let Some(entry) = self.entries.get_mut(&execution_id) else {
                 self.send_error(
                     token,
@@ -461,39 +471,101 @@ impl Runtime {
             };
             let reporting = entry.execution.terminal().modes().mouse_reporting;
             let shift = event.modifiers.bits() & TerminalKeyV2Modifiers::SHIFT.bits() != 0;
-            let kind = match event.kind {
-                TerminalMouseKind::Press => MouseEventKind::Press,
-                TerminalMouseKind::Release => MouseEventKind::Release,
-                TerminalMouseKind::Move => MouseEventKind::Move,
-                TerminalMouseKind::Wheel => MouseEventKind::Wheel,
-            };
-            if mouse_takes_host_override(reporting, shift, entry.mouse_host_anchor, kind) {
-                if let Some((start, end)) =
-                    apply_host_mouse_gesture(&mut entry.mouse_host_anchor, kind, cell)
-                {
-                    entry.execution.set_linear_selection(start, end);
-                }
-                return;
-            }
-            let report_button = if event.kind == TerminalMouseKind::Move && entry.mouse_buttons == 0
-            {
-                3
+            let plain_left_press = event.kind == TerminalMouseKind::Press
+                && event.button == 0
+                && event.modifiers.bits() == 0;
+            let host_left_press = event.kind == TerminalMouseKind::Press
+                && event.button == 0
+                && (reporting == seyal_exec::MouseReporting::Off || shift);
+            let click_selection = if host_left_press && event.click_count == 2 {
+                entry.execution.select_word_at(cell)
+            } else if host_left_press && event.click_count == 3 {
+                entry.execution.select_logical_line_at(cell)
             } else {
-                event.button
+                false
             };
-            encode_mouse_report(
-                MouseReport {
-                    kind,
-                    button: report_button,
-                    shift: false,
-                    alt: event.modifiers.bits() & TerminalKeyV2Modifiers::ALT.bits() != 0,
-                    control: event.modifiers.bits() & TerminalKeyV2Modifiers::CONTROL.bits() != 0,
-                    col: event.col,
-                    row: event.row,
-                },
-                entry.execution.terminal().modes(),
-            )
+            let prompt_delta = if plain_left_press
+                && event.click_count == 1
+                && reporting == seyal_exec::MouseReporting::Off
+                && entry.prompt_ready
+                && !entry.execution.terminal().modes().alternate_screen
+            {
+                let cursor = entry.execution.terminal().cursor();
+                let anchor = *entry.prompt_anchor.get_or_insert(VisualPos {
+                    col: cursor.col,
+                    row: cursor.row,
+                });
+                entry.execution.terminal().prompt_cursor_delta(anchor, cell)
+            } else {
+                None
+            };
+            if click_selection {
+                (None, None)
+            } else if let Some(delta) = prompt_delta {
+                let arrow = if delta < 0 {
+                    b"\x1b[D".as_slice()
+                } else {
+                    b"\x1b[C".as_slice()
+                };
+                let mut bytes = Vec::with_capacity(delta.unsigned_abs() as usize * arrow.len());
+                for _ in 0..delta.unsigned_abs() {
+                    bytes.extend_from_slice(arrow);
+                }
+                (None, Some(bytes))
+            } else {
+                let kind = match event.kind {
+                    TerminalMouseKind::Press => MouseEventKind::Press,
+                    TerminalMouseKind::Release => MouseEventKind::Release,
+                    TerminalMouseKind::Move => MouseEventKind::Move,
+                    TerminalMouseKind::Wheel => MouseEventKind::Wheel,
+                };
+                if mouse_takes_host_override(reporting, shift, entry.mouse_host_anchor, kind) {
+                    if let Some((start, end)) =
+                        apply_host_mouse_gesture(&mut entry.mouse_host_anchor, kind, cell)
+                    {
+                        entry.execution.set_linear_selection(start, end);
+                    }
+                    (None, None)
+                } else {
+                    let report_button =
+                        if event.kind == TerminalMouseKind::Move && entry.mouse_buttons == 0 {
+                            3
+                        } else {
+                            event.button
+                        };
+                    (
+                        encode_mouse_report(
+                            MouseReport {
+                                kind,
+                                button: report_button,
+                                shift: false,
+                                alt: event.modifiers.bits() & TerminalKeyV2Modifiers::ALT.bits()
+                                    != 0,
+                                control: event.modifiers.bits()
+                                    & TerminalKeyV2Modifiers::CONTROL.bits()
+                                    != 0,
+                                col: event.col,
+                                row: event.row,
+                            },
+                            entry.execution.terminal().modes(),
+                        ),
+                        None,
+                    )
+                }
+            }
         };
+        if let Some(bytes) = prompt_edit {
+            if !bytes.is_empty()
+                && let Err(error) = self.submit_raw_input(execution_id, bytes)
+            {
+                self.send_error(
+                    token,
+                    direct_input_error(&error),
+                    MessageType::TerminalMouse as u16,
+                );
+            }
+            return;
+        }
         let Some(bytes) = encoded else {
             return;
         };
@@ -718,25 +790,15 @@ impl Runtime {
             );
             return;
         };
-        if !bytes.is_empty() {
-            match self.input_ingress(execution_id) {
-                Ok(ingress) => {
-                    if let Err(error) = ingress.try_submit(bytes) {
-                        self.send_error_detail(
-                            token,
-                            direct_input_error(&error),
-                            MessageType::TerminalKeyV2 as u16,
-                            key.action_id,
-                        );
-                    }
-                }
-                Err(_) => self.send_error_detail(
-                    token,
-                    ErrorCode::InvalidExecution,
-                    MessageType::TerminalKeyV2 as u16,
-                    key.action_id,
-                ),
-            }
+        if !bytes.is_empty()
+            && let Err(error) = self.submit_raw_input(execution_id, bytes)
+        {
+            self.send_error_detail(
+                token,
+                direct_input_error(&error),
+                MessageType::TerminalKeyV2 as u16,
+                key.action_id,
+            );
         }
     }
 
