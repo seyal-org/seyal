@@ -406,6 +406,13 @@ impl PrimaryBlockEngine {
         u32::try_from(header.saturating_add(output)).unwrap_or(u32::MAX)
     }
 
+    pub(crate) fn region_row_count(&self, region_id: u64) -> u32 {
+        self.store
+            .region(RegionId(region_id))
+            .map(|grid| u32::try_from(grid.line_spine.len()).unwrap_or(u32::MAX))
+            .unwrap_or(0)
+    }
+
     pub(crate) fn content_total_height(&self) -> u64 {
         self.blocks
             .iter()

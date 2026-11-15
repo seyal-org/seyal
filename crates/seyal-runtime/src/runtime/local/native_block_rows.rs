@@ -40,6 +40,21 @@ pub(super) fn native_block_wire_rows_from(
             .find(|block| block.block_id.0 == block_id)
             .map(|block| block.output.0)
     })?;
+    native_region_wire_rows_from(entry, output, max_lines, skip_leads, start_sealed_index)
+}
+
+/// Read canonical RegionGrid rows by RegionId, independent of Block card
+/// identity. Viewport clips address both header and output Regions this way.
+pub(super) fn native_region_wire_rows_from(
+    entry: &Entry,
+    output: u64,
+    max_lines: usize,
+    skip_leads: u32,
+    start_sealed_index: usize,
+) -> Option<(Vec<WireRow>, bool)> {
+    if output == 0 {
+        return None;
+    }
     let terminal = entry.execution.terminal();
     let cols_n = terminal.cols();
 
@@ -48,6 +63,21 @@ pub(super) fn native_block_wire_rows_from(
     for (col, row, cell) in live {
         let line_id = terminal.line_id(row).unwrap_or(LineId(1));
         live_by_line.entry(line_id.0).or_default().push((col, cell));
+    }
+
+    // `first_row` is an absolute RegionGrid row offset. Once it reaches past
+    // sealed ownership, skip the corresponding prefix of the live window too;
+    // treating it as a sealed-only index returned row zero for every live clip.
+    let sealed_count = terminal.primary_sealed_row_count(output) as usize;
+    if start_sealed_index >= sealed_count {
+        let mut live_skip = start_sealed_index - sealed_count;
+        while live_skip > 0 {
+            let Some(first) = live_by_line.keys().next().copied() else {
+                break;
+            };
+            live_by_line.remove(&first);
+            live_skip -= 1;
+        }
     }
 
     // Finding E: address by sealed-row index (plan clipping / source anchor).

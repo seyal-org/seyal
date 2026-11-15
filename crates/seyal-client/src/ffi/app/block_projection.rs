@@ -728,6 +728,7 @@ mod tests {
                     first_row: 2,
                     row_count: 3,
                     sealed_rows: 0,
+                    header_rows: 0,
                 }],
             };
         });
@@ -820,6 +821,7 @@ mod tests {
                     first_row: 2,
                     row_count: 3,
                     sealed_rows: 100,
+                    header_rows: 0,
                 }],
             };
         });
@@ -913,6 +915,7 @@ mod tests {
                     first_row: 0,
                     row_count: 0,
                     sealed_rows: 30,
+                    header_rows: 0,
                 }],
             };
         });

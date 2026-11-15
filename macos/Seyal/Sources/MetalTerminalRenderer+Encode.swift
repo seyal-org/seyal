@@ -278,6 +278,32 @@ extension MetalTerminalRenderer {
                 instanceCount: instanceCount
             )
         }
+        if let blockSurfaceBuffer, blockSurfaceInstanceCount > 0 {
+            var surfaceMode: UInt32 = 0
+            encoder.setVertexBytes(
+                &surfaceMode,
+                length: MemoryLayout<UInt32>.stride,
+                index: 2
+            )
+            encoder.setFragmentBytes(
+                &surfaceMode,
+                length: MemoryLayout<UInt32>.stride,
+                index: 2
+            )
+            encoder.setVertexBuffer(blockSurfaceBuffer, offset: 0, index: 0)
+            var surfaceOrigin = SIMD2<Float>.zero
+            encoder.setVertexBytes(
+                &surfaceOrigin,
+                length: MemoryLayout<SIMD2<Float>>.stride,
+                index: 4
+            )
+            encoder.drawPrimitives(
+                type: .triangle,
+                vertexStart: 0,
+                vertexCount: 6,
+                instanceCount: blockSurfaceInstanceCount
+            )
+        }
         for region in historyRegions where region.instanceCount > 0 && atlasTexture != nil {
             encoder.setVertexBuffer(region.buffer, offset: 0, index: 0)
             var regionOrigin = region.origin
@@ -301,8 +327,9 @@ extension MetalTerminalRenderer {
             // cell-sized backgrounds first, then glyphs. A single composited
             // mode-2 pass would let a continuation instance cover the right
             // half of a width-two lead.
+            let flowBackgroundMode: UInt32 = presentationPlan.mode == .flow ? (1 << 2) : 0
             for pass: UInt32 in [0, 1] {
-                var historyMode = pass
+                var historyMode = pass | flowBackgroundMode
                 encoder.setVertexBytes(
                     &historyMode,
                     length: MemoryLayout<UInt32>.stride,
@@ -432,6 +459,18 @@ extension MetalTerminalRenderer {
     }
 
     func releaseDedicatedResources() {
+        presentationResourceGeneration &+= 1
+        pendingFlowFrame = nil
+        activeFlowDisplayHandle = 0
+        activeFlowRequestID = 0
+        activeFlowRegions = []
+        flowRetryDisplayHandle = 0
+        flowRetryEpoch = 0
+        flowInvalidPageRetries = 0
+        flowCommitFailures = 0
+        blockSurfaceDecorations = []
+        blockSurfaceBuffer = nil
+        blockSurfaceInstanceCount = 0
         instanceBuffer = nil
         instanceCount = 0
         historyRegions.removeAll()

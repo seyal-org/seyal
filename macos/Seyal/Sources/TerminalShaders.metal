@@ -51,7 +51,7 @@ vertex TerminalVertexOut seyal_terminal_vertex(
     const float2 local = corners[vertex_id];
     float2 size = instance.size;
     constexpr uint wide_glyph_flag = 1u << 3;
-    if (render_mode != 0u && (instance.flags & wide_glyph_flag) != 0u) {
+    if ((render_mode & 0x3u) != 0u && (instance.flags & wide_glyph_flag) != 0u) {
         size.x *= 2.0;
     }
     const float2 pixel = instance.origin + instance_offset + local * size;
@@ -82,10 +82,21 @@ fragment float4 seyal_terminal_fragment(
     constexpr uint underline_flag = 1u << 1;
     constexpr uint cursor_flag = 1u << 2;
     constexpr uint glyph_pass = 1u;
+    constexpr uint pass_mask = 0x3u;
+    constexpr uint flow_transparent_default_background = 1u << 2;
+    const uint pass = render_mode & pass_mask;
+    const bool flow_background = (render_mode & flow_transparent_default_background) != 0u;
 
-    if (render_mode == glyph_pass
+    if (pass == glyph_pass
         && (in.flags & (glyph_flag | underline_flag)) == 0u) {
         discard_fragment();
+    }
+
+    // Rust Block surfaces are drawn before their RegionGrid content. In Flow,
+    // a cell with no explicit VT background must leave those surfaces visible;
+    // resolving it to the terminal canvas color here erases every card/header.
+    if (flow_background && pass == 0u && in.background == 0u && (in.flags & cursor_flag) == 0u) {
+        return float4(0.0);
     }
 
     float4 foreground = unpack_rgba8(in.foreground == 0u ? default_colors.x : in.foreground);
@@ -97,16 +108,16 @@ fragment float4 seyal_terminal_fragment(
     }
 
     float4 color = background;
-    if ((render_mode == 1u || render_mode == 2u)
+    if ((pass == 1u || pass == 2u)
         && (in.flags & glyph_flag) != 0u) {
         const float coverage = glyph_atlas.sample(glyph_sampler, in.uv, in.atlas_slice).r;
-        if (render_mode == glyph_pass) {
+        if (pass == glyph_pass) {
             return float4(foreground.rgb, coverage);
         }
         color = mix(color, foreground, coverage);
     }
     if ((in.flags & underline_flag) != 0u && in.local.y >= 0.88) {
-        if (render_mode == glyph_pass) {
+        if (pass == glyph_pass) {
             return float4(foreground.rgb, 1.0);
         }
         color = foreground;

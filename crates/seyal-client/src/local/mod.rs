@@ -21,11 +21,12 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::DisplayCache,
     local_ipc::framing::{
-        encode_frame, BlockNativeRegions, BlockTimeline, ComposerEligibility, ComposerResult,
-        ComposerResultCode, ComposerStatus, ComposerTarget, ComposerTargetMode,
-        CreateExecutionResult, ErrorCode, ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot,
-        Lifecycle, MessageType, Role, SessionOffer, SessionOverlayWire, SessionStatus,
-        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        encode_frame, BlockNativeRegions, BlockTimeline, BlockViewportContentClip,
+        BlockViewportContentRequest, ComposerEligibility, ComposerResult, ComposerResultCode,
+        ComposerStatus, ComposerTarget, ComposerTargetMode, CreateExecutionResult, ErrorCode,
+        ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot, Lifecycle, MessageType, Role,
+        SessionOffer, SessionOverlayWire, SessionStatus, TerminateExecutionResult, HEADER_LEN,
+        MAX_FRAME_PAYLOAD,
     },
     pass8::BlockState,
     AttachmentId, ExecutionId,
@@ -157,7 +158,7 @@ pub struct LocalDisplayClient {
     /// Last plan-build paint identity: `(block_id, header, output, sealed_rows)`.
     /// Live `row_count` ticks that only grow heights do not bump
     /// `presentation_epoch` (#1484 P0 seq / HISTORY retain).
-    pub(crate) last_plan_native_paint_identity: Vec<(u64, u64, u64, u32)>,
+    pub(crate) last_plan_native_paint_identity: Vec<(u64, u64, u64)>,
     pub(crate) block_viewport_scroll_anchor: crate::viewport::ScrollAnchor,
     /// AppKit-reported visible window height in presentation rows. When set,
     /// overrides PTY geometry for plan window selection (G5 AbsoluteY sync).
@@ -176,6 +177,8 @@ pub struct LocalDisplayClient {
     /// for validation and never used as a response lookup key.
     pub(crate) history_ranges: HashMap<(u64, u64), HistoryRangeSnapshot>,
     pub(crate) history_requests: HashMap<u64, (u64, u64, u64)>,
+    /// Correlates one bounded viewport content batch with its Rust plan generation.
+    pub(crate) block_viewport_content_requests: HashMap<u64, (u64, Vec<BlockViewportContentClip>)>,
     pub(crate) next_history_request_id: u64,
     pub(crate) copied_text: Vec<u8>,
     /// Connection-local SPEC-006 §21.5 sent/highest-error bounds. Zero means none.
@@ -310,10 +313,30 @@ impl LocalDisplayClient {
         self.block_viewport_index.total_height()
     }
 
+    pub fn block_viewport_header_rows(&self, block_id: u64) -> Option<u32> {
+        self.block_native_regions
+            .records
+            .iter()
+            .find(|record| record.block_id == block_id)
+            .map(|record| record.header_rows)
+    }
+
     /// Rebuild the per-display viewport index + plan from the already-committed
     /// `block_native_regions` map. Callers must assign the map first so plan
     /// clips see the new RegionIds (#1484 FourPane type-48 lag).
     pub(crate) fn apply_block_native_regions_to_viewport(&mut self) {
+        // Convert a reader's absolute presentation offset into a stable source
+        // anchor before any Block height changes. Keeping AbsoluteY here makes
+        // output growth above the viewport silently move the reader to
+        // different content.
+        let source_anchor = match self.block_viewport_scroll_anchor {
+            crate::viewport::ScrollAnchor::AbsoluteY(y) => self
+                .block_viewport_index
+                .block_row_at(y)
+                .map(|(block_id, row)| crate::viewport::ScrollAnchor::BlockRow { block_id, row }),
+            crate::viewport::ScrollAnchor::LiveEnd
+            | crate::viewport::ScrollAnchor::BlockRow { .. } => None,
+        };
         // Height = sealed ownership rows + live on-window rows for each Block.
         // Ordinary output updates heights in place (O(log B) per Block) when
         // timeline order is unchanged; structural reorder still replace_all.
@@ -323,8 +346,10 @@ impl LocalDisplayClient {
             .iter()
             .map(|record| {
                 let height = record
-                    .sealed_rows
-                    .saturating_add(u32::from(record.row_count));
+                    .header_rows
+                    .saturating_add(record.sealed_rows)
+                    .saturating_add(u32::from(record.row_count))
+                    .saturating_add(crate::viewport::BLOCK_SPACING_ROWS);
                 (record.block_id, height)
             })
             .collect();
@@ -342,14 +367,20 @@ impl LocalDisplayClient {
         } else {
             self.block_viewport_index.replace_all(incoming);
         }
-        let next_identity: Vec<(u64, u64, u64, u32)> = self
+        if let Some(anchor) = source_anchor {
+            self.block_viewport_scroll_anchor = anchor;
+        }
+        let next_identity: Vec<(u64, u64, u64)> = self
             .block_native_regions
             .records
             .iter()
-            .map(|r| (r.block_id, r.header_region, r.output_region, r.sealed_rows))
+            .map(|r| (r.block_id, r.header_region, r.output_region))
             .collect();
-        // Bump presentation_epoch only when sealed RegionIds / ownership change.
-        // Live row_count growth keeps epoch stable so Metal retains HISTORY.
+        // RegionId changes alter canonical Block ownership and require a new
+        // presentation generation. Row growth/sealing within the same RegionGrid
+        // changes content and extent, not structural ownership; include those
+        // changes through the plan geometry/content generation without forcing
+        // Metal to discard its complete Flow frame.
         let bump_epoch = next_identity != self.last_plan_native_paint_identity
             || self.block_viewport_plan.is_none();
         self.last_plan_native_paint_identity = next_identity;
@@ -383,6 +414,76 @@ impl LocalDisplayClient {
         }
     }
 
+    /// Resize the Rust-owned viewport while preserving its existing anchor.
+    /// Native hosts report drawable height through this method; they do not
+    /// derive a replacement scroll position from an AppKit document offset.
+    pub fn set_block_viewport_window_rows(&mut self, window_rows: u32) {
+        let next_window = window_rows.max(1);
+        if self.block_viewport_window_rows == Some(next_window)
+            && self.block_viewport_plan.is_some()
+        {
+            return;
+        }
+        self.block_viewport_window_rows = Some(next_window);
+        self.rebuild_block_viewport_plan_with_epoch(false);
+    }
+
+    /// Apply a native scroll-event delta to the Rust-owned Flow viewport.
+    /// Positive deltas move toward later document rows; negative deltas move
+    /// toward the Block onset. Returning to the maximum offset restores LiveEnd.
+    pub fn scroll_block_viewport_by(&mut self, delta_rows: i32, window_rows: u32) -> u64 {
+        let max_y = self
+            .block_viewport_index
+            .total_height()
+            .saturating_sub(u64::from(window_rows.max(1)));
+        let current_y = match self.block_viewport_scroll_anchor {
+            crate::viewport::ScrollAnchor::LiveEnd => max_y,
+            crate::viewport::ScrollAnchor::AbsoluteY(y) => y.min(max_y),
+            crate::viewport::ScrollAnchor::BlockRow { block_id, row } => self
+                .block_viewport_index
+                .y_of(block_id)
+                .unwrap_or(0)
+                .saturating_add(u64::from(row))
+                .min(max_y),
+        };
+        let next_y = if delta_rows >= 0 {
+            current_y
+                .saturating_add(u64::from(delta_rows as u32))
+                .min(max_y)
+        } else {
+            current_y.saturating_sub(u64::from(delta_rows.unsigned_abs()))
+        };
+        self.set_block_viewport_scroll_anchor(next_y == max_y, next_y, window_rows);
+        next_y
+    }
+
+    /// Apply a user-driven native scroller position and convert it into a
+    /// stable Rust anchor. Resizes and routine plan publication use
+    /// `set_block_viewport_window_rows` instead of this input action.
+    pub fn scroll_block_viewport_to(&mut self, absolute_y: u64, window_rows: u32) -> u64 {
+        let window_rows = window_rows.max(1);
+        let max_y = self
+            .block_viewport_index
+            .total_height()
+            .saturating_sub(u64::from(window_rows));
+        let next_y = absolute_y.min(max_y);
+        let next_anchor = if next_y == max_y {
+            crate::viewport::ScrollAnchor::LiveEnd
+        } else if let Some((block_id, row)) = self.block_viewport_index.block_row_at(next_y) {
+            crate::viewport::ScrollAnchor::BlockRow { block_id, row }
+        } else {
+            crate::viewport::ScrollAnchor::AbsoluteY(next_y)
+        };
+        if self.block_viewport_scroll_anchor != next_anchor
+            || self.block_viewport_window_rows != Some(window_rows)
+        {
+            self.block_viewport_scroll_anchor = next_anchor;
+            self.block_viewport_window_rows = Some(window_rows);
+            self.rebuild_block_viewport_plan_with_epoch(false);
+        }
+        next_y
+    }
+
     /// Rebuild the Metal-facing plan from the current per-display index (C).
     /// `bump_epoch` is false for scroll-only AbsoluteY/LiveEnd updates so
     /// Metal can retain overlapping HISTORY pages across near-end scrolls.
@@ -409,6 +510,7 @@ impl LocalDisplayClient {
                     r.block_id,
                     r.header_region,
                     r.output_region,
+                    r.header_rows,
                     r.sealed_rows,
                     r.first_row,
                     r.row_count,
@@ -645,6 +747,61 @@ impl LocalDisplayClient {
         self.flush_control_write()
     }
 
+    /// Request all visible RegionGrid clips as one correlated Runtime response.
+    pub fn request_block_viewport_content(
+        &mut self,
+        plan_generation: u64,
+    ) -> Result<u64, ClientError> {
+        self.require_controller()?;
+        if plan_generation == 0 {
+            return Err(ClientError::Protocol);
+        }
+        let plan = self
+            .block_viewport_plan
+            .as_ref()
+            .ok_or(ClientError::Display)?;
+        if plan.content_generation != plan_generation || plan.clipping.is_empty() {
+            return Err(ClientError::Display);
+        }
+        let clips = plan
+            .clipping
+            .iter()
+            .map(|clip| BlockViewportContentClip {
+                region_id: clip.region_id,
+                first_row: clip.first_row,
+                row_count: clip.row_count,
+            })
+            .collect::<Vec<_>>();
+        if let Some((request_id, _)) =
+            self.block_viewport_content_requests
+                .iter()
+                .find(|(_, (generation, existing_clips))| {
+                    *generation == plan_generation && *existing_clips == clips
+                })
+        {
+            return Ok(*request_id);
+        }
+        let request_id = self.next_history_request_id;
+        self.next_history_request_id = request_id.checked_add(1).unwrap_or(1);
+        let request = BlockViewportContentRequest {
+            attachment_id: self.attachment_id,
+            request_id,
+            plan_generation,
+            clips,
+        };
+        let payload = request.try_encode().map_err(|_| ClientError::Protocol)?;
+        self.admit_frame(
+            encode_frame(MessageType::BlockViewportContentRequest, &payload),
+            input_resize::OutboundKind::HistoryRangeRequest,
+        )?;
+        self.block_viewport_content_requests
+            .retain(|_, (generation, _)| *generation >= plan_generation);
+        self.block_viewport_content_requests
+            .insert(request_id, (plan_generation, request.clips));
+        self.flush_control_write()?;
+        Ok(request_id)
+    }
+
     pub fn next_history_request_id(&self) -> u64 {
         self.next_history_request_id
     }
@@ -790,6 +947,7 @@ fn reconstruction_probe_client_with_stream(
         next_composer_request_id: 1,
         history_ranges: HashMap::new(),
         history_requests: HashMap::new(),
+        block_viewport_content_requests: HashMap::new(),
         next_history_request_id: 1,
         copied_text: Vec::new(),
         last_admitted_v2_action_id: 0,

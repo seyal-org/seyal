@@ -183,6 +183,50 @@ fn sealed_native_cells_resolve_from_history_store_without_spill() {
 }
 
 #[test]
+fn sealed_sparse_tab_output_preserves_original_column_positions() {
+    use crate::primary_blocks::types::BlockId;
+
+    let mut terminal = TerminalState::new(32, 2).expect("terminal");
+    let block = terminal
+        .core
+        .primary
+        .engine
+        .open_block(BlockId(1490))
+        .unwrap()
+        .clone();
+    let output = block.output.0;
+    terminal
+        .feed(b"Applications\tMovies\tgo")
+        .expect("feed terminal tabs");
+    // The macOS host resizes the initial terminal after the prompt appears.
+    // This reflow must preserve VT tab columns before output is sealed.
+    terminal.resize(90, 4).expect("resize terminal after tabs");
+    let live = terminal.primary_live_region_cells(output);
+    assert!(live
+        .iter()
+        .any(|(col, _, cell)| *col == 16 && cell.character == 'M'));
+    assert!(live
+        .iter()
+        .any(|(col, _, cell)| *col == 24 && cell.character == 'g'));
+    terminal
+        .feed(b"\r\n\r\n\r\n\r\n")
+        .expect("scroll resized terminal tabs");
+
+    let mut owned = Vec::new();
+    terminal.primary_visit_sealed_region_rows(output, |_, cells| {
+        owned.extend(cells.iter().map(|(col, cell)| (*col, cell.character)));
+        true
+    });
+    assert_eq!(owned.first(), Some(&(0, 'A')));
+    assert_eq!(
+        owned.iter().find(|(col, _)| *col == 16),
+        Some(&(16, 'M')),
+        "tab-separated output must retain its physical columns after resize and seal"
+    );
+    assert_eq!(owned.iter().find(|(col, _)| *col == 24), Some(&(24, 'g')));
+}
+
+#[test]
 fn sealed_region_visitor_is_ordered_and_early_stoppable() {
     use crate::history::{HistoryBreakAfter, HistoryLine};
     use crate::primary_blocks::types::BlockId;

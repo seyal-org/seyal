@@ -24,6 +24,21 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     /// transcript frame replaces the order and membership atomically.
     var historyRegions: [UInt64: HistoryRenderRegion] = [:]
     var historyRegionOrder: [UInt64] = []
+    var blockSurfaceDecorations: [MetalBlockSurfaceDecoration] = []
+    var blockSurfaceBuffer: MTLBuffer?
+    var blockSurfaceInstanceCount = 0
+    /// A complete Flow generation is installed only after all of its bounded
+    /// RegionGrid pages have arrived. The current drawable keeps the old state.
+    var pendingFlowFrame: PendingFlowFrame?
+    var activeFlowDisplayHandle: UInt64 = 0
+    var activeFlowRequestID: UInt64 = 0
+    var activeFlowRegions: [NativeTranscriptRegion] = []
+    var flowRetryDisplayHandle: UInt64 = 0
+    var flowRetryEpoch: UInt64 = 0
+    var flowInvalidPageRetries = 0
+    var flowCommitFailures = 0
+    /// Invalidates cached viewport projection after disposable GPU resources are released.
+    var presentationResourceGeneration: UInt64 = 0
     var liveTail = LiveTailRenderState()
     var presentationPlan = RendererPresentationPlan.fullPane(.raw)
     var currentRows = 0
@@ -445,6 +460,36 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             needsPresent = instanceBuffer != nil || !presentationPlan.drawsLiveGrid
             return
         }
+        if let existing = historyRegions[historyRange.blockID],
+           existing.atlasGeneration == glyphAtlas.stats.resets,
+           let source = existing.historySource,
+           source.historyRange.blockID == historyRange.blockID,
+           source.historyRange.sourceDisplayHandle == historyRange.sourceDisplayHandle,
+           source.historyRange.rows == historyRange.rows,
+           source.region.historyRows == region.historyRows,
+           source.backingScale == backingScale,
+           existing.instanceCount == cells
+        {
+            // Viewport generations often change because a neighboring/live
+            // Block changed. Keep this sealed Block's prepared glyph instances
+            // and update only its Rust-selected translation/clip and source
+            // metadata. Equality is over the bounded VT row payload, so a
+            // genuine content edit still rebuilds this region.
+            historyRegions[historyRange.blockID] = HistoryRenderRegion(
+                buffer: existing.buffer,
+                instanceCount: existing.instanceCount,
+                origin: SIMD2<Float>(Float(region.origin.x), Float(region.origin.y)),
+                clip: region.clip,
+                historySource: DeferredHistoryPrepare(
+                    historyRange: historyRange,
+                    region: region,
+                    backingScale: backingScale
+                ),
+                atlasGeneration: existing.atlasGeneration
+            )
+            needsPresent = true
+            return
+        }
         let metrics = glyphAtlas.metrics(backingScale: max(backingScale, 1))
         let byteCount = cells * MemoryLayout<TerminalInstance>.stride
         guard let buffer = device.makeBuffer(length: byteCount, options: .storageModeShared) else {
@@ -527,13 +572,6 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             || !presentationPlan.drawsLiveGrid
     }
 
-    /// Shell-exit retain: stop treating in-flight LiveTail frames as a gate so
-    /// deferred HISTORY pages become inspectable glyphs (#1484 false-green).
-    func forceFlushHistoryPreparesForRetain() {
-        framesInFlight = 0
-        flushDeferredHistoryPrepares()
-    }
-
     func flushDeferredHistoryPrepares() {
         guard framesInFlight == 0, !deferredHistoryPrepares.isEmpty else { return }
         let pending = deferredHistoryPrepares
@@ -567,7 +605,62 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         }
     }
 
+    /// Install visible Block card and header surfaces from the Rust viewport
+    /// plan. The prepared buffer is disposable renderer state; Block order,
+    /// row extents and visible coordinates remain Rust-owned.
+    func setBlockSurfaceDecorations(_ decorations: [MetalBlockSurfaceDecoration]) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard decorations.count <= 512 else { return }
+        guard decorations != blockSurfaceDecorations else { return }
+        blockSurfaceDecorations = decorations
+        guard !decorations.isEmpty else {
+            blockSurfaceBuffer = nil
+            blockSurfaceInstanceCount = 0
+            needsPresent = true
+            requestPresent()
+            return
+        }
+        let instances = decorations.map { decoration in
+            TerminalInstance(
+                origin: SIMD2<Float>(Float(decoration.rect.minX), Float(decoration.rect.minY)),
+                size: SIMD2<Float>(Float(decoration.rect.width), Float(decoration.rect.height)),
+                uvRect: SIMD4<Float>(repeating: 0),
+                foreground: 0,
+                background: decoration.color,
+                flags: 0,
+                atlasSlice: 0
+            )
+        }
+        let byteCount = instances.count * MemoryLayout<TerminalInstance>.stride
+        guard let buffer = device.makeBuffer(
+            bytes: instances,
+            length: byteCount,
+            options: .storageModeShared
+        ) else {
+            blockSurfaceDecorations = []
+            blockSurfaceBuffer = nil
+            blockSurfaceInstanceCount = 0
+            return
+        }
+        buffer.label = "Seyal Rust Block Surface Decorations"
+        blockSurfaceBuffer = buffer
+        blockSurfaceInstanceCount = instances.count
+        needsPresent = true
+        requestPresent()
+    }
+
     func setPresentationPlan(_ plan: RendererPresentationPlan) {
+        if plan.mode != .flow {
+            pendingFlowFrame = nil
+            activeFlowDisplayHandle = 0
+            activeFlowRequestID = 0
+            activeFlowRegions = []
+            flowRetryDisplayHandle = 0
+            flowRetryEpoch = 0
+            flowInvalidPageRetries = 0
+            flowCommitFailures = 0
+            setBlockSurfaceDecorations([])
+        }
         presentationPlan = plan
         // Flow must be allowed to submit a clear-only frame so a prior live
         // grid cannot remain on the drawable after the mode fence.
@@ -688,6 +781,9 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         deferredHistoryPrepares = deferredHistoryPrepares.filter { keep.contains($0.key) }
         historyRegionOrder = ids
         needsPresent = instanceBuffer != nil
+            || !blockSurfaceDecorations.isEmpty
+            || !liveTail.order.isEmpty
+            || !presentationPlan.drawsLiveGrid
     }
 
     func removeHistoryRegions(except ids: Set<UInt64>) {
@@ -719,15 +815,19 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     func present(drawable: any CAMetalDrawable, presentsToDisplay: Bool = true) -> Bool {
         dispatchPrecondition(condition: .onQueue(.main))
         drainGPUCompletionsIfNeeded()
-        reencodeHistoryRegionsForCurrentAtlas()
         guard visible,
               persistentDisplayFailure == nil,
               needsPresent,
-              framesInFlight == 0,
-              hasPresentablePreparedState
+              framesInFlight == 0
         else {
             return false
         }
+        commitPendingFlowFrameIfReady()
+        // History preparation can rewrite atlas-backed buffers. Do not even
+        // inspect/re-encode that state until the previous GPU command buffer
+        // has completed and released its resource reads.
+        reencodeHistoryRegionsForCurrentAtlas()
+        guard hasPresentablePreparedState else { return false }
         guard let commandBuffer = makeCommandBuffer(
             target: drawable.texture,
             instanceBuffer: instanceBuffer,

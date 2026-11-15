@@ -75,7 +75,27 @@ enum BlockAccessibilityText {
 }
 
 final class TranscriptClipView: NSClipView {
+    /// Flow scroll deltas are forwarded to the Rust BlockViewportPlan.
+    /// Raw and TUI retain native NSScrollView behavior.
+    var onFlowScroll: ((NSEvent) -> Bool)?
+    var onFlowMouseDown: ((NSEvent) -> Bool)?
+
     override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        return bounds.contains(local) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if onFlowMouseDown?(event) == true { return }
+        super.mouseDown(with: event)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if onFlowScroll?(event) == true { return }
+        super.scrollWheel(with: event)
+    }
 }
 
 final class IdentityButton: NSButton {
@@ -172,8 +192,8 @@ final class CommandBlockView: NSView {
     private let interactButton = NSButton(title: "Interact", target: nil, action: nil)
     private let seam = NSView()
     private var state: UInt16
+    private var headerHeight: NSLayoutConstraint!
     private var bodyHeight: NSLayoutConstraint!
-    private var seamTopConstraint: NSLayoutConstraint!
     private var statusTrailingToHeader: NSLayoutConstraint!
     private var statusTrailingToInteractButton: NSLayoutConstraint!
     private var theme: NativeTheme?
@@ -248,8 +268,7 @@ final class CommandBlockView: NSView {
         bodyHeight = body.heightAnchor.constraint(
             equalToConstant: max(cellHeight, 1) * CGFloat(max(lines, 1))
         )
-        // Rust owns session classification; SSH Blocks retain the normal Block geometry.
-        seamTopConstraint = seam.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 12)
+        headerHeight = header.heightAnchor.constraint(equalToConstant: max(cellHeight, 1))
         statusTrailingToHeader = status.trailingAnchor.constraint(equalTo: header.trailingAnchor)
         statusTrailingToInteractButton = status.trailingAnchor.constraint(
             lessThanOrEqualTo: interactButton.leadingAnchor,
@@ -259,7 +278,7 @@ final class CommandBlockView: NSView {
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.topAnchor.constraint(equalTo: topAnchor),
-            header.heightAnchor.constraint(greaterThanOrEqualToConstant: 22),
+            headerHeight,
             self.prompt.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             self.prompt.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             command.leadingAnchor.constraint(equalTo: self.prompt.trailingAnchor, constant: 8),
@@ -272,12 +291,12 @@ final class CommandBlockView: NSView {
             command.trailingAnchor.constraint(lessThanOrEqualTo: status.leadingAnchor, constant: -12),
             body.leadingAnchor.constraint(equalTo: command.leadingAnchor),
             body.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-            body.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            body.topAnchor.constraint(equalTo: header.bottomAnchor),
+            body.bottomAnchor.constraint(equalTo: bottomAnchor),
             bodyHeight,
             seam.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             seam.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-            seamTopConstraint,
-            seam.bottomAnchor.constraint(equalTo: bottomAnchor),
+            seam.bottomAnchor.constraint(equalTo: body.bottomAnchor),
             seam.heightAnchor.constraint(equalToConstant: 1),
         ])
     }
@@ -380,6 +399,12 @@ final class CommandBlockView: NSView {
         if expandOnly, height + 0.5 < bodyHeight.constant { return }
         guard abs(bodyHeight.constant - height) > 0.5 else { return }
         bodyHeight.constant = height
+    }
+
+    func setHeaderRows(_ rows: Int, cellHeight: CGFloat) {
+        let height = max(cellHeight, 1) * CGFloat(max(rows, 1))
+        guard abs(headerHeight.constant - height) > 0.5 else { return }
+        headerHeight.constant = height
     }
 
     func updatePresentation(prompt: String, title: String, detail: String, state: UInt16, session: Bool) {

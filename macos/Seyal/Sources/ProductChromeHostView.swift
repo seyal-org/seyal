@@ -22,8 +22,6 @@ final class ProductChromeHostView: NSView {
     /// composer, instead of top-packing with a dead zone below it (#1426
     /// follow-up / Warp-like Block stacking). Height is driven explicitly by
     /// `syncTranscriptDocumentSize`, never by NSStackView distribution.
-    let transcriptLeadingSpacer = NSView()
-    var transcriptLeadingSpacerHeight: NSLayoutConstraint!
     var lastTranscriptViewportSize = CGSize.zero
     var hasPendingTranscriptViewportSync = false
     let composer: ComposerBridgeView
@@ -68,16 +66,15 @@ final class ProductChromeHostView: NSView {
     /// Live-end follow for Flow transcript. New Blocks and async history-body
     /// growth keep the viewport pinned only while the user was already at the
     /// live end; intentional history scroll must not be yanked forward.
-    var followingLiveEnd = true
+    var flowScrollRowRemainder: CGFloat = 0
     var isProgrammaticTranscriptScroll = false
+    var lastObservedTranscriptOriginY: CGFloat = 0
     var isReconcilingChrome = false
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
     var chromeNeedsReconcile = false
     var blockCards: [UInt64: CommandBlockView] = [:]
     var composerDockConstraints: [NSLayoutConstraint] = []
     var transcriptRelayBottomConstraint: NSLayoutConstraint?
-    let transcriptTopSpacer = NSView(frame: .zero)
-    var transcriptTopSpacerHeight: NSLayoutConstraint!
     var relayTarget: (
         blockID: UInt64,
         generation: UInt64,
@@ -95,7 +92,6 @@ final class ProductChromeHostView: NSView {
     var lastSyncedNativeRegionRows: UInt64 = .max
     /// Settled AppKit body clips for plan placement. Refreshed only on layout
     /// settle — never rebuilt on every Candidate-D tick (#1484 echo lag/flicker).
-    var cachedChromeBodyClips: [UInt64: NSRect] = [:]
     /// Card chrome identity (ids/flags/title/projection). Generation-only
     /// reconciles must not rebuildBlocks / reupload HISTORY (#1484 flicker).
     var lastBlocksChromeSignature: UInt64 = 0
@@ -203,12 +199,21 @@ final class ProductChromeHostView: NSView {
         blocks.spacing = 22
         blocks.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         blocks.translatesAutoresizingMaskIntoConstraints = false
-        setupTranscriptTopSpacer()
         expose(blocks, identifier: "seyal-blocks")
-        configureTranscriptLeadingSpacer()
         composer.setAccessibilityIdentifier("seyal-composer")
 
         let clip = TranscriptClipView()
+        clip.onFlowScroll = { [weak self] event in
+            self?.handleBlockScrollWheel(event) ?? false
+        }
+        clip.onFlowMouseDown = { [weak self] event in
+            guard let self,
+                  seyal_app_eligibility(self.pane.appHandle)
+                    == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            else { return false }
+            self.pane.inputSurface.mouseDown(with: event)
+            return true
+        }
         clip.drawsBackground = false
         clip.copiesOnScroll = false
         clip.postsBoundsChangedNotifications = true
@@ -388,6 +393,9 @@ final class ProductChromeHostView: NSView {
         }
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
             self?.requestComposerFocusIfPaletteAllows() ?? false
+        }
+        pane.inputSurface.onBlockViewportRowHit = { [weak self] viewportRow in
+            self?.selectBlockAtViewportRow(viewportRow)
         }
         composer.onFocusEligibilityChanged = { [weak self] in
             guard let self, self.composer.isFocusEligibleForRecovery else { return }

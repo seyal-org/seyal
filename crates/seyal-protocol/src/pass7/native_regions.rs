@@ -21,6 +21,8 @@ pub struct NativeBlockRegions {
     /// Contiguous on-window row count for `output_region` (0 = off-window /
     /// sealed; client must not invent primary-frame clips).
     pub row_count: u16,
+    /// Total prompt/command RegionGrid presentation rows for this Block.
+    pub header_rows: u32,
     /// Sealed ownership rows for `output_region` (HistoryStore-backed). Zero
     /// when the Block has no sealed content yet. Wire width is u32 (#1484:
     /// u16 saturated at 65_535 and broke 100k/1M Flow height / AX books).
@@ -38,7 +40,7 @@ pub struct BlockNativeRegions {
 
 impl BlockNativeRegions {
     const HEADER_LEN: usize = 24;
-    const RECORD_LEN: usize = 32;
+    const RECORD_LEN: usize = 36;
 
     pub fn try_encode(&self) -> Result<Vec<u8>, FramingError> {
         if self.records.len() > MAX_NATIVE_REGION_RECORDS {
@@ -63,6 +65,7 @@ impl BlockNativeRegions {
             out.extend_from_slice(&record.first_row.to_le_bytes());
             out.extend_from_slice(&record.row_count.to_le_bytes());
             out.extend_from_slice(&record.sealed_rows.to_le_bytes());
+            out.extend_from_slice(&record.header_rows.to_le_bytes());
             if out.len() > crate::framing::MAX_FRAME_PAYLOAD as usize {
                 return Err(FramingError::OversizedPayload);
             }
@@ -115,6 +118,8 @@ impl BlockNativeRegions {
             let row_count = u16::from_le_bytes(bytes[offset + 26..offset + 28].try_into().unwrap());
             let sealed_rows =
                 u32::from_le_bytes(bytes[offset + 28..offset + 32].try_into().unwrap());
+            let header_rows =
+                u32::from_le_bytes(bytes[offset + 32..offset + 36].try_into().unwrap());
             if block_id == 0 || header_region == 0 || output_region == 0 {
                 return Err(FramingError::MalformedPayload);
             }
@@ -128,6 +133,7 @@ impl BlockNativeRegions {
                 first_row,
                 row_count,
                 sealed_rows,
+                header_rows,
             });
             offset += Self::RECORD_LEN;
         }
@@ -156,6 +162,7 @@ mod tests {
                     first_row: 4,
                     row_count: 5,
                     sealed_rows: 0,
+                    header_rows: 3,
                 },
                 NativeBlockRegions {
                     block_id: 4,
@@ -164,6 +171,7 @@ mod tests {
                     first_row: 0,
                     row_count: 0,
                     sealed_rows: 9,
+                    header_rows: 2,
                 },
             ],
         };
@@ -182,6 +190,7 @@ mod tests {
                 first_row: 0,
                 row_count: 0,
                 sealed_rows: 0,
+                header_rows: 0,
             }],
         };
         assert!(map.try_encode().is_err());
@@ -199,6 +208,7 @@ mod tests {
                 first_row: 7,
                 row_count: 0,
                 sealed_rows: 0,
+                header_rows: 0,
             }],
         };
         assert!(map.try_encode().is_err());

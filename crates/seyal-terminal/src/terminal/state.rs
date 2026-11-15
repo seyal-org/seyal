@@ -400,7 +400,6 @@ impl TerminalState {
     ) {
         use crate::CellRole;
         let history = self.core.primary.history();
-        let window_cols = usize::from(self.core.primary.engine.store.window_cols().max(1));
         let mut owned: Vec<(u16, crate::Cell)> = Vec::new();
         let sealed = self
             .core
@@ -420,15 +419,18 @@ impl TerminalState {
             };
             let cells = entry.presentation_cells();
             owned.clear();
-            if cells.len() >= window_cols {
-                // Keep Empty cells — filtering them dropped whole sealed rows
-                // whose owned columns were blank-padded spaces (#1484 MP0).
+            let last_owned_col = row.cols.iter().copied().max().unwrap_or(0);
+            if cells.len() > usize::from(last_owned_col) {
+                // Full-width history rows retain physical Empty cells.
                 owned.extend(
                     row.cols
                         .iter()
                         .filter_map(|&col| cells.get(usize::from(col)).map(|cell| (col, *cell))),
                 );
             } else {
+                // Scroll sealing stores compact lead-only fragments with
+                // logical source offsets. Pair those leads with RegionGrid's
+                // sparse physical columns to restore tabs and blank gaps.
                 let leads = cells.iter().filter(|cell| cell.role == CellRole::Lead);
                 owned.extend(row.cols.iter().zip(leads).map(|(&col, cell)| (col, *cell)));
             }
@@ -475,6 +477,10 @@ impl TerminalState {
             .primary
             .engine
             .viewport_height_of(crate::BlockId(block_id))
+    }
+
+    pub fn primary_region_row_count(&self, region_id: u64) -> u32 {
+        self.core.primary.engine.region_row_count(region_id)
     }
 
     /// Contiguous live-window output spans for each Block (row_count 0 = off-window).

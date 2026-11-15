@@ -53,28 +53,49 @@ extension RustDisplayBridge {
     return result
   }
 
-  /// Request visible sealed rows for one Block from the current viewport plan.
-  func requestSealedViewportClip(forDisplayHandle handle: UInt64, blockID: UInt64) -> Int32 {
-    var clip = SeyalBlockViewportClip()
-    if seyal_bridge_block_viewport_clip_for(handle, blockID, &clip) != 0, clip.row_count > 0 {
-      return requestHistoryRange(
-        forDisplayHandle: handle,
-        startLine: 0,
-        endLine: 0,
-        blockID: blockID,
-        startUnit: clip.first_row,
-        unitLimit: clip.row_count
+  /// Submit all visible RegionGrid clips in one Rust-owned viewport request.
+  /// The returned RegionId rows enter the existing bounded native history
+  /// cache under one shared request ID.
+  func requestBlockViewportContent(
+    forDisplayHandle handle: UInt64,
+    planGeneration: UInt64,
+    clips: [(regionID: UInt64, firstRow: UInt32, rowCount: UInt32)]
+  ) -> UInt64 {
+    guard isConnected, handle != 0, planGeneration != 0, !clips.isEmpty else { return 0 }
+    // Rust may return an existing request ID when this exact generation and
+    // clip set is already in flight. The next-ID accessor is only a prediction
+    // and must not be used as correlation authority.
+    let requestID = seyal_bridge_request_block_viewport_content_for(handle, planGeneration)
+    guard requestID != 0 else { return 0 }
+    recordBlockViewportContentRequest(
+      forDisplayHandle: handle, returnedRequestID: requestID, clips: clips)
+    return requestID
+  }
+
+  /// Correlate every selected Rust clip with the ID Rust actually returned.
+  /// Deduplication may reuse an in-flight ID rather than the next predicted ID.
+  func recordBlockViewportContentRequest(
+    forDisplayHandle handle: UInt64,
+    returnedRequestID requestID: UInt64,
+    clips: [(regionID: UInt64, firstRow: UInt32, rowCount: UInt32)]
+  ) {
+    guard handle != 0, requestID != 0 else { return }
+    requestedHistoryRanges = requestedHistoryRanges.filter {
+      $0.key.displayHandle != handle || $0.key.cacheBlockID == 0
+    }
+    historyRevisions = historyRevisions.filter { requestedHistoryRanges[$0.key] != nil }
+    historyContinuations = historyContinuations.filter { requestedHistoryRanges[$0.key] != nil }
+    for clip in clips where clip.regionID != 0 && clip.rowCount > 0 {
+      let key = PaneHistoryRequestKey(
+        displayHandle: handle,
+        paneID: paneID,
+        requestID: requestID,
+        cacheBlockID: clip.regionID
+      )
+      requestedHistoryRanges[key] = (
+        clip.regionID, 0, 0, clip.firstRow, clip.firstRow &+ clip.rowCount
       )
     }
-    // Plan has no sealed clip yet — fetch from sealed index 0 (bounded page).
-    return requestHistoryRange(
-      forDisplayHandle: handle,
-      startLine: 0,
-      endLine: 0,
-      blockID: blockID,
-      startUnit: 0,
-      unitLimit: 512
-    )
   }
 
   /// Discard this bridge's own focused-Controller stale requests.
@@ -91,7 +112,7 @@ extension RustDisplayBridge {
   /// their Block bodies (#1426 residual).
   func discardHistoryRequests(except blockIDs: Set<UInt64>, forDisplayHandle handle: UInt64) {
     requestedHistoryRanges = requestedHistoryRanges.filter { key, value in
-      key.displayHandle != handle || blockIDs.contains(value.blockID)
+      key.displayHandle != handle || key.cacheBlockID != 0 || blockIDs.contains(value.blockID)
     }
     historyRevisions = historyRevisions.filter { requestKey, _ in
       requestedHistoryRanges[requestKey] != nil

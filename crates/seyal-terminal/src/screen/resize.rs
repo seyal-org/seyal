@@ -88,6 +88,105 @@ impl Screen {
                     self.row_breaks[usize::from(row)].unwrap_or(HistoryBreakAfter::HardBreak);
                 let cells =
                     &self.engine.store.grid_cells[row_start..row_start + usize::from(old_cols)];
+                // A VT horizontal tab advances the physical cursor without
+                // writing cells. Those interior Empty slots are still part
+                // of the displayed row: dropping them here compacts the
+                // following glyphs on the first host resize (for example,
+                // `Applications\tMovies\tgo` becomes `ApplicationsMoviesgo`).
+                // Preserve the complete physical row when its content belongs
+                // to one source line, and synthesize stable anchors for its
+                // interior blanks so HistoryStore/reflow keep those columns.
+                let mut source_line = None;
+                let mut mixed_source_lines = false;
+                for (col, cell) in cells.iter().enumerate() {
+                    if cell.role != CellRole::Lead {
+                        continue;
+                    }
+                    let line_id = self.engine.store.grid_anchors[row_start + col]
+                        .map_or(self.line_ids[usize::from(row)], |anchor| anchor.line_id);
+                    if source_line.is_some_and(|existing| existing != line_id) {
+                        mixed_source_lines = true;
+                        break;
+                    }
+                    source_line = Some(line_id);
+                }
+                if !mixed_source_lines && let Some(line_id) = source_line {
+                    let content_end = cells
+                        .iter()
+                        .rposition(|cell| cell.role != CellRole::Empty)
+                        .map_or(0, |index| index + 1);
+                    let Some(first_lead_col) = cells[..content_end]
+                        .iter()
+                        .position(|cell| cell.role == CellRole::Lead)
+                    else {
+                        unreachable!("source_line is set only for rows with a lead");
+                    };
+                    let first_anchor = self.engine.store.grid_anchors[row_start + first_lead_col]
+                        .unwrap_or(crate::HistoryAnchor {
+                            line_id,
+                            unit_offset: 0,
+                        });
+                    let leading_units = cells[..first_lead_col]
+                        .iter()
+                        .filter(|cell| cell.role != CellRole::Continuation)
+                        .count() as u32;
+                    let start_offset = first_anchor.unit_offset.saturating_sub(leading_units);
+                    let mut fragment = HistoryLine::from_cells(
+                        line_id,
+                        HistoryBreakAfter::SoftWrap,
+                        &cells[..content_end],
+                        store,
+                    );
+                    fragment.start_offset = start_offset;
+                    source_breaks.insert(
+                        line_id,
+                        self.source_breaks
+                            .get(&line_id)
+                            .copied()
+                            .unwrap_or(break_after),
+                    );
+                    if let Some(previous) = source_lines.last_mut().filter(|previous| {
+                        previous.line_id == fragment.line_id
+                            && previous.start_offset.saturating_add(
+                                u32::try_from(previous.units.len()).unwrap_or(u32::MAX),
+                            ) == fragment.start_offset
+                    }) {
+                        previous.units.extend(fragment.units);
+                    } else {
+                        source_lines.push(fragment);
+                    }
+
+                    let mut unit_offset = start_offset;
+                    for (col, cell) in cells[..content_end].iter().enumerate() {
+                        if cell.role == CellRole::Continuation {
+                            continue;
+                        }
+                        let anchor = crate::HistoryAnchor {
+                            line_id,
+                            unit_offset,
+                        };
+                        source_cells.insert(anchor, *cell);
+                        let region = if cell.role == CellRole::Lead {
+                            self.engine.store.grid_regions[row_start + col]
+                        } else {
+                            unstructured
+                        };
+                        source_regions.insert(anchor, region);
+                        if row == self.cursor.row
+                            && (col < usize::from(self.cursor.col)
+                                || (self.cursor.pending_wrap
+                                    && col <= usize::from(self.cursor.col)))
+                        {
+                            cursor_source = crate::HistoryAnchor {
+                                line_id,
+                                unit_offset: unit_offset.saturating_add(1),
+                            };
+                        }
+                        unit_offset = unit_offset.saturating_add(1);
+                    }
+                    *source_offsets.entry(line_id).or_default() = unit_offset;
+                    continue;
+                }
                 let mut row_has_units = false;
                 for (col, cell) in cells.iter().enumerate() {
                     if cell.role != CellRole::Lead {

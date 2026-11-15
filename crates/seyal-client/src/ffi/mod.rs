@@ -78,7 +78,8 @@ pub(crate) use types::{
     SeyalRecoveryResult, SeyalSessionSurface,
 };
 pub use types::{
-    SeyalBlockViewportClip, SeyalBlockViewportPlanHeader, SeyalBlockViewportVisibleItem,
+    SeyalBlockViewportClip, SeyalBlockViewportHit, SeyalBlockViewportPlanHeader,
+    SeyalBlockViewportSurface, SeyalBlockViewportVisibleItem,
 };
 
 #[allow(unused_imports)]
@@ -92,17 +93,17 @@ pub use app::pane_recovery::{
 pub use app::{
     seyal_app_accessibility, seyal_app_apply, seyal_app_apply_runtime_composer_status,
     seyal_app_block_projection, seyal_app_block_projection_for_pane, seyal_app_block_row,
-    seyal_app_block_row_for_pane, seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row,
-    seyal_app_composer, seyal_app_composer_for_pane, seyal_app_copy, seyal_app_create,
-    seyal_app_destroy, seyal_app_eligibility, seyal_app_block_scoped_direct_input,
-    seyal_app_eligibility_for_pane, seyal_app_invoke_workspace_command,
-    seyal_app_last_error, seyal_app_leave_offer, seyal_app_native_effect, seyal_app_option_as_alt,
-    seyal_app_palette, seyal_app_palette_row, seyal_app_pane_binding, seyal_app_pane_divider,
-    seyal_app_pane_leaf, seyal_app_pane_region, seyal_app_propose_pane_geometry,
-    seyal_app_record_compatible, seyal_app_recovery_param, seyal_app_route_keystroke,
-    seyal_app_shell, seyal_app_shell_row, seyal_app_shortcut_count, seyal_app_shortcut_enabled,
-    seyal_app_shortcut_item, seyal_app_shortcut_title, seyal_app_should_confirm_quit,
-    seyal_app_snapshot, seyal_app_sync_pane_runtime_blocks, seyal_app_tab, seyal_app_tab_tree_node,
+    seyal_app_block_row_for_pane, seyal_app_block_scoped_direct_input, seyal_app_block_span,
+    seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_composer_for_pane,
+    seyal_app_copy, seyal_app_create, seyal_app_destroy, seyal_app_eligibility,
+    seyal_app_eligibility_for_pane, seyal_app_invoke_workspace_command, seyal_app_last_error,
+    seyal_app_leave_offer, seyal_app_native_effect, seyal_app_option_as_alt, seyal_app_palette,
+    seyal_app_palette_row, seyal_app_pane_binding, seyal_app_pane_divider, seyal_app_pane_leaf,
+    seyal_app_pane_region, seyal_app_propose_pane_geometry, seyal_app_record_compatible,
+    seyal_app_recovery_param, seyal_app_route_keystroke, seyal_app_shell, seyal_app_shell_row,
+    seyal_app_shortcut_count, seyal_app_shortcut_enabled, seyal_app_shortcut_item,
+    seyal_app_shortcut_title, seyal_app_should_confirm_quit, seyal_app_snapshot,
+    seyal_app_sync_pane_runtime_blocks, seyal_app_tab, seyal_app_tab_tree_node,
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning, seyal_app_window, SeyalAppPaneBinding,
 };
@@ -115,7 +116,9 @@ pub use attach_wakeup::{
 pub use display::{
     seyal_bridge_block_count, seyal_bridge_block_record, seyal_bridge_block_timeline_revision,
     seyal_bridge_block_viewport_clip_at_for, seyal_bridge_block_viewport_clip_for,
-    seyal_bridge_block_viewport_plan_header_for, seyal_bridge_block_viewport_set_scroll_anchor_for,
+    seyal_bridge_block_viewport_hit_test_row_for, seyal_bridge_block_viewport_plan_header_for,
+    seyal_bridge_block_viewport_scroll_by_for, seyal_bridge_block_viewport_scroll_to_for,
+    seyal_bridge_block_viewport_set_window_rows_for, seyal_bridge_block_viewport_surface_at_for,
     seyal_bridge_block_viewport_visible_at_for, seyal_bridge_composer_result,
     seyal_bridge_composer_status, seyal_bridge_ensure_prepared, seyal_bridge_ensure_prepared_for,
     seyal_bridge_execution_block_metadata, seyal_bridge_flush_writable,
@@ -127,12 +130,12 @@ pub use display::{
     seyal_bridge_native_regions_total_height, seyal_bridge_native_regions_total_height_for,
     seyal_bridge_next_composer_request_id, seyal_bridge_next_history_request_id,
     seyal_bridge_next_history_request_id_for, seyal_bridge_poll, seyal_bridge_poll_for,
-    seyal_bridge_request_history_range, seyal_bridge_request_history_range_for,
-    seyal_bridge_session_consent, seyal_bridge_session_copy,
-    seyal_bridge_session_request_for_handle, seyal_bridge_session_surface,
-    seyal_bridge_session_surface_for_handle, seyal_bridge_viewport_start_line_id,
-    seyal_bridge_viewport_start_line_id_for, seyal_bridge_wants_write,
-    seyal_bridge_wants_write_for,
+    seyal_bridge_request_block_viewport_content_for, seyal_bridge_request_history_range,
+    seyal_bridge_request_history_range_for, seyal_bridge_session_consent,
+    seyal_bridge_session_copy, seyal_bridge_session_request_for_handle,
+    seyal_bridge_session_surface, seyal_bridge_session_surface_for_handle,
+    seyal_bridge_viewport_start_line_id, seyal_bridge_viewport_start_line_id_for,
+    seyal_bridge_wants_write, seyal_bridge_wants_write_for,
 };
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]

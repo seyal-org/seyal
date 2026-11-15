@@ -201,6 +201,10 @@ impl TerminalExecution {
         self.terminal.primary_viewport_block_height(block_id)
     }
 
+    pub fn primary_region_row_count(&self, region_id: u64) -> u32 {
+        self.terminal.primary_region_row_count(region_id)
+    }
+
     pub fn primary_on_window_region_spans(&self) -> Vec<seyal_terminal::OnWindowRegionSpan> {
         self.terminal.primary_on_window_region_spans()
     }

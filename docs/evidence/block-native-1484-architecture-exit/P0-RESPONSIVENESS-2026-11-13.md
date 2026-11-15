@@ -66,3 +66,41 @@ App for manual owner acceptance:
 `target/macos-derived-data/Build/Products/Debug/Seyal.app`
 
 Do **not** resume full G1–G10 / headed UI campaign until owner confirms typing, seq, SSH→python3, and multipane feel responsive and visually stable.
+
+## Re-audit addendum — 2026-11-14, published head `961538be`
+
+This addendum corrects the “closed in this cut” wording above where it could be read as proof of complete Rust-owned presentation. Those items describe narrower code changes; they do not establish the complete cutover.
+
+### Current source findings
+
+- Both primary and secondary hosts still create hidden `CommandBlockView` instances in an `NSStackView`; the stack remains the AppKit scroll document. Swift still calculates document size and keeps per-host scroll/follow state.
+- The primary inline composer still positions itself from a hidden card body rectangle. Mouse selection maps a viewport row and then loops through Swift composer Blocks. Source-unit drag selection/copy and virtual Rust-backed Block accessibility children are not implemented.
+- The dirty candidate now adds Rust card/header row ranges, but Swift still chooses colors, converts those ranges to full-width pixel rectangles, and publishes surfaces, LiveTail and HISTORY separately. There is no generation-bound atomic frame commit.
+- The bounded HISTORY clip path still needs explicit short/stale/missing-page semantics. Existing tests/build do not establish the no-gap live-to-sealed transition.
+- The secondary host can reuse a prior display handle’s scroll anchor after switching terminal tabs; verify and reset that state per handle before claiming pane-local scroll ownership.
+
+### Evidence at this re-audit
+
+| Check | Result |
+|---|---|
+| Current branch/head | `mahboobmonnamd/issue/1484`, published HEAD `961538be`; candidate changes uncommitted |
+| Exclusive Issue #1484 claim | VERIFIED for current Codex worker |
+| `cargo test -p seyal-client viewport::` | PASS, 12 tests |
+| Focused macOS component tests | PASS: Rust surface ownership source contract, live-only surface presentability, renderer resource generation |
+| `make build` | SUCCESS, arm64 app and bundled Runtime |
+| Live pixels after latest rebuild | NOT CAPTURED; macOS locked during test. Earlier accessible candidate frame still showed command/output as plain rows with separators |
+| SSH → Python response on latest rebuilt app | NOT VERIFIED |
+| input-to-pixel / p50/p95/p99 / G9 comparison | NOT MEASURED; UI automation roundtrip includes screenshot/control overhead and is not a product latency metric |
+| `seq` streaming, scroll, live-to-sealed acceptance | NOT VERIFIED |
+| Full headed UI suite | NOT RUN; blocked on visual/performance acceptance by design |
+
+### Follow-up — native scrollbar ownership, 2026-11-14
+
+- A fresh source audit found that native scrollbar bounds changes republished the plan without updating its Rust anchor. Added `scroll_block_viewport_to_for` as a user-scroll action and retained `set_window_rows_for` for viewport-size changes. Both host callbacks now ignore size-only bounds notifications by comparing the clip-view origin.
+- Focused Rust regression `native_scroller_position_becomes_a_block_relative_rust_anchor`: PASS. Focused Xcode component `testFlowViewportResizeDoesNotReapplySwiftScrollAnchor`: PASS (1 test). The initial Xcode run caught a stale test source path; the test was corrected to inspect the secondary host file and rerun successfully.
+- This addresses scrollbar-to-plan synchronization only. It does not remove the two AppKit `NSStackView` transcript documents, AppKit document extent/follow state, card-driven composer placement, or separate surfaces/live/HISTORY publication. It is not evidence of working Block pixels or end-to-end acceptance.
+- Mac remained locked at the latest availability check. Latest pixel capture, echo/SSH→Python/seq interaction, and comparative input-to-pixel measurements remain NOT VERIFIED / NOT MEASURED.
+
+### Current verdict
+
+P0 remains **OPEN**. A clean build and focused tests are not visual acceptance. Do not mark the Swift presentation cutover complete, claim Rust owns all Block UI, or close the responsiveness gate until the remaining Swift authority is removed and the required live pixel and comparative performance evidence exists.

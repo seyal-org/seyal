@@ -3,7 +3,7 @@
 use super::Screen;
 use crate::{
     grapheme_store::GraphemeStore,
-    history::{HistoryBreakAfter, HistoryLine},
+    history::{HistoryBreakAfter, HistoryLine, HistoryUnit},
     CellRole, LineId,
 };
 use std::collections::HashMap;
@@ -44,20 +44,41 @@ impl Screen {
             .seal_window_row_indexed(row as u16, seal_line_id);
         let mut fragments: Vec<HistoryLine> = Vec::new();
         for (col, cell) in self.engine.store.grid_cells[start..end].iter().enumerate() {
-            if cell.role != CellRole::Lead {
+            if cell.role == CellRole::Continuation {
                 continue;
             }
-            let anchor =
-                self.engine.store.grid_anchors[start + col].unwrap_or(crate::HistoryAnchor {
-                    line_id: seal_line_id,
-                    unit_offset: fragments.len() as u32,
-                });
-            let mut fragment = HistoryLine::from_cells(
-                anchor.line_id,
-                HistoryBreakAfter::SoftWrap,
-                std::slice::from_ref(cell),
-                store,
-            );
+            let cell_anchor = self.engine.store.grid_anchors[start + col];
+            // Resize may materialize an interior tab gap as an anchored Empty
+            // cell. Keep that blank unit in HistoryStore so the following
+            // sparse RegionGrid columns still have their physical x positions
+            // after the row is sealed. Ordinary unanchored Empty cells remain
+            // omitted.
+            if cell.role == CellRole::Empty && cell_anchor.is_none() {
+                continue;
+            }
+            let anchor = cell_anchor.unwrap_or(crate::HistoryAnchor {
+                line_id: seal_line_id,
+                unit_offset: fragments.len() as u32,
+            });
+            let mut fragment = if cell.role == CellRole::Empty {
+                HistoryLine {
+                    line_id: anchor.line_id,
+                    units: vec![HistoryUnit {
+                        utf8: vec![b' '],
+                        width: 1,
+                        style: cell.style,
+                    }],
+                    break_after: HistoryBreakAfter::SoftWrap,
+                    start_offset: anchor.unit_offset,
+                }
+            } else {
+                HistoryLine::from_cells(
+                    anchor.line_id,
+                    HistoryBreakAfter::SoftWrap,
+                    std::slice::from_ref(cell),
+                    store,
+                )
+            };
             fragment.start_offset = anchor.unit_offset;
             if let Some(previous) = fragments.last_mut().filter(|previous| {
                 previous.line_id == fragment.line_id

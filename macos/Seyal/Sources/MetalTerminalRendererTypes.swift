@@ -79,6 +79,13 @@ struct TerminalInstance {
     var atlasSlice: UInt32
 }
 
+/// Solid Metal surface generated from the Rust BlockViewportPlan.
+/// Coordinates are drawable pixels; Swift only converts the Rust row plan.
+struct MetalBlockSurfaceDecoration: Equatable {
+    let rect: CGRect
+    let color: UInt32
+}
+
 struct DamageMask: Equatable {
     var word0: UInt64 = 0
     var word1: UInt64 = 0

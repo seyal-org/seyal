@@ -1,6 +1,6 @@
 # Architecture exit gate — #1484 / PR #1485
 
-Exact head under review: WIP on `mahboobmonnamd/issue/1484` (PR #1485) atop `bc03c0d0`. Prior baseline `e335e1f2`. P0 responsiveness cut: [`P0-RESPONSIVENESS-2026-11-13.md`](./P0-RESPONSIVENESS-2026-11-13.md).
+Published PR head: `961538be77652f4c0359edbdfbffc67be4cd715b` on `mahboobmonnamd/issue/1484`. The current working candidate is dirty and uncommitted. The A–F `COMPLIANT` entries below are historical results at earlier SHAs, not current-head approval. Current status is **HOLD; no current A–F compliance claim**. P0 responsiveness cut: [`P0-RESPONSIVENESS-2026-11-13.md`](./P0-RESPONSIVENESS-2026-11-13.md).
 
 Authority: ADR-004, ADR-009, ADR-010, ADR-011, SPEC-008, merged #1481/#1483, Issue #1484 body, AGENTS.md.
 
@@ -8,7 +8,7 @@ Status legend: `VIOLATING` | `PARTIAL` | `COMPLIANT` | `UNPROVEN`.
 
 A requirement is COMPLIANT only when: corrected production path executes, ownership is proven, complexity evidence exists where required, displaced legacy is removed or proven unreachable, and focused verification has run. New types alone are not compliance.
 
-## Findings A–F inventory (source review)
+## Historical findings A–F inventory (earlier source review; not current-head status)
 
 | ID | Accepted requirement | Previous / current violating path | Status | Owner agent |
 |---|---|---|---|---|
@@ -18,6 +18,21 @@ A requirement is COMPLIANT only when: corrected production path executes, owners
 | D | Swift is thin OS/IME/AX/GPU adapter; no authoritative card geometry/document height/per-Block HISTORY presentation | Plan-only publish; HISTORY emission fail-closed; collectBlockOutputRegions deleted; chrome-only cards | **COMPLIANT** (indep `27d26c58`) | Metal/Swift migration |
 | E | Indexed RegionId/source-anchor viewport retrieval; visible rows + overscan only; no full-Block HISTORY retain for paint | Sealed-index + overscan; latest-clip retain (no monotonic full-Block); LineId HISTORY emission removed | **COMPLIANT** (indep `27d26c58`) | Storage + Protocol |
 | F | Causal StreamSequence/UnitVersion ownership; no silent trusted-marker loss; deterministic barriers; proven capacity | Soft-cap + watermark + cumulative consume counts + f06_f | **COMPLIANT** (indep `27d26c58`) | Attribution |
+
+## Current-head re-audit — 2026-11-14
+
+The prior table and gate rows preserve historical evidence only. They do not prove the published head or the dirty candidate satisfies the cutover.
+
+| Finding | Current evidence | Status |
+|---|---|---|
+| A — per-display viewport ownership | Rust client index exists; exact-head attachment/focus/resize lifecycle needs fresh verification | **UNVERIFIED** |
+| B — bounded index work | Fenwick index and work-counter tests exist; full `BlockNativeRegions` map and plan reconstruction remain; plan builder linearly scans records per visible Block | **PARTIAL** |
+| C — complete Rust plan / Metal frame | Dirty candidate now exports Rust card/header row ranges; Swift chooses colors and builds/publishes pixel decorations separately from live and history state | **PARTIAL** |
+| D — thin Swift host / legacy removal | Both hosts retain hidden `CommandBlockView` cards in `NSStackView`, Swift document extent and scroll state; primary inline composer geometry comes from a hidden card | **VIOLATING** |
+| E — bounded visible history | Rust clip requests are bounded; incomplete/stale page semantics and live-to-sealed atomic publication remain unproven | **PARTIAL** |
+| F — canonical attribution | Earlier focused tests exist; no new exact-head adversarial attribution review was completed in this re-audit | **UNVERIFIED** |
+
+The dirty candidate passes focused viewport and surface tests and `make build`. It has not passed live pixel acceptance after the latest rebuild, input-to-pixel measurement, comparison against the prior responsive build, atomic generation publication, or independent complete cutover review. The full UI suite remains intentionally deferred.
 
 ## Required production path (must execute)
 
@@ -29,14 +44,16 @@ One PTY → One VT authority → PrimaryBlockEngine (RegionStore+HistoryStore+VT
   → Thin Swift event/IME/AX/platform host
 ```
 
-## Gate table (fill during correction)
+## Historical gate table (superseded for current-head decisions)
+
+These rows record an earlier source review. Their `COMPLIANT` cells are **not** a verdict on published `961538be` or the current dirty candidate. Use the current-head re-audit above and the latest addendum below; both keep the complete Swift presentation cutover on HOLD.
 
 | Req | Corrected path | Production caller | Ownership proof | Complexity evidence | Legacy removed | Focused verification | Independent verdict |
 |---|---|---|---|---|---|---|---|
 | A | `LocalDisplayClient.block_viewport_index`; engine field removed | poll apply + FFI `block_viewport_total_height` | Client owns index; Runtime content only | n/a | Engine `BlockViewportIndex` deleted | client+terminal unit tests | **COMPLIANT** |
 | B | Fenwick+HashMap `seyal-client/viewport/index.rs` | `set_height`/`visible_spans` + same-order publish | O(log B) proof via WorkCounter | work-counter B∈{1k,4k,16k} | terminal prefix Vec index removed | `cargo test -p seyal-client --lib viewport::` | **COMPLIANT** |
 | C | `BlockViewportPlan` + FFI header/items/clips; Metal `applyBlockViewportPlan` | Flow `publishBlockOutputFrame` plan-only | Client owns plan; Metal paints plan clips | n/a | `collectBlockOutputRegions` + card-clip fallback **deleted** | protocol+client viewport+plan unit | **COMPLIANT** |
-| D | Plan-only publish; Flow HISTORY/NATIVE fetch retired; chrome-only `setOutputLines(1)` | `publishBlockOutputFrame` + no-op `applyBlockOutputProjection` | Plan owns paint; cards AX/header chrome only | n/a | card-clip/`collectBlockOutputRegions` deleted; HISTORY fail-closed | source review + focused unit | **COMPLIANT** |
+| D | Plan-only publish; Flow HISTORY/NATIVE fetch retired; chrome-only `setOutputLines(1)` | `publishBlockOutputFrame` + no-op `applyBlockOutputProjection` | Plan owns paint; cards AX/header chrome only | n/a | card-clip/`collectBlockOutputRegions` deleted; HISTORY fail-closed | source review + focused unit | **HISTORICAL ONLY — current D is VIOLATING** |
 | E | `native_block_wire_rows_from` + protocol `(0,0)` sealed-index; Swift clip fetch | Flow NATIVE uses plan clip `start_unit` | RegionId sealed index, not lead skip | no full-Block download required for clip | latest-clip retain only (no monotonic full-Block) | protocol sealed-index + runtime native_block_rows | **COMPLIANT** |
 | F | D1–D7 production path: atomic admit, refuse-at-capacity, feed yield+reactor observe, prompt header, journal consume, eviction reclaim | `osc.rs`, `attribution.rs`, `engine.rs`, `reactor_io.rs`, `shell_integration.rs`, `history_seal.rs` | Ownership: VT journal+shell_events atomic; Runtime consumes drain; header owns prompt bytes until begin | F05-D3, F06-C/D, F-HDR, F-D6 unit green | Preferential CellMutation eviction removed; discarded drain removed | Focused `seyal-terminal` f05/f06/f_hdr/f_d6 | **COMPLIANT** |
 
@@ -45,7 +62,7 @@ One PTY → One VT authority → PrimaryBlockEngine (RegionStore+HistoryStore+VT
 - Second geometry authority or compatibility dual engine
 - ADR amendments inside this implementation PR
 
-## Specialist ownership map
+## Specialist ownership map (historical)
 
 | Agent | Write/read focus |
 |---|---|
@@ -118,3 +135,4 @@ Detail: [`SOURCE-INVENTORY.md`](./SOURCE-INVENTORY.md). Specialist reports: agen
 - 2026-11-13: Tip `0b3bd44a` — `make bench` EXIT 0 (Pass-7/Pass-8 measured evidence). Focused headed after helper fix: Workload 12/12 + skip, 100k PASS, multipane Completed/Unfocused/RunningFlow PASS; remaining FAIL: FlowSplitSibling stream COMPLETE AX, FocusChurn scroll-b body AX (fix in flight).
 
 - 2026-11-13: Tip `b6c1927a` — FocusChurn mid-transcript scroll retention PASS (content-relative pin + expand-only body height + max(Rust,card) document floor); FlowSplitSibling unfocused stream AX PASS; `make check` EXIT 0. Full `make ui-test` still has residual fails (FourPane LiveEnd AX latch, SplitFromLivePane OCR, divider/window/SSH flakes). Architecture A–F remain COMPLIANT.
+- 2026-11-14: Published head refreshed to `961538be`; historical A–F COMPLIANT rows explicitly superseded for current-head decisions. Dirty candidate remains HOLD with D VIOLATING, C/E PARTIAL, A/B/F unverified; focus tests and app build do not establish visual or performance acceptance.

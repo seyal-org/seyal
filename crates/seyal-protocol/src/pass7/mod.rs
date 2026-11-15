@@ -2,6 +2,7 @@
 //!
 //! Private module; `crate::framing` re-exports the public wire surface for callers.
 
+mod block_viewport;
 mod command_blocks;
 mod composer;
 mod history;
@@ -16,6 +17,11 @@ mod tests;
 
 use crate::{framing::FramingError, AttachmentId};
 
+pub use block_viewport::{
+    BlockViewportContentClip, BlockViewportContentRequest, BlockViewportContentSnapshot,
+    BlockViewportRegionContent, CAP_BLOCK_VIEWPORT_CONTENT, MAX_BLOCK_VIEWPORT_CLIPS,
+    MAX_BLOCK_VIEWPORT_CLIP_ROWS, MAX_BLOCK_VIEWPORT_TOTAL_ROWS,
+};
 pub use command_blocks::{
     BlockTimeline, CommandBlock, CommandBlockState, COMMAND_BLOCK_FLAG_CANVAS_FLOOR,
 };

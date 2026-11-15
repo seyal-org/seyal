@@ -597,7 +597,8 @@ pub struct SeyalBlockViewportPlanHeader {
     pub window_rows: u32,
     pub visible_count: u32,
     pub clipping_count: u32,
-    pub reserved: u32,
+    pub surface_count: u32,
+    pub alignment_padding_rows: u32,
     pub total_document_extent: u64,
 }
 
@@ -614,7 +615,8 @@ impl SeyalBlockViewportPlanHeader {
             window_rows: 0,
             visible_count: 0,
             clipping_count: 0,
-            reserved: 0,
+            surface_count: 0,
+            alignment_padding_rows: 0,
             total_document_extent: 0,
         }
     }
@@ -631,6 +633,7 @@ pub struct SeyalBlockViewportVisibleItem {
     pub first_visible_row: u32,
     pub visible_rows: u32,
     pub sealed_rows: u32,
+    pub header_rows: u32,
     pub live_first_row: u16,
     pub live_row_count: u16,
 }
@@ -646,6 +649,7 @@ impl SeyalBlockViewportVisibleItem {
             first_visible_row: 0,
             visible_rows: 0,
             sealed_rows: 0,
+            header_rows: 0,
             live_first_row: 0,
             live_row_count: 0,
         }
@@ -657,10 +661,56 @@ impl SeyalBlockViewportVisibleItem {
 pub struct SeyalBlockViewportClip {
     pub block_id: u64,
     pub region_id: u64,
+    pub presentation_y: u64,
     pub first_row: u32,
     pub row_count: u32,
+    pub role: u8,
     pub sealed: u8,
+    pub reserved: [u8; 2],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct SeyalBlockViewportSurface {
+    pub block_id: u64,
+    pub presentation_y: u64,
+    pub row_count: u32,
+    pub role: u8,
     pub reserved: [u8; 3],
+}
+
+impl SeyalBlockViewportSurface {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            block_id: 0,
+            presentation_y: 0,
+            row_count: 0,
+            role: 0,
+            reserved: [0; 3],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct SeyalBlockViewportHit {
+    pub block_id: u64,
+    pub region_id: u64,
+    pub region_row: u32,
+    pub role: u8,
+    pub reserved: [u8; 3],
+}
+
+impl SeyalBlockViewportHit {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            block_id: 0,
+            region_id: 0,
+            region_row: 0,
+            role: 0,
+            reserved: [0; 3],
+        }
+    }
 }
 
 impl SeyalBlockViewportClip {
@@ -668,10 +718,12 @@ impl SeyalBlockViewportClip {
         Self {
             block_id: 0,
             region_id: 0,
+            presentation_y: 0,
             first_row: 0,
             row_count: 0,
+            role: 0,
             sealed: 0,
-            reserved: [0; 3],
+            reserved: [0; 2],
         }
     }
 }

@@ -6,6 +6,76 @@ import Metal
 
 @MainActor
 extension RendererValidation {
+    /// Flow RegionGrid cells without explicit VT background ink must reveal
+    /// the Rust-authored Block surface. Explicit VT backgrounds remain opaque.
+    static func flowHistoryPreservesBlockSurfaceOffscreenSelfTest() -> Bool {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        do {
+            let renderer = try MetalTerminalRenderer(device: device)
+            renderer.setPresentationPlan(.flow())
+            let size = renderer.cellPixelSize(backingScale: 1)
+            let surface = (red: UInt8(88), green: UInt8(104), blue: UInt8(120))
+            let explicit = (red: UInt8(24), green: UInt8(32), blue: UInt8(40))
+            let blockColor = packRGBA(red: surface.red, green: surface.green, blue: surface.blue)
+            renderer.setBlockSurfaceDecorations([
+                MetalBlockSurfaceDecoration(
+                    rect: CGRect(x: 0, y: 0, width: size.width, height: size.height),
+                    color: blockColor
+                ),
+            ])
+            let region = NativeTranscriptRegion(
+                id: 1_485,
+                origin: .zero,
+                clip: CGRect(x: 0, y: 0, width: size.width, height: size.height)
+            )
+            func draw(background: UInt32) -> MTLTexture? {
+                let range = NativeHistoryRange(
+                    startLine: 1,
+                    endLine: 1,
+                    blockID: 1_485,
+                    requestID: 1,
+                    revision: 1,
+                    rows: [[NativeHistoryRange.Cell(
+                        scalar: 0,
+                        foreground: 0,
+                        background: background,
+                        flags: 0
+                    )]]
+                )
+                guard (try? renderer.update(
+                    historyRange: range,
+                    region: region,
+                    backingScale: 1
+                )) == .updated else { return nil }
+                renderer.setHistoryRegionOrder([1_485])
+                return renderer.renderOffscreenAndWait(width: size.width, height: size.height)
+            }
+            guard let defaultBackground = draw(background: 0) else { return false }
+            let defaultMatches = pixelMatches(
+                defaultBackground,
+                x: size.width - 1,
+                y: size.height - 1,
+                red: surface.red,
+                green: surface.green,
+                blue: surface.blue
+            )
+            guard let explicitBackground = draw(
+                background: terminalRGB(red: explicit.red, green: explicit.green, blue: explicit.blue)
+            ) else { return false }
+            let explicitMatches = pixelMatches(
+                explicitBackground,
+                x: size.width - 1,
+                y: size.height - 1,
+                red: explicit.red,
+                green: explicit.green,
+                blue: explicit.blue
+            )
+            return defaultMatches && explicitMatches
+        } catch {
+            return false
+        }
+    }
+
     static func retainedDefaultColorsFollowThemeOffscreenSelfTest() -> Bool {
         guard let device = MTLCreateSystemDefaultDevice() else { return false }
         do {
@@ -341,7 +411,7 @@ extension RendererValidation {
             )
             renderer.setTranscriptRegions([region])
             renderer.setLiveTailBlocks([
-                865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+                865: LiveTailClip(firstRow: 1, rowCount: 2)
             ])
             guard renderer.liveTailRegionCount == 1,
                   renderer.liveTailInstanceCount(for: 865) == 4

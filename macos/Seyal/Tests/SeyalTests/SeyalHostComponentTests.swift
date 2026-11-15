@@ -6,6 +6,68 @@ import XCTest
 @testable import Seyal
 
 final class SeyalHostComponentTests: XCTestCase {
+    @MainActor private static var isolatedViewportRuntime: Process?
+
+    /// Create a genuine Controller in XCTest's isolated Runtime, then fill its
+    /// canonical RegionGrid. Synthetic card heights cannot exercise Rust's
+    /// document extent or per-attachment scroll anchor.
+    @MainActor
+    private func makeLiveBlockViewport(rows: Int = 120) async throws -> UInt64 {
+        IsolatedRuntimeDirectory.installIfNeeded()
+        if Self.isolatedViewportRuntime == nil {
+            let root = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+            let helper = root.appendingPathComponent("target/debug/seyal-runtime")
+            XCTAssertTrue(FileManager.default.isExecutableFile(atPath: helper.path),
+                          "build the OSS Runtime helper before focused native tests")
+            let process = Process()
+            process.executableURL = helper
+            process.arguments = IsolatedRuntimeDirectory.helperArguments()
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            Self.isolatedViewportRuntime = process
+        }
+        let startupDeadline = Date().addingTimeInterval(10)
+        var handle: UInt64 = 0
+        while Date() < startupDeadline, handle == 0 {
+            handle = seyal_bridge_open_created_execution()
+            if handle == 0 { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        XCTAssertNotEqual(handle, 0, "isolated Runtime must create a Controller")
+        guard handle != 0 else { throw XCTSkip("isolated Runtime unavailable") }
+        XCTAssertEqual(seyal_bridge_adopt_handle(handle), 0)
+        if rows > 0 {
+            let command = Array("seq 1 \(rows)".utf8)
+            let admissionDeadline = Date().addingTimeInterval(10)
+            var submitted: Int32 = -4
+            while Date() < admissionDeadline, submitted != 0 {
+                _ = seyal_bridge_poll_for(handle)
+                submitted = command.withUnsafeBufferPointer { bytes in
+                    seyal_bridge_submit_composer_for(handle, bytes.baseAddress, UInt32(bytes.count))
+                }
+                if submitted != 0 { try await Task.sleep(nanoseconds: 10_000_000) }
+            }
+            XCTAssertEqual(submitted, 0, "Controller must negotiate Block composer admission")
+        }
+        let outputDeadline = Date().addingTimeInterval(10)
+        var plan = SeyalBlockViewportPlanHeader()
+        while Date() < outputDeadline {
+            _ = seyal_bridge_poll_for(handle)
+            if seyal_bridge_block_viewport_plan_header_for(handle, &plan) != 0,
+               plan.total_document_extent >= UInt64(rows) {
+                return handle
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("isolated Controller did not publish \(rows) canonical Block rows")
+        return handle
+    }
+
     private func terminalContentFrame(_ region: NSRect, splitInset: CGFloat = 0) -> NSRect {
         var frame = region.insetBy(dx: splitInset, dy: splitInset)
         frame.origin.y += 30
@@ -839,7 +901,10 @@ final class SeyalHostComponentTests: XCTestCase {
     /// #1424: every visible Flow leaf keeps Block transcript + composer, not
     /// Metal-only chrome. Focus must not destroy hosts or reset scroll.
     @MainActor
-    func testSplitFlowPanesEachExposeBlocksAndComposer() throws {
+    func testSplitFlowPanesEachExposeBlocksAndComposer() async throws {
+        let liveHandle = try await makeLiveBlockViewport(rows: 120)
+        defer { seyal_bridge_disconnect_handle(liveHandle) }
+        XCTAssertEqual(seyal_bridge_select(liveHandle), 0)
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         let handle = view.pane.appHandle
         // LIVE hosts require a bound Controller (same as #936 multipane).
@@ -853,8 +918,10 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_pane_lo = snap.pane_lo
         bind.fence_pane_hi = snap.pane_hi
         bind.fence_epoch = snap.epoch
-        bind.target_execution_lo = 0x1111_1111_1111_1111
-        bind.target_attachment_lo = 0x2222_2222_2222_2222
+        bind.target_execution_lo = seyal_bridge_execution_id_low()
+        bind.target_execution_hi = seyal_bridge_execution_id_high()
+        bind.target_attachment_lo = seyal_bridge_attachment_id_low()
+        bind.target_attachment_hi = seyal_bridge_attachment_id_high()
         bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(optInFlow(handle), 0)
@@ -970,12 +1037,13 @@ final class SeyalHostComponentTests: XCTestCase {
         let identityB = ObjectIdentifier(hostB)
 
         let scrollTarget = hostA.inputOwned ? hostB : hostA
+        XCTAssertEqual(scrollTarget.displayHandle, liveHandle)
         // Host tests often run without a key window; size the scroll clip
         // explicitly so mid-transcript offsets are representable.
         scrollTarget.transcript.setFrameSize(
             NSSize(width: max(scrollTarget.bounds.width, 200), height: 320)
         )
-        scrollTarget.ensureTranscriptScrollableForTests()
+        scrollTarget.syncTranscriptDocumentSize()
         scrollTarget.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(
             scrollTarget.transcriptDocumentScrollHeight(),
@@ -1049,9 +1117,7 @@ final class SeyalHostComponentTests: XCTestCase {
             scrollTarget.transcriptDocumentOffsetY,
             retainedOffset,
             accuracy: 1,
-            "registry poll changed scroll: doc=\(scrollTarget.transcriptDocumentScrollHeight()), "
-                + "preserved=\(scrollTarget.preservedDocumentHeightConstraint?.constant ?? -1), "
-                + "following=\(scrollTarget.followingLiveEnd), "
+            "registry poll changed Rust scroll: doc=\(scrollTarget.transcriptDocumentScrollHeight()), "
                 + "clip=\(NSStringFromRect(scrollTarget.transcript.contentView.bounds)), "
                 + "blocks=\(NSStringFromRect(scrollTarget.blocks.frame))"
         )
@@ -1254,7 +1320,11 @@ final class SeyalHostComponentTests: XCTestCase {
 
     /// #1424: focus ownership updates must not recreate Block views or scroll.
     @MainActor
-    func testFocusOwnershipPreservesBlockViewIdentityAndScroll() throws {
+    func testFocusOwnershipPreservesBlockViewIdentityAndScroll() async throws {
+        let handleA = try await makeLiveBlockViewport(rows: 120)
+        defer { seyal_bridge_disconnect_handle(handleA) }
+        let handleB = try await makeLiveBlockViewport(rows: 120)
+        defer { seyal_bridge_disconnect_handle(handleB) }
         let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
         layout.appHandle = seyal_app_create()
         defer { seyal_app_destroy(layout.appHandle) }
@@ -1270,8 +1340,8 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         layout.apply([left, right], dividers: [])
         layout.reconcileSecondaryLiveHosts(bindings: [
-            (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
-            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
+            (paneLo: 1, paneHi: 0, displayHandle: handleA, focused: true, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: handleB, focused: false, live: true),
         ])
         layout.layoutSubtreeIfNeeded()
         let hostA = try XCTUnwrap(layout.presentationHost(paneLo: 1, paneHi: 0))
@@ -1294,7 +1364,8 @@ final class SeyalHostComponentTests: XCTestCase {
 
         for host in [hostA, hostB] {
             host.transcript.setFrameSize(NSSize(width: 280, height: 320))
-            host.ensureTranscriptScrollableForTests(minimumHeight: 2000)
+            host.syncTranscriptDocumentSize()
+            XCTAssertGreaterThan(host.transcriptDocumentScrollHeight(), 1500)
             let eligibility = seyal_app_eligibility_for_pane(
                 layout.appHandle, host.paneLo, host.paneHi
             )
@@ -1313,8 +1384,8 @@ final class SeyalHostComponentTests: XCTestCase {
         for i in 0..<20 {
             let aFocused = i % 2 == 0
             layout.reconcileSecondaryLiveHosts(bindings: [
-                (paneLo: 1, paneHi: 0, displayHandle: 11, focused: aFocused, live: true),
-                (paneLo: 2, paneHi: 0, displayHandle: 22, focused: !aFocused, live: true),
+                (paneLo: 1, paneHi: 0, displayHandle: handleA, focused: aFocused, live: true),
+                (paneLo: 2, paneHi: 0, displayHandle: handleB, focused: !aFocused, live: true),
             ])
             hostA.reconcileFocusOwnershipPresentation()
             hostB.reconcileFocusOwnershipPresentation()
@@ -1401,9 +1472,13 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(hostB.displayHandle, 22)
     }
 
-    /// #1424: empty projection rebuild must clear preserved blank scroll canvas.
+    /// #1424: selecting an empty Rust plan must clear the prior scroll extent.
     @MainActor
-    func testEmptyProjectionClearsPreservedTranscriptHeight() throws {
+    func testEmptyProjectionClearsPreservedTranscriptHeight() async throws {
+        let populatedHandle = try await makeLiveBlockViewport(rows: 120)
+        defer { seyal_bridge_disconnect_handle(populatedHandle) }
+        let emptyHandle = try await makeLiveBlockViewport(rows: 0)
+        defer { seyal_bridge_disconnect_handle(emptyHandle) }
         let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
         layout.appHandle = seyal_app_create()
         defer { seyal_app_destroy(layout.appHandle) }
@@ -1420,23 +1495,22 @@ final class SeyalHostComponentTests: XCTestCase {
         layout.apply([left, right], dividers: [])
         layout.reconcileSecondaryLiveHosts(bindings: [
             (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
-            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: populatedHandle, focused: false, live: true),
         ])
         layout.layoutSubtreeIfNeeded()
         let host = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
         host.transcript.setFrameSize(NSSize(width: 280, height: 320))
-        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
-        host.preserveDocumentHeight(2400)
+        host.syncTranscriptDocumentSize()
+        XCTAssertGreaterThan(host.transcriptDocumentScrollHeight(), 500)
         host.setTranscriptDocumentOffsetY(400)
-        XCTAssertNotNil(host.preservedDocumentHeightConstraint)
         XCTAssertGreaterThan(host.transcriptDocumentOffsetY, 100)
 
+        XCTAssertTrue(host.updateDisplayHandle(emptyHandle))
         host.invalidateProjectionCacheForTests()
         host.reconcileFlowPresentation()
-        XCTAssertNil(
-            host.preservedDocumentHeightConstraint,
-            "empty canvas must not keep a blank scrollable transcript"
-        )
+        var plan = SeyalBlockViewportPlanHeader()
+        XCTAssertNotEqual(seyal_bridge_block_viewport_plan_header_for(emptyHandle, &plan), 0)
+        XCTAssertEqual(plan.total_document_extent, 0)
         XCTAssertEqual(host.transcriptDocumentOffsetY, 0, accuracy: 1)
         XCTAssertLessThan(
             host.transcriptDocumentScrollHeight(),
@@ -2013,6 +2087,99 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testScrolledViewportReplacesRetainedHistoryWithEarlierPage() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-history-scroll-page"
+        )
+        func page(start: UInt64, request: UInt64, marker: UInt32) -> NativeHistoryRange {
+            NativeHistoryRange(
+                startLine: start,
+                endLine: start + 1,
+                blockID: 1,
+                requestID: request,
+                revision: 1,
+                rows: [[
+                    NativeHistoryRange.Cell(
+                        scalar: marker,
+                        foreground: 0,
+                        background: 0,
+                        flags: 0
+                    )
+                ]],
+                sourceDisplayHandle: 11
+            )
+        }
+
+        let tailPage = page(start: 80, request: 8, marker: 56)
+        let earlierPage = page(start: 30, request: 9, marker: 51)
+        surface.retainHistoryRange(tailPage)
+        surface.retainHistoryRange(earlierPage)
+
+        XCTAssertEqual(
+            surface.retainedHistoryRange(blockID: 1, displayHandle: 11),
+            earlierPage,
+            "a newer viewport request for earlier rows must replace the cached tail page"
+        )
+    }
+
+    @MainActor
+    func testNewScrollClipDoesNotPaintCachedRowsAtTheNewCoordinate() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-history-scroll-stale-pixels"
+        )
+        let tailPage = NativeHistoryRange(
+            startLine: 80,
+            endLine: 81,
+            blockID: 1,
+            requestID: 8,
+            revision: 1,
+            rows: [[
+                NativeHistoryRange.Cell(scalar: 56, foreground: 0, background: 0, flags: 0)
+            ]],
+            sourceDisplayHandle: 11
+        )
+        surface.retainHistoryRange(tailPage)
+        surface.activateTranscriptDisplayHandle(11)
+        func frame(requestID: UInt64, y: CGFloat) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: requestID,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: .zero,
+                        clip: NSRect(x: 0, y: y, width: 320, height: 16),
+                        historyRows: 0..<1,
+                        historyRequestID: requestID,
+                        historyRevision: 1
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+
+        surface.setTranscriptFrame(frame(requestID: 8, y: 0))
+        XCTAssertEqual(surface.inspectFlowPaint().historyInstanceCount, 1)
+
+        // The clip moves during a scroll before its earlier Rust page arrives.
+        // Old row 80 must not be drawn at the new row-30 geometry.
+        surface.setTranscriptFrame(frame(requestID: 9, y: 80))
+        XCTAssertEqual(
+            surface.inspectFlowPaint().historyInstanceCount,
+            0,
+            "cached content for another viewport request must not paint at this clip"
+        )
+    }
+
+    @MainActor
     func testControllerSwitchDoesNotPaintStaleSameIDHistoryBeforeReplacementArrives() throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal unavailable")
@@ -2138,6 +2305,79 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(
             surface.renderer.historyRegions[1]?.buffer === preparedHistoryBuffer,
             "moving an unchanged Block must preserve its prepared Metal buffer"
+        )
+    }
+
+    @MainActor
+    func testViewportPageChangeAtStableClipReplacesPaintedHistory() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let surface = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "pane-history-stable-clip-page-change"
+        )
+        func range(requestID: UInt64, marker: UInt32) -> NativeHistoryRange {
+            NativeHistoryRange(
+                startLine: UInt64(requestID * 10),
+                endLine: UInt64(requestID * 10),
+                blockID: 1,
+                requestID: requestID,
+                revision: 1,
+                rows: [[
+                    NativeHistoryRange.Cell(
+                        scalar: marker,
+                        foreground: 0,
+                        background: 0,
+                        flags: 0
+                    )
+                ]],
+                sourceDisplayHandle: 11
+            )
+        }
+        func frame(requestID: UInt64) -> NativeTranscriptFrame {
+            NativeTranscriptFrame(
+                revision: requestID,
+                regions: [
+                    NativeTranscriptRegion(
+                        id: 1,
+                        displayHandle: 11,
+                        origin: .zero,
+                        clip: NSRect(x: 0, y: 0, width: 320, height: 120),
+                        historyRows: 0..<1,
+                        historyRequestID: requestID,
+                        historyRevision: 1
+                    )
+                ],
+                surfaceIdentity: ObjectIdentifier(surface)
+            )
+        }
+
+        surface.renderer.setPresentationPlan(.flow())
+        surface.activateTranscriptDisplayHandle(11)
+        surface.retainHistoryRange(range(requestID: 8, marker: 65))
+        surface.setTranscriptFrame(frame(requestID: 8))
+        let firstBuffer = try XCTUnwrap(surface.renderer.historyRegions[1]?.buffer)
+
+        // Scrolling can replace the Rust source page while the viewport clip
+        // remains at the same pixel coordinates. Clear the old page while the
+        // new Rust response is pending, then prepare the replacement when it
+        // arrives.
+        surface.setTranscriptFrame(frame(requestID: 9))
+        XCTAssertEqual(
+            surface.inspectFlowPaint().historyInstanceCount,
+            0,
+            "a prior viewport page must not remain visible at the new scroll position"
+        )
+
+        surface.retainHistoryRange(range(requestID: 9, marker: 66))
+        surface.setTranscriptFrame(frame(requestID: 9))
+
+        let updated = try XCTUnwrap(surface.renderer.historyRegions[1])
+        XCTAssertEqual(updated.historySource?.historyRange.requestID, 9)
+        XCTAssertFalse(
+            updated.buffer === firstBuffer,
+            "a new source page at stable geometry must replace the painted rows"
         )
     }
 
@@ -2408,21 +2648,34 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testSecondaryPaneCanScrollTranscriptToLiveEnd() {
+    func testSecondaryPaneCanScrollTranscriptToLiveEnd() async throws {
+        let displayHandle = try await makeLiveBlockViewport(rows: 120)
+        defer { seyal_bridge_disconnect_handle(displayHandle) }
         let host = SecondaryLivePaneHost(
             appHandle: 0,
             paneLo: 1,
             paneHi: 2,
-            displayHandle: 11,
+            displayHandle: displayHandle,
             recoveryTarget: SeyalAppPaneRecoveryTarget()
         )
         host.frame = NSRect(x: 0, y: 0, width: 360, height: 240)
         host.layoutSubtreeIfNeeded()
-        host.ensureTranscriptScrollableForTests(minimumHeight: 2400)
+        host.syncTranscriptDocumentSize()
+        XCTAssertGreaterThan(host.transcriptDocumentScrollHeight(), 500)
+        host.setTranscriptDocumentOffsetY(160)
+        XCTAssertFalse(host.isNearLiveEnd())
 
         host.scrollTranscriptToLiveEnd()
 
         XCTAssertTrue(host.isNearLiveEnd())
+        var plan = SeyalBlockViewportPlanHeader()
+        XCTAssertNotEqual(seyal_bridge_block_viewport_plan_header_for(displayHandle, &plan), 0)
+        XCTAssertEqual(
+            plan.scroll_y,
+            plan.total_document_extent > UInt64(plan.window_rows)
+                ? plan.total_document_extent - UInt64(plan.window_rows)
+                : 0
+        )
     }
 
     @MainActor
@@ -3300,8 +3553,8 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertTrue(
             hostText.contains("syncBlockViewportScrollAnchor")
-                && hostText.contains("seyal_bridge_block_viewport_set_scroll_anchor_for"),
-            "Flow publish must sync AppKit scroll into Rust AbsoluteY/LiveEnd plan anchor (G5)"
+                && hostText.contains("seyal_bridge_block_viewport_set_window_rows_for"),
+            "Flow publish must report viewport dimensions while Rust retains its scroll anchor"
         )
         XCTAssertFalse(
             hostText.contains("collectBlockOutputRegions(")
@@ -3561,6 +3814,53 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testViewportHistoryCorrelationUsesReturnedDeduplicatedRequestID() {
+        let bridge = RustDisplayBridge(
+            onFrame: { _ in }, onError: { _ in }, onStatusChanged: {},
+            paneID: "viewport-correlation"
+        )
+        let predictedID: UInt64 = 99
+        let returnedID: UInt64 = 41
+        let stale = PaneHistoryRequestKey(
+            displayHandle: 11, paneID: bridge.paneID, requestID: predictedID,
+            cacheBlockID: 700
+        )
+        let sibling = PaneHistoryRequestKey(
+            displayHandle: 22, paneID: bridge.paneID, requestID: predictedID,
+            cacheBlockID: 800
+        )
+        bridge.requestedHistoryRanges[stale] = (700, 0, 0, 0, 5)
+        bridge.requestedHistoryRanges[sibling] = (800, 0, 0, 0, 5)
+
+        bridge.recordBlockViewportContentRequest(
+            forDisplayHandle: 11,
+            returnedRequestID: returnedID,
+            clips: [
+                (regionID: 701, firstRow: 12, rowCount: 8),
+                (regionID: 702, firstRow: 40, rowCount: 4),
+            ]
+        )
+
+        XCTAssertNil(bridge.requestedHistoryRanges[stale])
+        XCTAssertNotNil(bridge.requestedHistoryRanges[sibling])
+        for (regionID, first, end) in [(UInt64(701), UInt32(12), UInt32(20)),
+                                        (UInt64(702), UInt32(40), UInt32(44))] {
+            let returned = PaneHistoryRequestKey(
+                displayHandle: 11, paneID: bridge.paneID,
+                requestID: returnedID, cacheBlockID: regionID
+            )
+            let predicted = PaneHistoryRequestKey(
+                displayHandle: 11, paneID: bridge.paneID,
+                requestID: predictedID, cacheBlockID: regionID
+            )
+            XCTAssertNil(bridge.requestedHistoryRanges[predicted])
+            XCTAssertEqual(bridge.requestedHistoryRanges[returned]?.blockID, regionID)
+            XCTAssertEqual(bridge.requestedHistoryRanges[returned]?.startUnit, first)
+            XCTAssertEqual(bridge.requestedHistoryRanges[returned]?.clipEndUnit, end)
+        }
+    }
+
     func testRepeatedPanePollDoesNotReRequestSettledBlockHistory() {
         var requests = HistoryProjectionRequestBook()
         let key = HistoryProjectionRequestKey(
@@ -3615,7 +3915,11 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testSecondaryTallToShortBlockKeepsScrolledHistoryAtItsOriginalCoordinate() throws {
+    func testSecondaryTallToShortBlockKeepsScrolledHistoryAtItsOriginalCoordinate() async throws {
+        let tallHandle = try await makeLiveBlockViewport(rows: 120)
+        defer { seyal_bridge_disconnect_handle(tallHandle) }
+        let shortHandle = try await makeLiveBlockViewport(rows: 2)
+        defer { seyal_bridge_disconnect_handle(shortHandle) }
         let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
         layout.appHandle = seyal_app_create()
         defer { seyal_app_destroy(layout.appHandle) }
@@ -3632,7 +3936,7 @@ final class SeyalHostComponentTests: XCTestCase {
         layout.apply([left, right], dividers: [])
         layout.reconcileSecondaryLiveHosts(bindings: [
             (paneLo: 1, paneHi: 0, displayHandle: 11, focused: true, live: true),
-            (paneLo: 2, paneHi: 0, displayHandle: 22, focused: false, live: true),
+            (paneLo: 2, paneHi: 0, displayHandle: tallHandle, focused: false, live: true),
         ])
         layout.layoutSubtreeIfNeeded()
         let host = try XCTUnwrap(layout.presentationHost(paneLo: 2, paneHi: 0))
@@ -3648,24 +3952,42 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         host.blocks.insertArrangedSubview(card, at: 1)
         host.blockCards[42] = card
-        host.followingLiveEnd = false
         host.syncTranscriptDocumentSize()
         layout.layoutSubtreeIfNeeded()
-        let originalCardMinY = card.frame.minY
-        host.preserveDocumentHeight(1_200)
-        card.setOutputLines(2, cellHeight: 16)
-        host.followingLiveEnd = false
-        host.syncTranscriptDocumentSize()
-        layout.layoutSubtreeIfNeeded()
-
-        XCTAssertGreaterThan(host.transcriptLeadingSpacerHeight.constant, 0)
+        var tallPlan = SeyalBlockViewportPlanHeader()
+        XCTAssertNotEqual(seyal_bridge_block_viewport_plan_header_for(tallHandle, &tallPlan), 0)
         XCTAssertEqual(
-            card.frame.minY,
-            originalCardMinY,
-            accuracy: 1,
-            "preserved document extent must not become filler before the visible Block"
+            host.transcriptDocumentScrollHeight(),
+            CGFloat(tallPlan.total_document_extent) * host.surface.terminalPresentationCellSize().height,
+            accuracy: 1
         )
-        XCTAssertTrue(host.blocks.arrangedSubviews.first === host.transcriptLeadingSpacer)
+        host.setTranscriptDocumentOffsetY(400)
+        let anchoredOffset = host.transcriptDocumentOffsetY
+        XCTAssertGreaterThan(anchoredOffset, 100)
+        card.setOutputLines(2, cellHeight: 16)
+        host.syncTranscriptDocumentSize()
+        layout.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            host.transcriptDocumentOffsetY,
+            anchoredOffset,
+            accuracy: 1,
+            "a hidden AX card shrink cannot move the Rust-owned reader position"
+        )
+        XCTAssertEqual(
+            host.transcriptDocumentScrollHeight(),
+            CGFloat(tallPlan.total_document_extent) * host.surface.terminalPresentationCellSize().height,
+            accuracy: 1
+        )
+        XCTAssertTrue(host.updateDisplayHandle(shortHandle))
+        host.syncTranscriptDocumentSize()
+        var shortPlan = SeyalBlockViewportPlanHeader()
+        XCTAssertNotEqual(seyal_bridge_block_viewport_plan_header_for(shortHandle, &shortPlan), 0)
+        XCTAssertGreaterThan(shortPlan.alignment_padding_rows, 0)
+        XCTAssertEqual(
+            host.transcriptDocumentScrollHeight(),
+            CGFloat(shortPlan.total_document_extent) * host.surface.terminalPresentationCellSize().height,
+            accuracy: 1
+        )
     }
 
     /// The primary readiness source polls `clientHandle`; focus selection must
@@ -4444,6 +4766,11 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(RendererValidation.retainedDefaultColorsFollowThemeOffscreenSelfTest())
     }
 
+    @MainActor
+    func testFlowHistoryDefaultBackgroundPreservesRustBlockSurface() {
+        XCTAssertTrue(RendererValidation.flowHistoryPreservesBlockSurfaceOffscreenSelfTest())
+    }
+
     /// #1062: light Canvas must drive Raw/TUI full-grid clear (not hardcoded dark).
     @MainActor
     func testFullGridClearFollowsRustThemeCanvas() {
@@ -5201,7 +5528,7 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         renderer.setTranscriptRegions([region])
         renderer.setLiveTailBlocks([
-            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+            865: LiveTailClip(firstRow: 1, rowCount: 2)
         ])
 
         XCTAssertEqual(renderer.liveTailRegionCount, 1)
@@ -5305,7 +5632,7 @@ final class SeyalHostComponentTests: XCTestCase {
         // A Runtime row mapping can briefly outrun the latest prepared frame.
         // Keep the Block-local buffer under the latest origin/clip for one
         // submitted frame, then fail closed if the mapping has not converged.
-        let staleClip = LiveTailClip(startLine: 30, firstRow: 2, rowCount: 2)
+        let staleClip = LiveTailClip(firstRow: 2, rowCount: 2)
         renderer.setLiveTailBlocks([865: staleClip])
         XCTAssertEqual(renderer.liveTailRegionCount, 1)
         XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
@@ -5328,7 +5655,7 @@ final class SeyalHostComponentTests: XCTestCase {
         // Local instances follow a moved Block by updating draw-time origin
         // and clip. Persistent invalid mappings still retire after one draw.
         renderer.setLiveTailBlocks([
-            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+            865: LiveTailClip(firstRow: 1, rowCount: 2)
         ])
         let movedRegion = NativeTranscriptRegion(
             id: 865,
@@ -5371,7 +5698,7 @@ final class SeyalHostComponentTests: XCTestCase {
         // Atlas reset invalidates UV coordinates even when row shape and font
         // metrics match. An incompatible stale buffer must never be replayed.
         renderer.setLiveTailBlocks([
-            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+            865: LiveTailClip(firstRow: 1, rowCount: 2)
         ])
         XCTAssertEqual(renderer.liveTailRegionCount, 1)
         renderer.glyphAtlas.resetWhenGPUIdle()
@@ -5388,7 +5715,7 @@ final class SeyalHostComponentTests: XCTestCase {
         // refresh could repaint loose primary rows over Block cards.
         XCTAssertEqual(try update(generation: 870, fullRebuild: false, damage: DamageMask()), .updated)
         renderer.setLiveTailBlocks([
-            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+            865: LiveTailClip(firstRow: 1, rowCount: 2)
         ])
         XCTAssertGreaterThan(renderer.lastPreparedRowCount, 0)
         XCTAssertEqual(renderer.liveTailRegionCount, 1)
@@ -5459,6 +5786,7 @@ final class SeyalHostComponentTests: XCTestCase {
             .appendingPathComponent("Sources", isDirectory: true)
         let surface = try String(contentsOf: sources.appendingPathComponent("MetalSurfaceView.swift"), encoding: .utf8)
         let history = try String(contentsOf: sources.appendingPathComponent("MetalSurfaceView+History.swift"), encoding: .utf8)
+        let renderer = try String(contentsOf: sources.appendingPathComponent("MetalTerminalRenderer.swift"), encoding: .utf8)
         func body(of signature: String, in text: String) throws -> Substring {
             let start = try XCTUnwrap(text.range(of: signature))
             let end = text[start.upperBound...].range(of: "\n  func ")?.lowerBound ?? text.endIndex
@@ -5471,6 +5799,20 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(
             try body(of: "func renderHistoryRange(", in: history).contains("forceFlushHistoryPreparesForRetain"),
             "HISTORY prepare must keep the in-flight gate"
+        )
+        let flushBody = try body(of: "func flushDeferredHistoryPrepares()", in: renderer)
+        XCTAssertFalse(
+            renderer.contains("func forceFlushHistoryPreparesForRetain()")
+                || flushBody.contains("framesInFlight = 0"),
+            "disconnect retention must never claim GPU completion before its completion handler runs"
+        )
+        let presentBody = try body(of: "func present(drawable: any CAMetalDrawable", in: renderer)
+        let idleGuard = try XCTUnwrap(presentBody.range(of: "guard visible"))
+        let atlasMutation = try XCTUnwrap(presentBody.range(of: "reencodeHistoryRegionsForCurrentAtlas()"))
+        XCTAssertLessThan(
+            idleGuard.lowerBound,
+            atlasMutation.lowerBound,
+            "atlas re-encoding must not mutate resources while a drawable frame is in flight"
         )
     }
 
@@ -5659,6 +6001,114 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
+    func testFlowViewportResizeDoesNotReapplySwiftScrollAnchor() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let primary = try String(
+            contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift"),
+            encoding: .utf8
+        )
+        let secondaryFlow = try String(
+            contentsOf: sourceRoot.appendingPathComponent("SecondaryLivePaneHost+Flow.swift"),
+            encoding: .utf8
+        )
+        let secondaryHost = try String(
+            contentsOf: sourceRoot.appendingPathComponent("SecondaryLivePaneHost.swift"),
+            encoding: .utf8
+        )
+        let bridgeHeader = try String(
+            contentsOf: sourceRoot.appendingPathComponent("SeyalBridge.h"),
+            encoding: .utf8
+        )
+        let ffi = try String(
+            contentsOf: sourceRoot.deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("crates/seyal-client/src/ffi/display.rs"),
+            encoding: .utf8
+        )
+        for source in [primary, secondaryFlow + secondaryHost] {
+            XCTAssertTrue(
+                source.contains("seyal_bridge_block_viewport_scroll_to_for"),
+                "native scroller changes must enter Rust as scroll actions, not only republish the viewport"
+            )
+            XCTAssertTrue(
+                source.contains("lastObservedTranscriptOriginY")
+                    && source.contains("originDidChange"),
+                "only a native scroll-origin change may update the Rust scroll anchor; size-only bounds changes must preserve it"
+            )
+            XCTAssertTrue(
+                source.contains("seyal_bridge_block_viewport_set_window_rows_for"),
+                "native viewport resize must update the Rust plan without changing its anchor"
+            )
+            XCTAssertFalse(
+                source.contains("flowRustScrollAnchorY")
+                    || source.contains("flowRustScrollAnchorActive"),
+                "each display handle's Rust client owns its scroll anchor; Swift must not replay a shadow into another tab"
+            )
+        }
+        XCTAssertFalse(
+            bridgeHeader.contains("seyal_bridge_block_viewport_set_scroll_anchor_for")
+                || ffi.contains("fn seyal_bridge_block_viewport_set_scroll_anchor_for"),
+            "native code must not have an API that overwrites a display handle's Rust scroll anchor"
+        )
+    }
+
+    func testFlowHostsDoNotMaintainASecondDocumentOrFollowAuthority() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let hostFiles = [
+            "ProductChromeHostView.swift",
+            "ProductChromeHostView+Blocks.swift",
+            "ProductChromeHostView+TranscriptLayout.swift",
+            "SecondaryLivePaneHost.swift",
+            "SecondaryLivePaneHost+Flow.swift",
+        ]
+        for name in hostFiles {
+            let source = try String(
+                contentsOf: sourceRoot.appendingPathComponent(name),
+                encoding: .utf8
+            )
+            for displacedAuthority in [
+                "followingLiveEnd",
+                "pinnedTranscriptOffsetY",
+                "preservedDocumentHeightConstraint",
+                "transcriptScrollStates",
+                "transcriptCardsContentHeight()",
+                "blocks.fittingSize",
+                "card.body.convert",
+            ] {
+                XCTAssertFalse(
+                    source.contains(displacedAuthority),
+                    "\(name) still gives Swift Flow presentation authority through \(displacedAuthority)"
+                )
+            }
+        }
+    }
+
+    @MainActor
+    func testFocusedFlowClickRoutesToRustRowHitAndDirectInputResponder() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let host = try String(contentsOf: sourceRoot.appendingPathComponent(
+            "SecondaryLivePaneHost.swift"), encoding: .utf8)
+        let flow = try String(contentsOf: sourceRoot.appendingPathComponent(
+            "SecondaryLivePaneHost+Flow.swift"), encoding: .utf8)
+        XCTAssertTrue(host.contains("surface.mouseDown(with: event)"))
+        XCTAssertTrue(host.contains("window?.makeFirstResponder(surface)"))
+        XCTAssertTrue(flow.contains("seyal_bridge_block_viewport_hit_test_row_for"))
+        XCTAssertTrue(host.contains("seyal_bridge_block_viewport_scroll_to_for"))
+    }
+
     func testBlockProjectionABIRejectsInventedRunningHistoryEnd() {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -5689,6 +6139,10 @@ final class SeyalHostComponentTests: XCTestCase {
             contentsOf: sourceRoot.appendingPathComponent("MetalSurfaceView+BlockViewportPlan.swift"),
             encoding: .utf8
         )
+        let historyTransport = try String(
+            contentsOf: sourceRoot.appendingPathComponent("RustDisplayBridge+History.swift"),
+            encoding: .utf8
+        )
         for text in [chrome, flow] {
             XCTAssertTrue(
                 text.contains("applyBlockViewportPlan(")
@@ -5696,8 +6150,8 @@ final class SeyalHostComponentTests: XCTestCase {
                 "Flow hosts must publish via BlockViewportPlan"
             )
             XCTAssertTrue(
-                text.contains("seyal_bridge_block_viewport_set_scroll_anchor_for"),
-                "Flow hosts must sync AppKit scroll into AbsoluteY/LiveEnd before plan paint"
+                text.contains("seyal_bridge_block_viewport_set_window_rows_for"),
+                "Flow hosts must report viewport height without overwriting the Rust-owned anchor"
             )
             XCTAssertTrue(
                 text.contains("func applyBlockOutputProjection"),
@@ -5714,10 +6168,10 @@ final class SeyalHostComponentTests: XCTestCase {
             }
         }
         XCTAssertTrue(
-            plan.contains("startLine: 0")
-                && plan.contains("endLine: 0")
-                && plan.contains("startUnit:"),
-            "Metal plan must request sealed-index HISTORY pages"
+            plan.contains("requestBlockViewportContent(")
+                && plan.contains("planGeneration: header.content_generation")
+                && plan.contains("clips: clips.map"),
+            "Metal plan must request only its Rust-selected sealed RegionGrid clips"
         )
         XCTAssertTrue(
             plan.contains("forDisplayHandle: displayHandle"),
@@ -5730,24 +6184,58 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertTrue(
             flow.contains("historyBridge: historyBridge")
-                && flow.contains("notePlanClipHistoryResult"),
-            "pane host must pass borrowed bridge and settle its own plan-clip book"
+                && flow.contains("lastPublishedTranscriptRegions = surface.currentTranscriptRegions()"),
+            "pane host must use its borrowed bridge and retain the Rust-selected plan clips"
+        )
+        XCTAssertTrue(
+            historyTransport.contains("seyal_bridge_request_block_viewport_content_for(handle, planGeneration)")
+                && historyTransport.contains("clip.firstRow")
+                && historyTransport.contains("clip.rowCount"),
+            "the bridge must submit the exact bounded region-row spans from Rust"
         )
         XCTAssertFalse(
             flow.contains("requestNativeCardHistoryFallback")
                 || plan.contains("func requestNativeCardHistoryFallback"),
             "ADR-015: no card-driven HISTORY fallback"
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             plan.contains("chromeBodyClips")
-                && (flow.contains("chromeBodyClips:") || chrome.contains("chromeBodyClips:")),
-            "chrome body clips may place plan-selected Blocks; plan still owns rows/HISTORY"
+                || flow.contains("chromeBodyClips:")
+                || chrome.contains("chromeBodyClips:"),
+            "Rust plan geometry must not be replaced with Swift card rectangles"
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             flow.contains("max(rustBody, cardHeight)")
                 || chrome.contains("max(rustBody, cardHeight)"),
-            "document must host AppKit chrome headers until Rust chrome metrics exist"
+            "Rust owns Block extent; Swift card height must not affect document size"
         )
+        XCTAssertTrue(
+            plan.contains("seyal_bridge_block_viewport_surface_at_for")
+                && plan.contains("header.surface_count"),
+            "Metal chrome geometry must come from Rust BlockSurfaceRange items"
+        )
+        XCTAssertTrue(
+            plan.contains("let viewportSize = bounds.size")
+                && plan.contains("viewportSize: viewportSize")
+                && plan.contains("cellSize: cell")
+                && plan.contains("backingScale: scale")
+                && plan.contains("resourceGeneration: renderer.presentationResourceGeneration")
+                && plan.contains("lastAppliedViewportPlanSignature?.viewportSize == signature.viewportSize")
+                && plan.contains("lastAppliedViewportPlanSignature?.backingScale == signature.backingScale")
+                && plan.contains("lastAppliedViewportPlanSignature?.resourceGeneration == signature.resourceGeneration"),
+            "the plan fast path must invalidate on pixel metrics or released renderer resources"
+        )
+        if let surfaceLoop = plan.range(of: "for index in 0..<header.surface_count"),
+           let noHistoryBranch = plan.range(of: "if regions.isEmpty")
+        {
+            XCTAssertLessThan(
+                surfaceLoop.lowerBound,
+                noHistoryBranch.lowerBound,
+                "live-only output must keep its Rust Block surface when no HISTORY clip exists"
+            )
+        } else {
+            XCTFail("Block surfaces must be published for plans with no HISTORY clips")
+        }
         let host = try String(
             contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView.swift"),
             encoding: .utf8
@@ -6362,48 +6850,54 @@ extension SeyalHostComponentTests {
     }
 
     @MainActor
-    func testTranscriptSizingUsesIntrinsicHeightsAndAccountsForDockSpacing() {
-        let leadingSpacer = NSView()
-        let staleExpandedCard = NSView(
-            frame: NSRect(x: 0, y: 0, width: 240, height: 500)
+    func testTranscriptSizingUsesIntrinsicHeightsAndAccountsForDockSpacing() async throws {
+        let handle = try await makeLiveBlockViewport(rows: 120)
+        defer { seyal_bridge_disconnect_handle(handle) }
+        let host = SecondaryLivePaneHost(
+            appHandle: 0, paneLo: 1, paneHi: 2, displayHandle: handle,
+            recoveryTarget: SeyalAppPaneRecoveryTarget()
         )
-        staleExpandedCard.translatesAutoresizingMaskIntoConstraints = false
-        staleExpandedCard.heightAnchor.constraint(equalToConstant: 48).isActive = true
-
-        XCTAssertEqual(staleExpandedCard.bounds.height, 500)
-        XCTAssertEqual(staleExpandedCard.fittingSize.height, 48)
-        let height = TranscriptDocumentSizing.contentHeight(
-            arrangedSubviews: [leadingSpacer, staleExpandedCard],
-            leadingSpacer: leadingSpacer,
-            spacing: 10,
-            edgeInsets: NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 240)
+        host.layoutSubtreeIfNeeded()
+        let staleCard = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 500))
+        staleCard.translatesAutoresizingMaskIntoConstraints = false
+        staleCard.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        host.blocks.addArrangedSubview(staleCard)
+        XCTAssertEqual(staleCard.bounds.height, 500)
+        XCTAssertEqual(staleCard.fittingSize.height, 48)
+        host.syncTranscriptDocumentSize()
+        var plan = SeyalBlockViewportPlanHeader()
+        XCTAssertNotEqual(seyal_bridge_block_viewport_plan_header_for(handle, &plan), 0)
+        XCTAssertEqual(
+            host.transcriptDocumentScrollHeight(),
+            CGFloat(plan.total_document_extent) * host.surface.terminalPresentationCellSize().height,
+            accuracy: 1,
+            "hidden AppKit intrinsic height must not change the Rust document extent"
         )
-        XCTAssertEqual(height, 74, "use the current Block height, the leading stack gap, and both insets")
     }
 
     @MainActor
-    func testScrolledSecondaryRebuildPreservesBlockCoordinatesWithBottomDockingSlack() {
-        let following = TranscriptDocumentSizing.spacerHeights(
-            contentHeight: 300,
-            viewportHeight: 500,
-            preservedDocumentHeight: 0
-        )
-        XCTAssertEqual(following.leading, 200)
-        XCTAssertEqual(following.trailing, 0)
-        XCTAssertEqual(following.document, 500)
-
-        let scrolledAwayAfterShrink = TranscriptDocumentSizing.spacerHeights(
-            contentHeight: 300,
-            viewportHeight: 400,
-            preservedDocumentHeight: 1_000
-        )
+    func testScrolledSecondaryRebuildPreservesBlockCoordinatesWithBottomDockingSlack() async throws {
+        let shortHandle = try await makeLiveBlockViewport(rows: 2)
+        defer { seyal_bridge_disconnect_handle(shortHandle) }
+        XCTAssertNotEqual(seyal_bridge_block_viewport_set_window_rows_for(shortHandle, 20), 0)
+        var short = SeyalBlockViewportPlanHeader()
+        XCTAssertNotEqual(seyal_bridge_block_viewport_plan_header_for(shortHandle, &short), 0)
+        XCTAssertGreaterThan(short.alignment_padding_rows, 0)
         XCTAssertEqual(
-            scrolledAwayAfterShrink.leading,
-            700,
-            "preserved document space keeps blocks bottom-docked"
+            UInt64(short.alignment_padding_rows) + short.total_document_extent,
+            UInt64(short.window_rows),
+            "Rust owns short-content bottom docking without a Swift spacer"
         )
-        XCTAssertEqual(scrolledAwayAfterShrink.trailing, 0)
-        XCTAssertEqual(scrolledAwayAfterShrink.document, 1_000)
+
+        let tallHandle = try await makeLiveBlockViewport(rows: 120)
+        defer { seyal_bridge_disconnect_handle(tallHandle) }
+        XCTAssertNotEqual(seyal_bridge_block_viewport_scroll_to_for(tallHandle, 20, 20), 0)
+        var scrolled = SeyalBlockViewportPlanHeader()
+        XCTAssertNotEqual(seyal_bridge_block_viewport_plan_header_for(tallHandle, &scrolled), 0)
+        XCTAssertEqual(scrolled.scroll_y, 20)
+        XCTAssertEqual(scrolled.alignment_padding_rows, 0)
+        XCTAssertGreaterThan(scrolled.total_document_extent, UInt64(scrolled.window_rows))
     }
 
     @MainActor
@@ -6506,6 +7000,41 @@ extension SeyalHostComponentTests {
         XCTAssertEqual(surface.kind, 0)
         banner.reconcile()
         XCTAssertTrue(banner.isHidden)
+    }
+
+    @MainActor
+    func testFlowSurfaceOnlyFrameRemainsPresentableAfterEmptyHistoryOrder() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let renderer = try MetalTerminalRenderer(device: device)
+        renderer.setPresentationPlan(.flow())
+        renderer.setBlockSurfaceDecorations([
+            MetalBlockSurfaceDecoration(
+                rect: CGRect(x: 0, y: 0, width: 32, height: 16),
+                color: 0xfff2_f4f7
+            )
+        ])
+
+        renderer.setHistoryRegionOrder([])
+
+        XCTAssertTrue(
+            renderer.hasPresentablePreparedState,
+            "Rust Block surfaces must remain presentable without a live-grid instance buffer"
+        )
+    }
+
+    @MainActor
+    func testReleasingRendererResourcesAdvancesPresentationGeneration() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let renderer = try MetalTerminalRenderer(device: device)
+        let previousGeneration = renderer.presentationResourceGeneration
+
+        renderer.releaseDedicatedResources()
+
+        XCTAssertEqual(renderer.presentationResourceGeneration, previousGeneration &+ 1)
     }
 
     func testSessionSurfaceAbiLayout() {

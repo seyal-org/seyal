@@ -289,6 +289,24 @@ extension ProductChromeHostView {
         reconcileChrome()
     }
 
+    func selectBlockAtViewportRow(_ viewportRow: UInt32) {
+        let bridge = pane.inputSurface.bridge
+        let focusedHandle = bridge?.windowFocusedDisplayHandle ?? 0
+        let handle = focusedHandle != 0 ? focusedHandle : bridge?.clientHandle ?? 0
+        guard handle != 0 else { return }
+        var hit = SeyalBlockViewportHit()
+        guard seyal_bridge_block_viewport_hit_test_row_for(handle, viewportRow, &hit) != 0 else {
+            return
+        }
+        let composer = seyal_app_composer(pane.appHandle)
+        for index in 0..<Int(composer.block_count) {
+            let row = seyal_app_block_row(pane.appHandle, UInt32(index))
+            guard row.id_lo == hit.block_id else { continue }
+            selectBlock(idLo: row.id_lo, idHi: row.id_hi, deselect: false)
+            return
+        }
+    }
+
     func applyPayload(_ kind: UInt16, text: String) {
         let snapshot = seyal_app_snapshot(pane.appHandle)
         var action = SeyalAppAction()

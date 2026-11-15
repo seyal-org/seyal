@@ -1,7 +1,9 @@
 use super::*;
 use seyal_runtime::local_ipc::framing::{
-    encode_frame, envelope_presentation_frame, ErrorCode, ErrorMessage, ExecutionList,
-    ExecutionListEntry, FrameHeader, Lifecycle, LifecycleMessage, MessageType, ResumeDelivery,
+    encode_frame, envelope_presentation_frame, BlockViewportContentClip,
+    BlockViewportContentRequest, BlockViewportContentSnapshot, BlockViewportRegionContent,
+    ErrorCode, ErrorMessage, ExecutionList, ExecutionListEntry, FrameHeader, HistoryRangeSnapshot,
+    HistoryRangeStatus, Lifecycle, LifecycleMessage, MessageType, ResumeDelivery,
 };
 use seyal_runtime::pass8::CAP_BLOCK_METADATA;
 use std::io::{Read, Write};
@@ -71,6 +73,7 @@ pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
         next_composer_request_id: 1,
         history_ranges: HashMap::new(),
         history_requests: HashMap::new(),
+        block_viewport_content_requests: HashMap::new(),
         next_history_request_id: 1,
         copied_text: Vec::new(),
         last_admitted_v2_action_id: 0,
@@ -243,7 +246,7 @@ fn native_regions_commit_before_plan_rebuild_emits_clips() {
     client.block_viewport_window_rows = Some(24);
     client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
         revision: 1,
-        total_height: 100,
+        total_height: 103,
         records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
             block_id: 42,
             header_region: 100,
@@ -251,6 +254,7 @@ fn native_regions_commit_before_plan_rebuild_emits_clips() {
             first_row: 0,
             row_count: 0,
             sealed_rows: 100,
+            header_rows: 3,
         }],
     };
     client.apply_block_native_regions_to_viewport();
@@ -261,10 +265,139 @@ fn native_regions_commit_before_plan_rebuild_emits_clips() {
         plan.total_document_extent > 0,
         "committed map must produce non-zero extent"
     );
+    assert_eq!(
+        client.block_viewport_total_height(),
+        104,
+        "Rust document extent includes the explicit Block spacing row"
+    );
     assert!(
         plan.clip_for(42).is_some(),
         "first-seen Block must emit a sealed clip from committed RegionIds"
     );
+}
+
+#[test]
+fn viewport_content_request_batches_the_current_rust_clip_plan() {
+    let (client_stream, mut server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(24);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 7,
+        total_height: 64,
+        records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+            block_id: 42,
+            header_region: 100,
+            output_region: 101,
+            first_row: 0,
+            row_count: 40,
+            sealed_rows: 40,
+            header_rows: 2,
+        }],
+    };
+    client.apply_block_native_regions_to_viewport();
+    let plan = client.block_viewport_plan().expect("Rust viewport plan");
+    let expected = plan
+        .clipping
+        .iter()
+        .map(|clip| BlockViewportContentClip {
+            region_id: clip.region_id,
+            first_row: clip.first_row,
+            row_count: clip.row_count,
+        })
+        .collect::<Vec<_>>();
+    let generation = plan.content_generation;
+
+    let request_id = client
+        .request_block_viewport_content(generation)
+        .expect("bounded batch request");
+    let mut bytes = [0u8; 8192];
+    let count = server.read(&mut bytes).expect("request frame");
+    let header = FrameHeader::decode(&bytes[..count]).expect("frame header");
+    assert_eq!(
+        header.message_type,
+        MessageType::BlockViewportContentRequest as u16
+    );
+    let request = BlockViewportContentRequest::decode(
+        &bytes[seyal_runtime::local_ipc::framing::HEADER_LEN..count],
+    )
+    .expect("viewport batch payload");
+    assert_eq!(request.request_id, request_id);
+    assert_eq!(request.plan_generation, generation);
+    assert_eq!(request.clips, expected);
+    assert_eq!(
+        client
+            .request_block_viewport_content(generation)
+            .expect("same plan reuses in-flight batch"),
+        request_id
+    );
+}
+
+#[test]
+fn viewport_content_response_is_cached_only_for_the_current_clip_plan() {
+    let (client_stream, mut server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(24);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 9,
+        total_height: 64,
+        records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+            block_id: 42,
+            header_region: 100,
+            output_region: 101,
+            first_row: 0,
+            row_count: 40,
+            sealed_rows: 40,
+            header_rows: 2,
+        }],
+    };
+    client.apply_block_native_regions_to_viewport();
+    let plan = client.block_viewport_plan().expect("Rust viewport plan");
+    let clips = plan.clipping.clone();
+    let generation = plan.content_generation;
+    let request_id = client
+        .request_block_viewport_content(generation)
+        .expect("bounded batch request");
+    let mut ignored_request = [0u8; 8192];
+    let _ = server.read(&mut ignored_request).expect("request frame");
+
+    let response = BlockViewportContentSnapshot {
+        request_id,
+        plan_generation: generation,
+        revision: 10,
+        status: HistoryRangeStatus::Complete,
+        regions: clips
+            .iter()
+            .map(|clip| BlockViewportRegionContent {
+                region_id: clip.region_id,
+                first_row: clip.first_row,
+                snapshot: HistoryRangeSnapshot {
+                    request_id,
+                    block_id: clip.region_id,
+                    revision: 10,
+                    status: HistoryRangeStatus::Complete,
+                    rows: Vec::new(),
+                    sidecar: Vec::new(),
+                },
+            })
+            .collect(),
+    };
+    client.buffered.extend(encode_frame(
+        MessageType::BlockViewportContentSnapshot,
+        &response.encode(),
+    ));
+    client.poll_prepare().expect("poll viewport response");
+
+    for clip in clips {
+        assert!(client
+            .history_range_for(clip.region_id, request_id)
+            .is_some());
+    }
 }
 
 #[test]
@@ -287,6 +420,7 @@ fn live_row_count_growth_does_not_bump_presentation_epoch() {
             first_row: 0,
             row_count: 5,
             sealed_rows: 0,
+            header_rows: 0,
         }],
     };
     client.apply_block_native_regions_to_viewport();
@@ -303,8 +437,8 @@ fn live_row_count_growth_does_not_bump_presentation_epoch() {
     );
     assert_eq!(
         client.block_viewport_total_height(),
-        20,
-        "Fenwick index must still track live height"
+        21,
+        "Fenwick index must still track live height and Rust-owned spacing"
     );
 
     client.block_native_regions.revision = 3;
@@ -316,6 +450,381 @@ fn live_row_count_growth_does_not_bump_presentation_epoch() {
         client.block_viewport_presentation_epoch > epoch_after_first,
         "sealed RegionId / ownership change must bump presentation_epoch"
     );
+}
+
+#[test]
+fn sealed_row_growth_with_stable_region_ids_does_not_bump_presentation_epoch() {
+    // Sealing moves rows from the live window into the same canonical
+    // RegionGrid. It changes content/extent, not Block structure or ownership.
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(24);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 42,
+        records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+            block_id: 7,
+            header_region: 1,
+            output_region: 2,
+            first_row: 0,
+            row_count: 40,
+            sealed_rows: 0,
+            header_rows: 1,
+        }],
+    };
+    client.apply_block_native_regions_to_viewport();
+    let epoch = client.block_viewport_presentation_epoch;
+
+    client.block_native_regions.revision = 2;
+    client.block_native_regions.total_height = 142;
+    client.block_native_regions.records[0].sealed_rows = 100;
+    client.apply_block_native_regions_to_viewport();
+
+    assert_eq!(
+        client.block_viewport_presentation_epoch, epoch,
+        "sealing additional rows into the same RegionGrid must not restart the Flow presentation generation"
+    );
+    assert_eq!(client.block_viewport_total_height(), 142);
+}
+
+#[test]
+fn scroll_anchor_stays_on_the_same_block_row_when_earlier_output_grows() {
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(3);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 22,
+        records: vec![
+            seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                block_id: 1,
+                header_region: 10,
+                output_region: 11,
+                first_row: 0,
+                row_count: 0,
+                sealed_rows: 10,
+                header_rows: 0,
+            },
+            seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                block_id: 2,
+                header_region: 20,
+                output_region: 21,
+                first_row: 0,
+                row_count: 0,
+                sealed_rows: 10,
+                header_rows: 0,
+            },
+        ],
+    };
+    client.apply_block_native_regions_to_viewport();
+
+    // The second Block begins at row 11; anchor its second row.
+    client.set_block_viewport_scroll_anchor(false, 12, 3);
+    assert_eq!(
+        client.block_viewport_plan().expect("initial plan").scroll_y,
+        12
+    );
+
+    // Four rows are sealed into the earlier Block while the reader is away
+    // from LiveEnd. AbsoluteY=12 now points into Block 1 unless the Rust
+    // viewport preserves the source-relative Block/row anchor.
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 2,
+        total_height: 26,
+        records: vec![
+            seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                block_id: 1,
+                header_region: 10,
+                output_region: 11,
+                first_row: 0,
+                row_count: 0,
+                sealed_rows: 14,
+                header_rows: 0,
+            },
+            seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                block_id: 2,
+                header_region: 20,
+                output_region: 21,
+                first_row: 0,
+                row_count: 0,
+                sealed_rows: 10,
+                header_rows: 0,
+            },
+        ],
+    };
+    client.apply_block_native_regions_to_viewport();
+
+    let plan = client.block_viewport_plan().expect("updated plan");
+    assert_eq!(
+        plan.scroll_anchor,
+        crate::viewport::ScrollAnchor::BlockRow {
+            block_id: 2,
+            row: 1,
+        }
+    );
+    assert_eq!(plan.scroll_y, 16);
+    assert_eq!(plan.visible_items[0].block_id, 2);
+    assert_eq!(plan.visible_items[0].first_visible_row, 1);
+}
+
+#[test]
+fn resizing_block_viewport_preserves_rust_scroll_anchor() {
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(3);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 30,
+        records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+            block_id: 7,
+            header_region: 70,
+            output_region: 71,
+            first_row: 0,
+            row_count: 0,
+            sealed_rows: 30,
+            header_rows: 0,
+        }],
+    };
+    client.apply_block_native_regions_to_viewport();
+    client.set_block_viewport_scroll_anchor(false, 12, 3);
+
+    client.set_block_viewport_window_rows(5);
+
+    let plan = client.block_viewport_plan().expect("resized plan");
+    assert_eq!(plan.window_rows, 5);
+    assert_eq!(plan.scroll_y, 12);
+    assert_eq!(
+        plan.scroll_anchor,
+        crate::viewport::ScrollAnchor::AbsoluteY(12)
+    );
+}
+
+#[test]
+fn native_scroller_position_becomes_a_block_relative_rust_anchor() {
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(3);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 22,
+        records: vec![
+            seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                block_id: 1,
+                header_region: 10,
+                output_region: 11,
+                first_row: 0,
+                row_count: 0,
+                sealed_rows: 10,
+                header_rows: 0,
+            },
+            seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                block_id: 2,
+                header_region: 20,
+                output_region: 21,
+                first_row: 0,
+                row_count: 0,
+                sealed_rows: 10,
+                header_rows: 0,
+            },
+        ],
+    };
+    client.apply_block_native_regions_to_viewport();
+
+    assert_eq!(client.scroll_block_viewport_to(12, 3), 12);
+    assert_eq!(
+        client
+            .block_viewport_plan()
+            .expect("scrolled plan")
+            .scroll_anchor,
+        crate::viewport::ScrollAnchor::BlockRow {
+            block_id: 2,
+            row: 1,
+        }
+    );
+
+    client.block_native_regions.revision = 2;
+    client.block_native_regions.records[0].sealed_rows = 14;
+    client.block_native_regions.total_height = 26;
+    client.apply_block_native_regions_to_viewport();
+    assert_eq!(
+        client
+            .block_viewport_plan()
+            .expect("reflowed plan")
+            .scroll_y,
+        16,
+        "native scroller input must resolve to a stable Block-relative anchor"
+    );
+}
+
+#[test]
+fn rust_block_scroll_deltas_clamp_and_restore_live_end() {
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(10);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 41,
+        records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+            block_id: 12,
+            header_region: 100,
+            output_region: 101,
+            first_row: 0,
+            row_count: 20,
+            sealed_rows: 20,
+            header_rows: 1,
+        }],
+    };
+    client.apply_block_native_regions_to_viewport();
+    let epoch = client
+        .block_viewport_plan()
+        .expect("initial plan")
+        .presentation_epoch;
+    assert_eq!(
+        client.block_viewport_plan().expect("initial plan").scroll_y,
+        32
+    );
+    assert_eq!(client.scroll_block_viewport_by(-5, 10), 27);
+    assert_eq!(client.scroll_block_viewport_by(5, 10), 32);
+    assert_eq!(
+        client
+            .block_viewport_plan()
+            .expect("live-end plan")
+            .scroll_anchor,
+        crate::viewport::ScrollAnchor::LiveEnd
+    );
+    assert_eq!(client.scroll_block_viewport_by(-100, 10), 0);
+    assert_eq!(client.scroll_block_viewport_by(200, 10), 32);
+    assert_eq!(
+        client
+            .block_viewport_plan()
+            .expect("scrolled plan")
+            .presentation_epoch,
+        epoch,
+        "scrolling must not invalidate stable RegionGrid paint content"
+    );
+}
+
+#[test]
+fn clearing_a_scrolled_block_drops_extent_and_returns_to_live_end() {
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(10);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 101,
+        records: vec![seyal_runtime::local_ipc::framing::NativeBlockRegions {
+            block_id: 7,
+            header_region: 70,
+            output_region: 71,
+            first_row: 0,
+            row_count: 0,
+            sealed_rows: 100,
+            header_rows: 0,
+        }],
+    };
+    client.apply_block_native_regions_to_viewport();
+    assert_eq!(client.scroll_block_viewport_to(20, 10), 20);
+    assert_eq!(client.block_viewport_plan().expect("scrolled").scroll_y, 20);
+
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 2,
+        total_height: 0,
+        records: vec![],
+    };
+    client.apply_block_native_regions_to_viewport();
+    let cleared = client.block_viewport_plan().expect("cleared plan");
+    assert_eq!(cleared.total_document_extent, 0);
+    assert_eq!(cleared.scroll_y, 0);
+    assert!(cleared.visible_items.is_empty());
+    assert_eq!(client.scroll_block_viewport_to(u64::MAX, 10), 0);
+    assert_eq!(
+        client
+            .block_viewport_plan()
+            .expect("live end")
+            .scroll_anchor,
+        crate::viewport::ScrollAnchor::LiveEnd
+    );
+}
+
+#[test]
+fn shrinking_a_scrolled_block_keeps_its_row_and_rust_supplies_bottom_alignment() {
+    let (client_stream, _server) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let mut client = test_client(client_stream);
+    client.block_viewport_window_rows = Some(10);
+    client.block_native_regions = seyal_runtime::local_ipc::framing::BlockNativeRegions {
+        revision: 1,
+        total_height: 82,
+        records: vec![
+            seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                block_id: 1,
+                header_region: 10,
+                output_region: 11,
+                first_row: 0,
+                row_count: 0,
+                sealed_rows: 40,
+                header_rows: 0,
+            },
+            seyal_runtime::local_ipc::framing::NativeBlockRegions {
+                block_id: 2,
+                header_region: 20,
+                output_region: 21,
+                first_row: 0,
+                row_count: 0,
+                sealed_rows: 40,
+                header_rows: 0,
+            },
+        ],
+    };
+    client.apply_block_native_regions_to_viewport();
+    assert_eq!(client.scroll_block_viewport_to(42, 10), 42);
+    assert_eq!(
+        client
+            .block_viewport_plan()
+            .expect("scrolled")
+            .scroll_anchor,
+        crate::viewport::ScrollAnchor::BlockRow {
+            block_id: 2,
+            row: 1
+        }
+    );
+
+    client.block_native_regions.records[0].sealed_rows = 2;
+    client.block_native_regions.revision = 2;
+    client.block_native_regions.total_height = 44;
+    client.apply_block_native_regions_to_viewport();
+    let shrunken = client.block_viewport_plan().expect("shrunken plan");
+    assert_eq!(shrunken.scroll_y, 4);
+    assert_eq!(shrunken.visible_items[0].block_id, 2);
+    assert_eq!(shrunken.visible_items[0].first_visible_row, 1);
+
+    client.block_native_regions.records[1].sealed_rows = 2;
+    client.block_native_regions.revision = 3;
+    client.block_native_regions.total_height = 6;
+    client.apply_block_native_regions_to_viewport();
+    let short = client.block_viewport_plan().expect("short plan");
+    assert_eq!(short.total_document_extent, 6);
+    assert_eq!(short.alignment_padding_rows, 4);
 }
 
 #[test]

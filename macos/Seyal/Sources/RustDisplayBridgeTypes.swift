@@ -33,11 +33,13 @@ struct PaneHistoryRequestKey: Hashable, Sendable {
   let displayHandle: UInt64
   let paneID: String
   let requestID: UInt64
+  let cacheBlockID: UInt64
 
-  init(displayHandle: UInt64, paneID: String, requestID: UInt64) {
+  init(displayHandle: UInt64, paneID: String, requestID: UInt64, cacheBlockID: UInt64 = 0) {
     self.displayHandle = displayHandle
     self.paneID = paneID
     self.requestID = requestID
+    self.cacheBlockID = cacheBlockID
   }
 }
 

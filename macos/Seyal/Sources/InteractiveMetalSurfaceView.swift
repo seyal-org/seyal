@@ -17,6 +17,9 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     /// window/tab close effects after Close Terminal Finalized (#1402).
     var onBridgeDisconnected: (() -> Void)?
     var onRequestComposerFocus: (() -> Bool)?
+    /// Flow click rows are resolved by Rust's BlockViewportPlan before any
+    /// selection action is projected by the host.
+    var onBlockViewportRowHit: ((UInt32) -> Void)?
     /// A Rust table match already changed product state. The chrome host projects it.
     var onCommandConsumed: (() -> Void)?
     var observedAlternateScreen = false
@@ -714,6 +717,9 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
 
     private func submitNativeMouse(_ event: NSEvent, kind: UInt8, buttonOverride: UInt8? = nil) {
         if !allowsFullPaneDirectTerminal {
+            if kind == 1, let cell = terminalMouseCell(for: event) {
+                onBlockViewportRowHit?(UInt32(cell.1))
+            }
             // Flow DirectInput: click focuses the live surface for keys without
             // empty-canvas mouse reports. Plain Flow still returns to composer.
             if kind == 1 {

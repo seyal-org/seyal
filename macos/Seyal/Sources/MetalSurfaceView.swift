@@ -68,26 +68,25 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var lastRenderError: Error?
   var historyRanges: [PaneBlockKey: NativeHistoryRange] = [:]
   var historyRenderPageKeys: [UInt64: NativeHistoryRenderPageKey] = [:]
-  /// Plan-owned sealed-index HISTORY dedup (Finding C/E). Keys encode the
-  /// clipping window; wire requests stay `(0,0)+start_unit`.
-  var planClipRequestBook = HistoryProjectionRequestBook()
   /// Latest geometry installed for the active Flow transcript. Frame revisions
   /// can advance for unrelated runtime updates; identical regions need no new
   /// Metal history preparation.
   var lastTranscriptFrameRegions: [NativeTranscriptRegion]?
-  /// Last successfully applied BlockViewportPlan header signature.
-  /// Height-only growth invalidates via `totalExtent` (epoch stays stable).
-  /// Do not key on type-48 `content_generation` — it bumps every tick (#1484).
-  /// `chromeClipFingerprint` invalidates when AppKit body placement moves.
+  /// Last successfully applied Rust-owned viewport signature. Content changes
+  /// request one bounded batch for all visible RegionGrid clips.
   var lastAppliedViewportPlanSignature: (
     handle: UInt64,
     epoch: UInt64,
+    geometry: Int,
     scrollY: UInt64,
     visible: UInt32,
     clipping: UInt32,
     totalExtent: UInt64,
-    clipCount: UInt32,
-    chromeClipFingerprint: UInt64
+    viewportSize: CGSize,
+    cellSize: CGSize,
+    backingScale: CGFloat,
+    canvasColor: UInt32,
+    resourceGeneration: UInt64
   )?
   private(set) var transcriptDisplayHandle: UInt64 = 0
   var lastProposedGeometry = CGRect.null
@@ -179,7 +178,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
           // only re-encodes ranges already stored here; dropping this store
           // leaves Block bodies empty even after Runtime history arrives.
           self.retainHistoryRange(range)
-          self.notePlanClipHistoryResult(range)
           if let onHistoryRangeChanged {
             onHistoryRangeChanged(range)
           } else {
@@ -284,6 +282,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     lastTranscriptFrameRegions = nil
     lastAppliedViewportPlanSignature = nil
     historyRenderPageKeys.removeAll(keepingCapacity: true)
+    renderer.clearFlowFrame()
     renderer.removeHistoryRegions(except: [])
     renderer.clearLiveTailPresentation()
     hasRetainedHistoryPresentation = historyRanges.keys.contains {
@@ -718,17 +717,13 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     if retainHistory {
       // LiveTail/present may still hold framesInFlight; force deferred HISTORY
       // prepares through so inspectFlowPaint is not stuck at instances=0.
-      renderer.forceFlushHistoryPreparesForRetain()
+      renderer.flushDeferredHistoryPrepares()
       hasRetainedHistoryPresentation = !historyRanges.isEmpty || !renderer.historyRegions.isEmpty
       onTimelineChanged?()
-      renderer.forceFlushHistoryPreparesForRetain()
+      renderer.flushDeferredHistoryPrepares()
       // rebuildBlocks may prune ranges/buffers to the ended timeline; if Metal
-      // buffers were dropped, re-encode from remaining retained rows against
-      // the last plan frame (and stack any revealed floor-hidden Blocks).
-      if renderer.historyRegions.isEmpty, !historyRanges.isEmpty {
-        reencodeRetainedHistoryAfterDisconnect()
-        renderer.forceFlushHistoryPreparesForRetain()
-      }
+      // buffers were dropped, wait for a fresh Rust viewport plan instead of
+      // reconstructing Block placement from cached Swift history rows.
       hasRetainedHistoryPresentation = !renderer.historyRegions.isEmpty
       if hasRetainedHistoryPresentation {
         updateVisibility()

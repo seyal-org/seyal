@@ -171,6 +171,58 @@ impl LocalDisplayClient {
                             metadata_changed = true;
                         }
                     }
+                    MessageType::BlockViewportContentSnapshot => {
+                        let response = seyal_runtime::local_ipc::framing::BlockViewportContentSnapshot::decode(
+                            &frame[HEADER_LEN..],
+                        )
+                        .map_err(|_| ClientError::Protocol)?;
+                        let expected = self
+                            .block_viewport_content_requests
+                            .get(&response.request_id);
+                        let response_clips = response
+                            .regions
+                            .iter()
+                            .map(|region| BlockViewportContentClip {
+                                region_id: region.region_id,
+                                first_row: region.first_row,
+                                row_count: u32::try_from(region.snapshot.rows.len())
+                                    .unwrap_or(u32::MAX),
+                            })
+                            .collect::<Vec<_>>();
+                        let response_matches =
+                            expected.is_some_and(|(generation, clips)| {
+                                *generation == response.plan_generation
+                                    && clips.iter().zip(&response.regions).all(|(clip, region)| {
+                                        clip.region_id == region.region_id
+                                            && clip.first_row == region.first_row
+                                            && region.snapshot.rows.len() <= clip.row_count as usize
+                                    })
+                                    && clips.len() == response.regions.len()
+                            }) && self.block_viewport_plan.as_ref().is_some_and(|plan| {
+                                plan.content_generation == response.plan_generation
+                                    && plan.clipping.len() == response_clips.len()
+                                    && plan.clipping.iter().zip(&response_clips).all(
+                                        |(clip, reply)| {
+                                            clip.region_id == reply.region_id
+                                                && clip.first_row == reply.first_row
+                                                && clip.row_count >= reply.row_count
+                                        },
+                                    )
+                            });
+                        if response_matches {
+                            self.block_viewport_content_requests
+                                .remove(&response.request_id);
+                            for region in response.regions {
+                                let key = (region.region_id, response.request_id);
+                                if self.history_ranges.len() >= 256
+                                    && let Some(oldest) = self.history_ranges.keys().next().copied()
+                                {
+                                    self.history_ranges.remove(&oldest);
+                                }
+                                self.history_ranges.insert(key, region.snapshot);
+                            }
+                        }
+                    }
                     MessageType::ComposerResult => {
                         let result = ComposerResult::decode(&frame[HEADER_LEN..])
                             .map_err(|_| ClientError::Protocol)?;

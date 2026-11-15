@@ -33,44 +33,19 @@ extension MetalSurfaceView {
     )
   }
 
-  func requestSealedViewportClip(blockID: UInt64, displayHandle: UInt64) -> Int32 {
-    bridge?.requestSealedViewportClip(forDisplayHandle: displayHandle, blockID: blockID) ?? -10
-  }
-
   func liveTailBlockIDs() -> Set<UInt64> {
     Set(renderer.liveTail.clips.keys)
   }
 
-  func liveTailClips() -> [UInt64: LiveTailClip] {
-    renderer.liveTail.clips
-  }
-
-  /// Sealed HISTORY instances ready for Metal — hold LiveTail until this is true.
-  func hasPreparedHistoryRegion(blockID: UInt64) -> Bool {
-    renderer.hasPreparedHistoryRegion(blockID: blockID)
-  }
-
   /// Plan-owned transcript regions from the last successful BlockViewportPlan.
   func currentTranscriptRegions() -> [NativeTranscriptRegion] {
-    lastTranscriptFrameRegions ?? []
+    renderer.activeFlowDisplayHandle != 0
+      ? renderer.activeFlowRegions
+      : lastTranscriptFrameRegions ?? []
   }
 
   func currentTranscriptRegion(blockID: UInt64) -> NativeTranscriptRegion? {
-    lastTranscriptFrameRegions?.first(where: { $0.id == blockID })
-  }
-
-  func reopenPlanClipsAfterLiveTailRelease(blockIDs: Set<UInt64>, displayHandle: UInt64) {
-    guard displayHandle != 0 else { return }
-    for blockID in blockIDs where blockID != 0 {
-      planClipRequestBook.retry(
-        HistoryProjectionRequestKey(
-          displayHandle: displayHandle,
-          blockID: blockID,
-          startLine: 0,
-          endLine: 0
-        )
-      )
-    }
+    currentTranscriptRegions().first(where: { $0.id == blockID })
   }
 
   func retainHistoryRange(_ range: NativeHistoryRange) {
@@ -84,10 +59,10 @@ extension MetalSurfaceView {
     )
     let incomingAx = range.accessibilityTranscript()
     if incomingAx.isEmpty { return }
-    if let previous = historyRanges[key],
-       !previous.accessibilityTranscript().isEmpty,
-       previous.startLine > range.startLine
-    {
+    // Viewport pages are addressed by sealed-row index. Scrolling toward the
+    // head legitimately requests a lower startLine, so page freshness follows
+    // the monotonically increasing request ID rather than content position.
+    if let previous = historyRanges[key], previous.requestID > range.requestID {
       return
     }
     historyRanges[key] = range
@@ -106,19 +81,35 @@ extension MetalSurfaceView {
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
     bridge?.discardHistoryRequests(except: historyExceptPreservingRawScrollback(blockIDs))
-    let handle = transcriptDisplayHandle != 0
-      ? transcriptDisplayHandle
-      : (bridge?.windowFocusedDisplayHandle ?? bridge?.clientHandle ?? 0)
-    if handle != 0 {
-      planClipRequestBook.retain(blockIDs: blockIDs, forDisplayHandle: handle)
-    }
   }
 
   /// Installs a bounded Runtime history projection in this Pane's Metal renderer.
   func renderHistoryRange(_ range: NativeHistoryRange, region: NativeTranscriptRegion? = nil) {
+    let pendingRegion = renderer.pendingFlowRegion(
+      id: range.blockID,
+      displayHandle: range.sourceDisplayHandle,
+      requestID: range.requestID
+    )
+    if renderer.presentationPlan.mode == .flow {
+      guard pendingRegion != nil else {
+        // A late reply or disconnect cache has no matching Rust layout. Keep
+        // complete cells for AX/reconnect, never invent a Metal position.
+        if range.status == 0 { retainHistoryRange(range) }
+        return
+      }
+      if range.status != 0 || range.rows.isEmpty {
+        rejectInvalidFlowPage(requestID: range.requestID)
+        return
+      }
+    }
+    if renderer.shouldIgnoreFlowHistory(
+      id: range.blockID,
+      displayHandle: range.sourceDisplayHandle,
+      requestID: range.requestID
+    ) { return }
     retainHistoryRange(range)
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
-    let rows = region?.historyRows ?? HistoryRenderWindow(
+    let rows = pendingRegion?.historyRows ?? region?.historyRows ?? HistoryRenderWindow(
       totalRows: range.rows.count,
       firstVisibleRow: max(range.rows.count - HistoryRenderWindow.maximumRows, 0),
       visibleRowCount: HistoryRenderWindow.maximumRows
@@ -149,7 +140,7 @@ extension MetalSurfaceView {
       backingScale: scale
     )
     do {
-      let currentRegion = region ?? lastTranscriptFrameRegions?.first(where: {
+      let currentRegion = pendingRegion ?? region ?? lastTranscriptFrameRegions?.first(where: {
         $0.id == range.blockID
           && ($0.displayHandle == 0 || $0.displayHandle == range.sourceDisplayHandle)
       })
@@ -185,6 +176,17 @@ extension MetalSurfaceView {
           )
         )
       }
+      if pendingRegion != nil {
+        guard renderer.stageFlowHistory(page, region: rendererRegion, backingScale: scale) else {
+          rejectInvalidFlowPage(requestID: range.requestID)
+          return
+        }
+        if shouldRender || hasRetainedHistoryPresentation {
+          beginPresentationAttemptSeries()
+          armMetalDisplayLink()
+        }
+        return
+      }
       if historyRenderPageKeys[range.blockID] == key,
          renderer.setHistoryRegionGeometry(
            id: range.blockID,
@@ -219,52 +221,16 @@ extension MetalSurfaceView {
     }
   }
 
-  /// Re-install HISTORY Metal instances after shell-exit when buffers were
-  /// pruned but `historyRanges` still hold RegionId pages.
-  func reencodeRetainedHistoryAfterDisconnect() {
-    var order: [UInt64] = []
-    var encodedRegions: [NativeTranscriptRegion] = []
-    for region in lastTranscriptFrameRegions ?? [] {
-      let range = historyRanges[
-        PaneBlockKey(
-          paneID: paneID,
-          displayHandle: region.displayHandle,
-          blockID: region.id
-        )
-      ] ?? historyRanges.first(where: {
-        $0.key.paneID == paneID && $0.key.blockID == region.id
-      })?.value
-      guard let range, !range.rows.isEmpty else { continue }
-      renderHistoryRange(range, region: region)
-      if !order.contains(region.id) {
-        order.append(region.id)
-      }
-      encodedRegions.append(region)
+  private func rejectInvalidFlowPage(requestID: UInt64) {
+    let shouldRetry = renderer.rejectPendingFlowFrame(requestID: requestID)
+    lastAppliedViewportPlanSignature = nil
+    guard shouldRetry else {
+      lastRenderError = MetalTerminalRendererError.invalidFrame
+      return
     }
-    let cellHeight = max(terminalPresentationCellSize().height, 1)
-    var stackY = bounds.height
-    for (key, range) in historyRanges.sorted(by: { $0.key.blockID < $1.key.blockID })
-    where key.paneID == paneID {
-      guard !order.contains(key.blockID), !range.rows.isEmpty else { continue }
-      let rowCount = max(range.rows.count, 1)
-      let height = min(CGFloat(rowCount) * cellHeight, max(bounds.height * 0.4, cellHeight))
-      stackY -= height
-      var region = NativeTranscriptRegion(
-        id: key.blockID,
-        origin: .zero,
-        clip: NSRect(x: 0, y: stackY, width: max(bounds.width, 1), height: height),
-        historyRows: 0..<rowCount,
-        historyRequestID: range.requestID,
-        historyRevision: range.revision
-      )
-      region.displayHandle = key.displayHandle
-      renderHistoryRange(range, region: region)
-      order.append(key.blockID)
-      encodedRegions.append(region)
-    }
-    renderer.setHistoryRegionOrder(order)
-    if !encodedRegions.isEmpty {
-      lastTranscriptFrameRegions = encodedRegions
+    // One event-driven retry asks Rust for a fresh plan; no timer or poll loop.
+    DispatchQueue.main.async { [weak self] in
+      self?.renderer.onNeedsCurrentFrame?()
     }
   }
 }

@@ -5,7 +5,6 @@ import Metal
 /// `firstRow`/`rowCount` map `start_line` onto the prepared viewport; hosts
 /// must not invent a history end such as `start + 511`.
 struct LiveTailClip: Equatable {
-    var startLine: UInt64
     var firstRow: UInt16
     var rowCount: UInt16
 }
@@ -57,15 +56,10 @@ extension MetalTerminalRenderer {
         return true
     }
 
-    /// Sealed HISTORY then LiveTail. Never dual-draw the same Block — LiveTail
-    /// owns Running paint until sealed HISTORY is prepared (#1484 Finding E).
+    /// Sealed HISTORY and damage-driven LiveTail occupy disjoint Rust-planned
+    /// row ranges, so both are composed in the same Metal surface.
     var orderedBlockRegions: [HistoryRenderRegion] {
-        let liveIDs = Set(liveTail.order)
-        let historyOnly = historyRegionOrder.compactMap { id -> HistoryRenderRegion? in
-            guard !liveIDs.contains(id) else { return nil }
-            return historyRegions[id]
-        }
-        return historyOnly + orderedLiveTailRegions
+        historyRegionOrder.compactMap { historyRegions[$0] } + orderedLiveTailRegions
     }
 
     /// True when sealed HISTORY GPU instances exist for `blockID`.
@@ -286,7 +280,6 @@ extension MetalTerminalRenderer {
         var nextGeometry: [UInt64: LiveTailRegionGeometry] = [:]
         for blockID in liveTail.order {
             guard let clip = liveTail.clips[blockID],
-                  clip.startLine > 0,
                   clip.rowCount > 0,
                   let region = liveTail.transcriptRegions[blockID]
             else {

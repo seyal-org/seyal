@@ -2,9 +2,10 @@ use seyal_exec::{Color, HistoryRangeError, LineId};
 
 use crate::{
     local_ipc::framing::{
-        self, BlockNativeRegions, BlockTimeline, CommandBlock, CommandBlockState, ErrorCode,
-        MessageType, NativeBlockRegions, CAP_COMMAND_BLOCKS, CAP_NATIVE_BLOCK_REGIONS,
-        CAP_SESSION_BOOTSTRAP,
+        self, BlockNativeRegions, BlockTimeline, BlockViewportContentSnapshot,
+        BlockViewportRegionContent, CommandBlock, CommandBlockState, ErrorCode, MessageType,
+        NativeBlockRegions, CAP_BLOCK_VIEWPORT_CONTENT, CAP_COMMAND_BLOCKS,
+        CAP_NATIVE_BLOCK_REGIONS, CAP_SESSION_BOOTSTRAP,
     },
     AttachmentId, ExecutionId,
 };
@@ -21,6 +22,158 @@ fn pack_terminal_color(color: Color) -> u32 {
 }
 
 impl Runtime {
+    pub(super) fn handle_block_viewport_content_request(&mut self, token: u64, payload: &[u8]) {
+        let Ok(request) = framing::BlockViewportContentRequest::decode(payload) else {
+            self.send_error(
+                token,
+                ErrorCode::MalformedPayload,
+                MessageType::BlockViewportContentRequest as u16,
+            );
+            return;
+        };
+        let Some(state) = self.local_ipc.as_ref() else {
+            return;
+        };
+        if state
+            .connections
+            .get(&token)
+            .is_none_or(|meta| meta.client_capabilities & CAP_BLOCK_VIEWPORT_CONTENT == 0)
+        {
+            self.send_error(
+                token,
+                ErrorCode::InvalidState,
+                MessageType::BlockViewportContentRequest as u16,
+            );
+            return;
+        }
+        let execution_id = match state
+            .attachments
+            .execution_for_connection(token, request.attachment_id)
+        {
+            Ok(id) => id,
+            Err(_) => {
+                self.send_error(
+                    token,
+                    ErrorCode::StaleIdentity,
+                    MessageType::BlockViewportContentRequest as u16,
+                );
+                return;
+            }
+        };
+        let Some(entry) = self.entries.get(&execution_id) else {
+            self.send_error(
+                token,
+                ErrorCode::InvalidExecution,
+                MessageType::BlockViewportContentRequest as u16,
+            );
+            return;
+        };
+
+        let revision = entry.execution.terminal().damage_generation();
+        let mut status = framing::HistoryRangeStatus::Complete;
+        let mut regions = Vec::with_capacity(request.clips.len());
+        for clip in request.clips {
+            let region_rows = super::native_block_rows::native_region_wire_rows_from(
+                entry,
+                clip.region_id,
+                clip.row_count as usize,
+                0,
+                clip.first_row as usize,
+            );
+            let Some((rows, _more_rows)) = region_rows else {
+                status = framing::HistoryRangeStatus::Stale;
+                regions.push(BlockViewportRegionContent {
+                    region_id: clip.region_id,
+                    first_row: clip.first_row,
+                    snapshot: framing::HistoryRangeSnapshot {
+                        request_id: request.request_id,
+                        block_id: clip.region_id,
+                        revision,
+                        status: framing::HistoryRangeStatus::Stale,
+                        rows: Vec::new(),
+                        sidecar: Vec::new(),
+                    },
+                });
+                continue;
+            };
+            let source_rows = rows.into_iter().map(|(line_id, cells)| {
+                (
+                    line_id.0,
+                    cells
+                        .into_iter()
+                        .map(|cell| framing::HistorySourceCell {
+                            text: cell.text,
+                            width: cell.width,
+                            continuation: cell.continuation,
+                            foreground: pack_terminal_color(cell.style.fg),
+                            background: pack_terminal_color(cell.style.bg),
+                            style_flags: u16::from(cell.style.bold)
+                                | (u16::from(cell.style.underline) << 1)
+                                | (u16::from(cell.style.inverse) << 2),
+                        })
+                        .collect(),
+                )
+            });
+            let (packed_rows, sidecar, pack_truncated) =
+                framing::HistoryRangeSnapshot::pack_source_rows(source_rows);
+            let (encoded_rows, budget_truncated) = framing::HistoryRangeSnapshot::admit_rows(
+                packed_rows,
+                clip.row_count as usize,
+                usize::from(entry.execution.terminal().cols())
+                    .saturating_mul(clip.row_count as usize),
+                sidecar.len(),
+            );
+            // Rows beyond the requested visible clip are expected viewport
+            // content, not a partial response. Only payload admission loss
+            // makes this RegionGrid slice truncated.
+            let truncated = pack_truncated || budget_truncated;
+            if truncated {
+                status = framing::HistoryRangeStatus::Truncated;
+            }
+            let mut snapshot = framing::HistoryRangeSnapshot {
+                request_id: request.request_id,
+                // In a viewport batch, the cache identity is the canonical RegionId.
+                block_id: clip.region_id,
+                revision,
+                status: if truncated {
+                    framing::HistoryRangeStatus::Truncated
+                } else {
+                    framing::HistoryRangeStatus::Complete
+                },
+                rows: encoded_rows,
+                sidecar,
+            };
+            snapshot.trim_sidecar_to_rows();
+            regions.push(BlockViewportRegionContent {
+                region_id: clip.region_id,
+                first_row: clip.first_row,
+                snapshot,
+            });
+        }
+        let response = BlockViewportContentSnapshot {
+            request_id: request.request_id,
+            plan_generation: request.plan_generation,
+            revision,
+            status,
+            regions,
+        };
+        let payload = match response.try_encode() {
+            Ok(payload) => payload,
+            Err(_) => {
+                self.send_error(
+                    token,
+                    ErrorCode::CapacityExceeded,
+                    MessageType::BlockViewportContentRequest as u16,
+                );
+                return;
+            }
+        };
+        let _ = self.send_mandatory_frame(
+            token,
+            framing::encode_frame(MessageType::BlockViewportContentSnapshot, &payload),
+        );
+    }
+
     pub(super) fn handle_history_range_request(&mut self, token: u64, payload: &[u8]) {
         let Ok(request) = framing::HistoryRangeRequest::decode(payload) else {
             self.send_error(
@@ -400,13 +553,18 @@ impl Runtime {
                         on_window.get(&record.id.raw()).copied().unwrap_or((0, 0));
                     let output_region = record.output_region?;
                     let sealed_rows = entry.execution.primary_sealed_row_count(output_region);
+                    let header_region = record.header_region?;
                     Some(NativeBlockRegions {
                         block_id: record.id.raw(),
-                        header_region: record.header_region?,
+                        header_region,
                         output_region,
                         first_row,
                         row_count,
                         sealed_rows,
+                        header_rows: entry
+                            .execution
+                            .primary_region_row_count(header_region)
+                            .max(1),
                     })
                 })
                 .collect();

@@ -11,9 +11,10 @@ use super::payload::{
 };
 use super::presentation::{ResumeDelivery, SuspendDelivery};
 use super::{
-    BlockNativeRegions, BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus,
-    ComposerTarget, HistoryRangeRequest, HistoryRangeSnapshot, ResizeRequest, ResizeResult,
-    SessionConsent, SessionOffer, SessionStatus, TerminalKey, TerminalKeyV2, ViewportLineIds,
+    BlockNativeRegions, BlockTimeline, BlockViewportContentRequest, BlockViewportContentSnapshot,
+    ComposerCommandRef, ComposerResult, ComposerStatus, ComposerTarget, HistoryRangeRequest,
+    HistoryRangeSnapshot, ResizeRequest, ResizeResult, SessionConsent, SessionOffer, SessionStatus,
+    TerminalKey, TerminalKeyV2, ViewportLineIds,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +89,10 @@ pub enum MessageType {
     MintWorkspaceResult = 47,
     /// #1484: Runtime→client BlockId → RegionId map (`CAP_NATIVE_BLOCK_REGIONS`).
     BlockNativeRegions = 48,
+    /// #1484: one bounded viewport request containing all visible RegionGrid clips.
+    BlockViewportContentRequest = 49,
+    /// #1484: one coherent viewport content response.
+    BlockViewportContentSnapshot = 50,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -139,6 +144,8 @@ impl MessageType {
             46 => Self::MintWorkspaceRequest,
             47 => Self::MintWorkspaceResult,
             48 => Self::BlockNativeRegions,
+            49 => Self::BlockViewportContentRequest,
+            50 => Self::BlockViewportContentSnapshot,
             _ => return None,
         })
     }
@@ -193,6 +200,8 @@ pub enum Message<'a> {
     MintWorkspaceRequest(MintWorkspaceRequest),
     MintWorkspaceResult(MintWorkspaceResult),
     BlockNativeRegions(BlockNativeRegions),
+    BlockViewportContentRequest(BlockViewportContentRequest),
+    BlockViewportContentSnapshot(BlockViewportContentSnapshot),
 }
 
 pub fn decode_message<'a>(
@@ -281,6 +290,12 @@ pub fn decode_message<'a>(
         }
         MessageType::BlockNativeRegions => {
             Message::BlockNativeRegions(BlockNativeRegions::decode(payload)?)
+        }
+        MessageType::BlockViewportContentRequest => {
+            Message::BlockViewportContentRequest(BlockViewportContentRequest::decode(payload)?)
+        }
+        MessageType::BlockViewportContentSnapshot => {
+            Message::BlockViewportContentSnapshot(BlockViewportContentSnapshot::decode(payload)?)
         }
     })
 }

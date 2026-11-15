@@ -132,6 +132,14 @@ impl BlockViewportIndex {
         Some(self.prefix_sum(rank))
     }
 
+    /// Resolve a presentation row to its stable Block-relative source row.
+    /// The row index includes Rust-owned Block spacing so a reader anchored in
+    /// a gap remains at that same presentation location as earlier Blocks grow.
+    pub fn block_row_at(&self, y: u64) -> Option<(u64, u32)> {
+        let span = self.visible_spans(y, 1).into_iter().next()?;
+        Some((span.block_id, span.first_visible_row))
+    }
+
     pub fn ordered_ids(&self) -> &[u64] {
         &self.order
     }

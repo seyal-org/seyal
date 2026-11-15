@@ -6,9 +6,9 @@ use crate::LocalDisplayClient;
 use super::{
     error_code, with_active_client, with_active_client_mut, with_display_client,
     with_display_client_mut, SeyalBlockRecord, SeyalBlockViewportClip,
-    SeyalBlockViewportPlanHeader, SeyalBlockViewportVisibleItem, SeyalComposerResult,
-    SeyalComposerStatus, SeyalComposerTarget, SeyalExecutionBlockMetadata, SeyalHistoryCell,
-    SeyalHistoryRange, SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame,
+    SeyalBlockViewportPlanHeader, SeyalBlockViewportSurface, SeyalBlockViewportVisibleItem,
+    SeyalComposerResult, SeyalComposerStatus, SeyalComposerTarget, SeyalExecutionBlockMetadata,
+    SeyalHistoryCell, SeyalHistoryRange, SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame,
     SeyalSessionSurface,
 };
 
@@ -607,6 +607,20 @@ pub extern "C" fn seyal_bridge_request_history_range_for(
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
+/// Request every visible RegionGrid clip in one bounded viewport response.
+/// Returns the request correlation ID, or zero if the plan cannot be queued.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_request_block_viewport_content_for(
+    handle: u64,
+    plan_generation: u64,
+) -> u64 {
+    super::with_client_mut(handle, |client| {
+        client.request_block_viewport_content(plan_generation)
+    })
+    .and_then(Result::ok)
+    .unwrap_or(0)
+}
+
 /// Borrow the current contiguous prepared surface.
 ///
 /// The returned cell pointer borrows Rust-owned prepared storage and is valid
@@ -665,19 +679,23 @@ pub extern "C" fn seyal_bridge_native_regions_total_height_for(handle: u64) -> u
     super::with_client(handle, |client| client.block_viewport_total_height()).unwrap_or(0)
 }
 
-/// Sync AppKit transcript scroll into the per-display plan anchor (G5).
-/// `live_end != 0` pins LiveEnd; otherwise `absolute_y` is the presentation-row
-/// origin. `window_rows` is the AppKit viewport height in presentation rows.
-/// Returns 1 when the handle resolves; 0 otherwise.
 #[unsafe(no_mangle)]
-pub extern "C" fn seyal_bridge_block_viewport_set_scroll_anchor_for(
+pub extern "C" fn seyal_bridge_block_viewport_header_rows_for(handle: u64, block_id: u64) -> u32 {
+    super::with_client(handle, |client| {
+        client.block_viewport_header_rows(block_id).unwrap_or(0)
+    })
+    .unwrap_or(0)
+}
+
+/// Update viewport height while preserving the Rust-owned scroll anchor.
+/// The native host supplies only drawable dimensions, never a document offset.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_set_window_rows_for(
     handle: u64,
-    live_end: i32,
-    absolute_y: u64,
     window_rows: u32,
 ) -> i32 {
     match super::with_client_mut(handle, |client| {
-        client.set_block_viewport_scroll_anchor(live_end != 0, absolute_y, window_rows);
+        client.set_block_viewport_window_rows(window_rows);
     }) {
         Some(()) => 1,
         None => 0,
@@ -708,7 +726,8 @@ pub extern "C" fn seyal_bridge_block_viewport_plan_header_for(
                 window_rows: plan.window_rows,
                 visible_count: u32::try_from(plan.visible_items.len()).unwrap_or(u32::MAX),
                 clipping_count: u32::try_from(plan.clipping.len()).unwrap_or(u32::MAX),
-                reserved: 0,
+                surface_count: u32::try_from(plan.surfaces.len()).unwrap_or(u32::MAX),
+                alignment_padding_rows: plan.alignment_padding_rows,
                 total_document_extent: plan.total_document_extent,
             })
     })
@@ -723,6 +742,112 @@ pub extern "C" fn seyal_bridge_block_viewport_plan_header_for(
         None => {
             unsafe {
                 *out = SeyalBlockViewportPlanHeader::empty();
+            }
+            0
+        }
+    }
+}
+
+/// Copy one Rust-owned solid-surface range from the current plan.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_surface_at_for(
+    handle: u64,
+    index: u32,
+    out: *mut SeyalBlockViewportSurface,
+) -> i32 {
+    if out.is_null() {
+        return 0;
+    }
+    let surface = super::with_client(handle, |client| {
+        client
+            .block_viewport_plan()
+            .and_then(|plan| plan.surfaces.get(index as usize).copied())
+            .map(|surface| SeyalBlockViewportSurface {
+                block_id: surface.block_id,
+                presentation_y: surface.presentation_y,
+                row_count: surface.row_count,
+                role: surface.role as u8,
+                reserved: [0; 3],
+            })
+    })
+    .flatten();
+    match surface {
+        Some(surface) => {
+            unsafe {
+                *out = surface;
+            }
+            1
+        }
+        None => {
+            unsafe {
+                *out = SeyalBlockViewportSurface::empty();
+            }
+            0
+        }
+    }
+}
+
+/// Apply a native event delta to Rust-owned Block scroll state.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_scroll_by_for(
+    handle: u64,
+    delta_rows: i32,
+    window_rows: u32,
+) -> i32 {
+    super::with_client_mut(handle, |client| {
+        client.scroll_block_viewport_by(delta_rows, window_rows);
+    })
+    .map(|_| 1)
+    .unwrap_or(0)
+}
+
+/// Apply a user-driven native scroller position to the Rust-owned viewport.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_scroll_to_for(
+    handle: u64,
+    absolute_y: u64,
+    window_rows: u32,
+) -> i32 {
+    super::with_client_mut(handle, |client| {
+        client.scroll_block_viewport_to(absolute_y, window_rows);
+    })
+    .map(|_| 1)
+    .unwrap_or(0)
+}
+
+/// Rust-owned hit test for a row in the current Flow viewport.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_block_viewport_hit_test_row_for(
+    handle: u64,
+    viewport_row: u32,
+    out: *mut super::SeyalBlockViewportHit,
+) -> i32 {
+    if out.is_null() {
+        return 0;
+    }
+    let hit = super::with_client(handle, |client| {
+        client
+            .block_viewport_plan()
+            .and_then(|plan| plan.hit_test_viewport_row(viewport_row))
+            .map(|hit| super::SeyalBlockViewportHit {
+                block_id: hit.block_id,
+                region_id: hit.region_id,
+                region_row: hit.region_row,
+                role: hit.role as u8,
+                reserved: [0; 3],
+            })
+    })
+    .flatten();
+    match hit {
+        Some(hit) => {
+            unsafe {
+                *out = hit;
+            }
+            1
+        }
+        None => {
+            unsafe {
+                *out = super::SeyalBlockViewportHit::empty();
             }
             0
         }
@@ -752,6 +877,7 @@ pub extern "C" fn seyal_bridge_block_viewport_visible_at_for(
                 first_visible_row: item.first_visible_row,
                 visible_rows: item.visible_rows,
                 sealed_rows: item.sealed_rows,
+                header_rows: item.header_rows,
                 live_first_row: item.live_first_row,
                 live_row_count: item.live_row_count,
             })
@@ -790,10 +916,12 @@ pub extern "C" fn seyal_bridge_block_viewport_clip_at_for(
             .map(|clip| SeyalBlockViewportClip {
                 block_id: clip.block_id,
                 region_id: clip.region_id,
+                presentation_y: clip.presentation_y,
                 first_row: clip.first_row,
                 row_count: clip.row_count,
+                role: clip.role as u8,
                 sealed: u8::from(clip.sealed),
-                reserved: [0; 3],
+                reserved: [0; 2],
             })
     })
     .flatten();
@@ -830,10 +958,12 @@ pub extern "C" fn seyal_bridge_block_viewport_clip_for(
             .map(|clip| SeyalBlockViewportClip {
                 block_id: clip.block_id,
                 region_id: clip.region_id,
+                presentation_y: clip.presentation_y,
                 first_row: clip.first_row,
                 row_count: clip.row_count,
+                role: clip.role as u8,
                 sealed: u8::from(clip.sealed),
-                reserved: [0; 3],
+                reserved: [0; 2],
             })
     })
     .flatten();

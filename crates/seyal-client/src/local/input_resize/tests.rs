@@ -70,6 +70,7 @@ fn resize_client() -> (LocalDisplayClient, UnixStream) {
             next_composer_request_id: 1,
             history_ranges: HashMap::new(),
             history_requests: HashMap::new(),
+            block_viewport_content_requests: HashMap::new(),
             next_history_request_id: 1,
             copied_text: Vec::new(),
             last_admitted_v2_action_id: 0,

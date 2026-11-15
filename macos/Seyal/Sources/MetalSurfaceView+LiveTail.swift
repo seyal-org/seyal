@@ -40,7 +40,12 @@ extension MetalSurfaceView {
     }
     let previous = lastTranscriptFrameRegions
     let geometryChanged = !Self.transcriptGeometryEqual(previous, frame.regions)
-    guard geometryChanged || hasUnpreparedHistory else { return }
+    let historyPageChanged = zip(previous ?? [], frame.regions).contains { prior, current in
+      prior.id == current.id
+        && (prior.historyRequestID != current.historyRequestID
+          || prior.historyRevision != current.historyRevision)
+    }
+    guard geometryChanged || historyPageChanged || hasUnpreparedHistory else { return }
     lastTranscriptFrameRegions = frame.regions
     let regionIDs = Set(frame.regionIDs)
     // Do not drop `historyRanges` here when a body clip is briefly omitted —
@@ -48,16 +53,25 @@ extension MetalSurfaceView {
     // cards still existed. Lifetime stays with removeTranscriptRegions /
     // disconnect retain policy.
     renderer.removeHistoryRegions(except: regionIDs)
-    renderer.setHistoryRegionOrder(frame.regionIDs)
-    // LiveTail clips are damage-driven; only republish pixel regions when
-    // AppKit/plan geometry moved — not on presentation_epoch churn.
-    if geometryChanged {
-      let pixelRegions = liveTailPixelRegions(in: frame)
-      renderer.setTranscriptRegions(pixelRegions)
+    let renderableRegions = frame.regions.filter { region in
+      guard let range = historyRanges[
+        PaneBlockKey(
+          paneID: paneID,
+          displayHandle: region.displayHandle,
+          blockID: region.id
+        )
+      ] else {
+        return false
+      }
+      // A new scroll clip is not allowed to relabel the cached old page. Keep
+      // that page out of the Metal order until the matching Rust response
+      // arrives; otherwise old rows appear at the new clip coordinate.
+      return region.historyRequestID == 0 || range.requestID == region.historyRequestID
     }
+    renderer.setHistoryRegionOrder(renderableRegions.map(\.id))
     // History pages are bounded per Pane viewport. Geometry-only movement
     // reuses a page, while a page/revision change rebuilds its GPU instances.
-    for region in frame.regions {
+    for region in renderableRegions {
       guard
         let range = historyRanges[
           PaneBlockKey(
@@ -129,7 +143,7 @@ extension MetalSurfaceView {
   }
 
   /// AppKit bottom-left → terminal top-left pixel clips for live-tail.
-  private func liveTailPixelRegions(in frame: NativeTranscriptFrame) -> [NativeTranscriptRegion] {
+  func liveTailPixelRegions(in frame: NativeTranscriptFrame) -> [NativeTranscriptRegion] {
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
     return frame.regions.map { region in
       let pixelClip = NSRect(

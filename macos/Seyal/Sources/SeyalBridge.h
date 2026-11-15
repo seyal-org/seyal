@@ -268,6 +268,7 @@ int32_t seyal_bridge_request_history_range_for(
     uint32_t max_cells,
     uint32_t start_unit
 );
+uint64_t seyal_bridge_request_block_viewport_content_for(uint64_t handle, uint64_t plan_generation);
 uint64_t seyal_bridge_next_history_request_id(void);
 uint64_t seyal_bridge_next_history_request_id_for(uint64_t handle);
 SeyalHistoryRange seyal_bridge_history_range_peek_for(uint64_t block_id, uint64_t request_id);
@@ -355,6 +356,7 @@ uint64_t seyal_bridge_viewport_start_line_id_for(uint64_t handle);
 /* Indexed Flow transcript height from BlockNativeRegions (#1484); 0 if unpublished. */
 uint64_t seyal_bridge_native_regions_total_height(void);
 uint64_t seyal_bridge_native_regions_total_height_for(uint64_t handle);
+uint32_t seyal_bridge_block_viewport_header_rows_for(uint64_t handle, uint64_t block_id);
 
 /* Rust-owned BlockViewportPlan for Metal (Finding C / ADR-009). */
 typedef struct SeyalBlockViewportPlanHeader {
@@ -368,7 +370,8 @@ typedef struct SeyalBlockViewportPlanHeader {
     uint32_t window_rows;
     uint32_t visible_count;
     uint32_t clipping_count;
-    uint32_t reserved;
+    uint32_t surface_count;
+    uint32_t alignment_padding_rows;
     uint64_t total_document_extent;
 } SeyalBlockViewportPlanHeader;
 
@@ -381,24 +384,49 @@ typedef struct SeyalBlockViewportVisibleItem {
     uint32_t first_visible_row;
     uint32_t visible_rows;
     uint32_t sealed_rows;
+    uint32_t header_rows;
     uint16_t live_first_row;
     uint16_t live_row_count;
 } SeyalBlockViewportVisibleItem;
 
+typedef struct SeyalBlockViewportHit {
+    uint64_t block_id;
+    uint64_t region_id;
+    uint32_t region_row;
+    uint8_t role;
+    uint8_t reserved[3];
+} SeyalBlockViewportHit;
+
 typedef struct SeyalBlockViewportClip {
     uint64_t block_id;
     uint64_t region_id;
+    uint64_t presentation_y;
     uint32_t first_row;
     uint32_t row_count;
+    uint8_t role;
     uint8_t sealed;
-    uint8_t reserved[3];
+    uint8_t reserved[2];
 } SeyalBlockViewportClip;
 
-/* AppKit scroll → Rust plan anchor (G5 AbsoluteY / LiveEnd). */
-int32_t seyal_bridge_block_viewport_set_scroll_anchor_for(
+typedef struct SeyalBlockViewportSurface {
+    uint64_t block_id;
+    uint64_t presentation_y;
+    uint32_t row_count;
+    uint8_t role;
+    uint8_t reserved[3];
+} SeyalBlockViewportSurface;
+
+/* Native Flow scroll input → Rust-owned viewport anchor. */
+int32_t seyal_bridge_block_viewport_scroll_by_for(
+    uint64_t handle, int32_t delta_rows, uint32_t window_rows);
+/* Native scroller user action → Rust-owned anchor. */
+int32_t seyal_bridge_block_viewport_scroll_to_for(
+    uint64_t handle, uint64_t absolute_y, uint32_t window_rows);
+int32_t seyal_bridge_block_viewport_hit_test_row_for(
+    uint64_t handle, uint32_t viewport_row, SeyalBlockViewportHit *out);
+/* Native viewport dimensions → Rust plan; preserves Rust's current anchor. */
+int32_t seyal_bridge_block_viewport_set_window_rows_for(
     uint64_t handle,
-    int32_t live_end,
-    uint64_t absolute_y,
     uint32_t window_rows
 );
 int32_t seyal_bridge_block_viewport_plan_header_for(
@@ -419,6 +447,11 @@ int32_t seyal_bridge_block_viewport_clip_for(
     uint64_t handle,
     uint64_t block_id,
     SeyalBlockViewportClip *out
+);
+int32_t seyal_bridge_block_viewport_surface_at_for(
+    uint64_t handle,
+    uint32_t index,
+    SeyalBlockViewportSurface *out
 );
 
 int32_t seyal_bridge_ensure_prepared_for(uint64_t handle);
