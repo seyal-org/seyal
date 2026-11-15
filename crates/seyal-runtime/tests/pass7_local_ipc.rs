@@ -809,6 +809,86 @@ fn wait_for_text(harness: &mut Harness, cache: &mut DisplayCache, needle: &str) 
 }
 
 #[test]
+fn host_mouse_drag_selection_is_published_as_display_damage() {
+    let command = CommandSpec::new("/bin/sh").args(["-c", "printf 'selectable'; sleep 30"]);
+    let (mut harness, execution_id) = Harness::new(command);
+    harness.hello();
+    let (attached, mut cache) = harness.attach(execution_id, Role::Controller);
+    wait_for_text(&mut harness, &mut cache, "selectable");
+
+    for (action_id, kind, col) in [
+        (1, TerminalMouseKind::Press, 0),
+        (2, TerminalMouseKind::Move, 5),
+        (3, TerminalMouseKind::Release, 5),
+    ] {
+        harness.send(
+            MessageType::TerminalMouse,
+            &TerminalMouse {
+                attachment_id: attached.attachment_id,
+                action_id,
+                kind,
+                button: 0,
+                modifiers: TerminalKeyV2Modifiers::NONE,
+                col,
+                row: 0,
+                click_count: if kind == TerminalMouseKind::Press {
+                    1
+                } else {
+                    0
+                },
+            }
+            .encode(),
+        );
+        harness.next_display(&mut cache);
+    }
+
+    assert!(cache.cells[..6].iter().all(|cell| cell.attributes.inverse));
+    assert!(!cache.cells[6].attributes.inverse);
+}
+
+#[test]
+fn host_double_click_selects_word_without_writing_to_pty() {
+    let command = CommandSpec::new("/bin/sh").args([
+        "-c",
+        "printf 'one two'; stty raw -echo; od -An -tu1 -N1 | tr -s ' ' | sed 's/^ //'",
+    ]);
+    let (mut harness, execution_id) = Harness::new(command);
+    harness.hello();
+    let (attached, mut cache) = harness.attach(execution_id, Role::Controller);
+    wait_for_text(&mut harness, &mut cache, "one two");
+
+    harness.send(
+        MessageType::TerminalMouse,
+        &TerminalMouse {
+            attachment_id: attached.attachment_id,
+            action_id: 1,
+            kind: TerminalMouseKind::Press,
+            button: 0,
+            modifiers: TerminalKeyV2Modifiers::NONE,
+            col: 5,
+            row: 0,
+            click_count: 2,
+        }
+        .encode(),
+    );
+    harness.next_display(&mut cache);
+
+    assert!(cache.cells[4..7].iter().all(|cell| cell.attributes.inverse));
+    assert!(!cache.cells[..4].iter().any(|cell| cell.attributes.inverse));
+    assert!(!cache.cells[7].attributes.inverse);
+
+    harness.send(
+        MessageType::Input,
+        &InputRef {
+            attachment_id: attached.attachment_id,
+            bytes: b"x",
+        }
+        .encode(),
+    );
+    wait_for_text(&mut harness, &mut cache, "120");
+}
+
+#[test]
 fn controller_sgr_mouse_reaches_pty_after_canonical_mode() {
     let command = CommandSpec::new("/bin/sh").args([
         "-c",
@@ -828,6 +908,7 @@ fn controller_sgr_mouse_reaches_pty_after_canonical_mode() {
             modifiers: TerminalKeyV2Modifiers::NONE,
             col: 0,
             row: 0,
+            click_count: 2,
         }
         .encode(),
     );
@@ -854,6 +935,7 @@ fn shift_override_does_not_write_application_mouse() {
             modifiers: TerminalKeyV2Modifiers::SHIFT,
             col: 1,
             row: 1,
+            click_count: 1,
         }
         .encode(),
     );
@@ -888,6 +970,7 @@ fn shift_press_latches_host_override_through_unshifted_release() {
             modifiers: TerminalKeyV2Modifiers::SHIFT,
             col: 1,
             row: 1,
+            click_count: 1,
         }
         .encode(),
     );
@@ -901,6 +984,7 @@ fn shift_press_latches_host_override_through_unshifted_release() {
             modifiers: TerminalKeyV2Modifiers::NONE,
             col: 2,
             row: 1,
+            click_count: 0,
         }
         .encode(),
     );

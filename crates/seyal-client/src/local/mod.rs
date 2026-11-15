@@ -9,6 +9,7 @@ mod poll;
 mod provisioning_wire;
 #[cfg(any(test, target_os = "macos"))]
 mod quit_probe;
+mod raw_viewport;
 mod viewport_line_ids;
 
 use std::{
@@ -161,6 +162,7 @@ pub struct LocalDisplayClient {
     pub(crate) history_ranges: HashMap<(u64, u64), HistoryRangeSnapshot>,
     pub(crate) history_requests: HashMap<u64, (u64, u64, u64)>,
     pub(crate) next_history_request_id: u64,
+    pub(crate) raw_viewport: raw_viewport::RawViewport,
     pub(crate) copied_text: Vec<u8>,
     /// Connection-local SPEC-006 §21.5 sent/highest-error bounds. Zero means none.
     /// `last_admitted` is the highest V2 ID accepted into the outbound FIFO.
@@ -616,6 +618,7 @@ fn reconstruction_probe_client_with_stream(
         history_ranges: HashMap::new(),
         history_requests: HashMap::new(),
         next_history_request_id: 1,
+        raw_viewport: raw_viewport::RawViewport::default(),
         copied_text: Vec::new(),
         last_admitted_v2_action_id: 0,
         last_sent_v2_action_id: 0,

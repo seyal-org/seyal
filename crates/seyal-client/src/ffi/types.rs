@@ -226,8 +226,18 @@ mod pass8_execution_block_abi_tests {
 
     use super::{
         SeyalBlockRecord, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRow,
-        SeyalPreparedFrame,
+        SeyalPreparedFrame, SeyalRawViewportPlan,
     };
+
+    #[test]
+    fn raw_viewport_plan_matches_seyal_bridge_h() {
+        assert_eq!(size_of::<SeyalRawViewportPlan>(), 32);
+        assert_eq!(align_of::<SeyalRawViewportPlan>(), 8);
+        assert_eq!(offset_of!(SeyalRawViewportPlan, active), 0);
+        assert_eq!(offset_of!(SeyalRawViewportPlan, offset_rows), 8);
+        assert_eq!(offset_of!(SeyalRawViewportPlan, start_line), 16);
+        assert_eq!(offset_of!(SeyalRawViewportPlan, end_line), 24);
+    }
 
     #[test]
     fn execution_block_metadata_c_abi_is_exactly_40_bytes() {
@@ -346,6 +356,29 @@ pub struct SeyalHistoryRange {
     pub revision: u64,
     pub row_count: u32,
     pub reserved: u32,
+}
+
+/// Rust-authored bounded Raw viewport plan. Zero `active` means follow-tail.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct SeyalRawViewportPlan {
+    pub active: u8,
+    pub reserved: [u8; 7],
+    pub offset_rows: u64,
+    pub start_line: u64,
+    pub end_line: u64,
+}
+
+impl SeyalRawViewportPlan {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            active: 0,
+            reserved: [0; 7],
+            offset_rows: 0,
+            start_line: 0,
+            end_line: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

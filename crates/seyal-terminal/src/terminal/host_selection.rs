@@ -9,8 +9,212 @@ use crate::{
     },
     CellRole, HistoryAnchor, HistoryBreakAfter, HistoryMatch, HistoryRangeError,
 };
+use unicode_segmentation::UnicodeSegmentation;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClickClass {
+    Word,
+    Space,
+    Other,
+}
+
+fn click_class(grapheme: &str) -> ClickClass {
+    if grapheme
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_alphanumeric() || character == '_')
+    {
+        ClickClass::Word
+    } else if !grapheme.is_empty() && grapheme.chars().all(char::is_whitespace) {
+        ClickClass::Space
+    } else {
+        ClickClass::Other
+    }
+}
 
 impl TerminalState {
+    /// Select the word or grapheme under a Raw terminal double-click.
+    /// Rust derives Unicode word boundaries from canonical terminal cells;
+    /// the platform adapter supplies only the hit-tested cell coordinate.
+    pub fn select_word_at(&mut self, position: VisualPos) -> bool {
+        if position.col >= self.cols() || position.row >= self.rows() {
+            return false;
+        }
+        let mut units = Vec::new();
+        for col in 0..self.cols() {
+            let Some(cell) = self.cell(col, position.row) else {
+                return false;
+            };
+            if cell.role != CellRole::Lead {
+                continue;
+            }
+            let Some(bytes) = self.lead_utf8(col, position.row) else {
+                return false;
+            };
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                return false;
+            };
+            let mut end_col = col;
+            while end_col + 1 < self.cols()
+                && self
+                    .cell(end_col + 1, position.row)
+                    .is_some_and(|next| next.role == CellRole::Continuation)
+            {
+                end_col += 1;
+            }
+            units.push((col, end_col, click_class(text)));
+        }
+        let Some(index) = units
+            .iter()
+            .position(|(start, end, _)| *start <= position.col && position.col <= *end)
+        else {
+            return false;
+        };
+        let class = units[index].2;
+        let mut first = index;
+        let mut last = index;
+        if class != ClickClass::Other {
+            while first > 0 && units[first - 1].2 == class {
+                first -= 1;
+            }
+            while last + 1 < units.len() && units[last + 1].2 == class {
+                last += 1;
+            }
+        }
+        self.set_linear_selection(
+            VisualPos {
+                col: units[first].0,
+                row: position.row,
+            },
+            VisualPos {
+                col: units[last].1,
+                row: position.row,
+            },
+        );
+        true
+    }
+
+    /// Select the logical terminal line under a Raw terminal triple-click.
+    /// Soft-wrap rows form one line; a hard break remains a line boundary.
+    pub fn select_logical_line_at(&mut self, position: VisualPos) -> bool {
+        if position.col >= self.cols() || position.row >= self.rows() {
+            return false;
+        }
+        let mut first_row = position.row;
+        while first_row > 0
+            && self.core.current().row_break_after(first_row - 1)
+                == Some(HistoryBreakAfter::SoftWrap)
+        {
+            first_row -= 1;
+        }
+        let mut last_row = position.row;
+        while last_row + 1 < self.rows()
+            && self.core.current().row_break_after(last_row) == Some(HistoryBreakAfter::SoftWrap)
+        {
+            last_row += 1;
+        }
+        let mut last_col = 0;
+        for col in (0..self.cols()).rev() {
+            if self.cell(col, last_row).is_some_and(|cell| {
+                cell.role == CellRole::Continuation
+                    || (cell.role == CellRole::Lead && cell.character != ' ')
+            }) {
+                last_col = col;
+                break;
+            }
+        }
+        self.set_linear_selection(
+            VisualPos {
+                col: 0,
+                row: first_row,
+            },
+            VisualPos {
+                col: last_col,
+                row: last_row,
+            },
+        );
+        true
+    }
+
+    /// Map one click on the active, single-row trusted shell prompt to the
+    /// shell editor's character-relative cursor movement. `None` means the
+    /// click is outside this conservative prompt region and should follow the
+    /// normal host-selection / application-mouse path.
+    pub fn prompt_cursor_delta(&self, prompt_start: VisualPos, target: VisualPos) -> Option<i32> {
+        if self.modes().alternate_screen {
+            return None;
+        }
+        let cursor = self.cursor();
+        if prompt_start.row > cursor.row
+            || target.row < prompt_start.row
+            || target.row > cursor.row
+            || prompt_start.col >= self.cols()
+        {
+            return None;
+        }
+
+        // A terminal row change is part of the same editable command only
+        // when the VT screen identifies it as an automatic soft wrap. A hard
+        // break can be a shell continuation prompt or a completed command;
+        // without shell-specific layout metadata it is unsafe to infer that
+        // those prompt cells belong to the command buffer.
+        for row in prompt_start.row..cursor.row {
+            if self.core.current().row_break_after(row) != Some(HistoryBreakAfter::SoftWrap) {
+                return None;
+            }
+        }
+
+        let clamp_to_grapheme_boundary = |pos: VisualPos| -> VisualPos {
+            let mut col = pos.col.min(self.cols());
+            if col < self.cols()
+                && self
+                    .cell(col, pos.row)
+                    .is_some_and(|cell| cell.role == CellRole::Continuation)
+            {
+                col = col.saturating_add(1).min(self.cols());
+            }
+            VisualPos { col, row: pos.row }
+        };
+        let cursor_pos = clamp_to_grapheme_boundary(VisualPos {
+            col: cursor.col,
+            row: cursor.row,
+        });
+        let mut target_pos = clamp_to_grapheme_boundary(target);
+        if (target_pos.row, target_pos.col) > (cursor_pos.row, cursor_pos.col) {
+            target_pos = cursor_pos;
+        }
+
+        let editor_character_offset = |end: VisualPos| -> Option<usize> {
+            let mut count = 0usize;
+            for row in prompt_start.row..=end.row {
+                let first_col = if row == prompt_start.row {
+                    prompt_start.col
+                } else {
+                    0
+                };
+                let last_col = if row == end.row { end.col } else { self.cols() };
+                for col in first_col..last_col.min(self.cols()) {
+                    let cell = self.cell(col, row)?;
+                    if cell.role == CellRole::Lead {
+                        let text = self.lead_utf8(col, row)?;
+                        count = count.checked_add(
+                            std::str::from_utf8(&text).ok()?.graphemes(true).count(),
+                        )?;
+                        if count > 4_096 {
+                            return None;
+                        }
+                    }
+                }
+            }
+            Some(count)
+        };
+
+        let current = editor_character_offset(cursor_pos)?;
+        let clicked = editor_character_offset(target_pos)?;
+        let delta = i64::try_from(clicked).ok()? - i64::try_from(current).ok()?;
+        i32::try_from(delta).ok()
+    }
+
     pub fn encode_host_paste(&self, bytes: &[u8]) -> Result<Vec<u8>, PasteError> {
         encode_paste(bytes, self.core.modes.bracketed_paste)
     }

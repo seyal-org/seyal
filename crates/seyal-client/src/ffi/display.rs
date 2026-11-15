@@ -7,7 +7,8 @@ use super::{
     error_code, with_active_client, with_active_client_mut, with_display_client,
     with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
     SeyalComposerTarget, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange,
-    SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame, SeyalSessionSurface,
+    SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame, SeyalRawViewportPlan,
+    SeyalSessionSurface,
 };
 
 #[unsafe(no_mangle)]
@@ -648,6 +649,60 @@ pub extern "C" fn seyal_bridge_viewport_start_line_id_for(handle: u64) -> u64 {
         client.viewport_line_ids().first().copied().unwrap_or(0)
     })
     .unwrap_or(0)
+}
+
+/// Apply an input-device scroll delta and return the Rust-owned Raw viewport.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_raw_viewport_apply_for(
+    handle: u64,
+    start_line_id: u64,
+    rows: u16,
+    delta_rows: i32,
+) -> SeyalRawViewportPlan {
+    super::with_client_mut(handle, |client| {
+        raw_viewport_plan(client, start_line_id, rows, Some(delta_rows))
+    })
+    .unwrap_or_else(SeyalRawViewportPlan::empty)
+}
+
+/// Reconcile a viewport against a newly published terminal origin or geometry.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_raw_viewport_plan_for(
+    handle: u64,
+    start_line_id: u64,
+    rows: u16,
+) -> SeyalRawViewportPlan {
+    super::with_client_mut(handle, |client| {
+        raw_viewport_plan(client, start_line_id, rows, None)
+    })
+    .unwrap_or_else(SeyalRawViewportPlan::empty)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_raw_viewport_clear_for(handle: u64) -> i32 {
+    super::with_client_mut(handle, |client| client.raw_viewport.clear()).map_or(-1, |_| 0)
+}
+
+fn raw_viewport_plan(
+    client: &mut LocalDisplayClient,
+    start_line_id: u64,
+    rows: u16,
+    delta_rows: Option<i32>,
+) -> SeyalRawViewportPlan {
+    let plan = match delta_rows {
+        Some(delta) => client.raw_viewport.apply_delta(start_line_id, rows, delta),
+        None => client.raw_viewport.plan(start_line_id, rows),
+    };
+    let Some(plan) = plan else {
+        return SeyalRawViewportPlan::empty();
+    };
+    SeyalRawViewportPlan {
+        active: 1,
+        reserved: [0; 7],
+        offset_rows: plan.offset_rows,
+        start_line: plan.start_line,
+        end_line: plan.end_line,
+    }
 }
 
 fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {

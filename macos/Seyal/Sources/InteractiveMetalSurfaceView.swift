@@ -22,6 +22,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     var observedAlternateScreen = false
     private var announcedBridgeUsable = false
     private var mouseTrackingArea: NSTrackingArea?
+    private var rawScrollFractionalRows: CGFloat = 0
     private var composerRecoveryFocusRetryScheduled = false
     private var composerRecoveryFocusAttempts = 0
     private var composerRecoveryFocusGeneration: UInt64 = 0
@@ -267,31 +268,30 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         // Block-scoped DirectInput keeps Flow chrome; local Raw scrollback is
         // only for full-Pane Raw/TUI. Wheel over Flow still scrolls transcript.
         guard allowsFullPaneDirectTerminal else {
+            rawScrollFractionalRows = 0
             super.scrollWheel(with: event)
             return
         }
         let eligibility = seyal_app_snapshot(appHandle).eligibility
         let alternate = terminalCurrentFrame()?.alternate_screen != 0
         if prefersRawLocalScrollback(eligibility: eligibility, alternateScreen: alternate),
-            abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
-            event.scrollingDeltaY != 0
+            abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
         {
-            // AppKit: positive scrollingDeltaY = fingers/content move down = view older lines.
-            let cell = max(terminalPresentationCellSize().height, 1)
-            var steps = Int((abs(event.scrollingDeltaY) / cell).rounded(.up))
-            if steps < 1 { steps = 1 }
-            if event.isDirectionInvertedFromDevice {
-                // Natural: fingers up → positive delta → scroll toward older history.
-                let delta = event.scrollingDeltaY > 0 ? steps : -steps
-                _ = applyRawScrollDelta(
-                    rows: delta, eligibility: eligibility, alternateScreen: alternate)
-            } else {
-                let delta = event.scrollingDeltaY > 0 ? -steps : steps
-                _ = applyRawScrollDelta(
-                    rows: delta, eligibility: eligibility, alternateScreen: alternate)
-            }
+            let deltaRows = Self.rawScrollRows(
+                deltaY: event.scrollingDeltaY,
+                precise: event.hasPreciseScrollingDeltas,
+                cellHeight: terminalPresentationCellSize().height,
+                remainder: &rawScrollFractionalRows
+            )
+            guard let deltaRows else { return }
+            // AppKit has already applied the user's direction preference to
+            // scrollingDeltaY. Positive values move toward older content. Precise
+            // devices report points; coarse wheels report rows.
+            _ = applyRawScrollDelta(
+                rows: deltaRows, eligibility: eligibility, alternateScreen: alternate)
             return
         }
+        rawScrollFractionalRows = 0
         let button: UInt8
         if abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX) {
             if event.scrollingDeltaY == 0 { return }
@@ -301,6 +301,25 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             button = event.scrollingDeltaX > 0 ? 66 : 67
         }
         submitNativeMouse(event, kind: 4, buttonOverride: button)
+    }
+
+    static func rawScrollRows(
+        deltaY: CGFloat, precise: Bool, cellHeight: CGFloat, remainder: inout CGFloat
+    ) -> Int? {
+        guard deltaY.isFinite, cellHeight.isFinite, cellHeight > 0, deltaY != 0 else {
+            return nil
+        }
+        // AppKit reports coarse wheel deltas in rows and precise deltas in points.
+        let rowDelta = precise ? deltaY / cellHeight : deltaY
+        guard rowDelta.isFinite else { return nil }
+        // Clamp before converting to Int: an extreme synthetic/device delta must
+        // not trap during CGFloat -> Int conversion.
+        let limit = CGFloat(Int32.max)
+        let accumulated = min(max(remainder + rowDelta, -limit), limit)
+        let wholeRows = accumulated.rounded(.towardZero)
+        remainder = accumulated - wholeRows
+        guard wholeRows != 0 else { return nil }
+        return Int(wholeRows)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -742,12 +761,15 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         } else {
             return
         }
+        let clickCount: UInt8 = kind == 1 && button == 0
+            ? UInt8(min(max(event.clickCount, 1), 3)) : 0
         _ = terminalSubmitMouse(
             kind: kind,
             button: button,
             modifiers: modifiers,
             col: cell.0,
             row: cell.1,
+            clickCount: clickCount,
             actionID: actionID
         )
     }

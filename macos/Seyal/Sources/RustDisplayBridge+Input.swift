@@ -164,13 +164,16 @@ extension RustDisplayBridge {
     modifiers: UInt16,
     col: UInt16,
     row: UInt16,
+    clickCount: UInt8,
     actionID: UInt32
   ) -> Int32 {
     guard isConnected, selectPresentedClient() else {
       onStatusChanged()
       return -10
     }
-    return finishMutation(seyal_bridge_submit_mouse(kind, button, modifiers, col, row, actionID))
+    return finishMutation(
+      seyal_bridge_submit_mouse(kind, button, modifiers, col, row, clickCount, actionID)
+    )
   }
 
   @discardableResult

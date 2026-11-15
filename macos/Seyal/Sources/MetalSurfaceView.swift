@@ -72,10 +72,11 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   private(set) var transcriptDisplayHandle: UInt64 = 0
   var lastProposedGeometry = CGRect.null
   var proposingGeometry = false
-  /// Presentation-local Raw scrollback rows above live origin (#1442).
-  var rawScrollOffset: UInt64 = 0
-  /// `ViewportLineIds[0]` last used to paint Raw scrollback; 0 when follow-tail.
+  /// Cached fetch anchor only; actual viewport state and geometry live in Rust.
   var rawScrollPaintedStartLineID: UInt64 = 0
+  /// Exact Rust history request permitted to replace the visible Raw page.
+  /// This fences late responses from prior scroll positions.
+  var rawScrollRequestedHistory: RawScrollbackRequest?
   /// One-shot refill after trimming sealed blank LineIds at absolute top.
   var rawScrollDidRefillLeadingBlanks = false
 
@@ -215,11 +216,17 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   override func hitTest(_ point: NSPoint) -> NSView? {
     // Flow paints terminal pixels over Block bodies. Chrome owns scrolling
     // and composer hit-testing, so the compositor must not swallow events.
-    // Raw scrollback temporarily suppresses drawsLiveGrid but must keep hits (#1442).
+    // Raw/TUI eligibility is Rust-owned input/presentation authority. Metal's
+    // transient draw mode may suppress the live grid while a coherent history
+    // frame is being installed; that must not disable Raw mouse input.
+    let eligibility = recoveryAppHandle != 0
+      ? seyal_app_snapshot(recoveryAppHandle).eligibility : 0
+    let ownsFullPaneInput = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+      || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
     // Flow DirectInput click→focus is CommandBlockView-owned (#1468): Metal
     // stays nil so Block bodies remain hittable and empty canvas never becomes
     // a Raw surface.
-    if inspectRendererPresentation().drawsLiveGrid || rawScrollOffset > 0 {
+    if ownsFullPaneInput || inspectRendererPresentation().drawsLiveGrid || rawScrollOffset > 0 {
       return super.hitTest(point)
     }
     return nil
@@ -778,14 +785,16 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     endCol: UInt16 = 0,
     endRow: UInt16 = 0
   ) -> Int32 {
-    bridge?.submitHostSelection(
-      action: action,
-      kind: kind,
-      startCol: startCol,
-      startRow: startRow,
-      endCol: endCol,
-      endRow: endRow
-    ) ?? -10
+    withSurfaceSubmissionClient {
+      $0.submitHostSelection(
+        action: action,
+        kind: kind,
+        startCol: startCol,
+        startRow: startRow,
+        endCol: endCol,
+        endRow: endRow
+      )
+    }
   }
 
   func terminalSubmitComposerCommand(_ text: String) -> Int32 {
@@ -854,16 +863,20 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     modifiers: UInt16,
     col: UInt16,
     row: UInt16,
+    clickCount: UInt8,
     actionID: UInt32
   ) -> Int32 {
-    bridge?.submitMouse(
-      kind: kind,
-      button: button,
-      modifiers: modifiers,
-      col: col,
-      row: row,
-      actionID: actionID
-    ) ?? -10
+    withSurfaceSubmissionClient {
+      $0.submitMouse(
+        kind: kind,
+        button: button,
+        modifiers: modifiers,
+        col: col,
+        row: row,
+        clickCount: clickCount,
+        actionID: actionID
+      )
+    }
   }
 
   @discardableResult

@@ -105,6 +105,14 @@ typedef struct SeyalHistorySidecar {
     uint32_t reserved;
 } SeyalHistorySidecar;
 
+typedef struct SeyalRawViewportPlan {
+    uint8_t active;
+    uint8_t reserved[7];
+    uint64_t offset_rows;
+    uint64_t start_line;
+    uint64_t end_line;
+} SeyalRawViewportPlan;
+
 typedef struct SeyalComposerResult {
     uint64_t request_id;
     uint64_t block_id;
@@ -331,6 +339,7 @@ int32_t seyal_bridge_submit_mouse(
     uint16_t modifiers,
     uint16_t col,
     uint16_t row,
+    uint8_t click_count,
     uint32_t action_id
 );
 int32_t seyal_bridge_propose_geometry(
@@ -350,6 +359,11 @@ SeyalPreparedFrame seyal_bridge_frame_for(uint64_t handle);
 /* Paired ViewportLineIds[0] for Raw presentation scroll (#1442); 0 if unpaired. */
 uint64_t seyal_bridge_viewport_start_line_id(void);
 uint64_t seyal_bridge_viewport_start_line_id_for(uint64_t handle);
+SeyalRawViewportPlan seyal_bridge_raw_viewport_apply_for(
+    uint64_t handle, uint64_t start_line_id, uint16_t rows, int32_t delta_rows);
+SeyalRawViewportPlan seyal_bridge_raw_viewport_plan_for(
+    uint64_t handle, uint64_t start_line_id, uint16_t rows);
+int32_t seyal_bridge_raw_viewport_clear_for(uint64_t handle);
 int32_t seyal_bridge_ensure_prepared_for(uint64_t handle);
 uint64_t seyal_bridge_block_timeline_revision(void);
 uint64_t seyal_bridge_next_composer_request_id(void);

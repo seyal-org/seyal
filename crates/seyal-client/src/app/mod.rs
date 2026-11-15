@@ -407,7 +407,7 @@ impl ApplicationRoot {
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
         let _ = composer.apply(ComposerAction::ApplyPresentation {
             pane,
-            mode: PresentationMode::Flow,
+            mode: PresentationMode::Raw,
             input_route: InputRoute::Frozen,
         });
         // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
@@ -420,7 +420,7 @@ impl ApplicationRoot {
         }
         let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
-            presentation: PresentationSession::new(None, PresentationMode::Flow),
+            presentation: PresentationSession::new(None, PresentationMode::Raw),
             shell,
             authority: None,
             pane_authorities: HashMap::new(),
@@ -445,8 +445,8 @@ impl ApplicationRoot {
             goto: GotoState::new(),
             focus_history: FocusHistory::new(),
             alternate_screen: false,
-            resting: PresentationMode::Flow,
-            explicit_flow: true,
+            resting: PresentationMode::Raw,
+            explicit_flow: false,
             integration_unsupported: false,
             runtime_composer_target: None,
             interactive_raw_target: None,

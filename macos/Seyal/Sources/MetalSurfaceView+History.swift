@@ -13,8 +13,23 @@ struct NativeHistoryRenderPageKey: Equatable {
 }
 
 extension MetalSurfaceView {
-  func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    bridge?.requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID) ?? -10
+  func requestHistoryRange(
+    startLine: UInt64,
+    endLine: UInt64,
+    blockID: UInt64,
+    onRequestID: ((UInt64) -> Void)? = nil
+  ) -> Int32 {
+    guard let bridge else { return -10 }
+    let handle = transcriptDisplayHandle != 0
+      ? transcriptDisplayHandle
+      : (bridge.windowFocusedDisplayHandle != 0 ? bridge.windowFocusedDisplayHandle : bridge.clientHandle)
+    return bridge.requestHistoryRange(
+      forDisplayHandle: handle,
+      startLine: startLine,
+      endLine: endLine,
+      blockID: blockID,
+      onRequestID: onRequestID
+    )
   }
 
   func retainHistoryRange(_ range: NativeHistoryRange) {
@@ -32,7 +47,12 @@ extension MetalSurfaceView {
   }
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
-    bridge?.discardHistoryRequests(except: historyExceptPreservingRawScrollback(blockIDs))
+    guard let bridge else { return }
+    let handle = transcriptDisplayHandle != 0
+      ? transcriptDisplayHandle
+      : (bridge.windowFocusedDisplayHandle != 0 ? bridge.windowFocusedDisplayHandle : bridge.clientHandle)
+    bridge.discardHistoryRequests(
+      except: historyExceptPreservingRawScrollback(blockIDs), forDisplayHandle: handle)
   }
 
   /// Installs a bounded Runtime history projection in this Pane's Metal renderer.

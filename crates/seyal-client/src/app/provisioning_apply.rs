@@ -224,7 +224,7 @@ impl ApplicationRoot {
             }
             return Err(error);
         }
-        self.select_split_tab_flow_resting_mode(pane);
+        self.select_split_tab_raw_resting_mode(pane);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

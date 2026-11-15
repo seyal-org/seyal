@@ -302,6 +302,10 @@ impl Runtime {
             #[cfg(target_os = "macos")]
             mouse_host_anchor: None,
             #[cfg(target_os = "macos")]
+            prompt_ready: false,
+            #[cfg(target_os = "macos")]
+            prompt_anchor: None,
+            #[cfg(target_os = "macos")]
             pending_composer: None,
             #[cfg(target_os = "macos")]
             shell_integration_mode,

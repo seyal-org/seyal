@@ -90,6 +90,14 @@ impl TerminalExecution {
         self.terminal.set_linear_selection(start, end);
     }
 
+    pub fn select_word_at(&mut self, position: seyal_terminal::VisualPos) -> bool {
+        self.terminal.select_word_at(position)
+    }
+
+    pub fn select_logical_line_at(&mut self, position: seyal_terminal::VisualPos) -> bool {
+        self.terminal.select_logical_line_at(position)
+    }
+
     pub fn set_rectangular_selection(
         &mut self,
         start: seyal_terminal::VisualPos,
