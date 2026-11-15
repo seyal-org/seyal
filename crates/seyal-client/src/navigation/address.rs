@@ -1,36 +1,33 @@
 //! Typed local navigation addresses and versioned/size-tagged decode.
 
-use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, WorkspaceId};
 
 use super::NavigationRejection;
 
-/// Portable ABI version for the M003 closed address set.
-pub const RESOURCE_ADDRESS_ABI_VERSION: u16 = 1;
+/// Portable ABI version for the closed address set (ADR-029 drops Tab).
+pub const RESOURCE_ADDRESS_ABI_VERSION: u16 = 2;
 
 pub const RESOURCE_ADDRESS_KIND_WORKSPACE: u16 = 1;
+/// Retired by ADR-029 / SPEC-032. Decode rejects this kind.
 pub const RESOURCE_ADDRESS_KIND_TAB: u16 = 2;
 pub const RESOURCE_ADDRESS_KIND_PANE: u16 = 3;
 pub const RESOURCE_ADDRESS_KIND_EXECUTION: u16 = 4;
 
 const WORKSPACE_PAYLOAD: usize = 16;
-const TAB_PAYLOAD: usize = 32;
-const PANE_PAYLOAD: usize = 48;
+const PANE_PAYLOAD: usize = 32;
 const EXECUTION_PAYLOAD: usize = 16;
 
-/// M003 closed navigation identity. `Copy` by construction so it cannot own a
+/// Closed navigation identity. `Copy` by construction so it cannot own a
 /// display string, path, ordinal, window handle, or PID (SPEC-022 R2.1).
+/// Pane address is `WorkspaceId` + `PaneId` (ADR-029); `TabId` is not a
+/// user-facing containment identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ResourceAddress {
     Workspace {
         workspace: WorkspaceId,
     },
-    Tab {
-        workspace: WorkspaceId,
-        tab: TabId,
-    },
     Pane {
         workspace: WorkspaceId,
-        tab: TabId,
         pane: PaneId,
     },
     Execution {
@@ -58,19 +55,12 @@ pub fn decode_resource_address(
                 workspace: WorkspaceId::from_bytes(workspace),
             })
         }
-        RESOURCE_ADDRESS_KIND_TAB => {
-            require_len(payload, TAB_PAYLOAD)?;
-            Ok(ResourceAddress::Tab {
-                workspace: WorkspaceId::from_bytes(read_exact(payload, 0)),
-                tab: TabId::from_bytes(read_exact(payload, 16)),
-            })
-        }
+        RESOURCE_ADDRESS_KIND_TAB => Err(NavigationRejection::UnsupportedKind),
         RESOURCE_ADDRESS_KIND_PANE => {
             require_len(payload, PANE_PAYLOAD)?;
             Ok(ResourceAddress::Pane {
                 workspace: WorkspaceId::from_bytes(read_exact(payload, 0)),
-                tab: TabId::from_bytes(read_exact(payload, 16)),
-                pane: PaneId::from_bytes(read_exact(payload, 32)),
+                pane: PaneId::from_bytes(read_exact(payload, 16)),
             })
         }
         RESOURCE_ADDRESS_KIND_EXECUTION => {

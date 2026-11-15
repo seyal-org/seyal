@@ -133,7 +133,6 @@ fn away_and_back_preserves_execution_id_no_replacement_spawn() {
     navigate(
         ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
         &mut shell,
@@ -153,7 +152,6 @@ fn away_and_back_preserves_execution_id_no_replacement_spawn() {
     navigate(
         ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
         &mut shell,
@@ -192,7 +190,6 @@ fn root_away_and_back_keeps_authority_and_refuses_rebind() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
     })
@@ -201,7 +198,6 @@ fn root_away_and_back_keeps_authority_and_refuses_rebind() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_b,
         },
     })
@@ -226,7 +222,6 @@ fn root_away_and_back_keeps_authority_and_refuses_rebind() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
     })
@@ -275,7 +270,6 @@ fn destroyed_pane_fails_closed_no_retarget() {
         navigate(
             ResourceAddress::Pane {
                 workspace: WorkspaceId::m001_default(),
-                tab: tab_a,
                 pane: pane_a,
             },
             &mut shell,
@@ -352,7 +346,6 @@ fn inactive_window_commits_target_activation_failure_does_not_retarget() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -387,7 +380,6 @@ fn repeated_activation_failure_stays_bounded_committed_focus_survives() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -429,7 +421,6 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -453,7 +444,6 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
     })
@@ -465,7 +455,6 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -509,7 +498,6 @@ fn history_back_forward_restore_published_cursor_and_pane() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
     })
@@ -523,7 +511,6 @@ fn history_back_forward_restore_published_cursor_and_pane() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -570,7 +557,6 @@ fn orthogonal_matrix_sample_cells_fail_closed_independently() {
     navigate(
         ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
         &mut shell,
@@ -613,7 +599,6 @@ fn orthogonal_matrix_sample_cells_fail_closed_independently() {
         navigate(
             ResourceAddress::Pane {
                 workspace: WorkspaceId::m001_default(),
-                tab: tab_a,
                 pane: PaneId::from_bytes([0xde; 16]),
             },
             &mut shell,

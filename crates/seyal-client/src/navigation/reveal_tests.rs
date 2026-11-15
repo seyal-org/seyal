@@ -51,7 +51,6 @@ fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
     let (mut shell, workspace, tab, pane) = mini_shell();
     let packed = pack_resource_address(ResourceAddress::Pane {
         workspace,
-        tab,
         pane,
     });
     let mut history = FocusHistory::default();
@@ -59,7 +58,6 @@ fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
         unpack_resource_address(&packed).unwrap(),
         ResourceAddress::Pane {
             workspace,
-            tab,
             pane,
         }
     );
@@ -73,7 +71,6 @@ fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
         ),
         AttentionReveal::Focused(ResolvedTarget::Pane {
             workspace,
-            tab,
             pane,
         })
     );

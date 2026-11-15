@@ -30,6 +30,7 @@ final class PaneLayoutView: NSView {
         let lo: UInt64
         let hi: UInt64
         let selected: Bool
+        let title: String
     }
 
     struct Region: Equatable {
@@ -145,6 +146,7 @@ final class PaneLayoutView: NSView {
     var onNewTerminal: ((UInt64, UInt64) -> Void)?
     var onSplitPane: ((UInt64, UInt64, SplitDirection) -> Void)?
     var onClosePane: ((UInt64, UInt64) -> Void)?
+    var onRenamePane: ((UInt64, UInt64, String) -> Void)?
     var onRetryPaneRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
     /// Bubbled from a leaf composer after a consumed product shortcut (#1464).
     var onPaneCommandConsumed: (() -> Void)?
@@ -381,17 +383,14 @@ final class PaneLayoutView: NSView {
     }
 
     private static func readRegions(appHandle: UInt64, paneCount: Int) -> [Region] {
+        let terminalTitles = readTerminalTabTitles(appHandle: appHandle)
         var regions: [Region] = []
         for index in 0..<paneCount {
             let raw = seyal_app_pane_region(appHandle, UInt32(index))
             guard raw.size != 0 else { break }
-            let row = seyal_app_shell_row(appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
-            let title = row.title.flatMap { bytes in
-                String(
-                    decoding: UnsafeBufferPointer(start: bytes, count: Int(row.title_len)),
-                    as: UTF8.self
-                )
-            } ?? "Pane"
+            // Match by PaneId so region order and shell-row order cannot cross-wire titles.
+            let title = paneTitle(appHandle: appHandle, paneLo: raw.pane_lo, paneHi: raw.pane_hi)
+                ?? "Pane"
             let recovery = seyal_app_pane_recovery_target_for_pane(
                 appHandle,
                 raw.pane_lo,
@@ -417,19 +416,62 @@ final class PaneLayoutView: NSView {
                     recoveryExecutionHi: recovery.execution_hi,
                     recoveryBindingGeneration: recovery.binding_generation,
                     recoveryGeneration: recovery.recovery_generation,
-                    terminalTabs: readTerminalTabs(appHandle: appHandle, paneLo: raw.pane_lo, paneHi: raw.pane_hi)
+                    terminalTabs: readTerminalTabs(
+                        appHandle: appHandle,
+                        paneLo: raw.pane_lo,
+                        paneHi: raw.pane_hi,
+                        titles: terminalTitles
+                    )
                 )
             )
         }
         return regions
     }
 
-    private static func readTerminalTabs(appHandle: UInt64, paneLo: UInt64, paneHi: UInt64) -> [TerminalTab] {
+    private static func paneTitle(appHandle: UInt64, paneLo: UInt64, paneHi: UInt64) -> String? {
+        let shell = seyal_app_shell(appHandle)
+        for index in 0..<Int(shell.pane_count) {
+            let row = seyal_app_shell_row(appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
+            guard row.id_lo == paneLo, row.id_hi == paneHi else { continue }
+            return productChromeCopyUTF8(row.title, row.title_len)
+        }
+        return nil
+    }
+
+    private static func readTerminalTabTitles(appHandle: UInt64) -> [String: String] {
+        var titles: [String: String] = [:]
+        let shell = seyal_app_shell(appHandle)
+        var flatCount = 0
+        for paneIndex in 0..<Int(shell.pane_count) {
+            let paneRow = seyal_app_shell_row(appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(paneIndex))
+            flatCount += Int(seyal_app_pane_terminal_tab_count(appHandle, paneRow.id_lo, paneRow.id_hi))
+        }
+        for index in 0..<flatCount {
+            let row = seyal_app_shell_row(appHandle, UInt16(SEYAL_APP_ROW_TERMINAL_TAB), UInt32(index))
+            guard let title = productChromeCopyUTF8(row.title, row.title_len) else { continue }
+            titles["\(row.id_hi)-\(row.id_lo)"] = title
+        }
+        return titles
+    }
+
+    private static func readTerminalTabs(
+        appHandle: UInt64,
+        paneLo: UInt64,
+        paneHi: UInt64,
+        titles: [String: String]
+    ) -> [TerminalTab] {
         let count = Int(seyal_app_pane_terminal_tab_count(appHandle, paneLo, paneHi))
         return (0..<count).compactMap { index in
             let row = seyal_app_pane_terminal_tab(appHandle, paneLo, paneHi, UInt32(index))
             guard row.size != 0 else { return nil }
-            return TerminalTab(lo: row.terminal_lo, hi: row.terminal_hi, selected: row.flags & 1 != 0)
+            let key = "\(row.terminal_hi)-\(row.terminal_lo)"
+            let title = titles[key] ?? "Pane \(index + 1)"
+            return TerminalTab(
+                lo: row.terminal_lo,
+                hi: row.terminal_hi,
+                selected: row.flags & 1 != 0,
+                title: title
+            )
         }
     }
 
@@ -590,7 +632,6 @@ final class PaneLayoutView: NSView {
             let strip = PaneTerminalTabStrip(
                 paneLo: region.paneLo,
                 paneHi: region.paneHi,
-                paneTitle: region.title,
                 tabs: region.terminalTabs,
                 focused: region.focused,
                 canSplit: region.focused && shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) != 0,
@@ -601,6 +642,9 @@ final class PaneLayoutView: NSView {
             strip.onNew = { [weak self] in self?.onNewTerminal?(key.lo, key.hi) }
             strip.onSplit = { [weak self] direction in self?.onSplitPane?(key.lo, key.hi, direction) }
             strip.onClosePane = { [weak self] in self?.onClosePane?(key.lo, key.hi) }
+            let paneLo = region.paneLo
+            let paneHi = region.paneHi
+            strip.onRenamePane = { [weak self] title in self?.onRenamePane?(paneLo, paneHi, title) }
             terminalStrips[key] = strip
             if let theme { strip.apply(theme: theme) }
             addSubview(strip, positioned: .above, relativeTo: liveContent)

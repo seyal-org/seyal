@@ -158,19 +158,17 @@ impl ApplicationRoot {
     }
 
     pub(super) fn select_workspace(&mut self, id: WorkspaceId) -> Result<(), AppError> {
-        // ADR-018 §3.3a: ActivateWorkspace raise vs create. Only the create path
-        // must begin #994 provisioning for the new empty terminal tab.
-        let created = !self
-            .shell
-            .snapshot()
-            .windows
-            .iter()
-            .any(|window| window.workspace == id);
+        // ActivateWorkspace create path only: empty workspaces need #994
+        // provisioning. Sidebar open/select of an existing pane tree must not
+        // re-provision.
+        let snap = self.shell.snapshot();
+        let needs_bootstrap = !snap.open_workspaces.contains(&id)
+            && !snap.windows.iter().any(|window| window.workspace == id);
         self.shell
             .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         self.drain_shell_effects();
-        if created && let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+        if needs_bootstrap && let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
             if let Ok(window) = self.shell.product_window_id() {
                 let _ = self.shell.apply(crate::shell::ShellAction::CloseWindow {
                     id: window,
@@ -201,6 +199,12 @@ impl ApplicationRoot {
                 _ => AppError::UnknownChromeWorkspace,
             })?;
         self.drain_shell_effects();
+        // Keep the open sidebar row even when the first surface provision fails.
+        // cmux / ADR-029: CreateWorkspace must appear in the host window's open
+        // list; unbound recovery owns the terminal surface, not RemoveWorkspace.
+        if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+            self.last_error = Some(error);
+        }
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         let _ = self
@@ -226,10 +230,65 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    pub(super) fn rename_workspace(
+        &mut self,
+        id: WorkspaceId,
+        name: String,
+    ) -> Result<(), AppError> {
+        self.shell
+            .rename_workspace(id, name)
+            .map_err(|error| match error {
+                crate::shell::ShellError::InvalidDisplayName => AppError::InvalidPayload,
+                crate::shell::ShellError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
+                _ => AppError::UnknownChromeWorkspace,
+            })?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn rename_pane(&mut self, id: PaneId, title: String) -> Result<(), AppError> {
+        self.shell
+            .rename_pane(id, title)
+            .map_err(|error| match error {
+                crate::shell::ShellError::InvalidDisplayName => AppError::InvalidPayload,
+                crate::shell::ShellError::UnknownPane => AppError::UnknownPane,
+                _ => AppError::UnknownPane,
+            })?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
     #[cfg(target_os = "macos")]
     fn mint_workspace_id(&mut self) -> Result<WorkspaceId, AppError> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        self.with_wire_client_mut(|client| client.mint_workspace_blocking(deadline))
+        // Prefer the live Attached Controller (same CAP path as New Terminal /
+        // CreateExecution). A dedicated Ready connect can hit MAX_CONNECTIONS
+        // and stall until StartupDeadlineExceeded → ABI 13 NoLiveClient.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        if self.has_wire_client() {
+            match self.with_wire_client_mut(|client| client.mint_workspace_blocking(deadline)) {
+                Ok(id) => return Ok(id),
+                Err(AppError::NoLiveClient) | Err(AppError::ProvisioningRejected) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        // Fallback: ADR-028 §2.5 Ready control connection when no Attached client.
+        crate::local::LocalDisplayClient::mint_workspace_via_ready_connection(deadline).map_err(
+            |error| match error {
+                crate::local::ClientError::UnsupportedInteractiveCapability => {
+                    AppError::ProvisioningRejected
+                }
+                crate::local::ClientError::LostController => AppError::NotController,
+                crate::local::ClientError::Discovery(_) => AppError::NoLiveClient,
+                crate::local::ClientError::StartupDeadlineExceeded => {
+                    AppError::ProvisioningRejected
+                }
+                _ => AppError::ProvisioningRejected,
+            },
+        )
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -286,7 +345,6 @@ impl ApplicationRoot {
         self.focus_history
             .record_user_commit(ResourceAddress::Pane {
                 workspace: focus.active_workspace,
-                tab: focus.active_tab,
                 pane: focus.focused_pane,
             });
     }
@@ -464,24 +522,43 @@ impl ApplicationRoot {
     }
 
     pub(super) fn create_window(&mut self) -> Result<(), AppError> {
-        // ADR-018 §2.2 / §3.3a: host sends target-free New Window; Rust picks
-        // the product-active Window's Workspace when any Window exists,
-        // otherwise `last_active_workspace` (zero-window re-entry / W4b).
+        // Zero-window re-entry keeps the retained workspace (ADR-018 §3.3a).
+        // Otherwise SPEC-032 §3.3 NewWindow: one new workspace in a new window.
         let snap = self.shell.snapshot();
-        let workspace = if snap.windows.is_empty() {
-            snap.last_active_workspace
-        } else {
-            snap.active_workspace
-        };
         let generation = snap.containment_generation;
-        self.apply_shell(ShellAction::CreateWindow {
-            workspace,
-            containment_generation: generation,
-        })
-        .map_err(|error| match error {
-            ShellError::WindowCreationUnavailable => AppError::WindowCreationUnavailable,
-            _ => AppError::UnknownChromeWorkspace,
-        })?;
+        if snap.windows.is_empty() {
+            self.apply_shell(ShellAction::CreateWindow {
+                workspace: snap.last_active_workspace,
+                containment_generation: generation,
+            })
+            .map_err(|error| match error {
+                ShellError::WindowCreationUnavailable => AppError::WindowCreationUnavailable,
+                _ => AppError::UnknownChromeWorkspace,
+            })?;
+        } else {
+            let root = self
+                .shell
+                .workspace_root(snap.active_workspace)
+                .filter(|path| !path.is_empty())
+                .map(str::to_owned)
+                .ok_or(AppError::InvalidPayload)?;
+            let id = self.mint_workspace_id_for_new_window()?;
+            self.shell
+                .record_workspace(id, root)
+                .map_err(|error| match error {
+                    ShellError::InvalidWorkspaceRoot => AppError::InvalidPayload,
+                    ShellError::DuplicateWorkspace => AppError::UnknownChromeWorkspace,
+                    _ => AppError::UnknownChromeWorkspace,
+                })?;
+            self.apply_shell(ShellAction::CreateWindow {
+                workspace: id,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(|error| match error {
+                ShellError::WindowCreationUnavailable => AppError::WindowCreationUnavailable,
+                _ => AppError::UnknownChromeWorkspace,
+            })?;
+        }
         self.drain_shell_effects();
         if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
             if let Ok(window) = self.shell.product_window_id() {
@@ -498,6 +575,26 @@ impl ApplicationRoot {
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    #[cfg(test)]
+    fn mint_workspace_id_for_new_window(&mut self) -> Result<WorkspaceId, AppError> {
+        Ok(WorkspaceId::from_bytes({
+            let mut bytes = [0x5a; 16];
+            bytes[0] = self.shell.snapshot().workspaces.len() as u8;
+            bytes[1] = (self.shell.containment_generation() & 0xff) as u8;
+            bytes
+        }))
+    }
+
+    #[cfg(all(not(test), target_os = "macos"))]
+    fn mint_workspace_id_for_new_window(&mut self) -> Result<WorkspaceId, AppError> {
+        self.mint_workspace_id()
+    }
+
+    #[cfg(all(not(test), not(target_os = "macos")))]
+    fn mint_workspace_id_for_new_window(&mut self) -> Result<WorkspaceId, AppError> {
+        Err(AppError::NoLiveClient)
     }
 
     pub(super) fn report_window_event(

@@ -150,7 +150,10 @@ pub(super) fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: R
             (Some(address), None) => {
                 let (version, kind, bytes, len) =
                     crate::navigation::encode_resource_address(address);
-                (version, kind, bytes, len)
+                // FFI row ABI keeps a 48-byte slot; ADR-029 payloads use ≤32.
+                let mut slot = [0u8; 48];
+                slot[..bytes.len()].copy_from_slice(&bytes);
+                (version, kind, slot, len)
             }
             (None, Some(raw)) => {
                 let mut bytes = [0u8; 48];
@@ -184,8 +187,18 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
     state.shell_text.clear();
     state.shell_rows.clear();
     let snap = state.root.snapshot();
-    for (index, workspace) in snap.shell.workspaces.iter().enumerate() {
-        let selected = workspace.id == snap.shell.active_workspace;
+    let open = &snap.shell.open_workspaces;
+    let catalog: std::collections::HashMap<_, _> = snap
+        .shell
+        .workspaces
+        .iter()
+        .map(|workspace| (workspace.id, workspace))
+        .collect();
+    for (index, workspace_id) in open.iter().enumerate() {
+        let Some(workspace) = catalog.get(workspace_id) else {
+            continue;
+        };
+        let selected = *workspace_id == snap.shell.selected_workspace;
         push_row(
             &mut state.shell_rows,
             &mut state.shell_text,
@@ -253,25 +266,21 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
             let pane_id = pane.id.to_bytes();
             let pane_title = pane.title.clone();
             let focused = pane.id == snap.shell.focused_pane;
-            pane.terminal_tabs
-                .iter()
-                .enumerate()
-                .map(move |(term_index, terminal)| {
-                    let selected = focused && pane.selected_terminal_tab == Some(terminal.id);
-                    let title = format!("Terminal {}", term_index + 1);
-                    let detail = if multi_pane {
-                        pane_title.clone()
-                    } else {
-                        String::new()
-                    };
-                    LeftTerminalTabRow {
-                        title,
-                        detail,
-                        terminal_id: terminal.id.to_bytes(),
-                        pane_id,
-                        selected,
-                    }
-                })
+            pane.terminal_tabs.iter().map(move |terminal| {
+                let selected = focused && pane.selected_terminal_tab == Some(terminal.id);
+                let detail = if multi_pane {
+                    pane_title.clone()
+                } else {
+                    String::new()
+                };
+                LeftTerminalTabRow {
+                    title: terminal.title.clone(),
+                    detail,
+                    terminal_id: terminal.id.to_bytes(),
+                    pane_id,
+                    selected,
+                }
+            })
         })
         .collect();
     for (terminal_index, row) in titles.iter().enumerate() {

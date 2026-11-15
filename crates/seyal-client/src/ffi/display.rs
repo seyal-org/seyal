@@ -267,6 +267,15 @@ pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
         .unwrap_or_else(SeyalComposerResult::empty)
 }
 
+/// Live focused display/input registry handle, or 0 when unbound / gone.
+///
+/// Never falls back to the readiness-selected (`ACTIVE_HANDLE`) client — hosts
+/// must not relay another Pane's composer status onto an unbound leaf.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_focused_display_handle() -> u64 {
+    super::focused_registry_handle()
+}
+
 /// Copies the latest Runtime composer eligibility and its attachment identity
 /// for the focused display client into a typed C value. Revision 0 / eligibility
 /// 0 means nothing published yet. Rust remains the only reader of its meaning.

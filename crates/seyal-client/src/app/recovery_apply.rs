@@ -342,7 +342,12 @@ impl ApplicationRoot {
             return Ok(());
         }
         self.pane_authorities.insert(pane, authority);
-        if self.shell.snapshot().focused_pane == pane {
+        let focused = self.shell.snapshot().focused_pane == pane;
+        // Copy the pane client's already-projected composer status before
+        // derive_presentation so resting / Busy→Available sees eligibility.
+        // Missing status is a no-op (never ResetAdmission; never clear draft).
+        self.adopt_projected_composer_status_for_pane(pane, focused);
+        if focused {
             let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
                 .ok_or(AppError::ZeroPtyGeneration)?;
             // A prior tab may already hold presentation identity; clear then bind
@@ -363,6 +368,41 @@ impl ApplicationRoot {
             }
         }
         Ok(())
+    }
+
+    /// Apply a pane Controller's projected composer eligibility onto that
+    /// PaneId. `update_resting` is true only for the focused Pane.
+    fn adopt_projected_composer_status_for_pane(&mut self, pane: PaneId, update_resting: bool) {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(raw) = self.pane_client_raws.get(&pane).copied() else {
+                return;
+            };
+            let Some((code, revision, _)) =
+                crate::ffi::with_client(raw, |client| client.projected_composer_status()).flatten()
+            else {
+                return;
+            };
+            let Some(eligibility) = projected_composer_eligibility(code) else {
+                return;
+            };
+            let _ = self
+                .composer
+                .apply(crate::composer::ComposerAction::ApplyRuntimeEligibility {
+                    pane,
+                    eligibility: Some(eligibility),
+                    revision,
+                });
+            if update_resting {
+                self.integration_unsupported =
+                    eligibility == RuntimeComposerEligibility::Unsupported;
+                self.recompute_resting();
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (pane, update_resting);
+        }
     }
 
     /// The adopted display client is the PTY generation and composer-status
@@ -475,5 +515,17 @@ impl ApplicationRoot {
         if self.authority.is_some() {
             let _ = self.derive_presentation(self.alternate_screen);
         }
+    }
+}
+
+/// Map LocalDisplayClient projected eligibility bytes (1–5) onto product enums.
+fn projected_composer_eligibility(code: u8) -> Option<RuntimeComposerEligibility> {
+    match code {
+        1 => Some(RuntimeComposerEligibility::Available),
+        2 => Some(RuntimeComposerEligibility::Busy),
+        3 => Some(RuntimeComposerEligibility::Unsupported),
+        4 => Some(RuntimeComposerEligibility::Relay),
+        5 => Some(RuntimeComposerEligibility::DirectInput),
+        _ => None,
     }
 }

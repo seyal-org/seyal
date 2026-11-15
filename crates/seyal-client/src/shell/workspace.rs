@@ -24,6 +24,8 @@ pub(super) struct Pane {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct TerminalTab {
     pub(super) id: TerminalTabId,
+    /// Display label for the pane-local terminal strip (ADR-029). Not an identity.
+    pub(super) title: String,
     pub(super) execution: Option<ExecutionId>,
 }
 
@@ -67,6 +69,12 @@ pub(super) struct Window {
     /// Stored with the window. Shell tests read it; the library build does not.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) workspace_id: WorkspaceId,
+    /// Workspaces this window lists in its sidebar (SPEC-032).
+    pub(super) open_workspaces: Vec<WorkspaceId>,
+    pub(super) selected_workspace: WorkspaceId,
+    /// When false, this Window holds a pane tree for sidebar presentation but
+    /// must not appear as an NSWindow (no RealizeWindow).
+    pub(super) realized: bool,
     pub(super) tabs: Vec<Tab>,
     pub(super) active_tab: TabId,
     /// Host-forwarded occlusion (fully occluded Window → Hidden leaves).
@@ -86,6 +94,9 @@ pub(super) struct Workspace {
     pub(super) attention: bool,
     pub(super) windows: Vec<Window>,
     pub(super) active_window: Option<WindowId>,
+    /// Window currently presenting this workspace in its sidebar (SPEC-032).
+    /// At most one; cleared on RemoveWorkspace / demote.
+    pub(super) presenting_window: Option<WindowId>,
 }
 
 /// Constructor input for tests and future hosts. Not a persistence schema.
@@ -137,6 +148,9 @@ impl Window {
         Ok(Self {
             id,
             workspace_id,
+            open_workspaces: vec![workspace_id],
+            selected_workspace: workspace_id,
+            realized: true,
             tabs,
             active_tab,
             occluded: false,
@@ -158,11 +172,13 @@ impl Workspace {
                 .into_iter()
                 .map(|tab| {
                     let terminal_id = TerminalTabId::new();
+                    let pane_title = tab.pane.title;
                     let pane = Pane {
                         id: tab.pane.id,
-                        title: tab.pane.title,
+                        title: pane_title.clone(),
                         terminal_tabs: vec![TerminalTab {
                             id: terminal_id,
+                            title: pane_title,
                             execution: None,
                         }],
                         selected_terminal_tab: Some(terminal_id),
@@ -192,6 +208,7 @@ impl Workspace {
             }
             Some(seed.active_window)
         };
+        let presenting_window = active_window.filter(|_| !windows.is_empty());
         Ok(Self {
             id: seed.id,
             name: seed.name,
@@ -202,6 +219,7 @@ impl Workspace {
             attention: seed.attention,
             active_window,
             windows,
+            presenting_window,
         })
     }
 
@@ -238,7 +256,6 @@ impl Workspace {
         self.windows.iter().position(|window| window.id == id)
     }
 
-    #[cfg(test)]
     pub(super) fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
         self.windows
             .iter_mut()

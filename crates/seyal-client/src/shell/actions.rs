@@ -49,6 +49,7 @@ impl ShellState {
         }
         workspace.active_window = Some(window);
         self.last_active_workspace = workspace_id;
+        self.sidebar_host = Some(window);
         self.record_window_focus(window)?;
         if request_native_activation && previous_product != Some(window) {
             self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
@@ -131,6 +132,7 @@ impl ShellState {
         let window = self.new_window_record(workspace)?;
         let window_id = window.id;
         self.workspace_mut(workspace)?.push_window(window);
+        self.workspace_mut(workspace)?.presenting_window = Some(window_id);
         self.push_effect(ShellNativeEffect::RealizeWindow { window: window_id });
         self.activate_window(window_id)?;
         self.bump_containment_generation();
@@ -142,6 +144,10 @@ impl ShellState {
         window: WindowId,
         containment_generation: u64,
     ) -> Result<(), ShellError> {
+        // Product CreateTab still mints an outer Tab leaf for the live
+        // create→attach→bind path (C2b). ADR-029 removes Tab from
+        // ResourceAddress; migration (§3.5) collapses multi-tab windows to
+        // one pane tree. Do not reintroduce Tab into user-facing addresses.
         self.require_containment_generation(containment_generation)?;
         if !self.allows_tab_creation {
             return Err(ShellError::TabCreationUnavailable);
@@ -150,7 +156,7 @@ impl ShellState {
             .find_window(window)
             .map(|workspace| workspace.id)
             .ok_or(ShellError::UnknownWindow)?;
-        let tab = self.new_tab_record();
+        let tab = self.new_tab_record(false);
         self.workspace_mut(workspace_id)?
             .push_tab_on_window(window, tab)?;
         self.activate_window(window)?;
@@ -173,6 +179,7 @@ impl ShellState {
         }
         workspace.active_window = Some(id);
         self.last_active_workspace = workspace_id;
+        self.sidebar_host = Some(id);
         self.record_window_focus(id)
     }
 
@@ -230,12 +237,269 @@ impl ShellState {
             !ws.windows.is_empty()
         };
         if has_window {
+            if let Some(host) = self.sidebar_host {
+                if self.find_window(host).is_some() {
+                    return self.open_workspace_in_sidebar(
+                        host,
+                        workspace,
+                        containment_generation,
+                    );
+                }
+            }
             let target = self
                 .derived_mru_window(workspace)
                 .ok_or(ShellError::UnknownWindow)?;
             return self.activate_window(target);
         }
+        if let Some(host) = self.sidebar_host {
+            if self.find_window(host).is_some() {
+                self.require_containment_generation(containment_generation)?;
+                self.attach_unrealized_pane_window(workspace)?;
+                self.present_workspace_on_host(host, workspace)?;
+                self.bump_containment_generation();
+                self.last_active_workspace = workspace;
+                if let Ok(pane) = self.focused_pane_id() {
+                    self.focus_history.record(pane);
+                }
+                return Ok(());
+            }
+        }
         self.create_window(workspace, containment_generation)
+    }
+
+    fn attach_unrealized_pane_window(
+        &mut self,
+        workspace: WorkspaceId,
+    ) -> Result<WindowId, ShellError> {
+        if let Some(existing) = self.workspace(workspace)?.active_window {
+            return Ok(existing);
+        }
+        let mut window = self.new_window_record(workspace)?;
+        window.realized = false;
+        let window_id = window.id;
+        {
+            let item = self.workspace_mut(workspace)?;
+            item.push_window(window);
+            // Snapshot content keys off active_window(); without this the
+            // sidebar selects the workspace while projecting an empty tree.
+            item.active_window = Some(window_id);
+        }
+        Ok(window_id)
+    }
+
+    fn open_workspace_in_sidebar(
+        &mut self,
+        host: WindowId,
+        workspace: WorkspaceId,
+        containment_generation: u64,
+    ) -> Result<(), ShellError> {
+        self.workspace(workspace)?;
+        let host_owner = self
+            .find_window(host)
+            .map(|owner| owner.id)
+            .ok_or(ShellError::UnknownWindow)?;
+        let (already_open, already_selected) = {
+            let window = self
+                .workspace(host_owner)?
+                .window(host)
+                .ok_or(ShellError::UnknownWindow)?;
+            (
+                window.open_workspaces.contains(&workspace),
+                window.selected_workspace == workspace,
+            )
+        };
+        if already_selected {
+            return Ok(());
+        }
+        if let Some(presenter) = self.foreign_presenter(workspace, host) {
+            self.present_workspace_on_host(presenter, workspace)?;
+            self.last_active_workspace = workspace;
+            return self.activate_window(presenter);
+        }
+        if !already_open {
+            self.require_containment_generation(containment_generation)?;
+            self.demote_prior_product_presentation(workspace, host)?;
+        }
+        self.present_workspace_on_host(host, workspace)?;
+        if !already_open {
+            self.bump_containment_generation();
+        }
+        self.last_active_workspace = workspace;
+        if let Ok(pane) = self.focused_pane_id() {
+            self.focus_history.record(pane);
+        }
+        Ok(())
+    }
+
+    fn foreign_presenter(&self, workspace: WorkspaceId, host: WindowId) -> Option<WindowId> {
+        let presenter = self
+            .workspace(workspace)
+            .ok()
+            .and_then(|item| item.presenting_window)
+            .filter(|window| *window != host)?;
+        let window = self
+            .workspaces
+            .iter()
+            .flat_map(|item| &item.windows)
+            .find(|item| item.id == presenter)?;
+        // Solitary home presentation is demoted into the host, not raised.
+        if !window.realized
+            || (window.workspace_id == workspace && window.open_workspaces.len() == 1)
+        {
+            return None;
+        }
+        Some(presenter)
+    }
+
+    fn demote_prior_product_presentation(
+        &mut self,
+        workspace: WorkspaceId,
+        keep: WindowId,
+    ) -> Result<(), ShellError> {
+        let victims: Vec<WindowId> = self
+            .workspaces
+            .iter()
+            .flat_map(|item| &item.windows)
+            .filter(|window| {
+                window.realized
+                    && window.id != keep
+                    && window.open_workspaces.contains(&workspace)
+            })
+            .map(|window| window.id)
+            .collect();
+        for window_id in victims {
+            let owner = self
+                .find_window(window_id)
+                .map(|item| item.id)
+                .ok_or(ShellError::UnknownWindow)?;
+            let (is_home, only_member) = {
+                let window = self
+                    .workspace(owner)?
+                    .window(window_id)
+                    .ok_or(ShellError::UnknownWindow)?;
+                (
+                    window.workspace_id == workspace,
+                    window.open_workspaces.len() == 1,
+                )
+            };
+            if is_home {
+                let window = self
+                    .workspace_mut(owner)?
+                    .window_mut(window_id)
+                    .ok_or(ShellError::UnknownWindow)?;
+                window.realized = false;
+                window.open_workspaces.clear();
+                self.push_effect(ShellNativeEffect::DestroyWindowRealization {
+                    window: window_id,
+                });
+                if self.sidebar_host == Some(window_id) {
+                    self.sidebar_host = Some(keep);
+                }
+                // Home window is no longer a presenter; the host will claim it.
+                self.workspace_mut(workspace)?.presenting_window = None;
+                continue;
+            }
+            if only_member {
+                self.close_window(window_id, self.containment_generation)?;
+                continue;
+            }
+            let window = self
+                .workspace_mut(owner)?
+                .window_mut(window_id)
+                .ok_or(ShellError::UnknownWindow)?;
+            if let Some(index) = window
+                .open_workspaces
+                .iter()
+                .position(|id| *id == workspace)
+            {
+                let was_selected = window.selected_workspace == workspace;
+                window.open_workspaces.remove(index);
+                if was_selected {
+                    let next = index.min(window.open_workspaces.len() - 1);
+                    window.selected_workspace = window.open_workspaces[next];
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn remove_workspace_from_window(
+        &mut self,
+        window: WindowId,
+        workspace: WorkspaceId,
+        containment_generation: u64,
+    ) -> Result<(), ShellError> {
+        self.require_containment_generation(containment_generation)?;
+        let owner = self
+            .find_window(window)
+            .map(|item| item.id)
+            .ok_or(ShellError::UnknownWindow)?;
+        let (index, selected, remaining) = {
+            let item = self
+                .workspace(owner)?
+                .window(window)
+                .ok_or(ShellError::UnknownWindow)?;
+            let index = item
+                .open_workspaces
+                .iter()
+                .position(|id| *id == workspace)
+                .ok_or(ShellError::UnknownWorkspace)?;
+            (
+                index,
+                item.selected_workspace == workspace,
+                item.open_workspaces.len() - 1,
+            )
+        };
+        if remaining == 0 {
+            return self.close_window(window, containment_generation);
+        }
+        {
+            let item = self
+                .workspace_mut(owner)?
+                .window_mut(window)
+                .ok_or(ShellError::UnknownWindow)?;
+            item.open_workspaces.remove(index);
+            if selected {
+                let next = index.min(item.open_workspaces.len() - 1);
+                item.selected_workspace = item.open_workspaces[next];
+            }
+        }
+        if self.workspace(workspace)?.presenting_window == Some(window) {
+            self.workspace_mut(workspace)?.presenting_window = None;
+        }
+        let selected_now = self
+            .workspace(owner)?
+            .window(window)
+            .map(|item| item.selected_workspace)
+            .ok_or(ShellError::UnknownWindow)?;
+        self.last_active_workspace = selected_now;
+        if let Ok(pane) = self.focused_pane_id() {
+            self.focus_history.record(pane);
+        }
+        self.bump_containment_generation();
+        Ok(())
+    }
+
+    pub(super) fn present_workspace_on_host(
+        &mut self,
+        host: WindowId,
+        workspace: WorkspaceId,
+    ) -> Result<(), ShellError> {
+        self.workspace(workspace)?;
+        let host_owner = self
+            .find_window(host)
+            .map(|owner| owner.id)
+            .ok_or(ShellError::UnknownWindow)?;
+        let window = self
+            .workspace_mut(host_owner)?
+            .window_mut(host)
+            .ok_or(ShellError::UnknownWindow)?;
+        if !window.open_workspaces.contains(&workspace) {
+            window.open_workspaces.push(workspace);
+        }
+        window.selected_workspace = workspace;
+        self.workspace_mut(workspace)?.presenting_window = Some(host);
+        Ok(())
     }
 
     pub(super) fn move_tab_before(
@@ -343,12 +607,15 @@ impl ShellState {
     }
 
     fn new_window_record(&mut self, workspace: WorkspaceId) -> Result<Window, ShellError> {
-        let tab = self.new_tab_record();
+        // New workspace / NewWindow first pane mirrors M001: allow implicit
+        // bootstrap so CreateWorkspace still gets a live surface if the
+        // explicit provision intent races or fails closed.
+        let tab = self.new_tab_record(true);
         let tab_id = tab.id;
         Window::try_new(WindowId::new(), workspace, vec![tab], tab_id)
     }
 
-    fn new_tab_record(&mut self) -> Tab {
+    fn new_tab_record(&mut self, allows_implicit_execution_bootstrap: bool) -> Tab {
         let ordinal = self.next_tab_ordinal;
         self.next_tab_ordinal = self.next_tab_ordinal.saturating_add(1);
         let terminal_id = TerminalTabId::new();
@@ -357,10 +624,11 @@ impl ShellState {
             title: "Pane 1".to_owned(),
             terminal_tabs: vec![super::workspace::TerminalTab {
                 id: terminal_id,
+                title: "Pane 1".to_owned(),
                 execution: None,
             }],
             selected_terminal_tab: Some(terminal_id),
-            allows_implicit_execution_bootstrap: false,
+            allows_implicit_execution_bootstrap,
             presentation_mode: crate::presentation::PresentationMode::Flow,
             resting_presentation_mode: crate::presentation::PresentationMode::Flow,
         };
@@ -402,6 +670,11 @@ impl ShellState {
                 workspace,
                 containment_generation,
             } => self.activate_workspace(workspace, containment_generation),
+            ShellAction::RemoveWorkspace {
+                window,
+                workspace,
+                containment_generation,
+            } => self.remove_workspace_from_window(window, workspace, containment_generation),
             _ => unreachable!("non-W2a action routed to dispatch_w2a"),
         }
     }

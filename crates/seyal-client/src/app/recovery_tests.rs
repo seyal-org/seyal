@@ -200,21 +200,26 @@ fn execution_ended_does_not_poison_create_tab_pane_latch() {
         "shell exit keeps Flow authority so completed Blocks still project"
     );
 
-    root.apply(AppAction::CreateTab)
-        .expect("CreateTab after shell exit must still admit a new leaf");
+    // New pane leaf (not NewTerminal on the ended pane) so ExecutionEnded latch
+    // stays isolated to the exited Pane under ADR-029 Surface semantics.
+    root.shell
+        .apply_product_create_tab()
+        .expect("outer tab leaf after shell exit");
+    root.drain_shell_effects();
     let new_pane = root.snapshot().shell.focused_pane;
-    assert_ne!(new_pane, ended_pane, "CreateTab must focus the new leaf");
+    assert_ne!(new_pane, ended_pane, "new leaf must be a distinct Pane");
     assert!(
         root.composer.execution_ended(ended_pane),
         "ended Pane must keep its sticky latch"
     );
     assert!(
         !root.composer.execution_ended(new_pane),
-        "new CreateTab leaf must not inherit ExecutionEnded"
+        "new leaf must not inherit ExecutionEnded"
     );
+    root.activate_focused_pane_authority();
     assert!(
         !root.new_shell_available(),
-        "CreateTab focus must not leave New shell admitted on a latch-free Pane"
+        "focusing the new leaf must not leave New shell admitted on a latch-free Pane"
     );
 }
 

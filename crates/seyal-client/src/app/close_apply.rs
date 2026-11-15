@@ -272,7 +272,8 @@ impl ApplicationRoot {
                 })
             })
             .ok_or(AppError::UnknownPane)?;
-        let workspace = window.workspace;
+        // SPEC-032: window projection shows the selected workspace's tree.
+        let workspace = window.selected_workspace;
         let tab_id = tab.id;
         let was_focused = before.active_window == Some(window.id)
             && window.active_tab == tab.id
@@ -294,12 +295,15 @@ impl ApplicationRoot {
                 );
             } else {
                 // Outstanding create for this pane: keep the request until the
-                // result arrives, then apply §6.3 disposition.
+                // result arrives, then apply §6.3 disposition. Sole-pane
+                // ClosePane that RemoveWorkspace'd a sidebar row also lands
+                // here (no storage teardown); switch focus to the successor.
                 self.provisioning.mark_intent_dead(id);
             }
             self.record_destroyed_pane_focus(id, was_focused);
             if was_focused && self.shell.snapshot().active_window.is_some() {
                 self.activate_focused_pane_authority();
+                self.record_focused_pane_commit();
             }
         } else {
             let _ = self.shell.take_released_execution();

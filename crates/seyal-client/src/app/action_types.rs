@@ -152,6 +152,16 @@ pub enum AppAction {
         id: WorkspaceId,
         root_path: String,
     },
+    /// Rename a Workspace display label (ADR-029: label, not identity).
+    RenameWorkspace {
+        id: WorkspaceId,
+        name: String,
+    },
+    /// Rename a Pane display label (ADR-029: label, not identity).
+    RenamePane {
+        id: PaneId,
+        title: String,
+    },
     /// ADR-028: trusted foreground cwd observation (never OSC 7).
     ObserveTrustedForegroundCwd {
         path: String,

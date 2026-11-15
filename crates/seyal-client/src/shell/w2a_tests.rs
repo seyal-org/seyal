@@ -199,19 +199,53 @@ fn activate_workspace_create_path_is_generation_fenced() {
 }
 
 #[test]
-fn activate_workspace_raise_accepts_stale_generation() {
+fn activate_workspace_selects_in_place_without_raising_another_window() {
     let mut shell = seed_two_workspaces();
+    let host = shell.product_window_id().unwrap();
+    let before = shell.snapshot().focused_pane;
     shell.apply_product_create_tab().unwrap();
-    let stale = 0;
-    assert_ne!(shell.containment_generation(), stale);
+    let generation = shell.containment_generation();
+    let _ = shell.take_effects();
     shell
         .apply(ShellAction::ActivateWorkspace {
             workspace: other_workspace(),
-            containment_generation: stale,
+            containment_generation: generation,
         })
-        .expect("raise is identity-fenced");
-    assert_eq!(shell.snapshot().active_workspace, other_workspace());
-    assert_eq!(shell.snapshot().tabs[0].title, "API");
+        .expect("open the other workspace in this window");
+    let snapshot = shell.snapshot();
+    assert_eq!(snapshot.active_window, Some(host));
+    assert_eq!(snapshot.active_workspace, other_workspace());
+    assert_eq!(snapshot.selected_workspace, other_workspace());
+    assert_eq!(
+        snapshot.open_workspaces,
+        vec![WorkspaceId::m001_default(), other_workspace()]
+    );
+    assert_eq!(snapshot.tabs[0].title, "API");
+    assert_ne!(snapshot.focused_pane, before);
+    assert_eq!(snapshot.windows.len(), 1);
+    let effects = shell.take_effects();
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, ShellNativeEffect::DestroyWindowRealization { .. })));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, ShellNativeEffect::OrderFrontMakeKey { .. })));
+}
+
+#[test]
+fn opening_another_workspace_rejects_a_stale_generation() {
+    let mut shell = seed_two_workspaces();
+    shell.apply_product_create_tab().unwrap();
+    let before = shell.snapshot();
+    assert_eq!(
+        shell.apply(ShellAction::ActivateWorkspace {
+            workspace: other_workspace(),
+            containment_generation: 0,
+        }),
+        Err(ShellError::StaleContainment)
+    );
+    assert_eq!(shell.snapshot().open_workspaces, before.open_workspaces);
+    assert_eq!(shell.snapshot().active_workspace, before.active_workspace);
 }
 
 #[test]
@@ -273,8 +307,9 @@ fn selection_does_not_bump_containment_generation() {
 }
 
 #[test]
-fn active_workspace_projects_from_the_most_recent_live_window() {
+fn focus_history_alone_does_not_switch_the_sidebar_workspace() {
     let mut shell = seed_two_workspaces();
+    let host = shell.product_window_id().unwrap();
     let other_pane = shell
         .workspaces
         .iter()
@@ -283,14 +318,12 @@ fn active_workspace_projects_from_the_most_recent_live_window() {
         .map(|tab| tab.focused)
         .expect("other workspace pane");
 
-    // Focus history is the accepted application-wide source for derived
-    // Window recency. The product Workspace must follow its newest live Pane.
     shell.focus_history.record(other_pane);
-    assert_eq!(shell.snapshot().active_workspace, other_workspace());
     assert_eq!(
-        shell.snapshot().active_tab,
-        shell.workspaces[1].active_tab_id().unwrap()
+        shell.snapshot().active_workspace,
+        WorkspaceId::m001_default()
     );
+    assert_eq!(shell.snapshot().active_window, Some(host));
 }
 
 #[test]

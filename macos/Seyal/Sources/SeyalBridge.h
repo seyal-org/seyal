@@ -294,6 +294,7 @@ uint8_t seyal_bridge_history_range_consume_for_handle(
     uint64_t request_id
 );
 SeyalComposerResult seyal_bridge_composer_result(void);
+uint64_t seyal_bridge_focused_display_handle(void);
 SeyalComposerStatus seyal_bridge_composer_status(void);
 SeyalComposerTarget seyal_bridge_composer_target(void);
 SeyalComposerTarget seyal_bridge_composer_target_for_handle(uint64_t handle);

@@ -115,16 +115,16 @@ fn identical_labels_remain_independently_addressable() {
     assert_ne!(tabs[0].address, tabs[1].address);
     assert_eq!(
         tabs[0].address,
-        ResourceAddress::Tab {
+        ResourceAddress::Pane {
             workspace: w1,
-            tab: t1
+            pane: p1
         }
     );
     assert_eq!(
         tabs[1].address,
-        ResourceAddress::Tab {
+        ResourceAddress::Pane {
             workspace: w2,
-            tab: t2
+            pane: p2
         }
     );
 
@@ -136,7 +136,6 @@ fn identical_labels_remain_independently_addressable() {
         panes[0].address,
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1
         }
     );
@@ -144,7 +143,6 @@ fn identical_labels_remain_independently_addressable() {
         panes[1].address,
         ResourceAddress::Pane {
             workspace: w2,
-            tab: t2,
             pane: p2
         }
     );
@@ -283,7 +281,7 @@ fn assert_scope_only_kind(scope: GotoScope, rows: &[crate::goto::GotoRow]) {
     for row in rows {
         match (scope, row.address) {
             (GotoScope::Workspaces, ResourceAddress::Workspace { .. }) => {}
-            (GotoScope::Tabs, ResourceAddress::Tab { .. }) => {}
+            (GotoScope::Tabs, ResourceAddress::Pane { .. }) => {}
             (GotoScope::Panes, ResourceAddress::Pane { .. }) => {}
             (GotoScope::Sessions, ResourceAddress::Execution { .. }) => {}
             _ => panic!("scope {scope:?} produced foreign address {:?}", row.address),

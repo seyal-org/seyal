@@ -389,7 +389,12 @@ impl Default for ApplicationRoot {
 
 impl ApplicationRoot {
     pub fn new() -> Self {
-        Self::with_shell(ShellState::m001_local("local"))
+        let mut shell = ShellState::m001_local("local");
+        // SPEC-032 §3.5: production startup collapses multi-tab windows once.
+        // Test fixtures that intentionally seed multiple tabs use `with_shell`
+        // and skip this pass.
+        shell.migrate_seyal_tabs_to_sidebar_containment();
+        Self::with_shell(shell)
     }
 
     /// Test-only: force CreateTab policy regardless of production composition.
@@ -405,10 +410,13 @@ impl ApplicationRoot {
         let pane = snap.focused_pane;
         let mut composer = ComposerState::new();
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
+        // Unbound Flow keeps the composer route so the text area is visible
+        // (Busy) before the first Controller bind — same rule as
+        // sync_composer_presentation after CreateWorkspace.
         let _ = composer.apply(ComposerAction::ApplyPresentation {
             pane,
             mode: PresentationMode::Flow,
-            input_route: InputRoute::Frozen,
+            input_route: InputRoute::Composer,
         });
         // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
         let mut pending_effects = Vec::new();

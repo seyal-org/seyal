@@ -34,6 +34,8 @@ final class ProductChromeHostView: NSView {
     let commandPalette: CommandPaletteOverlayView
     let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
     let createWorkspaceButton = NSButton(title: "+", target: nil, action: nil)
+    /// Explicit-root CreateWorkspace (directory picker). Distinct from `+`.
+    let createWorkspaceFromFolderButton = NSButton(title: "Folder", target: nil, action: nil)
     let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
     let recoveryLabel = NSTextField(labelWithString: "")
     /// #1379 Defect B: single clear recovery action after primary shell exit.
@@ -145,8 +147,12 @@ final class ProductChromeHostView: NSView {
         modeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         leftModeRow.addArrangedSubview(workspacesButton)
         leftModeRow.addArrangedSubview(createWorkspaceButton)
-        // Pane tabs are visible in their own strips; advanced inventory
-        // remains available from the command palette, not a second toggle.
+        leftModeRow.addArrangedSubview(createWorkspaceFromFolderButton)
+        // ADR-029 / cmux: sidebar lists open workspaces only. Pane-local terminal
+        // surfaces stay on the pane strip; there is no Workspaces/Tabs switcher
+        // and no outer Seyal Tab / LAYOUTS list.
+        workspacesButton.isHidden = true
+        tabsButton.isHidden = true
         leftModeRow.addArrangedSubview(modeSpacer)
         leftModeRow.addArrangedSubview(newTabButton)
         leftModeRow.addArrangedSubview(closeTabButton)
@@ -161,6 +167,10 @@ final class ProductChromeHostView: NSView {
         leftItems.setHuggingPriority(.defaultHigh, for: .horizontal)
         left.addSubview(leftModeRow)
         left.addSubview(leftItems)
+        // Do not attach a double-click CreateWorkspace gesture to `left`:
+        // rapid clicks on New Terminal / other chrome were coalescing into
+        // workspace creates (3rd–4th click). Use the explicit + / folder
+        // controls only.
 
         inspector.orientation = .vertical
         inspector.alignment = .leading
@@ -249,6 +259,9 @@ final class ProductChromeHostView: NSView {
         }
         centerColumn.onClosePane = { [weak self] paneLo, paneHi in
             self?.closePane(paneLo: paneLo, paneHi: paneHi)
+        }
+        centerColumn.onRenamePane = { [weak self] paneLo, paneHi, title in
+            self?.renamePane(paneLo: paneLo, paneHi: paneHi, title: title)
         }
         centerColumn.appHandle = pane.appHandle
 
@@ -525,8 +538,12 @@ final class ProductChromeHostView: NSView {
         applyShellChrome(chrome)
         let shell = seyal_app_shell(pane.appHandle)
         applyLeftModeSwitcher(leftPanel: chrome.left_panel)
-        createWorkspaceButton.isHidden = chrome.left_panel != 0
-        rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
+        // ADR-029 / cmux: always expose Create Workspace + the open-workspace
+        // list. The Workspaces/Tabs switcher is hidden, so never gate the rail
+        // on left_panel (Tabs mode would otherwise trap create off-screen).
+        createWorkspaceButton.isHidden = false
+        createWorkspaceFromFolderButton.isHidden = false
+        rebuildLeft(shell: shell, leftPanel: 0)
         presentLeaveOfferIfNeeded()
         rebuildInspector(chrome)
         rebuildLayoutActions(shell: shell, leftPanel: chrome.left_panel)
@@ -784,118 +801,63 @@ final class ProductChromeHostView: NSView {
     }
 
     func rebuildLayoutActions(shell: SeyalAppShell, leftPanel: UInt16) {
-        // Workspaces mode: + creates an outer Workspace Tab. Tabs mode: + creates
-        // a pane-local TerminalTab on the focused Pane (#1412 / ADR-025 §2.8).
-        if leftPanel == 1 {
-            newTabButton.isHidden = false
-            newTabButton.action = #selector(createTerminal)
-            newTabButton.setAccessibilityLabel("New Terminal")
-            newTabButton.toolTip = "New Terminal"
-            closeTabButton.isHidden = true
-        } else {
-            newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
-            newTabButton.action = #selector(createTab)
-            newTabButton.setAccessibilityLabel("New Layout")
-            newTabButton.toolTip = "New Layout"
-            closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
-        }
+        // ADR-029: + / − are pane-local terminal surfaces, not outer Seyal Tabs.
+        let _ = leftPanel
+        newTabButton.isHidden = false
+        newTabButton.action = #selector(createTerminal)
+        newTabButton.setAccessibilityLabel("New Terminal")
+        newTabButton.toolTip = "New Terminal"
+        closeTabButton.isHidden = true
         configureCloseButtons(shell: shell)
     }
 
     func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {
         leftItems.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        if leftPanel == 0 {
-            appendLeftSection(
-                title: "WORKSPACES",
-                identifier: "seyal-workspaces-heading",
-                topGap: false
-            ) {
-                for index in 0..<Int(shell.workspace_count) {
-                    let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_WORKSPACE), UInt32(index))
-                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace"
-                    let path = productChromeCopyUTF8(row.detail, row.detail_len)
-                    let selected = row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0
-                    // C04 secondary: helpful path; on the active Workspace also
-                    // keep outer Tab count when a root is bound (#1413 + #1412).
-                    let pathSecondary = Self.helpfulWorkspaceDetail(title: title, detail: path)
-                    let tabSecondary = selected
-                        ? "\(shell.tab_count) tab\(shell.tab_count == 1 ? "" : "s")"
-                        : nil
-                    let secondary: String?
-                    if let pathSecondary, let tabSecondary {
-                        secondary = "\(pathSecondary) · \(tabSecondary)"
-                    } else {
-                        secondary = pathSecondary ?? tabSecondary
-                    }
-                    leftItems.addArrangedSubview(
-                        contextRow(
-                            primary: title,
-                            secondary: secondary,
-                            identifier: "seyal-workspace-\(index)",
-                            selected: selected,
-                            action: #selector(selectWorkspace(_:)),
-                            kind: UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue),
-                            idLo: row.id_lo,
-                            idHi: row.id_hi
-                        )
+        let _ = leftPanel
+        appendLeftSection(
+            title: "WORKSPACES",
+            identifier: "seyal-workspaces-heading",
+            topGap: false
+        ) {
+            for index in 0..<Int(shell.workspace_count) {
+                let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_WORKSPACE), UInt32(index))
+                let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace"
+                let path = productChromeCopyUTF8(row.detail, row.detail_len)
+                let selected = row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0
+                let secondary = Self.helpfulWorkspaceDetail(title: title, detail: path)
+                leftItems.addArrangedSubview(
+                    contextRow(
+                        primary: title,
+                        secondary: secondary,
+                        identifier: "seyal-workspace-\(row.id_lo)-\(row.id_hi)",
+                        selected: selected,
+                        action: #selector(selectWorkspace(_:)),
+                        kind: UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue),
+                        idLo: row.id_lo,
+                        idHi: row.id_hi
                     )
-                }
+                )
             }
-            appendWorkspaceLayoutsIfNeeded(shell: shell)
-            let chrome = seyal_app_chrome(pane.appHandle)
-            if chrome.agent_count > 0 {
-                appendLeftSection(
-                    title: "AGENTS",
-                    identifier: "seyal-agents-heading",
-                    topGap: true
-                ) {
-                    for index in 0..<Int(chrome.agent_count) {
-                        let row = seyal_app_chrome_row(
-                            pane.appHandle,
-                            UInt16(SEYAL_APP_ROW_AGENT),
-                            UInt32(index)
-                        )
-                        let identity = productChromeCopyUTF8(row.title, row.title_len) ?? ""
-                        let name = productChromeCopyUTF8(row.detail, row.detail_len) ?? identity
-                        let button = borderlessButton(title: name, action: #selector(selectAgent(_:)))
-                        button.identifier = NSUserInterfaceItemIdentifier(identity)
-                        button.setAccessibilityIdentifier("seyal-agent-\(index)")
-                        leftItems.addArrangedSubview(button)
-                    }
-                }
-            }
-        } else {
-            // Pane-local TerminalTab navigation map (Rust-authored titles/order).
+        }
+        let chrome = seyal_app_chrome(pane.appHandle)
+        if chrome.agent_count > 0 {
             appendLeftSection(
-                title: "TABS",
-                identifier: "seyal-tabs-heading",
-                topGap: false
+                title: "AGENTS",
+                identifier: "seyal-agents-heading",
+                topGap: true
             ) {
-                let terminalCount = leftTerminalTabRowCount(shell: shell)
-                for index in 0..<terminalCount {
-                    let row = seyal_app_shell_row(
+                for index in 0..<Int(chrome.agent_count) {
+                    let row = seyal_app_chrome_row(
                         pane.appHandle,
-                        UInt16(SEYAL_APP_ROW_TERMINAL_TAB),
+                        UInt16(SEYAL_APP_ROW_AGENT),
                         UInt32(index)
                     )
-                    guard row.title_len > 0 || row.id_lo != 0 || row.id_hi != 0 else { break }
-                    let (paneLo, paneHi) = paneIdFromTerminalTabRow(row)
-                    let title = productChromeCopyUTF8(row.title, row.title_len) ?? "Terminal"
-                    let detail = productChromeCopyUTF8(row.detail, row.detail_len)
-                    leftItems.addArrangedSubview(
-                        contextRow(
-                            primary: title,
-                            secondary: Self.helpfulWorkspaceDetail(title: title, detail: detail),
-                            identifier: "seyal-terminal-tab-left-\(index)",
-                            selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
-                            action: #selector(selectLeftTerminalTab(_:)),
-                            kind: UInt16(SEYAL_APP_ACTION_SELECT_TERMINAL_TAB.rawValue),
-                            idLo: row.id_lo,
-                            idHi: row.id_hi,
-                            paneLo: paneLo,
-                            paneHi: paneHi
-                        )
-                    )
+                    let identity = productChromeCopyUTF8(row.title, row.title_len) ?? ""
+                    let name = productChromeCopyUTF8(row.detail, row.detail_len) ?? identity
+                    let button = borderlessButton(title: name, action: #selector(selectAgent(_:)))
+                    button.identifier = NSUserInterfaceItemIdentifier(identity)
+                    button.setAccessibilityIdentifier("seyal-agent-\(index)")
+                    leftItems.addArrangedSubview(button)
                 }
             }
         }

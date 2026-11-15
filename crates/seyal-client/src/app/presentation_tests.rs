@@ -67,16 +67,24 @@ fn new_supported_pane_defaults_to_flow_without_manual_selection() {
 #[test]
 fn newly_created_tab_defaults_to_flow_without_manual_selection() {
     let mut root = ApplicationRoot::new();
-    bind(&mut root, false);
+    // Product CreateTab is NewTerminal: new unbound Surface on the focused pane.
     root.apply(AppAction::CreateTab).unwrap();
-    let created = root.snapshot();
-    let tab_id = created.shell.windows[0].active_tab;
-    let tab = created.shell.windows[0]
-        .tabs
+    let pane = root.snapshot().shell.focused_pane;
+    let terminal = root
+        .shell
+        .selected_terminal_tab(pane)
+        .unwrap()
+        .expect("new surface selected");
+    let snap = root.snapshot();
+    let leaf = snap
+        .shell
+        .panes
         .iter()
-        .find(|tab| tab.id == tab_id)
-        .expect("CreateTab creates and selects a Tab");
-    assert_eq!(tab.panes[0].presentation_mode, PresentationMode::Flow);
+        .find(|item| item.id == pane)
+        .expect("focused pane");
+    assert_eq!(leaf.presentation_mode, PresentationMode::Flow);
+    assert!(leaf.execution.is_none());
+    assert_eq!(leaf.selected_terminal_tab, Some(terminal));
 
     root.apply(AppAction::Bind {
         fence: root.fence(),
@@ -345,7 +353,7 @@ fn split_promotes_every_pane_in_only_the_active_tab_to_flow() {
     bind(&mut root, false);
     let first_tab = root.snapshot().shell.windows[0].tabs[0].id;
 
-    root.apply(AppAction::CreateTab).unwrap();
+    root.shell.apply_product_create_tab().unwrap();
     let second_tab = root.snapshot().shell.windows[0].tabs[1].id;
     let source = root.snapshot().shell.focused_pane;
 

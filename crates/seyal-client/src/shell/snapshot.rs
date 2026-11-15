@@ -14,6 +14,8 @@ use super::{
 pub struct WindowSnapshot {
     pub id: WindowId,
     pub workspace: WorkspaceId,
+    pub open_workspaces: Vec<WorkspaceId>,
+    pub selected_workspace: WorkspaceId,
     pub title: String,
     pub attention: bool,
     pub tabs: Vec<WindowTabSnapshot>,
@@ -49,12 +51,21 @@ pub struct PaneLeafSnapshot {
 impl ShellState {
     pub(super) fn build_snapshot(&self) -> ShellSnapshot {
         let product_window = self.product_active_window().map(|window| window.id);
+        let open_workspaces = self
+            .product_active_window()
+            .map(|window| window.open_workspaces.clone())
+            .unwrap_or_default();
+        let selected_workspace = self
+            .product_active_window()
+            .map(|window| window.selected_workspace);
         let active_workspace = self.active_workspace_id();
         let workspace = self
             .workspace(active_workspace)
             .expect("active Workspace must exist");
-        let active = product_window.and_then(|id| {
-            let window = workspace.window(id)?;
+        // Content comes from the selected workspace's pane tree storage; the
+        // product window id stays the sidebar host (SPEC-032 in-place select).
+        let content = workspace.active_window();
+        let active = content.and_then(|window| {
             let tab = workspace.tab(window.active_tab)?;
             Some((window, tab))
         });
@@ -94,6 +105,7 @@ impl ShellState {
                                 .iter()
                                 .map(|terminal| TerminalTabSnapshot {
                                     id: terminal.id,
+                                    title: terminal.title.clone(),
                                     execution: terminal.execution,
                                 })
                                 .collect(),
@@ -138,6 +150,8 @@ impl ShellState {
             active_workspace,
             last_active_workspace: self.last_active_workspace,
             active_window: product_window,
+            open_workspaces,
+            selected_workspace: selected_workspace.unwrap_or(active_workspace),
             containment_generation: self.containment_generation,
             tabs,
             active_tab,
@@ -159,39 +173,65 @@ impl ShellState {
         let mut windows = Vec::new();
         for workspace in &self.workspaces {
             for window in &workspace.windows {
-                windows.push(window_snapshot(workspace, window, product_window));
+                if !window.realized {
+                    continue;
+                }
+                windows.push(self.window_snapshot_for(workspace, window, product_window));
             }
         }
         windows
     }
-}
 
-fn window_snapshot(
-    workspace: &Workspace,
-    window: &Window,
-    product_window: Option<WindowId>,
-) -> WindowSnapshot {
-    let active_tab = window
-        .tabs
-        .iter()
-        .find(|tab| tab.id == window.active_tab)
-        .expect("active Tab must belong to its Window");
-    let attention = window.tabs.iter().any(|tab| tab.attention);
-    WindowSnapshot {
-        id: window.id,
-        workspace: workspace.id,
-        title: active_tab.title.clone(),
-        attention,
-        tabs: window
-            .tabs
+    /// SPEC-032: a realized window projects the selected workspace's pane tree.
+    /// Home selection uses this window's tabs; a foreign sidebar selection uses
+    /// that workspace's storage window (often unrealized after CreateWorkspace).
+    fn window_snapshot_for(
+        &self,
+        owner: &Workspace,
+        host: &Window,
+        product_window: Option<WindowId>,
+    ) -> WindowSnapshot {
+        let (content_window, content_tabs) = if host.selected_workspace == host.workspace_id {
+            (host, host.tabs.as_slice())
+        } else {
+            self.workspace(host.selected_workspace)
+                .ok()
+                .and_then(|workspace| {
+                    let content_window = workspace.active_window()?;
+                    let tabs = content_window.tabs.as_slice();
+                    (!tabs.is_empty()).then_some((content_window, tabs))
+                })
+                .unwrap_or((host, host.tabs.as_slice()))
+        };
+        let active_tab_id = content_window.active_tab;
+        let active_tab = content_tabs
             .iter()
-            .map(|tab| tab_snapshot(tab, window, product_window))
-            .collect(),
-        active_tab: window.active_tab,
+            .find(|tab| tab.id == active_tab_id)
+            .or_else(|| content_tabs.first())
+            .expect("content window must have a Tab");
+        let attention = content_tabs.iter().any(|tab| tab.attention);
+        WindowSnapshot {
+            id: host.id,
+            workspace: owner.id,
+            open_workspaces: host.open_workspaces.clone(),
+            selected_workspace: host.selected_workspace,
+            title: active_tab.title.clone(),
+            attention,
+            tabs: content_tabs
+                .iter()
+                .map(|tab| tab_snapshot(tab, host, active_tab_id, product_window))
+                .collect(),
+            active_tab: active_tab_id,
+        }
     }
 }
 
-fn tab_snapshot(tab: &Tab, window: &Window, product_window: Option<WindowId>) -> WindowTabSnapshot {
+fn tab_snapshot(
+    tab: &Tab,
+    host: &Window,
+    content_active_tab: TabId,
+    product_window: Option<WindowId>,
+) -> WindowTabSnapshot {
     WindowTabSnapshot {
         id: tab.id,
         title: tab.title.clone(),
@@ -204,7 +244,7 @@ fn tab_snapshot(tab: &Tab, window: &Window, product_window: Option<WindowId>) ->
             .filter_map(|id| {
                 tab.panes
                     .get(&id)
-                    .map(|pane| leaf_snapshot(pane, tab, window, product_window))
+                    .map(|pane| leaf_snapshot(pane, tab, host, content_active_tab, product_window))
             })
             .collect(),
         tree: tab.root.clone(),
@@ -215,7 +255,8 @@ fn tab_snapshot(tab: &Tab, window: &Window, product_window: Option<WindowId>) ->
 fn leaf_snapshot(
     pane: &Pane,
     tab: &Tab,
-    window: &Window,
+    host: &Window,
+    content_active_tab: TabId,
     product_window: Option<WindowId>,
 ) -> PaneLeafSnapshot {
     PaneLeafSnapshot {
@@ -226,30 +267,33 @@ fn leaf_snapshot(
             .iter()
             .map(|terminal| TerminalTabSnapshot {
                 id: terminal.id,
+                title: terminal.title.clone(),
                 execution: terminal.execution,
             })
             .collect(),
         selected_terminal_tab: pane.selected_terminal_tab,
         execution: pane.execution(),
         allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
-        presentation_tier: tier_for_leaf(pane.id, tab, window, product_window),
+        presentation_tier: tier_for_leaf(pane.id, tab, host, content_active_tab, product_window),
         presentation_mode: pane.presentation_mode,
         resting_presentation_mode: pane.resting_presentation_mode,
     }
 }
 
 /// ADR-018 §5 product-derivable tier. Occlusion/miniaturize are host *inputs*;
-/// the host never invents the tier itself.
+/// the host never invents the tier itself. Content active-tab comes from the
+/// selected workspace's storage window (SPEC-032).
 fn tier_for_leaf(
     pane: PaneId,
     tab: &Tab,
-    window: &Window,
+    host: &Window,
+    content_active_tab: TabId,
     product_window: Option<WindowId>,
 ) -> PresentationTier {
-    if window.occluded || window.miniaturized || tab.id != window.active_tab {
+    if host.occluded || host.miniaturized || tab.id != content_active_tab {
         return PresentationTier::Hidden;
     }
-    if Some(window.id) == product_window && pane == tab.focused {
+    if Some(host.id) == product_window && pane == tab.focused {
         PresentationTier::Focused
     } else {
         PresentationTier::Visible
@@ -287,6 +331,7 @@ impl ShellError {
             Self::NoSelectedTerminalTab => 25,
             Self::InvalidWorkspaceRoot => 26,
             Self::DuplicateWorkspace => 27,
+            Self::InvalidDisplayName => 28,
         }
     }
 }

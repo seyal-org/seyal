@@ -24,6 +24,12 @@ pub enum ShellAction {
         workspace: WorkspaceId,
         containment_generation: u64,
     },
+    /// Detach a workspace from this window's sidebar (SPEC-032 §3.4).
+    RemoveWorkspace {
+        window: WindowId,
+        workspace: WorkspaceId,
+        containment_generation: u64,
+    },
     /// Selection actions carry the snapshot generation for complete host action context,
     /// but acceptance is fenced only by live identity (ADR-018 §6).
     SelectWindow {

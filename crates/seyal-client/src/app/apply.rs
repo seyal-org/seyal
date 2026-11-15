@@ -156,6 +156,8 @@ impl ApplicationRoot {
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
             AppAction::CreateWorkspace { root_path } => self.create_workspace(root_path),
             AppAction::SetWorkspaceRoot { id, root_path } => self.set_workspace_root(id, root_path),
+            AppAction::RenameWorkspace { id, name } => self.rename_workspace(id, name),
+            AppAction::RenamePane { id, title } => self.rename_pane(id, title),
             AppAction::ObserveTrustedForegroundCwd { path } => {
                 self.observe_trusted_foreground_cwd(path)
             }

@@ -595,7 +595,7 @@ fn navigate_to_other_window_tab_emits_window_activation() {
 
     let shell = seed_n_windows(2);
     let workspace = WorkspaceId::m001_default();
-    let other_tab = shell.snapshot().windows[1].tabs[0].id;
+    let other_pane = shell.snapshot().windows[1].tabs[0].focused_pane;
     let other_window = shell.snapshot().windows[1].id;
     let mut root = ApplicationRoot::with_shell(shell);
     while !root.snapshot().pending_effects.is_empty() {
@@ -603,9 +603,9 @@ fn navigate_to_other_window_tab_emits_window_activation() {
     }
     root.apply(AppAction::Navigate {
         fence: root.fence(),
-        address: ResourceAddress::Tab {
+        address: ResourceAddress::Pane {
             workspace,
-            tab: other_tab,
+            pane: other_pane,
         },
     })
     .expect("navigate");
@@ -644,7 +644,6 @@ fn navigate_encodes_one_window_activation_effect() {
                 fence: state.root.fence(),
                 address: ResourceAddress::Pane {
                     workspace,
-                    tab: target_tab,
                     pane: target_pane,
                 },
             })

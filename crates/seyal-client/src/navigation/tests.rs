@@ -156,13 +156,8 @@ fn resource_address_is_copy_and_holds_no_string() {
     let workspace = ResourceAddress::Workspace {
         workspace: WorkspaceId::m001_default(),
     };
-    let tab = ResourceAddress::Tab {
-        workspace: WorkspaceId::m001_default(),
-        tab: TabId::new(),
-    };
     let pane = ResourceAddress::Pane {
         workspace: WorkspaceId::m001_default(),
-        tab: TabId::new(),
         pane: PaneId::new(),
     };
     let execution = ResourceAddress::Execution {
@@ -170,7 +165,6 @@ fn resource_address_is_copy_and_holds_no_string() {
     };
 
     let _ = assert_copy(workspace);
-    let _ = assert_copy(tab);
     let _ = assert_copy(pane);
     let _ = assert_copy(execution);
 
@@ -201,24 +195,12 @@ fn equality_is_component_wise_and_ignores_labels() {
         ResourceAddress::Workspace { workspace: w2 }
     );
     assert_ne!(
-        ResourceAddress::Tab {
-            workspace: w1,
-            tab: t1
-        },
-        ResourceAddress::Tab {
-            workspace: w1,
-            tab: t2
-        }
-    );
-    assert_ne!(
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1
         },
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p2
         }
     );
@@ -269,7 +251,16 @@ fn unknown_kind_version_or_size_is_unsupported_without_reading_state() {
         decode_resource_address(
             RESOURCE_ADDRESS_ABI_VERSION,
             RESOURCE_ADDRESS_KIND_TAB,
-            &[0; 16]
+            &[0; 32]
+        ),
+        Err(NavigationRejection::UnsupportedKind)
+    );
+    // Pre-ADR-029 pane payload (workspace+tab+pane) is rejected.
+    assert_eq!(
+        decode_resource_address(
+            RESOURCE_ADDRESS_ABI_VERSION,
+            RESOURCE_ADDRESS_KIND_PANE,
+            &[0; 48]
         ),
         Err(NavigationRejection::UnsupportedKind)
     );
@@ -277,7 +268,7 @@ fn unknown_kind_version_or_size_is_unsupported_without_reading_state() {
         decode_resource_address(
             RESOURCE_ADDRESS_ABI_VERSION,
             RESOURCE_ADDRESS_KIND_PANE,
-            &[0; 32]
+            &[0; 31]
         ),
         Err(NavigationRejection::UnsupportedKind)
     );
@@ -402,19 +393,16 @@ fn rejection_unknown_workspace() {
 
 #[test]
 fn rejection_unknown_tab() {
-    let (shell, w1, _, _, _, _, _) = seed_shell();
+    // ADR-029 retired Tab addresses; the kind itself is UnsupportedKind.
     assert_eq!(
-        resolve(
-            ResourceAddress::Tab {
-                workspace: w1,
-                tab: TabId::from_bytes([0xcd; 16])
-            },
-            &shell,
-            &MapInventory::new(),
-            NavigationPrincipal::local_user()
+        decode_resource_address(
+            RESOURCE_ADDRESS_ABI_VERSION,
+            RESOURCE_ADDRESS_KIND_TAB,
+            &[0; 32]
         ),
-        Err(NavigationRejection::UnknownTab)
+        Err(NavigationRejection::UnsupportedKind)
     );
+    let _ = seed_shell();
 }
 
 #[test]
@@ -424,7 +412,6 @@ fn rejection_unknown_pane() {
         resolve(
             ResourceAddress::Pane {
                 workspace: w1,
-                tab: t1,
                 pane: PaneId::from_bytes([0xef; 16])
             },
             &shell,
@@ -452,14 +439,13 @@ fn rejection_unknown_execution() {
 
 #[test]
 fn rejection_not_composed_variant() {
-    let (shell, w1, _, t1, _, _, p2) = seed_shell();
-    // p2 lives under t2; requesting it under t1 is NotComposed.
+    let (shell, w1, w2, _, _, p1, _) = seed_shell();
+    // p1 lives under w1; requesting it under w2 is NotComposed.
     assert_eq!(
         resolve(
             ResourceAddress::Pane {
-                workspace: w1,
-                tab: t1,
-                pane: p2
+                workspace: w2,
+                pane: p1
             },
             &shell,
             &MapInventory::new(),
@@ -467,6 +453,7 @@ fn rejection_not_composed_variant() {
         ),
         Err(NavigationRejection::NotComposed)
     );
+    let _ = w1;
 }
 
 #[test]
@@ -549,16 +536,16 @@ fn rejection_unsupported_kind_variant() {
 
 #[test]
 fn not_composed_pane_under_wrong_tab_leaves_focus_unchanged() {
-    let (shell, w1, _, t1, t2, _, p2) = seed_shell();
+    let (shell, w1, w2, t1, _, p1, _) = seed_shell();
     let before = shell.snapshot();
     assert_eq!(before.active_tab, t1);
     let focused = before.focused_pane;
 
+    // p1 belongs to w1; addressing it under w2 is NotComposed (ADR-029).
     let result = resolve(
         ResourceAddress::Pane {
-            workspace: w1,
-            tab: t1,
-            pane: p2,
+            workspace: w2,
+            pane: p1,
         },
         &shell,
         &MapInventory::new(),
@@ -570,8 +557,7 @@ fn not_composed_pane_under_wrong_tab_leaves_focus_unchanged() {
     assert_eq!(after, before);
     assert_eq!(after.focused_pane, focused);
     assert_eq!(after.active_tab, t1);
-    // Sanity: p2 really belongs to t2.
-    assert_eq!(shell.location_of_pane(p2), Some((w1, t2)));
+    assert_eq!(shell.location_of_pane(p1).map(|(w, _)| w), Some(w1));
 }
 
 // --- §12.6 resolution purity ------------------------------------------------
@@ -593,34 +579,22 @@ fn resolution_never_mutates_shell_state() {
     let cases = [
         ResourceAddress::Workspace { workspace: w1 },
         ResourceAddress::Workspace { workspace: w2 },
-        ResourceAddress::Tab {
-            workspace: w1,
-            tab: t1,
-        },
-        ResourceAddress::Tab {
-            workspace: w1,
-            tab: t2,
-        },
+        ResourceAddress::Workspace { workspace: w1 },
+        ResourceAddress::Workspace { workspace: w1 },
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1,
         },
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t2,
             pane: p2,
         },
         ResourceAddress::Execution { execution },
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p2,
         },
-        ResourceAddress::Tab {
-            workspace: w2,
-            tab: t1,
-        },
+        ResourceAddress::Workspace { workspace: w2 },
         ResourceAddress::Execution {
             execution: ExecutionId::from_bytes([0x99; 16]),
         },
@@ -640,13 +614,11 @@ fn resolution_never_mutates_shell_state() {
 
 #[test]
 fn cross_workspace_tab_rejects_without_silent_correction() {
-    let (shell, w1, w2, t1, _, _, _) = seed_shell();
-    assert_eq!(shell.workspace_of_tab(t1), Some(w1));
-
+    let (shell, w1, w2, _, _, p1, _) = seed_shell();
     let result = resolve(
-        ResourceAddress::Tab {
+        ResourceAddress::Pane {
             workspace: w2,
-            tab: t1,
+            pane: p1,
         },
         &shell,
         &MapInventory::new(),
@@ -656,20 +628,19 @@ fn cross_workspace_tab_rejects_without_silent_correction() {
     // Must not resolve as if the workspace were rewritten to w1.
     assert_ne!(
         result,
-        Ok(ResolvedTarget::Tab {
+        Ok(ResolvedTarget::Pane {
             workspace: w1,
-            tab: t1
+            pane: p1
         })
     );
 }
 
 #[test]
 fn successful_decode_and_resolve_happy_paths() {
-    let (shell, w1, _, t1, _, p1, _) = seed_shell();
-    let mut payload = [0_u8; 48];
+    let (shell, w1, _, _, _, p1, _) = seed_shell();
+    let mut payload = [0_u8; 32];
     payload[0..16].copy_from_slice(&w1.to_bytes());
-    payload[16..32].copy_from_slice(&t1.to_bytes());
-    payload[32..48].copy_from_slice(&p1.to_bytes());
+    payload[16..32].copy_from_slice(&p1.to_bytes());
     let address = decode_resource_address(
         RESOURCE_ADDRESS_ABI_VERSION,
         RESOURCE_ADDRESS_KIND_PANE,
@@ -685,7 +656,6 @@ fn successful_decode_and_resolve_happy_paths() {
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1
         })
     );
@@ -702,7 +672,6 @@ fn navigate_pane_in_inactive_workspace_activates_all_in_one_transition() {
     let w2_focus = shell.workspace_focus(w2).expect("w2");
     let address = ResourceAddress::Pane {
         workspace: w2,
-        tab: w2_focus.active_tab,
         pane: w2_focus.focused_pane,
     };
     assert_eq!(
@@ -714,7 +683,6 @@ fn navigate_pane_in_inactive_workspace_activates_all_in_one_transition() {
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w2,
-            tab: w2_focus.active_tab,
             pane: w2_focus.focused_pane
         })
     );
@@ -734,7 +702,6 @@ fn navigate_already_active_pane_is_success_noop() {
         navigate_apply_only(
             ResourceAddress::Pane {
                 workspace: w1,
-                tab: t1,
                 pane: p1
             },
             &mut shell,
@@ -743,7 +710,6 @@ fn navigate_already_active_pane_is_success_noop() {
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1
         })
     );
@@ -769,7 +735,6 @@ fn navigate_does_not_change_bindings() {
     navigate_apply_only(
         ResourceAddress::Pane {
             workspace: w2,
-            tab: w2_focus.active_tab,
             pane: w2_focus.focused_pane,
         },
         &mut shell,
@@ -789,8 +754,7 @@ fn navigate_does_not_change_bindings() {
 #[test]
 fn navigate_rejects_destroyed_tab_without_workspace_change() {
     let (mut shell, w1, w2, _, _, _, _) = seed_shell();
-    // Point at a Tab that never existed under w2.
-    let ghost = TabId::from_bytes([0xde; 16]);
+    // Point at a Pane that never existed under w2.
     let pane = PaneId::from_bytes([0xad; 16]);
     let before = shell.focus_checkpoint();
     assert_eq!(before.active_workspace, w1);
@@ -798,14 +762,13 @@ fn navigate_rejects_destroyed_tab_without_workspace_change() {
         navigate_apply_only(
             ResourceAddress::Pane {
                 workspace: w2,
-                tab: ghost,
                 pane
             },
             &mut shell,
             &MapInventory::new(),
             NavigationPrincipal::local_user(),
         ),
-        Err(NavigationRejection::UnknownTab)
+        Err(NavigationRejection::UnknownPane)
     );
     assert_eq!(
         shell.focus_checkpoint(),
@@ -881,7 +844,6 @@ fn navigate_execution_rejection_matrix_r8_3() {
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1
         })
     );
@@ -922,7 +884,6 @@ fn navigate_execution_rejection_matrix_r8_3() {
         navigate_apply_only(
             ResourceAddress::Pane {
                 workspace: w1,
-                tab: t1,
                 pane: gone
             },
             &mut shell,
@@ -1076,11 +1037,12 @@ fn navigate_workspace_focuses_active_tab_and_focused_pane() {
 #[test]
 fn address_run_reaches_original_target_after_ordinal_would_shift() {
     let (mut shell, w1, _, t1, t2, p1, _) = seed_shell();
-    // Store the address of t2 while t1 is focused. A later CreateTab shifts
-    // the palette ordinals; running by address must still select t2.
-    let stored = ResourceAddress::Tab {
+    // Store the Pane address of t2 while t1 is focused. A later CreateTab
+    // shifts palette ordinals; running by address must still select t2.
+    let t2_pane = shell.tab_focused_pane(w1, t2).expect("t2 pane");
+    let stored = ResourceAddress::Pane {
         workspace: w1,
-        tab: t2,
+        pane: t2_pane,
     };
     assert_eq!(shell.snapshot().active_tab, t1);
     assert_eq!(shell.snapshot().focused_pane, p1);
@@ -1099,18 +1061,13 @@ fn address_run_reaches_original_target_after_ordinal_would_shift() {
             &MapInventory::new(),
             NavigationPrincipal::local_user(),
         ),
-        Ok(ResolvedTarget::Tab {
+        Ok(ResolvedTarget::Pane {
             workspace: w1,
-            tab: t2
+            pane: t2_pane
         })
     );
     assert_eq!(shell.snapshot().active_tab, t2);
-    assert_eq!(
-        shell.snapshot().focused_pane,
-        shell
-            .tab_focused_pane(w1, t2)
-            .expect("t2 focused pane after address run")
-    );
+    assert_eq!(shell.snapshot().focused_pane, t2_pane);
 }
 
 #[test]
@@ -1130,7 +1087,6 @@ fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
         .expect("refocus");
     let stored = ResourceAddress::Pane {
         workspace: w1,
-        tab: t1,
         pane: created,
     };
     shell

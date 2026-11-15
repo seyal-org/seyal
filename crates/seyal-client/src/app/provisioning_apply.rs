@@ -151,30 +151,10 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Create a Tab whose terminal leaf begins one C1 provisioning intent and
-    /// admits the resulting type-36 create on the wire client (same request id).
+    /// Product "New Tab" under ADR-029 / cmux: a pane-local terminal surface
+    /// (Surface), not an outer Seyal Tab. Delegates to [`Self::new_terminal`].
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
-        self.shell
-            .apply_product_create_tab()
-            .map_err(|_| AppError::TabCreationUnavailable)?;
-        self.drain_shell_effects();
-        let snap = self.shell.snapshot();
-        let tab = snap.active_tab;
-        if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
-            let _ = self.shell.apply(ShellAction::CloseTab {
-                id: tab,
-                containment_generation: self.shell.containment_generation(),
-            });
-            let _ = self.shell.take_removed_tab_panes();
-            return Err(error);
-        }
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        self.activate_focused_pane_authority();
-        // CreateTab focuses the new leaf; record as a user-initiated commit.
-        self.record_focused_pane_commit();
-        Ok(())
+        self.new_terminal()
     }
 
     /// Split the focused leaf and start its C1 provisioning intent (ADR-017 §4.4 / C3).
@@ -777,7 +757,7 @@ impl ApplicationRoot {
     }
 
     #[cfg(target_os = "macos")]
-    fn has_wire_client(&self) -> bool {
+    pub(super) fn has_wire_client(&self) -> bool {
         #[cfg(target_os = "macos")]
         {
             if self.wire_client.is_some() || self.client_handle.is_some() {

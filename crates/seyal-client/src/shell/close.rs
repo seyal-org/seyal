@@ -141,18 +141,41 @@ impl ShellState {
         containment_generation: u64,
     ) -> Result<(), ShellError> {
         self.require_containment_generation(containment_generation)?;
-        let (workspace_id, _window_id, tab_id) = self
+        let (workspace_id, window_id, tab_id) = self
             .find_pane_location(pane_id)
             .ok_or(ShellError::UnknownPane)?;
         let was_product_focused = self.focused_pane_id().ok() == Some(pane_id);
-        let only_pane = {
-            let tab = self
-                .workspace(workspace_id)?
-                .tab(tab_id)
-                .ok_or(ShellError::UnknownTab)?;
-            tab.panes.len() == 1
+        let (only_pane, only_tab) = {
+            let workspace = self.workspace(workspace_id)?;
+            let tab = workspace.tab(tab_id).ok_or(ShellError::UnknownTab)?;
+            let window = workspace
+                .window(window_id)
+                .ok_or(ShellError::UnknownWindow)?;
+            (tab.panes.len() == 1, window.tabs.len() == 1)
         };
         if only_pane {
+            // SPEC-032 / ADR-029: the last pane of a workspace's sole pane tree
+            // removes that workspace from the presenting window sidebar. Multi-
+            // tab windows (legacy) still close the Tab hierarchically.
+            if only_tab {
+                let host = self
+                    .workspace(workspace_id)?
+                    .presenting_window
+                    .or(self.sidebar_host)
+                    .or_else(|| self.product_window_id().ok())
+                    .ok_or(ShellError::UnknownWindow)?;
+                let host_lists_workspace = self
+                    .find_window(host)
+                    .and_then(|owner| owner.window(host))
+                    .is_some_and(|window| window.open_workspaces.contains(&workspace_id));
+                if host_lists_workspace {
+                    return self.remove_workspace_from_window(
+                        host,
+                        workspace_id,
+                        containment_generation,
+                    );
+                }
+            }
             return self.close_tab(tab_id, containment_generation);
         }
 
