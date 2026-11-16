@@ -1,6 +1,8 @@
 //! Rust-owned scroll state for the conventional Raw terminal presentation.
 
-use seyal_runtime::local_ipc::framing::{HistoryCell, HISTORY_CELL_CONTINUATION_FLAG};
+use seyal_runtime::local_ipc::framing::{
+    HistoryCell, HistoryRangeSnapshot, HISTORY_CELL_CONTINUATION_FLAG,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RawViewport {
@@ -33,6 +35,17 @@ pub(crate) fn clip_history_row_at_viewport_width(row: &mut Vec<HistoryCell>, col
         glyph_start -= 1;
     }
     row.truncate(glyph_start);
+}
+
+/// Apply Raw viewport clipping to the disposable history response while
+/// preserving its correlation, revision, status, and sidecar metadata.
+pub(crate) fn clip_history_snapshot(snapshot: &mut HistoryRangeSnapshot, columns: u16) {
+    if columns == 0 {
+        return;
+    }
+    for row in &mut snapshot.rows {
+        clip_history_row_at_viewport_width(&mut row.cells, usize::from(columns));
+    }
 }
 
 impl RawViewport {
@@ -101,8 +114,13 @@ impl RawViewport {
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_history_row_at_viewport_width, RawViewport, RawViewportPlan};
-    use seyal_runtime::local_ipc::framing::{HistoryCell, HISTORY_CELL_CONTINUATION_FLAG};
+    use super::{
+        clip_history_row_at_viewport_width, clip_history_snapshot, RawViewport, RawViewportPlan,
+    };
+    use seyal_runtime::local_ipc::framing::{
+        HistoryCell, HistoryRangeSnapshot, HistoryRangeStatus, HistoryRow,
+        HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG,
+    };
 
     fn cell(scalar: u32, flags: u16) -> HistoryCell {
         HistoryCell {
@@ -179,5 +197,35 @@ mod tests {
                 cell(0, HISTORY_CELL_CONTINUATION_FLAG)
             ]
         );
+    }
+
+    #[test]
+    fn raw_snapshot_clip_preserves_identity_and_grapheme_sidecar() {
+        let mut snapshot = HistoryRangeSnapshot {
+            request_id: 9,
+            block_id: u64::MAX,
+            revision: 17,
+            status: HistoryRangeStatus::Complete,
+            rows: vec![HistoryRow {
+                line_id: 42,
+                cells: vec![
+                    cell(b'a' as u32, 0),
+                    cell(0x4e2d, HISTORY_CELL_SIDECAR_FLAG),
+                    cell(0, HISTORY_CELL_CONTINUATION_FLAG),
+                    cell(b'z' as u32, 0),
+                ],
+            }],
+            sidecar: vec![3, 0, b'c', b'a', b't'],
+        };
+
+        clip_history_snapshot(&mut snapshot, 2);
+
+        assert_eq!(snapshot.request_id, 9);
+        assert_eq!(snapshot.block_id, u64::MAX);
+        assert_eq!(snapshot.revision, 17);
+        assert_eq!(snapshot.status, HistoryRangeStatus::Complete);
+        assert_eq!(snapshot.rows[0].line_id, 42);
+        assert_eq!(snapshot.rows[0].cells, vec![cell(b'a' as u32, 0)]);
+        assert_eq!(snapshot.sidecar, vec![3, 0, b'c', b'a', b't']);
     }
 }

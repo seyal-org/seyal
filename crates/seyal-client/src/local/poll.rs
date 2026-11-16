@@ -230,14 +230,10 @@ impl LocalDisplayClient {
                         if snapshot.block_id != expected_block {
                             continue;
                         }
-                        if raw_viewport_columns > 0 {
-                            for row in &mut snapshot.rows {
-                                super::raw_viewport::clip_history_row_at_viewport_width(
-                                    &mut row.cells,
-                                    usize::from(raw_viewport_columns),
-                                );
-                            }
-                        }
+                        super::raw_viewport::clip_history_snapshot(
+                            &mut snapshot,
+                            raw_viewport_columns,
+                        );
                         let key = (snapshot.block_id, snapshot.request_id);
                         if self
                             .history_ranges
