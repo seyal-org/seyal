@@ -284,6 +284,11 @@ SeyalHistoryRange seyal_bridge_history_range_peek_for_handle(
     uint64_t block_id,
     uint64_t request_id
 );
+uint32_t seyal_bridge_history_range_lead_count_for_handle(
+    uint64_t handle,
+    uint64_t block_id,
+    uint64_t request_id
+);
 SeyalHistoryRow seyal_bridge_history_range_row_for(uint64_t block_id, uint64_t request_id, uint32_t index);
 SeyalHistoryRow seyal_bridge_history_range_row_for_handle(
     uint64_t handle,

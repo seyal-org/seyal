@@ -160,6 +160,9 @@ pub struct LocalDisplayClient {
     /// anchor coordinates are retained only in the outstanding request value
     /// for validation and never used as a response lookup key.
     pub(crate) history_ranges: HashMap<(u64, u64), HistoryRangeSnapshot>,
+    /// Lead cells before Raw viewport clipping, used to continue bounded pages
+    /// without repeating cells discarded only for display geometry.
+    pub(crate) history_range_lead_counts: HashMap<(u64, u64), u32>,
     /// Expected history identity plus an optional Raw viewport width. A zero
     /// width keeps completed-Block/Flow history unchanged.
     pub(crate) history_requests: HashMap<u64, (u64, u64, u64, u16)>,
@@ -438,6 +441,13 @@ impl LocalDisplayClient {
         self.history_ranges.get(&(block_id, request_id))
     }
 
+    pub fn history_range_lead_count(&self, block_id: u64, request_id: u64) -> u32 {
+        self.history_range_lead_counts
+            .get(&(block_id, request_id))
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// Drops one copied history response after the native consumer has
     /// materialized its rows. The block/request pair is required so an older
     /// overlapping range can never consume a newer response.
@@ -447,6 +457,8 @@ impl LocalDisplayClient {
             .remove(&(block_id, request_id))
             .is_some();
         if removed {
+            self.history_range_lead_counts
+                .remove(&(block_id, request_id));
             self.history_requests.remove(&request_id);
         }
         removed
@@ -513,6 +525,8 @@ impl LocalDisplayClient {
                 || retained_block_ids.contains(&block_id)
         };
         self.history_ranges
+            .retain(|(block_id, _), _| keep(*block_id));
+        self.history_range_lead_counts
             .retain(|(block_id, _), _| keep(*block_id));
         self.history_requests
             .retain(|_, (block_id, _, _, _)| keep(*block_id));
@@ -623,6 +637,7 @@ fn reconstruction_probe_client_with_stream(
         pending_composer_requests: std::collections::HashSet::new(),
         next_composer_request_id: 1,
         history_ranges: HashMap::new(),
+        history_range_lead_counts: HashMap::new(),
         history_requests: HashMap::new(),
         next_history_request_id: 1,
         raw_viewport: raw_viewport::RawViewport::default(),

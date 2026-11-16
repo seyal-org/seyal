@@ -827,6 +827,7 @@ impl LocalDisplayClient {
             pending_composer_requests: std::collections::HashSet::new(),
             next_composer_request_id: 1,
             history_ranges: HashMap::new(),
+            history_range_lead_counts: HashMap::new(),
             history_requests: HashMap::new(),
             next_history_request_id: 1,
             raw_viewport: super::raw_viewport::RawViewport::default(),
@@ -883,12 +884,263 @@ pub(crate) fn read_blocking_raw_frame_until(
     let mut frame = Vec::with_capacity(HEADER_LEN + header.payload_len as usize);
     frame.extend_from_slice(&header_bytes);
     frame.resize(HEADER_LEN + header.payload_len as usize, 0);
-    read_exact_until(stream, &mut frame[HEADER_LEN..], deadline)?;
-    Ok(frame)
+…2741 tokens truncated…           result_code: ResizeResultCode::Error(ErrorCode::CapacityExceeded),
+            detail_code: 0,
+            applied_generation: 0,
+        }),
+        Ok(())
+    );
+    assert_eq!(client.applied_awaiting_projection, Some(fence));
+    assert!(client.unresolved_resizes.is_empty());
+    assert_eq!(client.retry_suppression, None);
+    assert_eq!(
+        client.resize_failure,
+        Some(ResizeFailure::Apply(ErrorCode::CapacityExceeded))
+    );
 }
 
-mod execution_inventory;
-#[cfg(test)]
-mod execution_inventory_tests;
-#[cfg(test)]
-mod tests;
+#[test]
+fn rejected_current_resize_waits_for_meaningful_layout_recovery() {
+    let (mut client, _peer) = resize_client();
+    let target = geometry(30, 100);
+    let initial_layout = LayoutMetrics::new(500.0, 300.0, 0.0, 0.0, 5.0, 10.0);
+    client
+        .set_desired_geometry_for_layout(target, initial_layout)
+        .expect("initial layout is accepted");
+    // Seed the native layout sample without keeping the initial request; the
+    // remainder of this test injects the rejected Runtime result directly.
+    client.unresolved_resizes.clear();
+    client.outbound.clear();
+    client.desired_geometry = Some(target);
+    client.unresolved_resizes.push_back(ResizeRecord {
+        request_id: 1,
+        geometry: target,
+        phase: ResizePhase::SentWaitingResult,
+    });
+    client.next_resize_request_id = 2;
+
+    assert_eq!(
+        client.accept_resize_result(seyal_runtime::local_ipc::framing::ResizeResult {
+            attachment_id: client.attachment_id,
+            request_id: 1,
+            result_code: ResizeResultCode::Error(ErrorCode::CapacityExceeded),
+            detail_code: 0,
+            applied_generation: 0,
+        }),
+        Ok(())
+    );
+    assert_eq!(
+        client.resize_failure,
+        Some(ResizeFailure::Apply(ErrorCode::CapacityExceeded))
+    );
+    assert_eq!(
+        client.retry_suppression.map(|value| value.geometry),
+        Some(target)
+    );
+    assert!(client.unresolved_resizes.is_empty());
+    assert!(client.outbound.is_empty());
+
+    // Re-observing identical native metrics does not resend a rejected Runtime
+    // request. Rust recognizes changed viewport metrics as a new layout epoch,
+    // even when the derived rows/columns remain identical.
+    client
+        .set_desired_geometry_for_layout(target, initial_layout)
+        .expect("same layout remains suppressed");
+    assert!(client.unresolved_resizes.is_empty());
+    let changed_viewport_same_grid = LayoutMetrics::new(501.0, 300.0, 0.0, 0.0, 5.0, 10.0);
+    client
+        .set_desired_geometry_for_layout(target, changed_viewport_same_grid)
+        .expect("changed native metrics authorize layout recovery");
+    assert_eq!(client.unresolved_resizes.len(), 1);
+    assert_eq!(client.unresolved_resizes[0].request_id, 2);
+    assert_eq!(client.unresolved_resizes[0].geometry, target);
+    client
+        .set_desired_geometry_for_layout(target, changed_viewport_same_grid)
+        .expect("same recovery epoch does not duplicate request");
+    assert_eq!(client.unresolved_resizes.len(), 1);
+}
+
+#[test]
+fn newer_unresolved_resize_remains_authoritative_over_older_applied_fence() {
+    let older = AppliedFence {
+        request_id: 4,
+        geometry: geometry(30, 100),
+        applied_generation: 12,
+    };
+    let newer = ResizeRecord {
+        request_id: 5,
+        geometry: geometry(40, 120),
+        phase: ResizePhase::SentWaitingResult,
+    };
+
+    assert_eq!(
+        newest_pending_geometry(&VecDeque::from([newer]), Some(older)),
+        Some(geometry(40, 120))
+    );
+}
+
+#[test]
+fn invalid_terminal_key_requests_fail_before_wire_encoding() {
+    assert!(!valid_terminal_key_request(
+        TerminalKeyKind::ControlAscii,
+        'é' as u32
+    ));
+    assert!(!valid_terminal_key_request(TerminalKeyKind::ArrowUp, 1));
+    assert!(valid_terminal_key_request(
+        TerminalKeyKind::ControlAscii,
+        '?' as u32
+    ));
+    assert!(valid_terminal_key_request(TerminalKeyKind::ArrowUp, 0));
+}
+
+#[test]
+fn runtime_input_backpressure_is_visible_without_fatal_disconnect() {
+    let error = ErrorMessage {
+        error_code: ErrorCode::Backpressure as u16,
+        offending_message_type: MessageType::Input as u16,
+        detail_code: 0,
+    };
+    assert_eq!(
+        classify_server_error(error).unwrap(),
+        Some(InputAdmissionFailure::ClientBackpressure)
+    );
+    let key_error = ErrorMessage {
+        offending_message_type: MessageType::TerminalKey as u16,
+        ..error
+    };
+    assert_eq!(
+        classify_server_error(key_error).unwrap(),
+        Some(InputAdmissionFailure::ClientBackpressure)
+    );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::InvalidExecution as u16,
+            offending_message_type: MessageType::Input as u16,
+            detail_code: 0,
+        }),
+        Err(ClientError::Server(ErrorCode::InvalidExecution))
+    );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::CapacityExceeded as u16,
+            offending_message_type: MessageType::HistoryRangeRequest as u16,
+            detail_code: 0,
+        }),
+        Ok(None)
+    );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::CapacityExceeded as u16,
+            offending_message_type: MessageType::Paste as u16,
+            detail_code: 0,
+        }),
+        Ok(Some(InputAdmissionFailure::CommitTooLarge))
+    );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::CapacityExceeded as u16,
+            offending_message_type: MessageType::BlockTimeline as u16,
+            detail_code: 0,
+        }),
+        Err(ClientError::Server(ErrorCode::CapacityExceeded))
+    );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::InvalidState as u16,
+            offending_message_type: MessageType::HostSearch as u16,
+            detail_code: 0,
+        }),
+        Ok(None)
+    );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::InvalidState as u16,
+            offending_message_type: MessageType::HostSelection as u16,
+            detail_code: 0,
+        }),
+        Ok(None)
+    );
+}
+
+#[test]
+fn composer_result_quarantines_cross_attachment_and_unknown_requests() {
+    let attachment = AttachmentId::from_bytes([7; 16]);
+    let other_attachment = AttachmentId::from_bytes([8; 16]);
+    let mut pending = std::collections::HashSet::new();
+    pending.insert(41);
+
+    let accepted = ComposerResult {
+        attachment_id: attachment,
+        code: ComposerResultCode::Accepted,
+        block_id: 99,
+        request_id: 41,
+    };
+    assert!(super::super::validate_composer_result(
+        accepted, attachment, &pending, false
+    ));
+    assert!(!super::super::validate_composer_result(
+        accepted,
+        other_attachment,
+        &pending,
+        false
+    ));
+    assert!(!super::super::validate_composer_result(
+        ComposerResult {
+            request_id: 42,
+            ..accepted
+        },
+        attachment,
+        &pending,
+        false
+    ));
+}
+
+#[test]
+fn composer_result_requires_code_specific_block_identity() {
+    let attachment = AttachmentId::from_bytes([9; 16]);
+    let pending = std::collections::HashSet::from([5]);
+    assert!(!super::super::validate_composer_result(
+        ComposerResult {
+            attachment_id: attachment,
+            code: ComposerResultCode::Accepted,
+            block_id: 0,
+            request_id: 5,
+        },
+        attachment,
+        &pending,
+        false
+    ));
+    assert!(super::super::validate_composer_result(
+        ComposerResult {
+            attachment_id: attachment,
+            code: ComposerResultCode::Accepted,
+            block_id: 0,
+            request_id: 5,
+        },
+        attachment,
+        &pending,
+        true
+    ));
+    assert!(!super::super::validate_composer_result(
+        ComposerResult {
+            attachment_id: attachment,
+            code: ComposerResultCode::Busy,
+            block_id: 77,
+            request_id: 5,
+        },
+        attachment,
+        &pending,
+        false
+    ));
+    assert!(super::super::validate_composer_result(
+        ComposerResult {
+            attachment_id: attachment,
+            code: ComposerResultCode::Busy,
+            block_id: 0,
+            request_id: 5,
+        },
+        attachment,
+        &pending,
+        false
+    ));
+}

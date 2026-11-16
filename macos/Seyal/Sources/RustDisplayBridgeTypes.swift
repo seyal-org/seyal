@@ -195,12 +195,6 @@ func mergeHistoryRange(
   )
 }
 
-func historyLeadCount(_ rows: [[NativeHistoryRange.Cell]]) -> UInt32 {
-  rows.reduce(into: 0) { count, row in
-    count += UInt32(row.filter { $0.scalar != 0 || !$0.graphemeUtf8.isEmpty }.count)
-  }
-}
-
 private let historyCellSidecarFlag: UInt16 = 1 << 7
 
 func historyGraphemeUtf8(cell: SeyalHistoryCell, sidecar: Data) -> Data {

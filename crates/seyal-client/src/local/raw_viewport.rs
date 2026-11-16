@@ -1,7 +1,7 @@
 //! Rust-owned scroll state for the conventional Raw terminal presentation.
 
 use seyal_runtime::local_ipc::framing::{
-    HistoryCell, HistoryRangeSnapshot, HISTORY_CELL_CONTINUATION_FLAG,
+    HistoryCell, HistoryRangeSnapshot, HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,13 +39,19 @@ pub(crate) fn clip_history_row_at_viewport_width(row: &mut Vec<HistoryCell>, col
 
 /// Apply Raw viewport clipping to the disposable history response while
 /// preserving its correlation, revision, status, and sidecar metadata.
-pub(crate) fn clip_history_snapshot(snapshot: &mut HistoryRangeSnapshot, columns: u16) {
-    if columns == 0 {
-        return;
+pub(crate) fn clip_history_snapshot(snapshot: &mut HistoryRangeSnapshot, columns: u16) -> u32 {
+    let original_lead_count = snapshot
+        .rows
+        .iter()
+        .flat_map(|row| &row.cells)
+        .filter(|cell| cell.scalar != 0 || cell.flags & HISTORY_CELL_SIDECAR_FLAG != 0)
+        .count() as u32;
+    if columns > 0 {
+        for row in &mut snapshot.rows {
+            clip_history_row_at_viewport_width(&mut row.cells, usize::from(columns));
+        }
     }
-    for row in &mut snapshot.rows {
-        clip_history_row_at_viewport_width(&mut row.cells, usize::from(columns));
-    }
+    original_lead_count
 }
 
 impl RawViewport {
@@ -229,8 +235,9 @@ mod tests {
             sidecar,
         };
 
-        clip_history_snapshot(&mut snapshot, 2);
+        let original_lead_count = clip_history_snapshot(&mut snapshot, 2);
 
+        assert_eq!(original_lead_count, 4);
         assert_eq!(snapshot.request_id, 9);
         assert_eq!(snapshot.block_id, u64::MAX);
         assert_eq!(snapshot.revision, 17);

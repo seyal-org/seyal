@@ -230,7 +230,7 @@ impl LocalDisplayClient {
                         if snapshot.block_id != expected_block {
                             continue;
                         }
-                        super::raw_viewport::clip_history_snapshot(
+                        let raw_lead_count = super::raw_viewport::clip_history_snapshot(
                             &mut snapshot,
                             raw_viewport_columns,
                         );
@@ -244,8 +244,10 @@ impl LocalDisplayClient {
                                 && let Some(key) = self.history_ranges.keys().next().copied()
                             {
                                 self.history_ranges.remove(&key);
+                                self.history_range_lead_counts.remove(&key);
                             }
                             self.history_ranges.insert(key, snapshot);
+                            self.history_range_lead_counts.insert(key, raw_lead_count);
                         }
                     }
                     MessageType::Error => {

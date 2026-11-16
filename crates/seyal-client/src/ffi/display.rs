@@ -109,6 +109,20 @@ pub extern "C" fn seyal_bridge_history_range_peek_for_handle(
     .unwrap_or_else(SeyalHistoryRange::empty)
 }
 
+/// Original lead-cell count before client-side Raw clipping, used for exact
+/// `start_unit` pagination on a named registry Controller.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_lead_count_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> u32 {
+    super::with_client(handle, |client| {
+        client.history_range_lead_count(block_id, request_id)
+    })
+    .unwrap_or(0)
+}
+
 fn history_range_peek_from_client(
     client: &LocalDisplayClient,
     block_id: u64,

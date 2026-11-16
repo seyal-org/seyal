@@ -154,7 +154,8 @@ extension RustDisplayBridge {
       )
       let previous = historyContinuations[requestKey]
       let merged = mergeHistoryRange(previous?.range, chunk)
-      let leads = historyLeadCount(rows)
+      let leads = seyal_bridge_history_range_lead_count_for_handle(
+        handle, metadata.block_id, metadata.request_id)
       _ = seyal_bridge_history_range_consume_for_handle(
         handle, metadata.block_id, metadata.request_id)
       requestedHistoryRanges.removeValue(forKey: requestKey)
