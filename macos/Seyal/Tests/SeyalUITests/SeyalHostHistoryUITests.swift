@@ -1,3 +1,4 @@
+import CoreGraphics
 import ImageIO
 import XCTest
 import Vision
@@ -200,25 +201,25 @@ final class SeyalHostHistoryUITests: XCTestCase {
         submitRawCommand(app, terminal: terminal, "printf '%s\\n' '\(token)'")
 
         let screenshot = try screenshotContaining(token, in: app, timeout: 20)
-        let source = try XCTUnwrap(
-            CGImageSourceCreateWithData(screenshot.pngRepresentation as CFData, nil)
-        )
-        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
-        try VNImageRequestHandler(cgImage: image).perform([request])
-        let marker = try XCTUnwrap(
-            (request.results ?? [])
-                .filter { $0.topCandidates(1).first?.string.contains(token) == true }
-                .min { $0.boundingBox.minY < $1.boundingBox.minY },
-            "the rendered output token must have a Vision text observation"
-        )
+        let marker = try textObservation(containing: token, in: screenshot)
+        let beforeColor = try averageColor(in: screenshot, bounds: marker.boundingBox)
         let bounds = marker.boundingBox
         let output = app.windows.firstMatch.coordinate(
             withNormalizedOffset: CGVector(dx: bounds.midX, dy: 1 - bounds.midY)
         )
         output.doubleTap()
+        let highlighted = try screenshotContaining(token, in: app, timeout: 5)
+        let selectedMarker = try textObservation(containing: token, in: highlighted)
+        let afterColor = try averageColor(in: highlighted, bounds: selectedMarker.boundingBox)
+        let colorDistance = zip(beforeColor, afterColor)
+            .map { abs($0.0 - $0.1) }
+            .reduce(0, +)
+        XCTAssertGreaterThan(
+            colorDistance,
+            45,
+            "selected default-colored output must visibly invert the terminal theme colors"
+        )
+        attachScreenshot(highlighted, name: "1502-raw-double-click-visible-selection")
         terminal.typeKey("c", modifierFlags: [.command])
         terminal.typeText("pbpaste")
         terminal.typeKey("\r", modifierFlags: [])
@@ -422,6 +423,14 @@ final class SeyalHostHistoryUITests: XCTestCase {
     }
 
     private func recognizedText(in screenshot: XCUIScreenshot) throws -> String {
+        try textObservations(in: screenshot)
+            .compactMap { $0.topCandidates(1).first?.string }
+            .joined(separator: "\n")
+    }
+
+    private func textObservations(in screenshot: XCUIScreenshot) throws
+        -> [VNRecognizedTextObservation]
+    {
         let source = try XCTUnwrap(
             CGImageSourceCreateWithData(screenshot.pngRepresentation as CFData, nil)
         )
@@ -430,8 +439,65 @@ final class SeyalHostHistoryUITests: XCTestCase {
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false
         try VNImageRequestHandler(cgImage: image).perform([request])
-        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-            .joined(separator: "\n")
+        return request.results ?? []
+    }
+
+    private func textObservation(
+        containing text: String,
+        in screenshot: XCUIScreenshot
+    ) throws -> VNRecognizedTextObservation {
+        try XCTUnwrap(
+            textObservations(in: screenshot)
+                .filter { $0.topCandidates(1).first?.string.contains(text) == true }
+                .min { $0.boundingBox.minY < $1.boundingBox.minY },
+            "the rendered output text must have a Vision observation"
+        )
+    }
+
+    private func averageColor(in screenshot: XCUIScreenshot, bounds: CGRect) throws -> [Double] {
+        let source = try XCTUnwrap(
+            CGImageSourceCreateWithData(screenshot.pngRepresentation as CFData, nil)
+        )
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let width = image.width
+        let height = image.height
+        let minX = max(Int(bounds.minX * CGFloat(width)), 0)
+        let maxX = min(Int(ceil(bounds.maxX * CGFloat(width))), width)
+        let minY = max(Int((1 - bounds.maxY) * CGFloat(height)), 0)
+        let maxY = min(Int(ceil((1 - bounds.minY) * CGFloat(height))), height)
+        guard maxX > minX, maxY > minY else {
+            throw XCTSkip("the OCR observation has no drawable pixel area")
+        }
+
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let rendered = pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue
+            ) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard rendered else { throw XCTSkip("could not read screenshot pixels") }
+
+        var totals = [Double](repeating: 0, count: 3)
+        var count = 0
+        for y in minY..<maxY {
+            for x in minX..<maxX {
+                let offset = (y * width + x) * 4
+                for channel in 0..<3 {
+                    totals[channel] += Double(pixels[offset + channel])
+                }
+                count += 1
+            }
+        }
+        return totals.map { $0 / Double(count) }
     }
 
     private func waitBriefly(_ seconds: TimeInterval) {
