@@ -9,9 +9,6 @@ struct RawScrollbackRequest: Equatable {
 
 /// Renderer-only row normalization for a Rust-authored Raw viewport plan.
 enum RawScrollbackViewport {
-    /// Matches `HISTORY_CELL_CONTINUATION_FLAG` in the Pass 7 wire contract.
-    private static let continuationFlag: UInt16 = 1 << 3
-
     /// Correlation id for `HistoryRangeRequest` (Runtime echoes; fetch is by LineId).
     /// Not a BlockTimeline identity. Must match
     /// `LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID` (`u64::MAX`)
@@ -72,21 +69,7 @@ enum RawScrollbackViewport {
         let trimmed = trimLeadingBlankRows(rows)
         var padded: [[NativeHistoryRange.Cell]] = trimmed.map { row in
             if row.count >= columns {
-                var visible = Array(row.prefix(columns))
-                // The next cell can be a wide grapheme continuation. If so,
-                // clipping here would leave part of that grapheme at the pane
-                // edge. Remove the whole glyph and let the normal pad below
-                // clear the vacated cells.
-                if row.count > columns, row[columns].flags & continuationFlag != 0 {
-                    var glyphStart = columns
-                    while glyphStart > 0,
-                        row[glyphStart].flags & continuationFlag != 0
-                    {
-                        glyphStart -= 1
-                    }
-                    visible.removeSubrange(glyphStart..<visible.count)
-                }
-                return visible
+                return Array(row.prefix(columns))
             }
             var next = row
             next.reserveCapacity(columns)

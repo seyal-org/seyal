@@ -20,7 +20,7 @@ use crate::{
 fn unknown_handle_history_apis_fail_closed() {
     assert_eq!(seyal_bridge_next_history_request_id_for(0), 0);
     assert_eq!(
-        seyal_bridge_request_history_range_for(0, 1, 1, 2, 512, 131_072, 0),
+        seyal_bridge_request_history_range_for(0, 1, 1, 2, 512, 131_072, 0, 0),
         -1
     );
     let peek = seyal_bridge_history_range_peek_for_handle(0, 1, 1);

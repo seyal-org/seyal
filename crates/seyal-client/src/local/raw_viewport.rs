@@ -1,5 +1,7 @@
 //! Rust-owned scroll state for the conventional Raw terminal presentation.
 
+use seyal_runtime::local_ipc::framing::{HistoryCell, HISTORY_CELL_CONTINUATION_FLAG};
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RawViewport {
     anchor_line: Option<u64>,
@@ -10,6 +12,27 @@ pub(crate) struct RawViewportPlan {
     pub offset_rows: u64,
     pub start_line: u64,
     pub end_line: u64,
+}
+
+/// Clip a history row without leaving half of a width-two grapheme visible.
+/// The Raw viewport width is presentation policy, so the canonical row is
+/// retained and only the disposable client snapshot is shortened.
+pub(crate) fn clip_history_row_at_viewport_width(row: &mut Vec<HistoryCell>, columns: usize) {
+    if columns == 0 || row.len() <= columns {
+        return;
+    }
+
+    let split_continuation = row[columns].flags & HISTORY_CELL_CONTINUATION_FLAG != 0;
+    if !split_continuation {
+        row.truncate(columns);
+        return;
+    }
+
+    let mut glyph_start = columns;
+    while glyph_start > 0 && row[glyph_start].flags & HISTORY_CELL_CONTINUATION_FLAG != 0 {
+        glyph_start -= 1;
+    }
+    row.truncate(glyph_start);
 }
 
 impl RawViewport {
@@ -78,7 +101,18 @@ impl RawViewport {
 
 #[cfg(test)]
 mod tests {
-    use super::{RawViewport, RawViewportPlan};
+    use super::{clip_history_row_at_viewport_width, RawViewport, RawViewportPlan};
+    use seyal_runtime::local_ipc::framing::{HistoryCell, HISTORY_CELL_CONTINUATION_FLAG};
+
+    fn cell(scalar: u32, flags: u16) -> HistoryCell {
+        HistoryCell {
+            scalar,
+            foreground: 0,
+            background: 0,
+            flags,
+            reserved: 0,
+        }
+    }
 
     #[test]
     fn viewport_clamps_scroll_and_anchors_the_same_history_window() {
@@ -110,5 +144,40 @@ mod tests {
         assert_eq!(plan.offset_rows, 1);
         assert_eq!((plan.start_line, plan.end_line), (1, 24));
         assert_eq!(viewport.plan(0, 12), None);
+    }
+
+    #[test]
+    fn history_clip_removes_a_wide_grapheme_crossing_the_right_edge() {
+        let mut row = vec![
+            cell(b'a' as u32, 0),
+            cell(0x4e2d, 0),
+            cell(0, HISTORY_CELL_CONTINUATION_FLAG),
+            cell(b'z' as u32, 0),
+        ];
+
+        clip_history_row_at_viewport_width(&mut row, 2);
+
+        assert_eq!(row, vec![cell(b'a' as u32, 0)]);
+    }
+
+    #[test]
+    fn history_clip_keeps_a_wide_grapheme_that_fits_inside_the_viewport() {
+        let mut row = vec![
+            cell(b'a' as u32, 0),
+            cell(0x4e2d, 0),
+            cell(0, HISTORY_CELL_CONTINUATION_FLAG),
+            cell(b'z' as u32, 0),
+        ];
+
+        clip_history_row_at_viewport_width(&mut row, 3);
+
+        assert_eq!(
+            row,
+            vec![
+                cell(b'a' as u32, 0),
+                cell(0x4e2d, 0),
+                cell(0, HISTORY_CELL_CONTINUATION_FLAG)
+            ]
+        );
     }
 }

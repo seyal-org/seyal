@@ -14,23 +14,6 @@ final class RawScrollbackViewportTests: XCTestCase {
         XCTAssertEqual(RawScrollbackViewport.correlationBlockID, UInt64.max)
     }
 
-    func testViewportClippingDoesNotSplitWideGraphemeAtRightEdge() {
-        let row = [
-            NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0),
-            NativeHistoryRange.Cell(
-                scalar: 0x4E00, foreground: 0, background: 0, flags: 0x20),
-            NativeHistoryRange.Cell(scalar: 0, foreground: 0, background: 0, flags: 0x08),
-        ]
-
-        let clipped = RawScrollbackViewport.padRowsForViewport(
-            rows: [row], columns: 2, targetRowCount: 1)
-
-        XCTAssertEqual(clipped.count, 1)
-        XCTAssertEqual(clipped[0].count, 2)
-        XCTAssertEqual(clipped[0][0].scalar, 65)
-        XCTAssertEqual(clipped[0][1].scalar, 32)
-    }
-
     func testOnlyTheExactLatestRawHistoryRequestCanReplaceTheVisiblePage() {
         let expected = RawScrollbackRequest(
             displayHandle: 42, requestID: 9, startLine: 100, endLine: 145)

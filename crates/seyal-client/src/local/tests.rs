@@ -739,8 +739,10 @@ fn purge_history_retains_presentation_correlation_block_id() {
     let (stream, _peer) = UnixStream::pair().expect("pair");
     let mut client = test_client(stream);
     let correlation = LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID;
-    client.history_requests.insert(42, (correlation, 10, 50));
-    client.history_requests.insert(43, (7, 1, 2));
+    client
+        .history_requests
+        .insert(42, (correlation, 10, 50, 80));
+    client.history_requests.insert(43, (7, 1, 2, 0));
     client.purge_history_for_blocks(&std::collections::HashSet::new());
     assert!(
         client.history_requests.contains_key(&42),
@@ -749,5 +751,21 @@ fn purge_history_retains_presentation_correlation_block_id() {
     assert!(
         !client.history_requests.contains_key(&43),
         "ordinary Block history must still purge when not retained"
+    );
+}
+
+#[test]
+fn raw_history_request_retains_viewport_width_only_in_client_request_state() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    let correlation = LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID;
+
+    client
+        .request_history_range(correlation, 10, 20, 512, 131_072, 0, 80)
+        .expect("request history");
+
+    assert_eq!(
+        client.history_requests.get(&1),
+        Some(&(correlation, 10, 20, 80))
     );
 }

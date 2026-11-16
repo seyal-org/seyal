@@ -160,7 +160,9 @@ pub struct LocalDisplayClient {
     /// anchor coordinates are retained only in the outstanding request value
     /// for validation and never used as a response lookup key.
     pub(crate) history_ranges: HashMap<(u64, u64), HistoryRangeSnapshot>,
-    pub(crate) history_requests: HashMap<u64, (u64, u64, u64)>,
+    /// Expected history identity plus an optional Raw viewport width. A zero
+    /// width keeps completed-Block/Flow history unchanged.
+    pub(crate) history_requests: HashMap<u64, (u64, u64, u64, u16)>,
     pub(crate) next_history_request_id: u64,
     pub(crate) raw_viewport: raw_viewport::RawViewport,
     pub(crate) copied_text: Vec<u8>,
@@ -458,6 +460,9 @@ impl LocalDisplayClient {
         max_lines: u16,
         max_cells: u32,
         start_unit: u32,
+        // Set only for Raw scrollback. This remains client-side and does not
+        // alter the Runtime history wire request.
+        raw_viewport_columns: u16,
     ) -> Result<(), ClientError> {
         self.require_controller()?;
         if block_id == 0 || start_line == 0 || end_line < start_line {
@@ -478,8 +483,10 @@ impl LocalDisplayClient {
         .encode();
         let frame = encode_frame(MessageType::HistoryRangeRequest, &payload);
         self.admit_frame(frame, input_resize::OutboundKind::HistoryRangeRequest)?;
-        self.history_requests
-            .insert(request_id, (block_id, start_line, end_line));
+        self.history_requests.insert(
+            request_id,
+            (block_id, start_line, end_line, raw_viewport_columns),
+        );
         self.flush_control_write()
     }
 
@@ -508,7 +515,7 @@ impl LocalDisplayClient {
         self.history_ranges
             .retain(|(block_id, _), _| keep(*block_id));
         self.history_requests
-            .retain(|_, (block_id, _, _)| keep(*block_id));
+            .retain(|_, (block_id, _, _, _)| keep(*block_id));
     }
 
     fn quarantine_block_metadata(&mut self) -> ClientError {

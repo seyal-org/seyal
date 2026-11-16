@@ -272,7 +272,9 @@ int32_t seyal_bridge_request_history_range_for(
     uint64_t end_line,
     uint16_t max_lines,
     uint32_t max_cells,
-    uint32_t start_unit
+    uint32_t start_unit,
+    /* Zero preserves the normal completed-Block history projection. */
+    uint16_t raw_viewport_columns
 );
 uint64_t seyal_bridge_next_history_request_id(void);
 uint64_t seyal_bridge_next_history_request_id_for(uint64_t handle);

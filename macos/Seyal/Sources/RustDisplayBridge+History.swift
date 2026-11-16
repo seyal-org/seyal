@@ -6,6 +6,7 @@ extension RustDisplayBridge {
     startLine: UInt64,
     endLine: UInt64,
     blockID: UInt64,
+    rawViewportColumns: UInt16 = 0,
     onRequestID: ((UInt64) -> Void)? = nil
   ) -> Int32 {
     let handle = Self.submissionHandle(
@@ -19,6 +20,7 @@ extension RustDisplayBridge {
       startLine: startLine,
       endLine: endLine,
       blockID: blockID,
+      rawViewportColumns: rawViewportColumns,
       onRequestID: onRequestID
     )
   }
@@ -30,6 +32,7 @@ extension RustDisplayBridge {
     startLine: UInt64,
     endLine: UInt64,
     blockID: UInt64,
+    rawViewportColumns: UInt16 = 0,
     onRequestID: ((UInt64) -> Void)? = nil
   ) -> Int32 {
     guard isConnected, handle != 0 else { return -4 }
@@ -41,7 +44,7 @@ extension RustDisplayBridge {
     onRequestID?(requestID)
     let result = finishAddressedMutation(
       seyal_bridge_request_history_range_for(
-        handle, blockID, startLine, endLine, 512, 131_072, 0),
+        handle, blockID, startLine, endLine, 512, 131_072, 0, rawViewportColumns),
       forDisplayHandle: handle
     )
     if result == 0 {
@@ -159,7 +162,7 @@ extension RustDisplayBridge {
           let continued = finishAddressedMutation(
             seyal_bridge_request_history_range_for(
               handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
-              nextStart),
+              nextStart, 0),
             forDisplayHandle: handle
           )
           if continued == 0 {
