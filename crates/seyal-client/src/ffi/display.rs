@@ -591,9 +591,9 @@ pub extern "C" fn seyal_bridge_request_history_range(
     start_unit: u32,
 ) -> i32 {
     with_display_client_mut(|client| {
-        client.request_history_range(
+        client.request_history_range(crate::local::HistoryRangeInput::new(
             block_id, start_line, end_line, max_lines, max_cells, start_unit, 0,
-        )
+        ))
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
@@ -614,7 +614,7 @@ pub extern "C" fn seyal_bridge_request_history_range_for(
     raw_viewport_columns: u16,
 ) -> i32 {
     super::with_client_mut(handle, |client| {
-        client.request_history_range(
+        client.request_history_range(crate::local::HistoryRangeInput::new(
             block_id,
             start_line,
             end_line,
@@ -622,7 +622,7 @@ pub extern "C" fn seyal_bridge_request_history_range_for(
             max_cells,
             start_unit,
             raw_viewport_columns,
-        )
+        ))
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }

@@ -255,7 +255,7 @@ fn history_request_on_unfocused_controller_reads_its_own_same_id_block() {
     assert_ne!(request_id, 0);
     assert_eq!(
         seyal_bridge_request_history_range_for(
-            handle_b, block_id, start_line, end_line, 128, 131_072, 0,
+            handle_b, block_id, start_line, end_line, 128, 131_072, 0, 0,
         ),
         0
     );

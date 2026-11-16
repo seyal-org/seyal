@@ -41,6 +41,8 @@ use seyal_runtime::local_ipc::framing::{
 
 pub use attach::force_bootstrap_attach_failure_for_test;
 pub use discovery::DiscoveryFailure;
+pub(crate) use display_apply::HistoryRangeInput;
+pub(crate) use input_resize::TerminalMouseInput;
 pub use input_resize::{
     cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, LayoutMetrics,
     ResizeFailure,
@@ -464,20 +466,12 @@ impl LocalDisplayClient {
         removed
     }
 
-    pub fn request_history_range(
+    pub(crate) fn request_history_range(
         &mut self,
-        block_id: u64,
-        start_line: u64,
-        end_line: u64,
-        max_lines: u16,
-        max_cells: u32,
-        start_unit: u32,
-        // Set only for Raw scrollback. This remains client-side and does not
-        // alter the Runtime history wire request.
-        raw_viewport_columns: u16,
+        input: HistoryRangeInput,
     ) -> Result<(), ClientError> {
         self.require_controller()?;
-        if block_id == 0 || start_line == 0 || end_line < start_line {
+        if input.block_id == 0 || input.start_line == 0 || input.end_line < input.start_line {
             return Err(ClientError::Protocol);
         }
         let request_id = self.next_history_request_id;
@@ -485,19 +479,24 @@ impl LocalDisplayClient {
         let payload = HistoryRangeRequest {
             attachment_id: self.attachment_id,
             request_id,
-            block_id,
-            start_line,
-            end_line,
-            max_lines,
-            max_cells,
-            start_unit,
+            block_id: input.block_id,
+            start_line: input.start_line,
+            end_line: input.end_line,
+            max_lines: input.max_lines,
+            max_cells: input.max_cells,
+            start_unit: input.start_unit,
         }
         .encode();
         let frame = encode_frame(MessageType::HistoryRangeRequest, &payload);
         self.admit_frame(frame, input_resize::OutboundKind::HistoryRangeRequest)?;
         self.history_requests.insert(
             request_id,
-            (block_id, start_line, end_line, raw_viewport_columns),
+            (
+                input.block_id,
+                input.start_line,
+                input.end_line,
+                input.raw_viewport_columns,
+            ),
         );
         self.flush_control_write()
     }

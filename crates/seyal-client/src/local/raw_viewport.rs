@@ -92,9 +92,7 @@ impl RawViewport {
         if let Some(anchor) = self.anchor_line {
             self.anchor_line = Some(anchor.min(start_line_id));
         }
-        let Some(anchor_line) = self.anchor_line else {
-            return None;
-        };
+        let anchor_line = self.anchor_line?;
         if anchor_line >= start_line_id {
             self.clear();
             return None;
