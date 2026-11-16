@@ -14,6 +14,24 @@ final class RawScrollbackViewportTests: XCTestCase {
         XCTAssertEqual(RawScrollbackViewport.correlationBlockID, UInt64.max)
     }
 
+    func testRendererAdapterPadsRustClippedRowsToViewportGeometry() {
+        let first = [
+            NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0),
+            NativeHistoryRange.Cell(scalar: 66, foreground: 0, background: 0, flags: 0),
+            NativeHistoryRange.Cell(scalar: 67, foreground: 0, background: 0, flags: 0),
+        ]
+        let second = [
+            NativeHistoryRange.Cell(scalar: 68, foreground: 0, background: 0, flags: 0)
+        ]
+
+        let rows = RawScrollbackViewport.padRowsForViewport(
+            rows: [first, second], columns: 2, targetRowCount: 2)
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].map(\.scalar), [65, 66])
+        XCTAssertEqual(rows[1].map(\.scalar), [68, 32])
+    }
+
     func testOnlyTheExactLatestRawHistoryRequestCanReplaceTheVisiblePage() {
         let expected = RawScrollbackRequest(
             displayHandle: 42, requestID: 9, startLine: 100, endLine: 145)
