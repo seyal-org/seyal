@@ -119,7 +119,7 @@ mod tests {
     };
     use seyal_runtime::local_ipc::framing::{
         HistoryCell, HistoryRangeSnapshot, HistoryRangeStatus, HistoryRow,
-        HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG,
+        HISTORY_CELL_CONTINUATION_FLAG,
     };
 
     fn cell(scalar: u32, flags: u16) -> HistoryCell {
@@ -201,21 +201,32 @@ mod tests {
 
     #[test]
     fn raw_snapshot_clip_preserves_identity_and_grapheme_sidecar() {
+        let mut sidecar = Vec::new();
+        let wide_grapheme = HistoryCell::from_text("👩‍💻", 0, 0, 0, &mut sidecar)
+            .unwrap()
+            .with_cell_metrics(2, false);
+        let continuation = cell(0, HISTORY_CELL_CONTINUATION_FLAG);
         let mut snapshot = HistoryRangeSnapshot {
             request_id: 9,
             block_id: u64::MAX,
             revision: 17,
             status: HistoryRangeStatus::Complete,
-            rows: vec![HistoryRow {
-                line_id: 42,
-                cells: vec![
-                    cell(b'a' as u32, 0),
-                    cell(0x4e2d, HISTORY_CELL_SIDECAR_FLAG),
-                    cell(0, HISTORY_CELL_CONTINUATION_FLAG),
-                    cell(b'z' as u32, 0),
-                ],
-            }],
-            sidecar: vec![3, 0, b'c', b'a', b't'],
+            rows: vec![
+                HistoryRow {
+                    line_id: 42,
+                    cells: vec![
+                        cell(b'a' as u32, 0),
+                        wide_grapheme,
+                        continuation,
+                        cell(b'z' as u32, 0),
+                    ],
+                },
+                HistoryRow {
+                    line_id: 43,
+                    cells: vec![wide_grapheme, continuation],
+                },
+            ],
+            sidecar,
         };
 
         clip_history_snapshot(&mut snapshot, 2);
@@ -226,6 +237,11 @@ mod tests {
         assert_eq!(snapshot.status, HistoryRangeStatus::Complete);
         assert_eq!(snapshot.rows[0].line_id, 42);
         assert_eq!(snapshot.rows[0].cells, vec![cell(b'a' as u32, 0)]);
-        assert_eq!(snapshot.sidecar, vec![3, 0, b'c', b'a', b't']);
+        assert_eq!(snapshot.rows[1].line_id, 43);
+        assert_eq!(snapshot.rows[1].cells, vec![wide_grapheme, continuation]);
+        assert_eq!(
+            wide_grapheme.sidecar_utf8(&snapshot.sidecar).unwrap(),
+            Some("👩‍💻".as_bytes())
+        );
     }
 }
