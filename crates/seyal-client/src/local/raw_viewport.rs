@@ -1,7 +1,7 @@
 //! Rust-owned scroll state for the conventional Raw terminal presentation.
 
 use seyal_runtime::local_ipc::framing::{
-    HistoryCell, HistoryRangeSnapshot, HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG,
+    HistoryCell, HistoryRangeSnapshot, HISTORY_CELL_CONTINUATION_FLAG,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,7 +44,7 @@ pub(crate) fn clip_history_snapshot(snapshot: &mut HistoryRangeSnapshot, columns
         .rows
         .iter()
         .flat_map(|row| &row.cells)
-        .filter(|cell| cell.scalar != 0 || cell.flags & HISTORY_CELL_SIDECAR_FLAG != 0)
+        .filter(|cell| cell.flags & HISTORY_CELL_CONTINUATION_FLAG == 0)
         .count() as u32;
     if columns > 0 {
         for row in &mut snapshot.rows {
@@ -222,6 +222,7 @@ mod tests {
                     line_id: 42,
                     cells: vec![
                         cell(b'a' as u32, 0),
+                        cell(0, 0),
                         wide_grapheme,
                         continuation,
                         cell(b'z' as u32, 0),
@@ -237,13 +238,16 @@ mod tests {
 
         let original_lead_count = clip_history_snapshot(&mut snapshot, 2);
 
-        assert_eq!(original_lead_count, 4);
+        assert_eq!(original_lead_count, 5);
         assert_eq!(snapshot.request_id, 9);
         assert_eq!(snapshot.block_id, u64::MAX);
         assert_eq!(snapshot.revision, 17);
         assert_eq!(snapshot.status, HistoryRangeStatus::Complete);
         assert_eq!(snapshot.rows[0].line_id, 42);
-        assert_eq!(snapshot.rows[0].cells, vec![cell(b'a' as u32, 0)]);
+        assert_eq!(
+            snapshot.rows[0].cells,
+            vec![cell(b'a' as u32, 0), cell(0, 0)]
+        );
         assert_eq!(snapshot.rows[1].line_id, 43);
         assert_eq!(snapshot.rows[1].cells, vec![wide_grapheme, continuation]);
         assert_eq!(
