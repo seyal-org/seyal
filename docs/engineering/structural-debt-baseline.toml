@@ -78,7 +78,7 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1067
+ceiling_loc = 1065
 issue = 1440
 responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority."
 
