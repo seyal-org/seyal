@@ -84,7 +84,10 @@ final class SeyalHostHistoryUITests: XCTestCase {
         attachScreenshot(live, name: "865-raw-scroll-live-end")
         let afterReturn = try XCTUnwrap(parseTerminalGeometryProbe(terminal.value as? String ?? ""))
         XCTAssertEqual(afterReturn, before, "returning to the live end must not mutate PTY state")
-        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 5),
+            "Seyal.app must remain in the foreground during Raw acceptance"
+        )
     }
 
     /// M003 daily-driver scrollback acceptance on the conventional Raw surface.
@@ -280,14 +283,20 @@ final class SeyalHostHistoryUITests: XCTestCase {
     func testRawAlternateScreenExitRestoresHistorySurface() throws {
         let app = hostedApp()
         let terminal = waitForUsableRawTerminal(in: app)
-        submitRawCommand(app, terminal: terminal, "printf 'M003-ALTSCR-PRIMARY\\n'")
-        _ = try screenshotContaining("M003-ALTSCR-PRIMARY", in: app, timeout: 20)
+        submitRawCommand(app, terminal: terminal, "printf 'SEYALALTSCREENPRIMARY\\n'")
+        _ = try screenshotContaining("SEYALALTSCREENPRIMARY", in: app, timeout: 20)
         try exerciseBoundedAlternateScreen(in: app) { command in
             submitRawCommand(app, terminal: terminal, command)
         }
-        let restored = try screenshotContaining("M003-ALTSCR-PRIMARY", in: app, timeout: 20)
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 5),
+            "Seyal should return to the foreground after alternate-screen exit"
+        )
+        XCTAssertTrue(terminal.exists, "the Raw terminal surface must remain mounted")
+        XCTAssertFalse(app.descendants(matching: .any)["seyal-composer"].exists)
+        attachScreenshot(app.windows.firstMatch.screenshot(), name: "1492-raw-after-altscreen")
+        let restored = try screenshotContaining("SEYALALTSCREENPRIMARY", in: app, timeout: 20)
         attachScreenshot(restored, name: "842-raw-history-after-altscreen")
-        assertRawTerminal(in: app)
     }
 
     /// Raw is the only user-selectable resting presentation while Blocks are suspended.
@@ -382,7 +391,8 @@ final class SeyalHostHistoryUITests: XCTestCase {
             waitBriefly(0.25)
             screenshot = app.windows.firstMatch.screenshot()
         }
-        XCTFail("Timed out waiting for visible text '\(text)'")
+        let observedText = try recognizedText(in: screenshot)
+        XCTFail("Timed out waiting for visible text '\(text)'; OCR=\(observedText)")
         return screenshot
     }
 
