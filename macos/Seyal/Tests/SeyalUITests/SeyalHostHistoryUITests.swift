@@ -277,6 +277,31 @@ final class SeyalHostHistoryUITests: XCTestCase {
             text.contains("RAW-PANE-1-MARKER"),
             "Pane 2 must display its own input; OCR=\(text)"
         )
+
+        originalPane.click()
+        let originalFocused = expectation(
+            for: NSPredicate(format: "value == 'focused'"),
+            evaluatedWith: originalPane,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [originalFocused], timeout: 8), .completed)
+        XCTAssertEqual(executionIdentity(originalTerminal.value as? String), originalExecution)
+        submitRawCommand(
+            app,
+            terminal: originalTerminal,
+            "printf 'RAW-PANE-0-FOCUS-RETURN\\n'"
+        )
+        let switchedBack = try screenshotContaining("RAW-PANE-0-FOCUS-RETURN", in: app, timeout: 20)
+        let switchedBackText = try recognizedText(in: switchedBack)
+        attachScreenshot(switchedBack, name: "1492-raw-split-pane-focus-return")
+        XCTAssertTrue(
+            switchedBackText.contains("RAW-PANE-1-MARKER"),
+            "Pane 2 output must remain visible after returning focus; OCR=\(switchedBackText)"
+        )
+        XCTAssertTrue(
+            switchedBackText.contains("RAW-PANE-0-FOCUS-RETURN"),
+            "Pane 1 must accept input after returning focus; OCR=\(switchedBackText)"
+        )
         XCTAssertEqual(app.state, .runningForeground)
     }
 
