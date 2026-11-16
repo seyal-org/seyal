@@ -248,6 +248,73 @@ final class SeyalHostHistoryUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// #1492 Raw-first acceptance: a large primary-screen stream must remain
+    /// stable when later commands update the same live terminal surface.
+    func testRawTenThousandLinesRemainStableAcrossFollowingCommands() throws {
+        let app = hostedApp()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10), "Raw terminal surface missing")
+        let usable = expectation(
+            for: NSPredicate(format: "value CONTAINS 'connection=usable'"),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [usable], timeout: 20), .completed)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-composer"].exists,
+            "Blocks suspension must leave the conventional Raw surface as the only resting view"
+        )
+
+        let initialGeometry = terminal.value as? String ?? ""
+        let geometry = try XCTUnwrap(
+            parseTerminalGeometryProbe(initialGeometry),
+            "Raw terminal must publish grid geometry: \(initialGeometry)"
+        )
+        XCTAssertGreaterThan(geometry.rows, 0, "Raw terminal rows must be nonzero")
+        XCTAssertGreaterThan(geometry.columns, 0, "Raw terminal columns must be nonzero")
+        terminal.click()
+        app.typeText("seq 1 10000")
+        app.typeKey("\r", modifierFlags: [])
+        let streamScreenshot = try screenshotContaining("10000", in: app, timeout: 10)
+        attachScreenshot(streamScreenshot, name: "1492-raw-10k-live-end")
+        let streamText = try recognizedText(in: streamScreenshot)
+        XCTAssertTrue(streamText.contains("10000"), "10k stream tail must be visible; OCR=\(streamText)")
+
+        app.typeText("pwd")
+        app.typeKey("\r", modifierFlags: [])
+        app.typeText("ls -d .")
+        app.typeKey("\r", modifierFlags: [])
+        app.typeText("printf 'SEYAL-RAW-10K-DONE'")
+        app.typeKey("\r", modifierFlags: [])
+        let followupScreenshot = try screenshotContaining("SEYAL-RAW-10K-DONE", in: app, timeout: 10)
+        attachScreenshot(followupScreenshot, name: "1492-raw-10k-after-pwd-ls")
+        let followupText = try recognizedText(in: followupScreenshot)
+        XCTAssertTrue(
+            followupText.contains("SEYAL-RAW-10K-DONE"),
+            "follow-up commands must complete on the same Raw surface; OCR=\(followupText)"
+        )
+        XCTAssertTrue(
+            followupText.contains("10000"),
+            "the prior stream tail must remain visible after pwd/ls; OCR=\(followupText)"
+        )
+        XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after Raw 10k output")
+    }
+
+    private func screenshotContaining(
+        _ text: String, in app: XCUIApplication, timeout: TimeInterval
+    ) throws -> XCUIScreenshot {
+        let deadline = Date().addingTimeInterval(timeout)
+        var screenshot = app.windows.firstMatch.screenshot()
+        while Date() < deadline {
+            if try recognizedText(in: screenshot).contains(text) { return screenshot }
+            waitBriefly(0.25)
+            screenshot = app.windows.firstMatch.screenshot()
+        }
+        XCTFail("Timed out waiting for visible text '\(text)'")
+        return screenshot
+    }
+
     /// #865: a second running command must keep Flow Blocks (preceding output
     /// stays owned by earlier Block chrome, not a Pane-wide live grid).
     func testSequentialCommandsKeepFlowLiveTailOnBlocks() throws {

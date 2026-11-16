@@ -87,6 +87,7 @@ fn directional_focus_moves_execution_and_input_authority_together() {
         direction: FocusDirection::Right,
     })
     .expect("focus B");
+    root.force_flow_test_fixture();
     let active = root.snapshot();
     assert_eq!(active.shell.focused_pane, pane_b);
     assert_eq!(active.pane, pane_b);

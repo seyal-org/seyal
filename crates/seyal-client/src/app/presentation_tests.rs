@@ -10,6 +10,7 @@ pub(super) fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
         target: None,
     })
     .unwrap();
+    root.force_flow_test_fixture();
 }
 
 fn evidence(tag: u8, alternate: bool) -> BindingEvidence {
