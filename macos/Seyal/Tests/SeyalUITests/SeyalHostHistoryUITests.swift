@@ -119,7 +119,7 @@ final class SeyalHostHistoryUITests: XCTestCase {
         )
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after 100,000 lines")
 
-        terminal.scroll(byDeltaX: 0, deltaY: 2_000)
+        terminal.scroll(byDeltaX: 0, deltaY: 1_700)
         let historyScreenshot = try screenshotContaining("M003-RETAINED-ROW", in: app, timeout: 20)
         let historyText = try recognizedText(in: historyScreenshot)
         attachScreenshot(historyScreenshot, name: "m003-raw-100k-scrolled-history")
