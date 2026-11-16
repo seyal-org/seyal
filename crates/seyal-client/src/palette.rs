@@ -178,10 +178,7 @@ impl PaletteState {
         }
     }
 
-    /// Rebuild the frozen projection from authoritative shell/chrome state.
-    /// Called after Open and SetQuery so Run never re-resolves by ordinal.
-    /// `resting_is_raw` is retained for call-site compatibility. Raw-only v1
-    /// never projects a user-selectable resting presentation.
+    /// Rebuild the frozen projection from authoritative state; Run reads it.
     /// `unpresented` must already be sorted deterministically (ExecutionId order).
     pub fn rebuild(
         &mut self,
