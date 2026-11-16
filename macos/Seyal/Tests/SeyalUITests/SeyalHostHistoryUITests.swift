@@ -1,12 +1,10 @@
-import Darwin
 import ImageIO
 import XCTest
 import Vision
 
-/// Headed HistoryStore / reflow evidence for #842. Metal does not expose PTY
-/// bytes as AX text, so these cases prove the user-visible Flow/Blocks host
-/// stays attached, resizes, and returns from alternate-screen without leaving
-/// a raw-terminal chrome. They do not close the physical #673 matrix.
+/// Headed Raw terminal history, reflow, scrollback and alternate-screen evidence.
+/// Metal does not expose PTY bytes as AX text, so cases inspect real screenshots
+/// from the packaged host and do not close the physical M002/M003 matrix.
 @MainActor
 final class SeyalHostHistoryUITests: XCTestCase {
     override func setUp() {
@@ -19,232 +17,125 @@ final class SeyalHostHistoryUITests: XCTestCase {
         return app
     }
 
-    func testLongOutputAndResizeStayOnFlowBlocks() throws {
+    func testRawLongOutputAndResizeStayOnTerminal() throws {
         let app = hostedApp()
-        waitForUsablePty(in: app)
-
-        submitComposerCommand(
+        let terminal = waitForUsableRawTerminal(in: app)
+        submitRawCommand(
             app,
+            terminal: terminal,
             "printf '%s\\n' $(seq 1 40) 'seyal-842-reflow 日本語 👩‍💻 wrapping-line-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'"
         )
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed on long history output")
-        assertFlowBlocksOrFail(in: app)
-        attachScreenshot(app, name: "842-history-before-resize")
+        let output = try screenshotContaining("seyal-842-reflow", in: app, timeout: 20)
+        attachScreenshot(output, name: "842-raw-history-before-resize")
 
         resizeFrontWindow(app, dx: -220, dy: -140)
-        waitBriefly(0.6)
+        assertRawTerminal(in: app)
+        let narrow = app.windows.firstMatch.screenshot()
+        attachScreenshot(narrow, name: "842-raw-history-narrow")
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed on narrow resize")
-        assertFlowBlocksOrFail(in: app)
-        attachScreenshot(app, name: "842-history-narrow")
 
         resizeFrontWindow(app, dx: 220, dy: 140)
-        waitBriefly(0.6)
+        assertRawTerminal(in: app)
+        let wide = app.windows.firstMatch.screenshot()
+        attachScreenshot(wide, name: "842-raw-history-wide")
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed on wide resize")
-        assertFlowBlocksOrFail(in: app)
-        attachScreenshot(app, name: "842-history-wide")
     }
 
-    /// #865: a long running normal-screen command must stay on one Flow Block
-    /// surface under the Pane scroll owner (no Pane-wide live grid chrome).
-    /// Uses a paced producer so the capture lands while the Block is still
-    /// running (PRIMARY_CLIP), then waits for completion handoff.
-    func testRunningSeqLiveTailStaysOnFlowBlocks() throws {
-        // The headed host spawns the account pw_shell. Only trusted zsh
-        // integration publishes a Block (OSC 133). Bash CI accounts never
-        // get one; skipping here matches testComposerReadsBusyWhileCommandRunsAndAvailableAtNextPrompt.
-        // Clip geometry on that path is SeyalHostComponentTests.
-        guard loginShellIsZsh() else {
-            throw XCTSkip(
-                "Running Block live-tail requires a zsh pw_shell. Hosted runners use bash, so no OSC 133 Block is published."
-            )
-        }
+    /// A paced producer proves output reaches the live Raw surface during a
+    /// command and continues to update until the shell returns to its prompt.
+    func testRawStreamingOutputKeepsLiveTail() throws {
         let app = hostedApp()
-        waitForUsablePty(in: app)
-
-        // Paced seq stays running long enough for the body-height check.
-        submitComposerCommand(
+        let terminal = waitForUsableRawTerminal(in: app)
+        submitRawCommand(
             app,
-            "for i in $(seq 1 1000); do printf '%s\\n' \"$i\"; sleep 0.01; done"
+            terminal: terminal,
+            "for i in $(seq 1 30); do printf 'M003-STREAM-%02d\\n' \"$i\"; sleep 0.03; done"
         )
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while seq live-tail ran")
-        assertFlowBlocksOrFail(in: app)
-        let runningBody = app.descendants(matching: .any)["seyal-block-0-body"]
-        XCTAssertTrue(
-            runningBody.waitForExistence(timeout: 12),
-            "zsh integration must publish a running Block body"
-        )
-        XCTAssertGreaterThan(
-            runningBody.frame.height,
-            8,
-            "running live-tail body must be taller than a one-line stub while seq runs"
-        )
-        attachScreenshot(app, name: "865-live-tail-running-seq")
-
-        // Completion handoff must remain on Flow Blocks, not a raw Metal viewport.
-        // seq 1 1000 @ 10ms ≈ 10s; allow headroom under CI load.
-        waitBriefly(14.0)
-        XCTAssertEqual(app.state, .runningForeground)
-        assertFlowBlocksOrFail(in: app)
-        attachScreenshot(app, name: "865-live-tail-after-seq")
+        let first = try screenshotContaining("M003-STREAM-01", in: app, timeout: 10)
+        attachScreenshot(first, name: "865-raw-stream-running")
+        let tail = try screenshotContaining("M003-STREAM-30", in: app, timeout: 20)
+        attachScreenshot(tail, name: "865-raw-stream-live-tail")
+        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed during streamed output")
+        assertRawTerminal(in: app)
     }
 
-    /// #865 / SPEC-008 §3.1: Flow transcript scroll must leave prepared-frame
-    /// PTY size and cursor tokens unchanged on the terminal AX probe.
-    /// Hosted CI without a zsh `pw_shell` is ENVIRONMENT_UNSUPPORTED (this
-    /// case `XCTSkip`s); local zsh evidence must still prove clip motion.
-    func testFlowTranscriptScrollDoesNotMutatePtySizeOrCursor() throws {
-        guard loginShellIsZsh() else {
-            throw XCTSkip(
-                "Flow scroll→PTY/cursor invariant requires a zsh pw_shell (OSC 133 Blocks). ENVIRONMENT_UNSUPPORTED on hosted CI without zsh."
-            )
-        }
+    /// Local Raw scrollback must not resize the PTY or move its live cursor.
+    func testRawScrollDoesNotMutatePtyGeometryOrCursor() throws {
         let app = hostedApp()
-        waitForUsablePty(in: app)
-
-        submitComposerCommand(app, "printf '%s\\n' $(seq 1 120)")
-        waitBriefly(1.2)
-        assertFlowBlocksOrFail(in: app)
-
-        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
-        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        let terminal = waitForUsableRawTerminal(in: app)
+        submitRawCommand(
+            app,
+            terminal: terminal,
+            "printf 'M003-SCROLL-OLD\\n'; seq 1 120; printf 'M003-SCROLL-TAIL\\n'"
+        )
+        _ = try screenshotContaining("M003-SCROLL-TAIL", in: app, timeout: 20)
         let beforeValue = terminal.value as? String ?? ""
-        let beforeGeom = try XCTUnwrap(
-            parseTerminalGeometryProbe(beforeValue),
-            "terminal AX must expose rows/columns/cursor before scroll; value=\(beforeValue)"
-        )
-        XCTAssertGreaterThan(beforeGeom.rows, 0)
-        XCTAssertGreaterThan(beforeGeom.columns, 0)
+        let before = try XCTUnwrap(parseTerminalGeometryProbe(beforeValue))
 
-        let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"].firstMatch
-        XCTAssertTrue(transcript.waitForExistence(timeout: 5))
-        let body = app.descendants(matching: .any)["seyal-block-0-body"].firstMatch
-        XCTAssertTrue(body.waitForExistence(timeout: 5), "the overflowing Block body must be addressable")
-        let yBefore = body.frame.minY
-        // Positive XCTest delta moves toward older transcript content on this
-        // flipped AppKit scroll view. A negative delta at live-tail was a
-        // no-op and made the former assertion report a product defect.
-        transcript.scroll(byDeltaX: 0, deltaY: 320)
-        waitBriefly(0.6)
-        let yAfter = body.frame.minY
-        XCTAssertNotEqual(
-            yBefore,
-            yAfter,
-            "the Block body must move inside its transcript viewport after scrolling toward history"
-        )
+        terminal.scroll(byDeltaX: 0, deltaY: 1_000_000)
+        let history = try screenshotContaining("M003-SCROLL-OLD", in: app, timeout: 20)
+        attachScreenshot(history, name: "865-raw-scroll-history")
+        let afterScrollValue = terminal.value as? String ?? ""
+        let afterScroll = try XCTUnwrap(parseTerminalGeometryProbe(afterScrollValue))
+        XCTAssertEqual(afterScroll, before, "Raw history scroll must preserve PTY geometry and cursor")
 
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after Flow scroll")
-        assertFlowBlocksOrFail(in: app)
-        let afterValue = terminal.value as? String ?? ""
-        let afterGeom = try XCTUnwrap(
-            parseTerminalGeometryProbe(afterValue),
-            "terminal AX must expose rows/columns/cursor after scroll; value=\(afterValue)"
-        )
-        XCTAssertEqual(afterGeom.rows, beforeGeom.rows, "Flow scroll must not change PTY rows")
-        XCTAssertEqual(afterGeom.columns, beforeGeom.columns, "Flow scroll must not change PTY columns")
-        XCTAssertEqual(afterGeom.cursorRow, beforeGeom.cursorRow, "Flow scroll must not change cursor row")
-        XCTAssertEqual(
-            afterGeom.cursorColumn,
-            beforeGeom.cursorColumn,
-            "Flow scroll must not change cursor column"
-        )
-        XCTAssertEqual(
-            afterGeom.cursorVisible,
-            beforeGeom.cursorVisible,
-            "Flow scroll must not change cursor visibility"
-        )
-        attachScreenshot(app, name: "865-flow-scroll-pty-cursor-invariant")
+        terminal.scroll(byDeltaX: 0, deltaY: -1_000_000)
+        let live = try screenshotContaining("M003-SCROLL-TAIL", in: app, timeout: 20)
+        attachScreenshot(live, name: "865-raw-scroll-live-end")
+        let afterReturn = try XCTUnwrap(parseTerminalGeometryProbe(terminal.value as? String ?? ""))
+        XCTAssertEqual(afterReturn, before, "returning to the live end must not mutate PTY state")
+        XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// M003 daily-driver scrollback acceptance: use a real local shell/PTy and
-    /// 100,000 output lines, then prove the final output remains available and
-    /// the transcript can move away from and back to its live end.
-    func testHundredThousandOutputLinesRemainScrollableAndDocked() throws {
+    /// M003 daily-driver scrollback acceptance on the conventional Raw surface.
+    /// A real local shell streams 100,000 lines; history must remain scrollable
+    /// and return to the same live tail without changing PTY geometry.
+    func testRawHundredThousandOutputLinesRemainScrollableAndStable() throws {
         let app = hostedApp()
-        waitForUsablePty(in: app)
-        submitComposerCommand(
+        let terminal = waitForUsableRawTerminal(in: app)
+        let initialValue = terminal.value as? String ?? ""
+        let initialGeometry = try XCTUnwrap(
+            parseTerminalGeometryProbe(initialValue),
+            "Raw terminal must publish grid geometry: \(initialValue)"
+        )
+        XCTAssertGreaterThan(initialGeometry.rows, 0)
+        XCTAssertGreaterThan(initialGeometry.columns, 0)
+
+        submitRawCommand(
             app,
+            terminal: terminal,
             "printf 'M003-OLD-ROW\\n'; seq 1 100000; printf 'M003-TAIL-ROW\\n'"
         )
-
-        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
-        let available = expectation(
-            for: NSPredicate(format: "value == 'available'"),
-            evaluatedWith: composer,
-            handler: nil
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [available], timeout: 60),
-            .completed,
-            "the 100,000-line command must finish and return the composer to service"
-        )
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after 100,000 lines")
-        assertFlowBlocksOrFail(in: app)
-
-        let body = app.descendants(matching: .any)["seyal-block-0-body"].firstMatch
-        XCTAssertTrue(body.waitForExistence(timeout: 12), "the large-output Block body must remain mounted")
-        let tail = expectation(
-            for: NSPredicate(format: "label CONTAINS 'M003-TAIL-ROW' OR value CONTAINS 'M003-TAIL-ROW'"),
-            evaluatedWith: body,
-            handler: nil
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [tail], timeout: 20),
-            .completed,
-            "the Block's retained transcript must expose the final output line"
-        )
-        let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"].firstMatch
-        XCTAssertTrue(transcript.exists)
-        let composerTop = composer.frame.minY
-        XCTAssertLessThanOrEqual(
-            composerTop - transcript.frame.maxY,
-            32,
-            "the transcript viewport must stay docked immediately above the composer"
-        )
-        let liveEndY = body.frame.minY
-        let liveEndScreenshot = app.windows.firstMatch.screenshot()
-        attachScreenshot(liveEndScreenshot, name: "m003-100k-live-end")
+        let liveEndScreenshot = try screenshotContaining("M003-TAIL-ROW", in: app, timeout: 90)
+        attachScreenshot(liveEndScreenshot, name: "m003-raw-100k-live-end")
         let liveEndText = try recognizedText(in: liveEndScreenshot)
         XCTAssertTrue(
-            liveEndText.contains("M003-TAIL-ROW"),
-            "the live Block tail must be visibly painted, not only present in AX; OCR=\(liveEndText)"
+            liveEndText.contains("100000"),
+            "100k tail must be visible; OCR=\(liveEndText)"
         )
+        XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after 100,000 lines")
 
-        transcript.scroll(byDeltaX: 0, deltaY: 520)
-        waitBriefly(0.6)
-        let historyY = body.frame.minY
-        XCTAssertGreaterThan(
-            abs(historyY - liveEndY),
-            80,
-            "100,000 output lines must be scrollable within the Block transcript"
-        )
-        let historyScreenshot = app.windows.firstMatch.screenshot()
-        attachScreenshot(historyScreenshot, name: "m003-100k-scrolled-history")
-        var historyText = try recognizedText(in: historyScreenshot)
-        if !historyText.contains("M003-OLD-ROW") {
-            // Drive the Pane scroll to its oldest retained content; large
-            // deltas are intentional here because the real document has
-            // 100,000 rows and only a bounded viewport may be prepared.
-            transcript.scroll(byDeltaX: 0, deltaY: 1_000_000)
-            waitBriefly(0.6)
-            historyText = try recognizedText(in: app.windows.firstMatch.screenshot())
-        }
+        terminal.scroll(byDeltaX: 0, deltaY: 1_000_000)
+        let historyScreenshot = try screenshotContaining("M003-OLD-ROW", in: app, timeout: 20)
+        let historyText = try recognizedText(in: historyScreenshot)
+        attachScreenshot(historyScreenshot, name: "m003-raw-100k-scrolled-history")
         XCTAssertTrue(
             historyText.contains("M003-OLD-ROW"),
-            "scrolling to the oldest retained page must visibly paint the first output row; OCR=\(historyText)"
+            "scrolling to retained history must visibly paint the first output row; OCR=\(historyText)"
         )
-        transcript.scroll(byDeltaX: 0, deltaY: -1_000_000)
-        waitBriefly(0.6)
-        XCTAssertEqual(
-            body.frame.minY,
-            liveEndY,
-            accuracy: 48,
-            "scrolling toward the live end must restore the original Block position"
-        )
-        let restoredText = try recognizedText(in: app.windows.firstMatch.screenshot())
+
+        terminal.scroll(byDeltaX: 0, deltaY: -1_000_000)
+        let restoredScreenshot = try screenshotContaining("M003-TAIL-ROW", in: app, timeout: 20)
+        attachScreenshot(restoredScreenshot, name: "m003-raw-100k-restored-live-end")
+        let restoredText = try recognizedText(in: restoredScreenshot)
         XCTAssertTrue(
-            restoredText.contains("M003-TAIL-ROW"),
-            "returning to the live end must repaint the tail page; OCR=\(restoredText)"
+            restoredText.contains("100000"),
+            "restored live tail must remain visible; OCR=\(restoredText)"
         )
+        let finalValue = terminal.value as? String ?? ""
+        let finalGeometry = try XCTUnwrap(parseTerminalGeometryProbe(finalValue))
+        XCTAssertEqual(finalGeometry.rows, initialGeometry.rows, "scrollback must not change PTY rows")
+        XCTAssertEqual(finalGeometry.columns, initialGeometry.columns, "scrollback must not change PTY columns")
         XCTAssertEqual(app.state, .runningForeground)
     }
 
@@ -252,42 +143,24 @@ final class SeyalHostHistoryUITests: XCTestCase {
     /// stable when later commands update the same live terminal surface.
     func testRawTenThousandLinesRemainStableAcrossFollowingCommands() throws {
         let app = hostedApp()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
-        XCTAssertTrue(terminal.waitForExistence(timeout: 10), "Raw terminal surface missing")
-        let usable = expectation(
-            for: NSPredicate(format: "value CONTAINS 'connection=usable'"),
-            evaluatedWith: terminal,
-            handler: nil
+        let terminal = waitForUsableRawTerminal(in: app)
+        let initialGeometry = try XCTUnwrap(
+            parseTerminalGeometryProbe(terminal.value as? String ?? ""),
+            "Raw terminal must publish grid geometry"
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [usable], timeout: 20), .completed)
-        XCTAssertFalse(
-            app.descendants(matching: .any)["seyal-composer"].exists,
-            "Blocks suspension must leave the conventional Raw surface as the only resting view"
-        )
+        XCTAssertGreaterThan(initialGeometry.rows, 0, "Raw terminal rows must be nonzero")
+        XCTAssertGreaterThan(initialGeometry.columns, 0, "Raw terminal columns must be nonzero")
 
-        let initialGeometry = terminal.value as? String ?? ""
-        let geometry = try XCTUnwrap(
-            parseTerminalGeometryProbe(initialGeometry),
-            "Raw terminal must publish grid geometry: \(initialGeometry)"
-        )
-        XCTAssertGreaterThan(geometry.rows, 0, "Raw terminal rows must be nonzero")
-        XCTAssertGreaterThan(geometry.columns, 0, "Raw terminal columns must be nonzero")
-        terminal.click()
-        app.typeText("seq 1 10000")
-        app.typeKey("\r", modifierFlags: [])
-        let streamScreenshot = try screenshotContaining("10000", in: app, timeout: 10)
+        submitRawCommand(app, terminal: terminal, "seq 1 10000")
+        let streamScreenshot = try screenshotContaining("10000", in: app, timeout: 20)
         attachScreenshot(streamScreenshot, name: "1492-raw-10k-live-end")
         let streamText = try recognizedText(in: streamScreenshot)
         XCTAssertTrue(streamText.contains("10000"), "10k stream tail must be visible; OCR=\(streamText)")
 
-        app.typeText("pwd")
-        app.typeKey("\r", modifierFlags: [])
-        app.typeText("ls -d .")
-        app.typeKey("\r", modifierFlags: [])
-        app.typeText("printf 'SEYAL-RAW-10K-DONE'")
-        app.typeKey("\r", modifierFlags: [])
-        let followupScreenshot = try screenshotContaining("SEYAL-RAW-10K-DONE", in: app, timeout: 10)
+        submitRawCommand(app, terminal: terminal, "pwd")
+        submitRawCommand(app, terminal: terminal, "ls -d .")
+        submitRawCommand(app, terminal: terminal, "printf 'SEYAL-RAW-10K-DONE'")
+        let followupScreenshot = try screenshotContaining("SEYAL-RAW-10K-DONE", in: app, timeout: 20)
         attachScreenshot(followupScreenshot, name: "1492-raw-10k-after-pwd-ls")
         let followupText = try recognizedText(in: followupScreenshot)
         XCTAssertTrue(
@@ -301,123 +174,77 @@ final class SeyalHostHistoryUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after Raw 10k output")
     }
 
-    private func screenshotContaining(
-        _ text: String, in app: XCUIApplication, timeout: TimeInterval
-    ) throws -> XCUIScreenshot {
-        let deadline = Date().addingTimeInterval(timeout)
-        var screenshot = app.windows.firstMatch.screenshot()
-        while Date() < deadline {
-            if try recognizedText(in: screenshot).contains(text) { return screenshot }
-            waitBriefly(0.25)
-            screenshot = app.windows.firstMatch.screenshot()
-        }
-        XCTFail("Timed out waiting for visible text '\(text)'")
-        return screenshot
+    func testRawSequentialCommandsPreserveEarlierOutput() throws {
+        let app = hostedApp()
+        let terminal = waitForUsableRawTerminal(in: app)
+        submitRawCommand(app, terminal: terminal, "printf 'M003-FIRST-COMMAND\\n'")
+        _ = try screenshotContaining("M003-FIRST-COMMAND", in: app, timeout: 20)
+        submitRawCommand(app, terminal: terminal, "printf 'M003-SECOND-COMMAND\\n'")
+        let result = try screenshotContaining("M003-SECOND-COMMAND", in: app, timeout: 20)
+        let text = try recognizedText(in: result)
+        XCTAssertTrue(text.contains("M003-FIRST-COMMAND"), "prior output must remain visible; OCR=\(text)")
+        XCTAssertTrue(text.contains("M003-SECOND-COMMAND"), "new output must be visible; OCR=\(text)")
+        attachScreenshot(result, name: "865-raw-sequential-commands")
     }
 
-    /// #865: a second running command must keep Flow Blocks (preceding output
-    /// stays owned by earlier Block chrome, not a Pane-wide live grid).
-    func testSequentialCommandsKeepFlowLiveTailOnBlocks() throws {
+    func testRawAlternateScreenExitRestoresHistorySurface() throws {
         let app = hostedApp()
-        waitForUsablePty(in: app)
-
-        submitComposerCommand(app, "printf 'seyal-865-first\\n'")
-        waitBriefly(0.8)
-        assertFlowBlocksOrFail(in: app)
-
-        submitComposerCommand(
-            app,
-            "for i in $(seq 1 80); do printf 'second-%s\\n' \"$i\"; sleep 0.02; done"
-        )
-        waitBriefly(0.5)
-        XCTAssertEqual(app.state, .runningForeground)
-        assertFlowBlocksOrFail(in: app)
-        attachScreenshot(app, name: "865-live-tail-second-command")
-
-        waitBriefly(3.0)
-        assertFlowBlocksOrFail(in: app)
-        attachScreenshot(app, name: "865-live-tail-after-second")
-    }
-
-    func testAlternateScreenExitRestoresFlowHistorySurface() throws {
-        let app = hostedApp()
-        waitForUsablePty(in: app)
-        submitComposerCommand(app, "printf 'seyal-842-primary\\n'")
-        assertFlowBlocksOrFail(in: app)
-
+        let terminal = waitForUsableRawTerminal(in: app)
+        submitRawCommand(app, terminal: terminal, "printf 'M003-ALTSCR-PRIMARY\\n'")
+        _ = try screenshotContaining("M003-ALTSCR-PRIMARY", in: app, timeout: 20)
         try exerciseBoundedAlternateScreen(in: app) { command in
-            submitComposerCommand(app, command)
+            submitRawCommand(app, terminal: terminal, command)
         }
-        assertFlowBlocksOrFail(in: app)
-        attachScreenshot(app, name: "842-history-after-altscreen")
+        let restored = try screenshotContaining("M003-ALTSCR-PRIMARY", in: app, timeout: 20)
+        attachScreenshot(restored, name: "842-raw-history-after-altscreen")
+        assertRawTerminal(in: app)
     }
 
-    /// #1442 historically used Cmd+Enter → Toggle Raw. Accepted keybinding
-    /// policy now keeps `presentation.toggle_raw` out of builtins and the
-    /// View menu (`supported_shell_menu_and_builtins_do_not_expose_raw_presentation`).
-    /// Raw/Flow restore coverage lives in presentation unit tests; a headed
-    /// Raw-admission E2E needs its own Issue against the current resting model.
-    func testCmdEnterRawToggleRestoresFlowBlocks() throws {
-        throw XCTSkip(
-            "Toggle Raw has no builtin Cmd+Enter / View menu admission; "
-                + "see keybinding projection policy. Out of scope for #1457 chrome."
-        )
+    /// Raw is the only user-selectable resting presentation while Blocks are suspended.
+    func testViewMenuDoesNotOfferPresentationSwitches() throws {
+        let app = hostedApp()
+        _ = waitForUsableRawTerminal(in: app)
+        let viewMenu = app.menuBars.menuBarItems["View"]
+        XCTAssertTrue(viewMenu.waitForExistence(timeout: 5), "View menu must be present")
+        viewMenu.click()
+        XCTAssertFalse(app.menuItems["Flow"].exists)
+        XCTAssertFalse(app.menuItems["Set Flow"].exists)
+        XCTAssertFalse(app.menuItems["Toggle Raw"].exists)
+        XCTAssertTrue(app.menuItems["Toggle TUI"].exists)
     }
 
-    private func submitComposerCommand(_ app: XCUIApplication, _ command: String) {
-        let composer = app.descendants(matching: .any)["seyal-composer"]
-        XCTAssertTrue(composer.waitForExistence(timeout: 12))
-        let composerReady = NSPredicate(format: "value == 'available'")
-        let becameReady = expectation(for: composerReady, evaluatedWith: composer, handler: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [becameReady], timeout: 12),
-            .completed,
-            "composer never became available; value=\(composer.value ?? "nil")"
-        )
-        composer.firstMatch.click()
-        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
-        if editor.waitForExistence(timeout: 2), editor.firstMatch.isHittable {
-            editor.firstMatch.click()
-            editor.firstMatch.typeText(command)
-            editor.firstMatch.typeKey("\r", modifierFlags: [])
-        } else {
-            composer.firstMatch.typeText(command)
-            app.typeKey("\r", modifierFlags: [])
-        }
-        let cleared = expectation(
-            for: NSPredicate(format: "value == nil OR value == ''"),
-            evaluatedWith: editor.firstMatch,
+    private func waitForUsableRawTerminal(
+        in app: XCUIApplication, timeout: TimeInterval = 20
+    ) -> XCUIElement {
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10), "Raw terminal surface missing")
+        let usable = expectation(
+            for: NSPredicate(format: "value CONTAINS 'connection=usable'"),
+            evaluatedWith: terminal,
             handler: nil
         )
-        _ = XCTWaiter.wait(for: [cleared], timeout: 8)
+        XCTAssertEqual(XCTWaiter.wait(for: [usable], timeout: timeout), .completed)
+        assertRawTerminal(in: app, terminal: terminal)
+        return terminal
     }
 
-    private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        let terminal = app.descendants(matching: .any)["terminal-input"]
-        XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
-        let usable = NSPredicate(format: "value CONTAINS 'connection=usable'")
-        let arrived = expectation(for: usable, evaluatedWith: terminal, handler: nil)
-        let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
-        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
-        XCTAssertEqual(
-            result,
-            .completed,
-            "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
+    private func assertRawTerminal(in app: XCUIApplication, terminal: XCUIElement? = nil) {
+        let surface = terminal ?? app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(surface.exists, "conventional Raw terminal surface must remain mounted")
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-composer"].exists,
+            "Blocks suspension must leave Raw as the only resting presentation"
         )
-        assertFlowBlocksOrFail(in: app)
+        XCTAssertEqual(app.state, .runningForeground)
     }
 
-    private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
-        app.ensureFlowBlocksPresentation(timeout: timeout)
-        let composer = app.descendants(matching: .any)["seyal-composer"]
-        let blocks = app.descendants(matching: .any)["seyal-blocks"]
-        let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
-        XCTAssertTrue(composer.waitForExistence(timeout: timeout), "history XCUI must stay on Flow/Blocks")
-        XCTAssertTrue(composer.firstMatch.isHittable, "history XCUI must keep composer hittable")
-        XCTAssertTrue(blocks.waitForExistence(timeout: 5), "history XCUI must keep seyal-blocks")
-        XCTAssertTrue(transcript.waitForExistence(timeout: 5), "history XCUI must keep the transcript")
-        XCTAssertGreaterThan(transcript.firstMatch.frame.height, 120, "transcript must remain a full Flow surface")
+    private func submitRawCommand(
+        _ app: XCUIApplication, terminal: XCUIElement, _ command: String
+    ) {
+        terminal.click()
+        app.typeText(command)
+        app.typeKey("\r", modifierFlags: [])
     }
 
     private func resizeFrontWindow(_ app: XCUIApplication, dx: CGFloat, dy: CGFloat) {
@@ -439,6 +266,20 @@ final class SeyalHostHistoryUITests: XCTestCase {
         add(attachment)
     }
 
+    private func screenshotContaining(
+        _ text: String, in app: XCUIApplication, timeout: TimeInterval
+    ) throws -> XCUIScreenshot {
+        let deadline = Date().addingTimeInterval(timeout)
+        var screenshot = app.windows.firstMatch.screenshot()
+        while Date() < deadline {
+            if try recognizedText(in: screenshot).contains(text) { return screenshot }
+            waitBriefly(0.25)
+            screenshot = app.windows.firstMatch.screenshot()
+        }
+        XCTFail("Timed out waiting for visible text '\(text)'")
+        return screenshot
+    }
+
     private func recognizedText(in screenshot: XCUIScreenshot) throws -> String {
         let source = try XCTUnwrap(
             CGImageSourceCreateWithData(screenshot.pngRepresentation as CFData, nil)
@@ -454,14 +295,6 @@ final class SeyalHostHistoryUITests: XCTestCase {
 
     private func waitBriefly(_ seconds: TimeInterval) {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
-    }
-
-    /// Same predicate as shell-integration support: account `pw_shell`, not `SHELL`.
-    private func loginShellIsZsh() -> Bool {
-        guard let account = getpwuid(geteuid()), let shell = account.pointee.pw_shell else {
-            return false
-        }
-        return URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
     }
 
     private struct TerminalGeometryProbe: Equatable {
