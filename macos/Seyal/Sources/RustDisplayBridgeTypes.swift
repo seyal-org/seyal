@@ -41,6 +41,26 @@ struct PaneHistoryRequestKey: Hashable, Sendable {
   }
 }
 
+/// Transport metadata retained across paginated history requests so every
+/// continuation uses the same presentation projection as the initial page.
+struct PaneHistoryRangeRequest: Equatable, Sendable {
+  let blockID: UInt64
+  let startLine: UInt64
+  let endLine: UInt64
+  let rawViewportColumns: UInt16
+  let startUnit: UInt32
+
+  func continuation(startUnit: UInt32) -> Self {
+    Self(
+      blockID: blockID,
+      startLine: startLine,
+      endLine: endLine,
+      rawViewportColumns: rawViewportColumns,
+      startUnit: startUnit
+    )
+  }
+}
+
 struct NativeBlockRecord: Equatable {
   enum State: Equatable {
     case running

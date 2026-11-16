@@ -6,6 +6,24 @@ import XCTest
 /// #1442: XCTest coverage for Raw presentation-local scrollback math and
 /// Flow isolation helpers (UI policy requires SeyalTests for Sources changes).
 final class RawScrollbackViewportTests: XCTestCase {
+    func testHistoryPageContinuationKeepsRawViewportWidth() {
+        let initial = PaneHistoryRangeRequest(
+            blockID: UInt64.max,
+            startLine: 40,
+            endLine: 90,
+            rawViewportColumns: 80,
+            startUnit: 0
+        )
+
+        let continued = initial.continuation(startUnit: 4_096)
+
+        XCTAssertEqual(continued.blockID, initial.blockID)
+        XCTAssertEqual(continued.startLine, initial.startLine)
+        XCTAssertEqual(continued.endLine, initial.endLine)
+        XCTAssertEqual(continued.startUnit, 4_096)
+        XCTAssertEqual(continued.rawViewportColumns, 80)
+    }
+
     func testRawScrollbackViewportMathSelfTests() {
         XCTAssertTrue(RawScrollbackViewportSelfTests.runAll())
     }

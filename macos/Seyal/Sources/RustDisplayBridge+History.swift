@@ -50,7 +50,13 @@ extension RustDisplayBridge {
     if result == 0 {
       let requestKey = PaneHistoryRequestKey(
         displayHandle: handle, paneID: paneID, requestID: requestID)
-      requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
+      requestedHistoryRanges[requestKey] = PaneHistoryRangeRequest(
+        blockID: blockID,
+        startLine: startLine,
+        endLine: endLine,
+        rawViewportColumns: rawViewportColumns,
+        startUnit: 0
+      )
     }
     return result
   }
@@ -157,18 +163,19 @@ extension RustDisplayBridge {
       let truncated = metadata.reserved == 1
       if truncated, leads > 0, isConnected {
         let nextStart = (previous?.startUnit ?? 0) + leads
+        let continuation = request.continuation(startUnit: nextStart)
         let nextID = seyal_bridge_next_history_request_id_for(handle)
         if nextID != 0 {
           let continued = finishAddressedMutation(
             seyal_bridge_request_history_range_for(
-              handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
-              nextStart, 0),
+              handle, continuation.blockID, continuation.startLine, continuation.endLine,
+              512, 131_072, continuation.startUnit, continuation.rawViewportColumns),
             forDisplayHandle: handle
           )
           if continued == 0 {
             let nextKey = PaneHistoryRequestKey(
               displayHandle: handle, paneID: paneID, requestID: nextID)
-            requestedHistoryRanges[nextKey] = request
+            requestedHistoryRanges[nextKey] = continuation
             historyContinuations[nextKey] = (nextStart, merged)
           }
         }
