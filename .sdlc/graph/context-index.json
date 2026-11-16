@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "575b7fb8b77f1c752b4a7d7665dd761fbb667b63"
+          "fingerprint": "6f6ce49a9e4a7cec223893b3623ef79007142a2e"
         }
       ],
       "relationships": [
@@ -54,7 +54,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-004-VT-STATE-OWNERSHIP.md",
-          "fingerprint": "6f675de46ffa783a9dfaebdd5896357b185b6237"
+          "fingerprint": "79de78245b195612f38cab85c19c5ae6dc7ce20d"
         },
         {
           "path": "docs/specs/SPEC-001-M001-VT.md",
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "575b7fb8b77f1c752b4a7d7665dd761fbb667b63"
+          "fingerprint": "6f6ce49a9e4a7cec223893b3623ef79007142a2e"
         }
       ],
       "relationships": [
@@ -126,15 +126,15 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "e5896411d374ca1414cca39e32213ced3853bf9d"
+          "fingerprint": "3c615f6fc1c8849b51f35a2bd40ebee8ffc008be"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
-          "fingerprint": "0fab42a04a6c9609a43a49ace744c2b0d9a46708"
+          "fingerprint": "05949c97d4e326ef8dcaa66d44a7ef3cb174d3d0"
         },
         {
           "path": "docs/specs/SPEC-008-M003-COMMAND-BLOCKS.md",
-          "fingerprint": "0ba5151f462290465cc6fa5103cb40573e943750"
+          "fingerprint": "195d9d749c7bbeb02f72f08a460a4c327dc7f7c6"
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
@@ -179,7 +179,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-004-VT-STATE-OWNERSHIP.md",
-          "fingerprint": "6f675de46ffa783a9dfaebdd5896357b185b6237"
+          "fingerprint": "79de78245b195612f38cab85c19c5ae6dc7ce20d"
         }
       ],
       "relationships": [
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "e5896411d374ca1414cca39e32213ced3853bf9d"
+          "fingerprint": "3c615f6fc1c8849b51f35a2bd40ebee8ffc008be"
         }
       ],
       "relationships": [

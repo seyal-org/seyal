@@ -1,5 +1,11 @@
 # SPEC-006 — M001 native input, focus/IME seam and authoritative resize
 
+> **Raw v1 presentation status proposed under #1493:** Raw is the only
+> production resting presentation while Blocks are suspended; TUI remains a
+> same-execution takeover. Flow/composer mechanics below are retained as a
+> dormant contract and do not expose a user-selectable Flow/Raw switch. This
+> status becomes normative when the separate #1493 architecture PR is accepted.
+
 - **Status:** Accepted for M001 Pass 7 via PR #703; production implementation completed by PR #707, merged as `4490d89fd32f96fe5ff04393a5470944c592f546`
 - **Date:** 2026-08-27
 - **Presentation amendment:** accepted by #858 / PR #859 (`8d08f2f`) on 2026-09-11

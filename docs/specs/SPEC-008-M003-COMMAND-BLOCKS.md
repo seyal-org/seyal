@@ -1,21 +1,25 @@
 # SPEC-008 — M003 command Blocks, Pane composer and presentation modes
 
-- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`), the duration / shell-metadata boundary amendment accepted by #686 / PR #1022, the Blocks-first supported-shell amendment for #1426, and tab-wide split-to-Flow behavior included with implementation in PR #1448.
+- **Status:** Accepted design and implementation specification for ADR-009. The Flow/Blocks presentation and composer are suspended for Raw v1 under the product-owner direction proposed by #1493; the contracts below remain preserved for a separately accepted reopening and do not authorize a user-facing Flow/Raw switch during the suspension.
 - **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686); ADR-026 alignment accepted 2026-10-29 (#1384); grid-first resting presentation 2026-11-04 (#1438/#1440); split-created Flow and Blocks-first default 2026-11-05/06 (#1426)
 - **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract. Accepted ADR-026 (#1384) is the authority for the session-bootstrap and input-target amendments in §3.1, §3.2, §3.5, §4, §5.5, §8 and §10.
 - **Depends on:** accepted SPEC-001 through SPEC-007 and completed Pass 7
 
 ## 1. Observable contract
 
-Under the 2026-11-06 ADR-009 amendment, a newly started trusted,
-Flow-capable, non-TUI terminal session presents **Flow/Blocks by default**.
-Users do not need to split a Pane or manually leave a Raw terminal view to get
-Blocks. The full-Pane Raw viewport is not shown during normal supported shell
-operation and is never visible underneath or beside Flow; supported-shell
-menus, palette commands, and built-in shortcuts do not offer Raw. A full-screen
-alternate-screen application takes over its Pane as TUI and restores Flow on
-exit. Unsupported or untrusted integration retains the existing safe fallback
-until structured Block boundaries can be proven.
+> **Dormant Flow/Blocks contract:** The remaining sections preserve the
+> accepted design for a future, separately reopened Flow/Blocks presentation.
+> They are not the active Raw v1 behavior. Raw is the only production resting
+> presentation while Blocks are suspended; TUI takes over and returns to the
+> same Raw execution. There is no user-facing Flow/Raw switch or Flow opt-in.
+> The dormant clauses below must not be used to claim that Blocks/composer ship
+> in v1.
+
+When Flow/Blocks are reactivated through a separate accepted architecture
+decision, a newly started trusted, Flow-capable, non-TUI terminal session
+follows the presentation policy specified here. Unsupported or untrusted
+integration retains its safe fallback until structured Block boundaries can
+be proven.
 
 A successful explicit split opts the affected Tab into Flow for every
 trusted, Flow-capable Pane in that Tab, including existing panes and the new
