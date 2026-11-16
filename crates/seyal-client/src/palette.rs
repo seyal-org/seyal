@@ -640,6 +640,12 @@ mod tests {
         let snap = palette.snapshot();
         assert!(snap.open);
         assert!(labels(&snap.rows).contains(&"New Tab"));
+        assert!(
+            !labels(&snap.rows)
+                .iter()
+                .any(|label| *label == "Use Flow" || *label == "Use Raw Terminal"),
+            "Raw-only v1 must not offer a presentation switch"
+        );
         assert!(!labels(&snap.rows).contains(&"Switch to Tab: Core Terminal"));
         palette
             .apply(PaletteAction::SetQuery("split".into()), 0)
