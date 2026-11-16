@@ -13,7 +13,7 @@ use super::display::{
 };
 use crate::{
     ffi::{CLIENTS, FOCUSED_DISPLAY_HANDLE},
-    local::test_client_for_ffi,
+    local::{test_client_for_ffi, LocalDisplayClient},
 };
 
 #[test]
@@ -27,6 +27,56 @@ fn unknown_handle_history_apis_fail_closed() {
     assert_eq!(peek.block_id, 0);
     assert_eq!(peek.request_id, 0);
     assert_eq!(seyal_bridge_history_range_consume_for_handle(0, 1, 1), 0);
+}
+
+#[test]
+fn raw_history_viewport_width_stays_client_side_for_named_controller() {
+    const HANDLE: u64 = u64::MAX - 103;
+    let (stream, _peer) = UnixStream::pair().expect("controller stream");
+    let client = test_client_for_ffi(stream);
+    CLIENTS.with(|clients| {
+        assert!(clients
+            .borrow_mut()
+            .insert(HANDLE, Box::new(client))
+            .is_none());
+    });
+
+    assert_eq!(seyal_bridge_next_history_request_id_for(HANDLE), 1);
+    assert_eq!(
+        seyal_bridge_request_history_range_for(
+            HANDLE,
+            LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID,
+            10,
+            20,
+            512,
+            131_072,
+            0,
+            80,
+        ),
+        0
+    );
+    let request = CLIENTS.with(|clients| {
+        clients
+            .borrow()
+            .get(&HANDLE)
+            .unwrap()
+            .history_requests
+            .get(&1)
+            .copied()
+    });
+    assert_eq!(
+        request,
+        Some((
+            LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID,
+            10,
+            20,
+            80,
+        ))
+    );
+
+    CLIENTS.with(|clients| {
+        clients.borrow_mut().remove(&HANDLE);
+    });
 }
 
 #[test]

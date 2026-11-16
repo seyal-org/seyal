@@ -753,19 +753,3 @@ fn purge_history_retains_presentation_correlation_block_id() {
         "ordinary Block history must still purge when not retained"
     );
 }
-
-#[test]
-fn raw_history_request_retains_viewport_width_only_in_client_request_state() {
-    let (stream, _peer) = UnixStream::pair().expect("pair");
-    let mut client = test_client(stream);
-    let correlation = LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID;
-
-    client
-        .request_history_range(correlation, 10, 20, 512, 131_072, 0, 80)
-        .expect("request history");
-
-    assert_eq!(
-        client.history_requests.get(&1),
-        Some(&(correlation, 10, 20, 80))
-    );
-}

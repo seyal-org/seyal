@@ -101,6 +101,11 @@ issue = 1451
 reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149/#1388/#1440 lifecycle fixtures remain here. #1451 adds should_confirm_quit FFI proofs beside the existing AppHandle ABI cases; rustfmt wrap raises three lines."
 
 [[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/display.rs"
+acknowledged_loc = 753
+issue = 1492
+reason = "Display FFI stays a single cold-path C façade; #1492 carries the Raw viewport width only on the named-controller history request, leaving the Runtime HistoryRange wire unchanged and row-clipping policy in Rust."
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
 acknowledged_loc = 944
 issue = 1388
@@ -265,9 +270,9 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 752
-issue = 1467
-reason = "Local display-client protocol proofs stay one module; #1467 adds DirectInput projection coverage beside existing type-45 Submit/Relay/Unavailable fixtures rather than a second client test file."
+acknowledged_loc = 755
+issue = 1492
+reason = "Local display-client protocol tests stay one module; #1492 extends the history-request correlation fixture with the Raw-only viewport width, while the Runtime wire request remains unchanged."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
