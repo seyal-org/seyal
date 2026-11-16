@@ -187,6 +187,91 @@ final class SeyalHostHistoryUITests: XCTestCase {
         attachScreenshot(result, name: "865-raw-sequential-commands")
     }
 
+    /// A headed interaction proof for the Rust-owned host-selection path:
+    /// double-clicking a word selects it, Cmd+C copies that word, and the real
+    /// shell can read the copied text back from the system pasteboard.
+    func testRawDoubleClickSelectionCopiesWord() throws {
+        let app = hostedApp()
+        let terminal = waitForUsableRawTerminal(in: app)
+        let token = "SEYAL_RAW_SELECT_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        submitRawCommand(app, terminal: terminal, "printf '%s\\n' '\(token)'")
+
+        let screenshot = try screenshotContaining(token, in: app, timeout: 20)
+        let source = try XCTUnwrap(
+            CGImageSourceCreateWithData(screenshot.pngRepresentation as CFData, nil)
+        )
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        let marker = try XCTUnwrap(
+            (request.results ?? [])
+                .filter { $0.topCandidates(1).first?.string.contains(token) == true }
+                .min { $0.boundingBox.minY < $1.boundingBox.minY },
+            "the rendered output token must have a Vision text observation"
+        )
+        let bounds = marker.boundingBox
+        let output = app.windows.firstMatch.coordinate(
+            withNormalizedOffset: CGVector(dx: bounds.midX, dy: 1 - bounds.midY)
+        )
+        output.doubleTap()
+        terminal.typeKey("c", modifierFlags: [.command])
+        terminal.typeText("pbpaste")
+        terminal.typeKey("\r", modifierFlags: [])
+
+        let copied = try screenshotContaining(token, in: app, timeout: 20)
+        attachScreenshot(copied, name: "1492-raw-double-click-copy")
+        XCTAssertTrue(try recognizedText(in: copied).contains(token))
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// Splitting a Raw Pane must provision a distinct execution and route
+    /// typing to that Pane while preserving the original Pane's output.
+    func testRawSplitPaneAcceptsInputWithoutCrossPaneLeakage() throws {
+        let app = hostedApp()
+        let originalPane = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
+        let originalTerminal = rawTerminal(in: originalPane)
+        _ = waitForUsableRawTerminal(in: app)
+        submitRawCommand(app, terminal: originalTerminal, "printf 'RAW-PANE-0-MARKER\\n'")
+        _ = try screenshotContaining("RAW-PANE-0-MARKER", in: app, timeout: 20)
+        let originalExecution = executionIdentity(originalTerminal.value as? String)
+
+        let split = app.buttons["seyal-split-right"]
+        XCTAssertTrue(split.waitForExistence(timeout: 5), "Raw Pane must expose Split Right")
+        split.click()
+        let secondPane = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(secondPane.waitForExistence(timeout: 12), "split must project Pane 2")
+        let secondTerminal = rawTerminal(in: secondPane)
+        XCTAssertTrue(secondTerminal.waitForExistence(timeout: 8), "Pane 2 must expose Raw input")
+        let usable = expectation(
+            for: NSPredicate(format: "value CONTAINS 'connection=usable'"),
+            evaluatedWith: secondTerminal,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [usable], timeout: 20), .completed)
+        let secondExecution = executionIdentity(secondTerminal.value as? String)
+        XCTAssertNotNil(originalExecution)
+        XCTAssertNotNil(secondExecution)
+        XCTAssertNotEqual(originalExecution, secondExecution, "each Pane owns a separate execution")
+
+        secondTerminal.click()
+        secondTerminal.typeText("printf 'RAW-PANE-1-MARKER\\n'")
+        secondTerminal.typeKey("\r", modifierFlags: [])
+        let screenshot = try screenshotContaining("RAW-PANE-1-MARKER", in: app, timeout: 20)
+        let text = try recognizedText(in: screenshot)
+        attachScreenshot(screenshot, name: "1492-raw-split-pane-input")
+        XCTAssertTrue(
+            text.contains("RAW-PANE-0-MARKER"),
+            "Pane 1 output must stay visible; OCR=\(text)"
+        )
+        XCTAssertTrue(
+            text.contains("RAW-PANE-1-MARKER"),
+            "Pane 2 must display its own input; OCR=\(text)"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     func testRawAlternateScreenExitRestoresHistorySurface() throws {
         let app = hostedApp()
         let terminal = waitForUsableRawTerminal(in: app)
@@ -227,6 +312,15 @@ final class SeyalHostHistoryUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [usable], timeout: timeout), .completed)
         assertRawTerminal(in: app, terminal: terminal)
         return terminal
+    }
+
+    private func rawTerminal(in pane: XCUIElement) -> XCUIElement {
+        pane.descendants(matching: .any)["terminal-input"].firstMatch
+    }
+
+    private func executionIdentity(_ value: String?) -> String? {
+        value?.split(separator: " ").first(where: { $0.hasPrefix("execution=") })
+            .map(String.init)
     }
 
     private func assertRawTerminal(in app: XCUIApplication, terminal: XCUIElement? = nil) {
