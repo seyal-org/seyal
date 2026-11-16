@@ -149,8 +149,7 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
 acknowledged_loc = 941
-iss…474 tokens truncated…ment]]
-path = "crates/seyal-agent-store/src/memory/tests.rs"
+iss…483 tokens truncated…tore/src/memory/tests.rs"
 acknowledged_loc = 711
 issue = 1300
 reason = "MemoryStore SPEC-012/014/015 fixtures stay one suite beside MemoryAuthority; #1300 adds the scope-wide revocation use-time denial regression without a second test façade or partN split."
@@ -239,9 +238,9 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 755
+acknowledged_loc = 756
 issue = 1492
-reason = "Local display-client protocol tests stay one module; #1492 extends the history-request correlation fixture with the Raw-only viewport width, while the Runtime wire request remains unchanged."
+reason = "Local display-client protocol tests stay one module; #1492 extends the history-request correlation fixture with Raw-only viewport width and keeps client-side lead-count metadata separate from the unchanged Runtime wire request."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
