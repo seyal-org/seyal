@@ -102,9 +102,9 @@ reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149/#1388/#1440 l
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/display.rs"
-acknowledged_loc = 753
+acknowledged_loc = 767
 issue = 1492
-reason = "Display FFI stays a single cold-path C façade; #1492 carries the Raw viewport width only on the named-controller history request, leaving the Runtime HistoryRange wire unchanged and row-clipping policy in Rust."
+reason = "Display FFI stays a single cold-path C façade; #1492 carries Raw viewport width and pre-clipping page lead counts only through named-controller APIs, leaving the Runtime HistoryRange wire unchanged and clipping/pagination policy in Rust."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
 acknowledged_loc = 944
@@ -149,38 +149,7 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
 acknowledged_loc = 941
-issue = 936
-reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1175's harness probe and #936's initial layout-metric state remain with attach lifecycle construction."
-
-# #1179 AB-1.3: per-connection handshake and session serve moved to
-# daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
-# [[cohesion_acknowledgement]] remains for it.
-
-# #1182 AB-1.6 observation/replay hardening kept ObservationAuthority in
-# observation.rs. #1196 moved fixture-host parse_script into script.rs, so
-# observation.rs is below review_loc and needs no [[cohesion_acknowledgement]].
-
-# #1182 AB-1.6 store high_water / terminal-observation probes for start_agent_run
-# and recovery stay with the SQLite aggregate event path.
-# #1178 adds PersistedPrincipal type collocated with other store row types.
-# #1181 adds §10 output-ref encode consumers, partial-segment merge, and
-# materialize_output_ref beside append_output_event.
-# #1271 adds rebuildable context_index_cache re-export beside existing open paths.
-# #1312 collocates Action persist-pause write-fault cells with existing store
-# write-fault instrumentation; pause policy methods live in action_persist.rs.
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 906
-issue = 1312
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1312 adds Action persist-pause Atomic/Mutex cells beside writes_before_fault without a second store façade."
-
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-store/src/sqlite/catalog.rs"
-acknowledged_loc = 716
-issue = 1252
-reason = "Adapter catalog remain one durable store module; #1252 adds schema-v8 admin.adapters grant lookup beside existing install/enable and adapter.execute grant paths without a second catalog façade."
-
-[[cohesion_acknowledgement]]
+iss…474 tokens truncated…ment]]
 path = "crates/seyal-agent-store/src/memory/tests.rs"
 acknowledged_loc = 711
 issue = 1300
