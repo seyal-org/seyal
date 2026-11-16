@@ -231,7 +231,7 @@ final class SeyalHostHistoryUITests: XCTestCase {
     func testRawSplitPaneAcceptsInputWithoutCrossPaneLeakage() throws {
         let app = hostedApp()
         let originalPane = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
-        let originalTerminal = rawTerminal(in: originalPane)
+        let originalTerminal = rawTerminal(in: app, inside: originalPane)
         _ = waitForUsableRawTerminal(in: app)
         submitRawCommand(app, terminal: originalTerminal, "printf 'RAW-PANE-0-MARKER\\n'")
         _ = try screenshotContaining("RAW-PANE-0-MARKER", in: app, timeout: 20)
@@ -242,7 +242,7 @@ final class SeyalHostHistoryUITests: XCTestCase {
         split.click()
         let secondPane = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
         XCTAssertTrue(secondPane.waitForExistence(timeout: 12), "split must project Pane 2")
-        let secondTerminal = rawTerminal(in: secondPane)
+        let secondTerminal = rawTerminal(in: app, inside: secondPane)
         XCTAssertTrue(secondTerminal.waitForExistence(timeout: 8), "Pane 2 must expose Raw input")
         let usable = expectation(
             for: NSPredicate(format: "value CONTAINS 'connection=usable'"),
@@ -255,9 +255,14 @@ final class SeyalHostHistoryUITests: XCTestCase {
         XCTAssertNotNil(secondExecution)
         XCTAssertNotEqual(originalExecution, secondExecution, "each Pane owns a separate execution")
 
-        secondTerminal.click()
-        secondTerminal.typeText("printf 'RAW-PANE-1-MARKER\\n'")
-        secondTerminal.typeKey("\r", modifierFlags: [])
+        secondPane.click()
+        let focused = expectation(
+            for: NSPredicate(format: "value == 'focused'"),
+            evaluatedWith: secondPane,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 8), .completed)
+        submitRawCommand(app, terminal: secondTerminal, "printf 'RAW-PANE-1-MARKER\\n'")
         let screenshot = try screenshotContaining("RAW-PANE-1-MARKER", in: app, timeout: 20)
         let text = try recognizedText(in: screenshot)
         attachScreenshot(screenshot, name: "1492-raw-split-pane-input")
@@ -314,8 +319,15 @@ final class SeyalHostHistoryUITests: XCTestCase {
         return terminal
     }
 
-    private func rawTerminal(in pane: XCUIElement) -> XCUIElement {
-        pane.descendants(matching: .any)["terminal-input"].firstMatch
+    private func rawTerminal(in app: XCUIApplication, inside pane: XCUIElement) -> XCUIElement {
+        let regionFrame = pane.frame
+        let terminals = app.descendants(matching: .any)
+            .matching(identifier: "terminal-input")
+        return terminals.allElementsBoundByIndex.first { terminal in
+            let frame = terminal.frame
+            return regionFrame.insetBy(dx: -1, dy: -1)
+                .contains(CGPoint(x: frame.midX, y: frame.midY))
+        } ?? terminals.firstMatch
     }
 
     private func executionIdentity(_ value: String?) -> String? {
