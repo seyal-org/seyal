@@ -6,61 +6,60 @@ extension XCTestCase {
     func exerciseBoundedAlternateScreen(
         in app: XCUIApplication, submitCommand: (String) -> Void
     ) throws {
-        let token = String(UUID().uuidString.prefix(8))
-        let scriptURL = URL(fileURLWithPath: "/tmp/s1049-\(token).sh")
-        let startedURL = URL(fileURLWithPath: "/tmp/s1049-\(token).ran")
-        try """
+        let script = """
         trap 'printf "\\033[?1049l"' EXIT
-        : > \(startedURL.path)
         printf '\\033[?1049h'
         read -r -t 20 answer
-        """.write(to: scriptURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+        """
+        let encodedScript = Data(script.utf8).base64EncodedString()
         let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
         defer {
-            if app.state == .runningForeground, composer.exists, !composer.isHittable {
-                if terminal.isHittable {
-                    terminal.click()
-                }
+            if app.state == .runningForeground, terminal.exists,
+                (terminal.value as? String)?.contains("alternate-screen=true") == true
+            {
+                terminal.click()
                 app.typeKey("\r", modifierFlags: [])
-                let stopped = expectation(
-                    for: NSPredicate(format: "isHittable == true"),
-                    evaluatedWith: composer, handler: nil)
-                XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 5), .completed)
-            }
-            do {
-                try FileManager.default.removeItem(at: scriptURL)
-                if FileManager.default.fileExists(atPath: startedURL.path) {
-                    try FileManager.default.removeItem(at: startedURL)
-                }
-            } catch {
-                XCTFail("Could not remove alternate-screen fixture: \(error)")
             }
         }
-        submitCommand("/bin/bash --noprofile --norc \(scriptURL.path)")
-        let startedDeadline = Date().addingTimeInterval(8)
-        while Date() < startedDeadline,
-            !FileManager.default.fileExists(atPath: startedURL.path)
-        {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-        let started = FileManager.default.fileExists(atPath: startedURL.path)
-        let entered = expectation(
-            for: NSPredicate(format: "isHittable == false"), evaluatedWith: composer, handler: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [entered], timeout: 12),
-            .completed,
-            "alt-screen must hide composer; started=\(started) composer=\(composer.value ?? "nil") terminal=\(terminal.value ?? "nil") hittable=\(composer.isHittable)"
+        submitCommand(
+            "/bin/bash --noprofile --norc -c \"$(printf '%s' '\(encodedScript)' | /usr/bin/base64 -D)\""
         )
+        let alternateScreen = expectation(
+            for: NSPredicate(format: "value CONTAINS 'alternate-screen=true'"),
+            evaluatedWith: terminal,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [alternateScreen], timeout: 8), .completed)
+        if composer.exists {
+            let entered = expectation(
+                for: NSPredicate(format: "isHittable == false"),
+                evaluatedWith: composer, handler: nil)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [entered], timeout: 12), .completed,
+                "alt-screen must hide the Flow composer"
+            )
+        } else {
+            XCTAssertTrue(terminal.isHittable, "Raw terminal remains the interactive surface")
+        }
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertTrue(terminal.waitForExistence(timeout: 5))
         terminal.click()
         app.typeKey("\r", modifierFlags: [])
-        let returned = expectation(
-            for: NSPredicate(format: "isHittable == true"), evaluatedWith: composer, handler: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [returned], timeout: 12), .completed)
+        if composer.exists {
+            let returned = expectation(
+                for: NSPredicate(format: "isHittable == true"),
+                evaluatedWith: composer, handler: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [returned], timeout: 12), .completed)
+        } else {
+            let returned = expectation(
+                for: NSPredicate(format: "value CONTAINS 'alternate-screen=false'"),
+                evaluatedWith: terminal, handler: nil)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [returned], timeout: 12), .completed,
+                "Raw must return to the primary screen after alternate-screen exit"
+            )
+        }
     }
 }
 

@@ -6,7 +6,7 @@ use seyal_runtime::local_ipc::framing::{
 };
 
 use crate::{
-    local::{cell_from_point, derive_grid_geometry, LayoutMetrics},
+    local::{cell_from_point, derive_grid_geometry, LayoutMetrics, TerminalMouseInput},
     LocalDisplayClient,
 };
 
@@ -284,7 +284,15 @@ pub extern "C" fn seyal_bridge_submit_mouse(
         return -4;
     };
     with_display_client_mut(|client| {
-        client.submit_terminal_mouse(kind, button, modifiers, col, row, click_count, action_id)
+        client.submit_terminal_mouse(TerminalMouseInput {
+            kind,
+            button,
+            modifiers,
+            col,
+            row,
+            click_count,
+            action_id,
+        })
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }

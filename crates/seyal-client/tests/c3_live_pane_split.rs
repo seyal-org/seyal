@@ -157,9 +157,9 @@ fn split_live_two_by_two_binds_four_distinct_executions() {
     assert_eq!(root.snapshot().shell.panes.len(), 4);
     assert!(
         root.snapshot().shell.windows[0].tabs[0].panes.iter().all(
-            |pane| pane.presentation_mode == seyal_client::presentation::PresentationMode::Flow
+            |pane| pane.presentation_mode == seyal_client::presentation::PresentationMode::Raw
         ),
-        "explicit Right+Down splits select Blocks across every Pane in the Tab"
+        "explicit Right+Down splits keep every Pane in the Raw terminal presentation"
     );
     let mut executions = std::collections::HashSet::new();
     for pane in [a, b, d, c] {

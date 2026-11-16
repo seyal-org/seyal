@@ -17,6 +17,7 @@ extension MetalSurfaceView {
     startLine: UInt64,
     endLine: UInt64,
     blockID: UInt64,
+    rawViewportColumns: UInt16 = 0,
     onRequestID: ((UInt64) -> Void)? = nil
   ) -> Int32 {
     guard let bridge else { return -10 }
@@ -28,6 +29,7 @@ extension MetalSurfaceView {
       startLine: startLine,
       endLine: endLine,
       blockID: blockID,
+      rawViewportColumns: rawViewportColumns,
       onRequestID: onRequestID
     )
   }

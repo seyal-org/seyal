@@ -14,6 +14,40 @@ use seyal_runtime::{
 
 use super::{ClientError, LocalDisplayClient};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HistoryRangeInput {
+    pub block_id: u64,
+    pub start_line: u64,
+    pub end_line: u64,
+    pub max_lines: u16,
+    pub max_cells: u32,
+    pub start_unit: u32,
+    /// Set only for Raw scrollback; it stays outside the Runtime wire request.
+    pub raw_viewport_columns: u16,
+}
+
+impl HistoryRangeInput {
+    pub(crate) fn new(
+        block_id: u64,
+        start_line: u64,
+        end_line: u64,
+        max_lines: u16,
+        max_cells: u32,
+        start_unit: u32,
+        raw_viewport_columns: u16,
+    ) -> Self {
+        Self {
+            block_id,
+            start_line,
+            end_line,
+            max_lines,
+            max_cells,
+            start_unit,
+            raw_viewport_columns,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct PendingDisplayBatch {
     chunks: Vec<DecodedDisplayChunk>,

@@ -6,12 +6,48 @@ import XCTest
 /// #1442: XCTest coverage for Raw presentation-local scrollback math and
 /// Flow isolation helpers (UI policy requires SeyalTests for Sources changes).
 final class RawScrollbackViewportTests: XCTestCase {
+    func testHistoryPageContinuationKeepsRawViewportWidth() {
+        let initial = PaneHistoryRangeRequest(
+            blockID: UInt64.max,
+            startLine: 40,
+            endLine: 90,
+            rawViewportColumns: 80,
+            startUnit: 0
+        )
+
+        let continued = initial.continuation(startUnit: 4_096)
+
+        XCTAssertEqual(continued.blockID, initial.blockID)
+        XCTAssertEqual(continued.startLine, initial.startLine)
+        XCTAssertEqual(continued.endLine, initial.endLine)
+        XCTAssertEqual(continued.startUnit, 4_096)
+        XCTAssertEqual(continued.rawViewportColumns, 80)
+    }
+
     func testRawScrollbackViewportMathSelfTests() {
         XCTAssertTrue(RawScrollbackViewportSelfTests.runAll())
     }
 
     func testCorrelationBlockIDIsDistinctFromOrdinaryBlocks() {
         XCTAssertEqual(RawScrollbackViewport.correlationBlockID, UInt64.max)
+    }
+
+    func testRendererAdapterPadsRustClippedRowsToViewportGeometry() {
+        let first = [
+            NativeHistoryRange.Cell(scalar: 65, foreground: 0, background: 0, flags: 0),
+            NativeHistoryRange.Cell(scalar: 66, foreground: 0, background: 0, flags: 0),
+            NativeHistoryRange.Cell(scalar: 67, foreground: 0, background: 0, flags: 0),
+        ]
+        let second = [
+            NativeHistoryRange.Cell(scalar: 68, foreground: 0, background: 0, flags: 0)
+        ]
+
+        let rows = RawScrollbackViewport.padRowsForViewport(
+            rows: [first, second], columns: 2, targetRowCount: 2)
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].map(\.scalar), [65, 66])
+        XCTAssertEqual(rows[1].map(\.scalar), [68, 32])
     }
 
     func testOnlyTheExactLatestRawHistoryRequestCanReplaceTheVisiblePage() {

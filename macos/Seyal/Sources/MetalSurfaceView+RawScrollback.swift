@@ -113,6 +113,7 @@ extension MetalSurfaceView {
             startLine: plan.start_line,
             endLine: plan.end_line,
             blockID: RawScrollbackViewport.correlationBlockID,
+            rawViewportColumns: frame.columns,
             onRequestID: { requestID = $0 }
         )
         if result != 0 {
@@ -183,6 +184,7 @@ extension MetalSurfaceView {
                     startLine: contentStart,
                     endLine: contentEnd,
                     blockID: RawScrollbackViewport.correlationBlockID,
+                    rawViewportColumns: UInt16(clamping: columns),
                     onRequestID: { requestID = $0 }
                 )
                 if requestResult == 0 {

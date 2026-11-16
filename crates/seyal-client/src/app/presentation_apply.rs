@@ -10,6 +10,31 @@
 use super::*;
 
 impl ApplicationRoot {
+    /// Exercise legacy Flow-only reducers without exposing Flow through the
+    /// production presentation action while Blocks are suspended.
+    #[cfg(test)]
+    pub(crate) fn force_flow_test_fixture(&mut self) {
+        let Some(bound) = self.authority else {
+            panic!("Flow fixture requires a bound execution");
+        };
+        let identity = PresentationIdentity::new(bound.execution, bound.pty_generation)
+            .expect("bound fixture has a valid PTY generation");
+        let epoch = self.presentation.snapshot().epoch;
+        self.presentation
+            .apply(PresentationAction::Transition {
+                mode: PresentationMode::Flow,
+                identity,
+                explicit: true,
+                epoch,
+            })
+            .expect("Flow fixture transition");
+        self.explicit_flow = true;
+        self.resting = PresentationMode::Flow;
+        self.sync_focused_presentation_mode();
+        self.sync_composer_presentation();
+        assert_eq!(self.snapshot().eligibility, PresentationEligibility::Flow);
+    }
+
     /// Keep every pane in the Tab on the conventional Raw resting surface.
     /// TUI remains the visible takeover while this updates the stored choice.
     pub(super) fn select_split_tab_raw_resting_mode(&mut self, pane: seyal_core::PaneId) {

@@ -43,6 +43,68 @@ fn retained_bytes(runtime: &Runtime, ids: &[ExecutionId]) -> usize {
 }
 
 #[test]
+fn raw_pty_100k_output_and_followup_commands_are_retained_exactly_once() {
+    let mut runtime = Runtime::new(config("raw-100k", 16 * 1024 * 1024)).expect("Runtime");
+    let command = CommandSpec::new("/bin/sh").args([
+        "-c",
+        "/usr/bin/seq 1 100000; /bin/pwd; /bin/ls -d .; printf 'RAW_DONE\\n'",
+    ]);
+    let id = runtime
+        .create_execution(command, WindowSize::cells(120, 40).expect("size"))
+        .expect("spawn Raw PTY");
+    let deadline = Instant::now() + Duration::from_secs(60);
+
+    loop {
+        let terminal = runtime.execution(id).expect("execution").terminal();
+        let done = (0..terminal.rows()).any(|row| {
+            terminal
+                .row_text(row)
+                .is_some_and(|text| text.contains("RAW_DONE"))
+        });
+        if done {
+            break;
+        }
+        assert!(Instant::now() < deadline, "100k Raw PTY stream timed out");
+        runtime
+            .poll_once(Some(Duration::from_millis(10)))
+            .expect("poll Raw PTY");
+    }
+
+    let terminal = runtime.execution(id).expect("execution").terminal();
+    let rows = terminal
+        .primary_history_range(seyal_exec::LineId(1), seyal_exec::LineId(u64::MAX), 100_100)
+        .expect("retained primary history");
+    let text = rows
+        .iter()
+        .map(|(_, cells)| {
+            cells
+                .iter()
+                .map(|cell| cell.character)
+                .collect::<String>()
+                .trim()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    let numbers = text
+        .iter()
+        .filter_map(|row| row.parse::<u32>().ok())
+        .collect::<Vec<_>>();
+
+    assert_eq!(numbers, (1..=100_000).collect::<Vec<_>>());
+    assert!(text.contains(&std::env::current_dir().expect("cwd").display().to_string()));
+    assert!(text.contains(&".".to_owned()));
+    assert_eq!(
+        text.iter().filter(|row| row.as_str() == "RAW_DONE").count(),
+        1
+    );
+
+    runtime.begin_shutdown().expect("shutdown");
+    runtime
+        .run_until_empty(Instant::now() + Duration::from_secs(15))
+        .expect("Runtime drains");
+}
+
+#[test]
 fn default_runtime_history_cap_is_256_mib() {
     assert_eq!(
         RuntimeConfig::m001()

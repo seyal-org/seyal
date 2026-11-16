@@ -109,6 +109,20 @@ pub extern "C" fn seyal_bridge_history_range_peek_for_handle(
     .unwrap_or_else(SeyalHistoryRange::empty)
 }
 
+/// Original lead-cell count before client-side Raw clipping, used for exact
+/// `start_unit` pagination on a named registry Controller.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_lead_count_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> u32 {
+    super::with_client(handle, |client| {
+        client.history_range_lead_count(block_id, request_id)
+    })
+    .unwrap_or(0)
+}
+
 fn history_range_peek_from_client(
     client: &LocalDisplayClient,
     block_id: u64,
@@ -577,9 +591,9 @@ pub extern "C" fn seyal_bridge_request_history_range(
     start_unit: u32,
 ) -> i32 {
     with_display_client_mut(|client| {
-        client.request_history_range(
-            block_id, start_line, end_line, max_lines, max_cells, start_unit,
-        )
+        client.request_history_range(crate::local::HistoryRangeInput::new(
+            block_id, start_line, end_line, max_lines, max_cells, start_unit, 0,
+        ))
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
@@ -597,11 +611,18 @@ pub extern "C" fn seyal_bridge_request_history_range_for(
     max_lines: u16,
     max_cells: u32,
     start_unit: u32,
+    raw_viewport_columns: u16,
 ) -> i32 {
     super::with_client_mut(handle, |client| {
-        client.request_history_range(
-            block_id, start_line, end_line, max_lines, max_cells, start_unit,
-        )
+        client.request_history_range(crate::local::HistoryRangeInput::new(
+            block_id,
+            start_line,
+            end_line,
+            max_lines,
+            max_cells,
+            start_unit,
+            raw_viewport_columns,
+        ))
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }

@@ -59,6 +59,7 @@ pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
         pending_composer_requests: std::collections::HashSet::new(),
         next_composer_request_id: 1,
         history_ranges: HashMap::new(),
+        history_range_lead_counts: HashMap::new(),
         history_requests: HashMap::new(),
         next_history_request_id: 1,
         raw_viewport: super::raw_viewport::RawViewport::default(),
@@ -739,8 +740,10 @@ fn purge_history_retains_presentation_correlation_block_id() {
     let (stream, _peer) = UnixStream::pair().expect("pair");
     let mut client = test_client(stream);
     let correlation = LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID;
-    client.history_requests.insert(42, (correlation, 10, 50));
-    client.history_requests.insert(43, (7, 1, 2));
+    client
+        .history_requests
+        .insert(42, (correlation, 10, 50, 80));
+    client.history_requests.insert(43, (7, 1, 2, 0));
     client.purge_history_for_blocks(&std::collections::HashSet::new());
     assert!(
         client.history_requests.contains_key(&42),

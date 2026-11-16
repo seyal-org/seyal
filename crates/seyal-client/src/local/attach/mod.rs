@@ -827,6 +827,7 @@ impl LocalDisplayClient {
             pending_composer_requests: std::collections::HashSet::new(),
             next_composer_request_id: 1,
             history_ranges: HashMap::new(),
+            history_range_lead_counts: HashMap::new(),
             history_requests: HashMap::new(),
             next_history_request_id: 1,
             raw_viewport: super::raw_viewport::RawViewport::default(),
