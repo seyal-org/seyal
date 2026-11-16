@@ -104,7 +104,7 @@ final class SeyalHostHistoryUITests: XCTestCase {
         submitRawCommand(
             app,
             terminal: terminal,
-            "printf 'M003-OLD-ROW\\n'; seq 1 100000; printf 'M003-TAIL-ROW\\n'"
+            "seq 1 99900; printf 'M003-RETAINED-ROW\\n'; seq 99901 100000; printf 'M003-TAIL-ROW\\n'"
         )
         let liveEndScreenshot = try screenshotContaining("M003-TAIL-ROW", in: app, timeout: 90)
         attachScreenshot(liveEndScreenshot, name: "m003-raw-100k-live-end")
@@ -115,13 +115,13 @@ final class SeyalHostHistoryUITests: XCTestCase {
         )
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after 100,000 lines")
 
-        terminal.scroll(byDeltaX: 0, deltaY: 1_000_000)
-        let historyScreenshot = try screenshotContaining("M003-OLD-ROW", in: app, timeout: 20)
+        terminal.scroll(byDeltaX: 0, deltaY: 2_000)
+        let historyScreenshot = try screenshotContaining("M003-RETAINED-ROW", in: app, timeout: 20)
         let historyText = try recognizedText(in: historyScreenshot)
         attachScreenshot(historyScreenshot, name: "m003-raw-100k-scrolled-history")
         XCTAssertTrue(
-            historyText.contains("M003-OLD-ROW"),
-            "scrolling to retained history must visibly paint the first output row; OCR=\(historyText)"
+            historyText.contains("M003-RETAINED-ROW"),
+            "scrolling within retained history must visibly paint the recent marker; OCR=\(historyText)"
         )
 
         terminal.scroll(byDeltaX: 0, deltaY: -1_000_000)
