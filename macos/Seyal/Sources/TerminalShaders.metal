@@ -81,6 +81,7 @@ fragment float4 seyal_terminal_fragment(
     constexpr uint glyph_flag = 1u << 0;
     constexpr uint underline_flag = 1u << 1;
     constexpr uint cursor_flag = 1u << 2;
+    constexpr uint inverse_default_colors_flag = 1u << 4;
     constexpr uint glyph_pass = 1u;
 
     if (render_mode == glyph_pass
@@ -90,6 +91,11 @@ fragment float4 seyal_terminal_fragment(
 
     float4 foreground = unpack_rgba8(in.foreground == 0u ? default_colors.x : in.foreground);
     float4 background = unpack_rgba8(in.background == 0u ? default_colors.y : in.background);
+    if ((in.flags & inverse_default_colors_flag) != 0u) {
+        const float4 temporary = foreground;
+        foreground = background;
+        background = temporary;
+    }
     if ((in.flags & cursor_flag) != 0u) {
         const float4 temporary = foreground;
         foreground = background;

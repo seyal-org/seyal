@@ -47,6 +47,7 @@ extension MetalTerminalRenderer {
         let cellSize = SIMD2<Float>(Float(metrics.cellWidth), Float(metrics.cellHeight))
         let preparedRoleContinuation: UInt16 = 2
         let preparedHasGrapheme: UInt16 = 1 << 4
+        let preparedInverseDefaultColors: UInt16 = 1 << 5
 
         // Grapheme sidecar is length-prefixed payloads in physical-cell order
         // for every multi-scalar lead on the surface.
@@ -62,10 +63,13 @@ extension MetalTerminalRenderer {
             let width = (reserved >> 2) & 0b11
             let hasGrapheme = reserved & preparedHasGrapheme != 0
             let knownBits = 0b11 | (0b11 << 2) | preparedHasGrapheme
+                | preparedInverseDefaultColors
             guard reserved & ~knownBits == 0,
                   role <= 2,
                   (role == 1 ? (width == 1 || width == 2) : width == 0),
-                  !hasGrapheme || role == 1
+                  !hasGrapheme || role == 1,
+                  reserved & preparedInverseDefaultColors == 0
+                    || (frame.cells[index].foreground == 0 && frame.cells[index].background == 0)
             else {
                 throw MetalTerminalRendererError.invalidFrame
             }
@@ -148,6 +152,9 @@ extension MetalTerminalRenderer {
                 }
                 if cell.flags & preparedUnderlineFlag != 0 {
                     flags |= instanceUnderlineFlag
+                }
+                if cell.reserved & preparedInverseDefaultColors != 0 {
+                    flags |= instanceInverseDefaultColorsFlag
                 }
                 if frame.cursorVisible,
                    row == frame.cursorRow,

@@ -4350,6 +4350,11 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(RendererValidation.retainedDefaultColorsFollowThemeOffscreenSelfTest())
     }
 
+    @MainActor
+    func testRawSelectionInvertsTerminalDefaultColors() {
+        XCTAssertTrue(RendererValidation.rawSelectionInvertsDefaultColorsOffscreenSelfTest())
+    }
+
     /// #1062: light Canvas must drive Raw/TUI full-grid clear (not hardcoded dark).
     @MainActor
     func testFullGridClearFollowsRustThemeCanvas() {

@@ -55,6 +55,52 @@ extension RendererValidation {
         }
     }
 
+    /// Selection on a default-colored Raw cell must invert the terminal theme
+    /// colors after their native realization, even though both packed colors
+    /// are zero in the Rust prepared frame.
+    static func rawSelectionInvertsDefaultColorsOffscreenSelfTest() -> Bool {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        do {
+            let renderer = try MetalTerminalRenderer(device: device)
+            var cell = preparedCell(scalar: UInt32(ascii: "A"))
+            cell.reserved = 1 | (1 << 2) | (1 << 5)
+            var damage = DamageMask()
+            damage.mark(row: 0)
+            guard try [cell].withUnsafeBufferPointer({ buffer in
+                try renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        fullRebuild: true,
+                        damage: damage
+                    ),
+                    backingScale: 1
+                ) == .updated
+            }) else { return false }
+
+            let size = renderer.cellPixelSize(backingScale: 1)
+            let foreground = packRGBA(red: 30, green: 35, blue: 40)
+            let background = packRGBA(red: 252, green: 252, blue: 250)
+            renderer.setDefaultTerminalColors(foreground: foreground, background: background)
+            guard let selected = renderer.renderOffscreenAndWait(
+                width: size.width,
+                height: size.height
+            ) else { return false }
+            return pixelMatches(
+                selected,
+                x: size.width - 1,
+                y: size.height - 1,
+                red: 30,
+                green: 35,
+                blue: 40
+            ) && textureRegionContainsBrightGlyph(selected, xStart: 0, xEnd: size.width)
+        } catch {
+            return false
+        }
+    }
+
     /// #1062: Raw/TUI full-grid clear uses Rust Canvas, not a hardcoded dark RGB.
     static func fullGridClearFollowsThemeOffscreenSelfTest() -> Bool {
         guard let device = MTLCreateSystemDefaultDevice() else { return false }
