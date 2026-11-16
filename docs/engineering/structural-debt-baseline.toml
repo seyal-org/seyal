@@ -245,9 +245,9 @@ responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proof
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 905
-issue = 1092
-reason = "Command palette query, frozen rows, and run dispatch stay one reducer; #1092 carries containment generation through window-aware actions, #1175 adds the P4 Terminate Execution verb, and #1123 keeps W4a fixture admission policy in the Rust shell."
+acknowledged_loc = 911
+issue = 1492
+reason = "The palette keeps its existing frozen-command projection; #1492 adds a Raw-only regression proving presentation choices stay absent while Blocks are suspended."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
