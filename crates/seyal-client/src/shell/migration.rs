@@ -1,6 +1,6 @@
 //! SPEC-032 §3.5 one-time migration off the outer Seyal Tab layer.
 
-use seyal_core::{ExecutionId, TabId, WindowId, WorkspaceId};
+use seyal_core::{TabId, WindowId, WorkspaceId};
 
 use super::ShellState;
 

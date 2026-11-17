@@ -241,28 +241,28 @@ impl ShellState {
             !ws.windows.is_empty()
         };
         if has_window {
-            if let Some(host) = self.sidebar_host {
-                if self.find_window(host).is_some() {
-                    return self.open_workspace_in_sidebar(host, workspace, containment_generation);
-                }
+            if let Some(host) = self.sidebar_host
+                && self.find_window(host).is_some()
+            {
+                return self.open_workspace_in_sidebar(host, workspace, containment_generation);
             }
             let target = self
                 .derived_mru_window(workspace)
                 .ok_or(ShellError::UnknownWindow)?;
             return self.activate_window(target);
         }
-        if let Some(host) = self.sidebar_host {
-            if self.find_window(host).is_some() {
-                self.require_containment_generation(containment_generation)?;
-                self.attach_unrealized_pane_window(workspace)?;
-                self.present_workspace_on_host(host, workspace)?;
-                self.bump_containment_generation();
-                self.last_active_workspace = workspace;
-                if let Ok(pane) = self.focused_pane_id() {
-                    self.focus_history.record(pane);
-                }
-                return Ok(());
+        if let Some(host) = self.sidebar_host
+            && self.find_window(host).is_some()
+        {
+            self.require_containment_generation(containment_generation)?;
+            self.attach_unrealized_pane_window(workspace)?;
+            self.present_workspace_on_host(host, workspace)?;
+            self.bump_containment_generation();
+            self.last_active_workspace = workspace;
+            if let Ok(pane) = self.focused_pane_id() {
+                self.focus_history.record(pane);
             }
+            return Ok(());
         }
         self.create_window(workspace, containment_generation)
     }

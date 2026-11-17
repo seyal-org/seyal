@@ -459,19 +459,18 @@ impl ShellState {
     }
 
     fn product_active_window(&self) -> Option<&Window> {
-        if let Some(host) = self.sidebar_host {
-            if let Some(window) = self
+        if let Some(host) = self.sidebar_host
+            && let Some(window) = self
                 .workspaces
                 .iter()
                 .flat_map(|workspace| &workspace.windows)
                 .find(|window| window.id == host)
-            {
-                // Unrealized pane-tree storage must never become the product
-                // host (#1490): stable native WindowId / input / chrome route
-                // only through realized projections.
-                if window.realized {
-                    return Some(window);
-                }
+        {
+            // Unrealized pane-tree storage must never become the product
+            // host (#1490): stable native WindowId / input / chrome route
+            // only through realized projections.
+            if window.realized {
+                return Some(window);
             }
         }
         self.focus_history.panes().iter().find_map(|pane| {
@@ -492,6 +491,7 @@ impl ShellState {
     }
 
     /// Host-originated New Tab: target the product Window with the live fence.
+    #[cfg(test)]
     pub(crate) fn apply_product_create_tab(&mut self) -> Result<(), ShellError> {
         let window = self.product_window_id()?;
         let containment_generation = self.containment_generation;

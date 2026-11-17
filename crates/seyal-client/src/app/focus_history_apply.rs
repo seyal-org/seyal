@@ -5,7 +5,7 @@ use crate::chrome::ChromeAction;
 use crate::navigation::{
     history_back, history_forward, EmptyExecutionInventory, FocusSeq, NavigationPrincipal,
 };
-use crate::navigation::{matches_destroyed_pane, matches_destroyed_tab, ResourceAddress};
+use crate::navigation::{matches_destroyed_pane, ResourceAddress};
 use seyal_core::{PaneId, TabId};
 
 impl ApplicationRoot {

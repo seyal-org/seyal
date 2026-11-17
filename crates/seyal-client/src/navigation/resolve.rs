@@ -157,7 +157,7 @@ pub fn resolve(
                     None => Err(NavigationRejection::UnknownExecution),
                 },
                 1 => {
-                    let (workspace, tab, pane) = bound[0];
+                    let (workspace, _tab, pane) = bound[0];
                     if !principal.allows_workspace(workspace) {
                         return Err(NavigationRejection::NavigationDenied);
                     }
