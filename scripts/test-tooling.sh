@@ -23,13 +23,13 @@ done
 grep -q 'XCODEBUILD_MCP_VERSION=' scripts/bootstrap-dev.sh || fail "XcodeBuildMCP is not pinned"
 grep -q 'AI_SDLC_REPO=' scripts/bootstrap-dev.sh || fail "AI-SDLC repository is not declared"
 grep -Eq 'AI_SDLC_COMMIT="[0-9a-f]{40}"' scripts/bootstrap-dev.sh || fail "AI-SDLC must be pinned by full commit SHA"
-grep -q 'AI_SDLC_COMMIT="4b4c603b2fc51105119a7773119319e8902f48e6"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include the executable claim-integrated skills"
+grep -q 'AI_SDLC_COMMIT="77158462473a4244d63329a55907d0c5ccc47757"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must match the approved portable workflow candidate"
 grep -q '^AI_SDLC_SKILLS=(' scripts/bootstrap-dev.sh || fail "AI-SDLC skill manifest is missing"
 grep -q '^ensure_ai_sdlc()' scripts/bootstrap-dev.sh || fail "AI-SDLC materialization is missing"
 for generic_skill in project-context create-issue implement-issue verification pr-review process-review pr-merge; do
   grep -q "  ${generic_skill}$" scripts/bootstrap-dev.sh || fail "AI-SDLC generic skill is not pinned: ${generic_skill}"
 done
-for tool in project_context.py work_claims.py workflow_claims.py; do
+for tool in project_context.py; do
   grep -Fq "${tool}" scripts/bootstrap-dev.sh || fail "AI-SDLC required tool missing from bootstrap validation: ${tool}"
 done
 grep -q 'project_context.py.*--root.*validate' scripts/bootstrap-dev.sh || fail "agent bootstrap must validate the derived context index"
@@ -58,13 +58,17 @@ grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/issue-refi
 grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/implementation-planning/SKILL.md || fail "planning must use the issue-owned canonical plan"
 grep -q '.sdlc/framework/skills/implement-issue/SKILL.md' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must delegate to current generic implement-issue"
 grep -q '.sdlc/framework/skills/process-review/SKILL.md' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must delegate to generic process-review"
-grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/implement-issue/SKILL.md || fail "Seyal implementation must call the executable agent claim wrapper"
-grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/pr-review/SKILL.md || fail "PR review must call the shared claim wrapper"
-grep -Fq 'scripts/seyal-ai-sdlc-claim.py' .agents/skills/address-pr-review/SKILL.md || fail "review remediation must call the shared claim wrapper"
-python3 -m py_compile scripts/seyal-ai-sdlc-claim.py scripts/test-seyal-ai-sdlc-claim.py .cursor/hooks/claim-gate.py scripts/test-cursor-claim-hook.py || fail "agent claim or hook cannot compile"
-python3 scripts/test-seyal-ai-sdlc-claim.py || fail "agent claim command tests failed"
-python3 scripts/test-cursor-claim-hook.py || fail "Cursor preToolUse claim enforcement tests failed"
-grep -Fq 'full-candidate re-review' .agents/skills/pr-review/SKILL.md || fail "Seyal must not retain diff-only PR re-review"
+# Developer coordination is human GitHub ownership; legacy session locks must not return.
+for retired in scripts/seyal-ai-sdlc-claim.py scripts/test-seyal-ai-sdlc-claim.py .cursor/hooks/claim-gate.py scripts/test-cursor-claim-hook.py .cursor/hooks.json; do
+  [[ ! -e "$retired" ]] || fail "retired local agent claim component returned: $retired"
+done
+active_workflow=(AGENTS.md docs/engineering/AGENT-TOOLING.md docs/engineering/AI-SDLC-REFERENCE-CONSUMER.md .agents/skills/implement-issue/SKILL.md .agents/skills/pr-review/SKILL.md .agents/skills/address-pr-review/SKILL.md scripts/bootstrap-dev.sh)
+if grep -Eq 'AI_SDLC_WORKER_ID|seyal-ai-sdlc-claim\.py|workflow_claims\.py|claim-gate\.py' "${active_workflow[@]}"; then
+  fail "local agent claim requirement remains in active workflow"
+fi
+grep -Fq 'review-convergence-and-evidence-reuse' .agents/skills/pr-review/SKILL.md || fail "PR review must use canonical bounded convergence"
+grep -Fq 'A clean first independent full review is final' .agents/skills/pr-review/SKILL.md || fail "clean initial review must not require redundant final pass"
+grep -Fq 'final whole-candidate exact-head/base review' .agents/skills/pr-review/SKILL.md || fail "final independent review must not be delta-only"
 grep -q '.sdlc/framework/skills/pr-review/SKILL.md' .agents/skills/pr-review/SKILL.md || fail "pr-review must delegate to AI-SDLC pr-review"
 if grep -q '.sdlc/framework/skills/code-review/SKILL.md' .agents/skills/pr-review/SKILL.md; then
   fail "pr-review must not reference removed generic code-review authority"
@@ -74,7 +78,7 @@ grep -q '.sdlc/framework/docs/WORKING-LOOP.md' .agents/skills/development-readin
 grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/verification/SKILL.md || fail "verification adapter must delegate to AI-SDLC"
 
 # Parallel-development safety: implementation pickup must be an exclusive,
-# verified GitHub claim before any production branch/worktree/edit path.
+# verified GitHub owner before any production branch/worktree/edit path.
 claim_skill=.agents/skills/implement-issue/SKILL.md
 grep -Fq 'mandatory entrypoint for production implementation of a Seyal GitHub Issue' "$claim_skill" || fail "implement-issue must be the mandatory production entrypoint"
 grep -Fq 'responsible **human GitHub owner**' "$claim_skill" || fail "implement-issue must resolve a human GitHub owner"
@@ -92,7 +96,7 @@ grep -Fq 'Report the current human owner record and branch state' "$claim_skill"
 grep -Fq 'never overwrite another valid claim to win a race' "$claim_skill" || fail "implement-issue must not steal a concurrent claim"
 grep -Fq 'If the work item is a GitHub sub-issue, fetch its parent immediately' "$claim_skill" || fail "implement-issue must inspect the parent claim before a child slice"
 grep -Fq 'planning/umbrella parent is not an ownership lock' "$claim_skill" || fail "implement-issue must allow independent child ownership under planning parents"
-grep -Fq 're-fetch both parent and child' "$claim_skill" || fail "implement-issue must re-fetch parent and child after claim and branch creation"
+grep -Fqi 're-fetch both parent and child' "$claim_skill" || fail "implement-issue must re-fetch parent and child after claim and branch creation"
 grep -Fq 'claim and branch that sub-issue only after the parent/slice overlap check' "$claim_skill" || fail "implement-issue must check parent/child slice overlap before claiming child work"
 grep -Fq 'do not duplicate ownership of the same implementation slice' "$claim_skill" || fail "implement-issue must prevent duplicate slice ownership"
 refine_skill=.agents/skills/issue-refinement/SKILL.md

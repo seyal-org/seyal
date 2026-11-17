@@ -40,7 +40,7 @@ An unassigned issue in either queue is claimed by the human who starts it. If Gi
 
 ## Active implementation claim
 
-Seyal implementation work is exclusively owned while active. The single human owner record — sole GitHub assignee when assignable, otherwise an `Owner: @login` claim on an unassigned queue issue — is the human-visible cross-contributor ownership lock. The deterministic human-namespaced implementation branch is only that owner's audit/resume backstop.
+Seyal implementation work is exclusively owned while active. The single human owner record — sole GitHub assignee when assignable, otherwise an `Owner: @login` claim on an unassigned queue issue — is the cross-contributor coordination record. It is not an atomic distributed lock. The deterministic human-namespaced implementation branch is only that owner's audit/resume backstop.
 
 The pickup contract is:
 
@@ -60,15 +60,16 @@ Rules:
 
 - Production implementation of a GitHub Issue must enter through `.agents/skills/implement-issue/SKILL.md`.
 - Resolve the authenticated **human GitHub owner** from project-approved GitHub tooling and the fresh Issue owner-record state. Never infer ownership from git author configuration, local username, chat name, an agent/bot account, or repository ownership.
-- Fetch the complete owner-record state fresh immediately before pickup: assignees plus any maintainer-acknowledged `Owner: @login` claim. Cached context is not ownership authority.
-- For an assignable contributor, assign the issue only to the authenticated **human** owner and re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning. On an unassigned `help wanted` or `needs-refinement` issue, comment `Owner: @login` and continue; that comment is the claim. A maintainer acknowledgement is required only when another owner record already exists or two claims disagree. A coding-agent/bot identity must never be the owner record.
+- Fetch the complete owner-record state fresh immediately before pickup: assignees plus active `Owner: @login` comments, including competing unacknowledged claims. Cached context is not ownership authority.
+- For an assignable contributor, add the authenticated **human** owner as assignee without replacing existing assignees; re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning. On an unassigned `help wanted` or `needs-refinement` issue, comment `Owner: @login` and continue; that comment is the claim. A maintainer acknowledgement is required only when another owner record already exists or two claims disagree. A coding-agent/bot identity must never be the owner record.
 - If the unique human owner record names a different contributor — by sole assignee or acknowledged external-owner claim — the Issue is already taken. Report that owner and stop before planning, worktree/branch creation, or production edits.
-- Multiple assignees, multiple acknowledged external-owner claims, or disagreement between assignment and acknowledged owner claim are ownership collisions. Stop and require explicit resolution.
+- Multiple assignees, competing active external-owner claims (including unacknowledged comments), or disagreement between assignment and owner claim are ownership collisions. Stop and require explicit resolution.
 - If owner identity, owner-record write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
 - Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the **human-owner rule**.
-- For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the unique human owner. It may be in upstream or the contributor's fork. The **single human owner record prevents two people from owning the same implementation Issue at once**; the human-namespaced branch is only that owner's deterministic audit/resume backstop. Do not create alternative agent prefixes or short-name branches to evade an existing owner record.
+- For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the unique human owner. It may be in upstream or the contributor's fork. The **single human owner record prevents two people from owning the same implementation Issue at once** as a contributor policy; it is not a guarantee against simultaneous GitHub API writes. the human-namespaced branch is only that owner's deterministic audit/resume backstop. Do not create alternative agent prefixes or short-name branches to evade an existing owner record.
 - Branch creation happens after the Issue is Ready. The Issue body is the plan. If that same human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim. A closed unmerged head that was not rejected as the wrong architecture is resumed by rebasing that head. Do not re-implement it.
-- If concurrent owner-record or branch operations produce disagreement, stop before production edits and require explicit ownership resolution. Never steal or overwrite another valid owner record to win a race.
+- Recheck the owner and candidate immediately before editing and before push/PR publication. If concurrent owner-record or branch operations produce disagreement, stop and require explicit ownership resolution. Never steal or overwrite another valid owner record to win a race.
+- The human implementor coordinates delegated agents; disjoint work may run in parallel, but overlapping edits to the same files/candidate must be serialized by the owner. Seyal requires no local agent-session lock, worker identity, token store or pre-tool claim hook. Read-only review requires no claim; authorized reviewers must not mutate the implementer's source.
 - Legacy `issue/<number>`, `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other pre-policy/agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
 
 ### Parent and child ownership
@@ -169,7 +170,7 @@ When accepted scope is complete and no pull request exists, `implement-issue` op
 
 If a draft pull request already exists, leave it a draft until accepted scope is complete, then mark that same pull request ready for review. Do not open a second pull request. Only `implement-issue` may open the pull request or change it from draft to ready for review.
 
-`CLOSED_UNMERGED` stays the candidate. Reopen or rebase that head. Do not start a new plan or a second pull request. Review findings on `IN_REVIEW` or `CLOSED_UNMERGED` are fixed on that same pull request through `address-pr-review`, then confirmed against the diff since the reviewed head. A second full `pr-review` starts only when that fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the review relied on. A decision blocker names the other pull request and keeps this one.
+`CLOSED_UNMERGED` stays the candidate. Reopen or rebase that head. Do not start a new plan or a second pull request. Review findings on `IN_REVIEW` or `CLOSED_UNMERGED` are fixed on that same pull request through `address-pr-review`, then reviewed under the pinned AI-SDLC canonical convergence policy: focused intermediate rechecks where safe, broader review when impact is high-risk or unknown, final whole-candidate exact-head/base approval. A clean initial review can be final. A decision blocker names the other pull request and keeps this one.
 
 `REJECTED` is not resumed.
 

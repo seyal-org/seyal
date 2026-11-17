@@ -62,27 +62,11 @@ An Issue or PR cannot override architecture/specification. Existing code is neve
 
 Any request to **implement, fix, finish, code, or complete a specific GitHub Issue** must enter through `.agents/skills/implement-issue/SKILL.md` before production edits. Do not implement a Ready Issue directly from chat instructions or bypass the skill because the requested change appears small.
 
-Seyal requires **two distinct ownership checks**: a human GitHub Issue owner for accountability, and a token-fenced atomic agent worker claim for the same-host execution. The human assignment/comment and branch do **not** provide atomic exclusion between two Cursor/Codex/Claude agents acting for that owner. After the approved plan and before writing, use `python3 scripts/seyal-ai-sdlc-claim.py begin --repo seyal-org/seyal --phase implement --number <N>`, then `verify` before every mutation and `release` only at the completed handoff. For PR review/remediation use the corresponding `review`/`process-review` phases on the same PR number. The host must provide `AI_SDLC_WORKER_ID` unique to each concurrently running worker; without it or `make bootstrap-agents` the write gate fails closed. A separate human review and explicit merge authorization are still required.
+Seyal coordinates work through the sole human GitHub Issue owner defined in `docs/engineering/ISSUE-PROTOCOL.md`. That owner coordinates delegated agents; no local session lock, token, worker identity or separate claim store is required. Do not allow overlapping edits by agents acting for the same owner. Recheck the owner and candidate before editing and publication. A separate human review and explicit merge authorization are still required.
 
-Seyal uses an exclusive active-work claim:
+Seyal uses one Ready Issue, one human owner, one isolated worktree and one scoped PR. The Issue body is the plan. Resolve fresh ownership, stop on another owner/conflict, and resume the existing authorized candidate instead of creating another. Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners. They must not replace the human owner record or independent human reviewer.
 
-```text
-fresh Ready Issue
-→ authenticated **human** GitHub owner
-→ exactly one human owner (sole assignee when assignable; otherwise `Owner: @login` on an unassigned queue issue)
-→ Issue body is the plan
-→ deterministic remote branch <human-login>/issue/<number>
-→ coding agent may act only as delegated tool/co-author
-→ isolated worktree
-→ production edits
-→ one scoped PR owned by the human
-```
-
-If another human already owns the Issue, assignment/owner-claim records conflict, the human owner identity cannot be established, or `<human-login>/issue/<number>` already exists for an unrequested resume, **STOP before production work** and report the collision. Never clear or steal another contributor's assignment. Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners. They may be credited as co-authors/tooling provenance, but must not replace the human owner record, branch owner, PR owner, durable handoff identity, or independent reviewer. Project status fields are lifecycle metadata, not an ownership lock.
-
-The Issue body is the plan, as defined in `docs/engineering/ISSUE-PROTOCOL.md`. A chat outline is not that record. A separate plan comment is not required.
-
-New implementation branches are named `<human-login>/issue/<number>`; agent/vendor namespaces are forbidden. Agent assistance may be credited as tooling provenance or valid co-authorship, but required owner/reviewer records stay human. See `ISSUE-PROTOCOL.md` for external-contributor owner claims, handoff, legacy-branch disposition, and attribution details.
+New implementation branches are named `<human-login>/issue/<number>`; agent/vendor namespaces are forbidden. Agent assistance may be credited as tooling provenance or valid co-authorship, but required owner/reviewer records stay human. See `docs/engineering/ISSUE-PROTOCOL.md` for external-contributor owner claims, handoff, legacy-branch disposition, and attribution details. Use the pinned AI-SDLC portable workflow and canonical review-convergence policy; do not create redundant review passes.
 
 ## Before changing code
 

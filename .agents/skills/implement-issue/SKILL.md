@@ -1,110 +1,22 @@
 ---
 name: implement-issue
-description: Seyal facade for AI-SDLC implementation, adding mandatory human GitHub ownership, Issue-body-plan/candidate mapping, the one-Issue/worktree/PR workflow, and terminal-specific engineering gates.
+description: Seyal adapter for AI-SDLC implementation, with human GitHub ownership, Issue-body plan and terminal-specific gates.
 ---
 
 # Implement Issue
 
-This is the mandatory entrypoint for production implementation of a Seyal GitHub Issue. Requests such as implement, fix, finish, code, or complete a specific Issue must use this skill before production edits; do not bypass it by editing directly.
+This is the mandatory entrypoint for production implementation of a Seyal GitHub Issue. Follow the canonical generic procedure in `.sdlc/framework/skills/implement-issue/SKILL.md`. If unavailable, run `make bootstrap-agents`. Use the portable coordination lane, not a local agent claim store.
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/implement-issue/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
+## GitHub ownership and candidate
 
-## Finding work
+Use `docs/engineering/ISSUE-PROTOCOL.md` as the sole detailed authority for Ready, human ownership, branch naming, handoff, and candidate lifecycle. For new work, select a Ready unassigned `help wanted` Issue; `needs-refinement` and `blocked` are not implementation queues.
 
-When someone asks what to develop, what to refine, or which issue to pick up, use the contributor queues in `CONTRIBUTING.md` and `docs/engineering/ISSUE-PROTOCOL.md`. Do not scan the full open-issue list and do not report that list as blocked.
-
-- Development: open, unassigned, label `help wanted`. These issues are Ready. Pick one up through this skill.
-- Refinement: open, unassigned, label `needs-refinement`. Route to `issue-refinement`. Do not implement them.
-- `blocked` names the issue, pull request, or ADR that still has to land. Report that dependency.
-- `historical-evidence` is not current work.
-
-If the requested issue is `needs-refinement`, stop implementation and refine it. If it is `blocked`, name the blocking issue and stop. An unassigned queue issue is claimed by assigning the human owner, or by commenting `Owner: @login` when GitHub will not assign an external contributor. That comment is the claim. Wait for a maintainer only when another human already owns the issue or two claims disagree.
-
-## Exclusive GitHub Issue claim
-
-The human owner record is the accountable contributor, **not** an atomic agent-execution lock. The pinned generic executable claim gate is additionally required. In Seyal, invoke `python3 scripts/seyal-ai-sdlc-claim.py begin --repo seyal-org/seyal --phase implement --number <N>` after approval and `verify` with the same arguments immediately before *every* mutation, followed by `release` only after successful handoff. The wrapper uses one host-local DB and a stable private token path; `AI_SDLC_WORKER_ID` must uniquely identify the active worker, not the human GitHub owner. This Seyal wrapper replaces (does not duplicate) the generic direct CLI invocation. On `BUSY`/`DENIED`/`ERROR` do not edit or create a replacement branch/PR; same-worker restart resumes its retained token. The human owner stays unchanged. Claiming the Issue is a coordination preflight, not implementation permission. Implementation planning happens before final readiness and does not claim ownership. Perform the human-owner claim before implementation branch/worktree creation, generated files, or production edits.
-
-1. Resolve the responsible **human GitHub owner** using the project-approved GitHub tooling and the fresh complete Issue owner-record state (assignees plus any maintainer-acknowledged `Owner: @login` claim). Coding-agent/bot identities are not valid Seyal owners. Do not guess from git author name, OS username, chat name, agent/vendor identity, or repository ownership. If the human owner cannot be resolved uniquely, stop with `BLOCKED: human implementation owner unavailable` and do not claim or edit the Issue.
-2. Fetch the owning GitHub Issue fresh from GitHub immediately before pickup. Cached project context, chat state, an earlier fetch, or the Issue body alone is not sufficient for owner-record state.
-3. Verify the Issue is still open and **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. Readiness and ownership are separate gates.
-4. Inspect the complete **human owner-record state**: assignees plus maintainer-acknowledged `Owner: @login` claims.
-   - **No active human owner record:** if the current human owner is assignable, assign exactly that owner and fetch again. If GitHub does not allow assigning this external contributor, post `Owner: @login`. On an unassigned `help wanted` or `needs-refinement` issue, that comment is the claim and work continues. Require a maintainer acknowledgement only when another owner record already exists or two claims disagree.
-   - **Exactly the current human owner:** treat this only as a potential resume; continue the deterministic-branch checks below.
-   - **Exactly another human owner:** stop before planning or edits and report `Issue #N is already taken by @login` with the Issue URL.
-   - **Agent/bot owner record:** stop as `BLOCKED`; Seyal work ownership must be transferred to a human before implementation.
-   - **Conflicting records:** multiple assignees, multiple acknowledged owner claims, or disagreement between assignee and acknowledged claim is an ownership collision. Seyal implementation Issues have exactly one active human owner.
-5. Re-fetch the Issue and require exactly one human owner record: either the current human is the sole assignee, or there is no conflicting assignee and exactly one `Owner: @login` comment names that human. On an unassigned `help wanted` or `needs-refinement` issue, that comment is enough. A maintainer acknowledgement is required only when another owner record already exists. Any disagreement is `BLOCKED`. A failed write, overwritten assignment, multiple assignees, or ambiguous result is `BLOCKED`; never overwrite another valid claim to win a race.
-6. If the work item is a GitHub sub-issue, fetch its parent immediately before claiming or editing the child. A **planning/umbrella parent is not an ownership lock** for an independently scoped child. Stop with `BLOCKED` only when parent and child overlap the same implementation slice or the parent explicitly owns/releases that slice. After the child claim write and again after creating `<human-login>/issue/<number>`, re-fetch both parent and child and verify there is no duplicate ownership of the same slice.
-7. Do not clear, replace, or steal another human's owner record. Ownership transfer requires an explicit human-to-human handoff under `ISSUE-PROTOCOL.md`.
-
-The human ownership claim is the sole assignee when assignable. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor's `Owner: @login` comment is the claim. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the **human owner record**. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
-
-## Human owner and agent delegation
-
-The work owner is always a human GitHub contributor.
-
-- A coding agent may execute implementation steps only on behalf of the sole human Issue owner.
-- New branches use `<human-login>/issue/<number>`; agent/vendor names are not branch ownership namespaces.
-- If an agent changes (for example Cursor → Codex), the Issue owner and branch stay unchanged.
-- Agent assistance may be credited in the PR body and/or with a real `Co-authored-by:` trailer. Do not invent attribution identities.
-- A bot-authored review/comment is supplemental analysis only. Required independent review must be owned by a human GitHub reviewer.
-
-## Accepted plan and candidate preflight
-
-Do not create or switch the implementation worktree/branch, generate files, or start production edits until the Issue is Ready and the candidate state is known.
-
-1. The Issue body is the plan when it states the goal, scope, acceptance criteria, tests, and dependencies. A chat outline is not that plan. A separate plan comment is not required.
-2. If the Issue body lacks measurable acceptance or no longer matches scope, architecture, or dependencies, stop and route to `issue-refinement`, then `development-readiness`. Do not invent a second plan comment inside `implement-issue`.
-3. Re-state the implementation slice and permanent production path before edits. Ask the user only when an unresolved product/architecture/authority decision remains.
-4. Resolve the implementation candidate defined in `docs/engineering/ISSUE-PROTOCOL.md` before creating a branch/worktree. `Refs` and `Part of` do not make a pull request the candidate. Include a closed unmerged pull request on the Issue branch:
-   - `NONE` → keep implementing on the branch. Do not open a pull request while accepted scope is incomplete. When it is complete, open one pull request ready for review;
-   - same human owner + `IMPLEMENTATION_IN_PROGRESS` (an existing draft) → resume that exact candidate/branch; keep it a draft until accepted scope is complete, then mark that same PR ready for review;
-   - `IN_REVIEW` (ready for review) + reviewer feedback or required-check remediation → use `address-pr-review` (Seyal alias for generic `process-review`) and review the complete candidate again through `pr-review` after the batch. Do not open a second PR;
-   - `CLOSED_UNMERGED` → reopen or rebase that same head. Review findings use `address-pr-review`. Do not re-implement it and do not open a second PR. A decision blocker names the other pull request and keeps this one;
-   - `REJECTED` → do not resume;
-   - `UNKNOWN`, another owner, ambiguous ownership, or multiple active candidates → stop and reconcile; never create a second candidate.
-   Only this skill may open the pull request or change it from draft to ready for review.
-5. New implementation begins only after the Issue is Ready, the human owner claim is valid, and no conflicting candidate owns the same slice.
-
-When the user asks what to do next, answer with one next action: the Issue or pull request, why it is next, and the concrete step.
-
-## Failure remediation loop
-
-A reproducible failure discovered while implementing, validating, or closing the owning Issue is active engineering work. Recording or classifying the failure is not completion when the failure is fixable within the Issue's accepted scope.
-
-For every reproducible failure:
-
-1. Reproduce it with the narrowest deterministic test, fixture, workload, or native gate available.
-2. Diagnose whether the root cause is product code, test/harness lifecycle or isolation, environment/setup, or an external platform limitation. Do not guess from a single green rerun.
-3. If the root cause is within the owning Issue scope, implement the smallest production-grade fix immediately. Test/harness fixes are valid only when they make the test more truthful; never weaken, skip, retry-away, serialize-away, or relabel a valid failure merely to obtain green.
-4. Rerun the narrow failing gate until stable, then rerun the applicable exact-head repository gates (`make check`, `make test`, native/XCUI, fuzz/bench/security as required) and CI.
-5. Continue diagnose → fix → rerun until green. An isolated pass does not override a later combined/full-suite failure.
-6. Create a blocking child Issue and stop only when diagnosis establishes that the required fix materially exceeds the owning Issue scope, changes an accepted architecture/authority boundary, requires a new non-local module/redesign, or belongs to a separate ownership boundary. Link the blocker and keep the original Issue open.
-7. Hosted/cloud CI is the default development loop. A physical or dedicated platform machine is required only for gates that hosted CI cannot truthfully establish, such as hardware-specific interactive performance. Lack of a developer-owned physical machine is not itself a reason to stop normal implementation/debugging.
-
-A known reproducible failure may be explicitly classified only after diagnosis. `ENVIRONMENT_UNSUPPORTED` / `PLATFORM_LIMITED` must identify the unavailable external capability and must not be used for an in-repository defect or test-lifecycle leak.
-
-## Production-grade merge invariant
-
-Anything that can reach `master` must be production-grade for its intended repository role. This applies to product code, developer tooling, scripts, fixtures, generated artifacts, and tests that are committed on a mergeable path.
-
-- Mergeable implementation work must use the accepted permanent architecture and must be intended to remain, be maintained, and evolve in production/contributor use.
-- Throwaway, demo-only, temporary, fake-data, prototype, spike, benchmark-experiment, or compatibility-bridge implementation code is never a merge candidate merely because it demonstrates progress or passes a narrow test.
-- Exploratory code must remain on an explicitly non-mergeable R&D path. Useful findings may graduate only as independently valid tests, fixtures, measurements, documentation, or decision evidence; shipping code is implemented cleanly afterward through the normal Ready/implementation/review flow.
-- Do not copy exploratory implementation wholesale into a production branch. Re-implement the accepted production solution cleanly so review can establish that every merged path is intentional and supportable.
-- If a requested feature cannot yet be implemented production-grade because architecture or dependencies are unresolved, stop and route the uncertainty instead of creating a temporary production path.
-
-## Deterministic branch audit/resume backstop
-
-After Issue-body-plan/readiness/candidate preflight and before creating a new worktree or editing production files, use the exact branch name `<human-login>/issue/<number>` for new implementation pickups, where `<human-login>` is the freshly verified unique human owner. The **unique human owner record prevents two people from owning the same implementation Issue at once**. Because branches are human-namespaced, branch creation only detects duplicate/resumable work for that same human owner.
-
-1. Fetch remote refs immediately before branch creation.
-2. If the human owner's deterministic `<human-login>/issue/<number>` branch already exists in the canonical repository or the contributor's declared fork, **do not create another implementation worktree or alternate branch**. Stop and report that the Issue has active/resumable work. Resume only when the human owner explicitly asked to continue/resume and the fresh Issue read still proves that same human is the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim.
-3. If the branch does not exist, create `<human-login>/issue/<number>` from the current accepted `master`. If that same human-namespaced ref appears concurrently, stop and re-run owner/branch preflight rather than selecting a different branch name. Do **not** treat branch creation as the mechanism that prevents two humans from claiming the same Issue: two different human namespaces can both be created, so the owner record must already have excluded that race.
-4. Immediately after successfully creating the branch, fetch the Issue again and require the same human to remain the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim. If ownership and branch state disagree, stop before production edits and surface the collision for explicit resolution.
-5. Create the isolated worktree from that exact branch only after both the **unique human owner-record check** and deterministic branch audit/resume check pass.
-
-Legacy implementation branches already created as `issue/<number>`, `issue/<number>-<short-name>`, or under agent/vendor namespaces such as `cursor/`, `codex/`, `claude/`, or `copilot/` require explicit human-owner disposition before they continue. Do not create new branches in those legacy forms after this rule is merged.
+- Resolve the responsible **human GitHub owner** from the authenticated contributor; read the complete Issue owner-record state (assignees and active owner comments) fresh. Cached context is not sufficient for owner-record state. A bot-authored review/comment is supplemental analysis only.
+- When unowned, add the human as assignee without replacing others; if not assignable, use the external `Owner: @login` claim in the protocol. Re-fetch and require one owner. If another owner exists, report `Issue #N is already taken by @login` and stop. Conflicting records (multiple assignees, multiple acknowledged owner claims, or conflicting pending claims) require maintainer resolution; never overwrite another valid claim to win a race.
+- If the work item is a GitHub sub-issue, fetch its parent immediately. A planning/umbrella parent is not an ownership lock for disjoint children; claim and branch that sub-issue only after the parent/slice overlap check. Re-fetch both parent and child after claim and branch creation; do not duplicate ownership of the same implementation slice.
+- The Issue body is the plan. Verify readiness, authorized scope and existing candidates including closed-unmerged PRs before edits. Use one exact branch name `<human-login>/issue/<number>` and one isolated persistent worktree. A unique human owner-record check is required before edits; verify the unique owner through either sole assignment or the external owner record. Do **not** treat branch creation as the mechanism that prevents two humans from claiming the same Issue. The unique human owner record prevents two people from owning the same implementation Issue at once as a contributor policy, not an atomic distributed lock. Recheck owner/candidate before push and publication; stop on conflicts.
+- Resume the same authorized branch/worktree and candidate, not a duplicate. `IMPLEMENTATION_IN_PROGRESS`: continue existing draft/branch; `IN_REVIEW`: route remediation to `address-pr-review`; `CLOSED_UNMERGED`: reopen/rebase the same non-rejected candidate; `UNKNOWN`, another owner, multiple candidates or rejected architecture: stop. Do not open a pull request while accepted scope is incomplete. A user-authorized draft for PR-only validation of a complete implementation with evidence pending is allowed, never ready until required evidence passes.
+- The human owner coordinates agents, serializes edits to shared files/candidates, and may delegate non-overlapping work. No extra worker identity or machine-local lock is required. For abandonment, explicitly clear or transfer the human owner record only after the owner stops and the branch disposition is known. Report the current human owner record and branch state if stale; never take over automatically.
 
 Then apply only these Seyal-specific rules on top of the generic procedure:
 
@@ -121,16 +33,9 @@ Then apply only these Seyal-specific rules on top of the generic procedure:
 11. Every mergeable PR must name exactly one **owning Issue** in the PR's `## Issue` section. Use `Closes #N`, `Fixes #N`, or `Resolves #N` only when this PR, once merged, satisfies that owning Issue's acceptance criteria and Definition of Done. If the PR is refinement, evidence, a partial implementation, a prerequisite, or otherwise does not make the Issue Done, use a non-closing reference such as `Refs #N` or `Part of #N`. Never use a closing keyword merely because the PR works on the Issue.
 12. Before opening the PR, compare the final diff/evidence against the owning Issue. If acceptance criteria changed during implementation, update/refine the Issue first; do not make the PR description silently redefine Done.
 13. Open the PR with `.github/pull_request_template.md`, preserve the exact owning-Issue reference, and provide reproducible evidence. The implementation handoff is **implemented for review**, never final verification.
-14. Do not self-approve core/high-risk work. When accepted-scope implementation is complete, mark/resolve the candidate as `IN_REVIEW` and route to one `pr-review`. That review lists every material blocker in the same pass. Review-stage remediation routes through `address-pr-review` and confirms those findings on the diff. A second full `pr-review` starts only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the review relied on.
+14. Do not self-approve core/high-risk work. When accepted-scope implementation is complete, hand off to `pr-review`. Follow the canonical AI-SDLC review convergence and evidence reuse policy; a clean initial independent review can be final, focused intermediate rechecks are permitted, and final approval is whole-candidate exact-head/base. No extra review invocation solely for ceremony.
 15. At final verification/merge handoff, explicitly verify the owning Issue's state: a closing PR may close it only if all Done gates are evidenced; a non-closing PR must leave it open. Also correct stale Issue status/checklist text when it would contradict the verified state.
 
-## Claim handoff and release
+## Handoff
 
-- **Normal completion:** keep the same unique human owner record through review/validation — sole assignee when assignable, otherwise the maintainer-acknowledged external-owner claim — so ownership remains visible; the Issue closes through the verified closing PR.
-- **Explicit mid-work handoff:** current human owner stops editing, records the exact branch/PR/check state, and ownership is explicitly transferred to the new human GitHub login through reassignment when possible or a maintainer-acknowledged owner-claim handoff for an external contributor. The new owner re-runs the full claim/readiness preflight. If branch namespace migration is required, copy the exact current head to `<new-human-login>/issue/<number>`, record the handoff, then retire the old ref; no parallel implementation branch is created.
-- **Abandoned before implementation:** remove the unused deterministic branch if it was created, then explicitly clear or transfer the human owner record using the same dual path (assignment when assignable; maintainer-acknowledged `Owner: @login` handoff/cleanup otherwise). Do not leave an owner record or branch that falsely advertises active work.
-- **Stale claim suspected:** never self-clear it. Report the current human owner record and branch state and require explicit ownership resolution.
-
-Useful findings from an isolated POC may be carried forward as measurements, docs, ADR evidence, fixtures, or independently valid tests. Production code must then be implemented cleanly from the accepted architecture/specification after readiness passes.
-
-If a reusable implementation-rule defect is found, fix it in `ai-sdlc` rather than expanding this facade into a second generic implementation skill. The generic exclusive-claim contract is tracked in `mahboobmonnamd/ai-sdlc#10`; this facade owns only Seyal's GitHub-specific identity, human owner-record, deterministic-branch, and handoff mapping.
+Follow `docs/engineering/ISSUE-PROTOCOL.md` for human ownership transfer, abandonment and resume. Do not clear an existing owner or delete another contributor's branch. Generic workflow defects belong upstream in AI-SDLC; this adapter contains only Seyal-specific requirements.

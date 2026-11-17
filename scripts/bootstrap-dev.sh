@@ -9,7 +9,7 @@ AI_SDLC_DIR="${ROOT}/.sdlc/framework"
 # Reviewed/pinned developer-tool inputs. Update only through a normal Seyal PR.
 XCODEBUILD_MCP_VERSION="2.7.0"
 AI_SDLC_REPO="https://github.com/mahboobmonnamd/ai-sdlc.git"
-AI_SDLC_COMMIT="4b4c603b2fc51105119a7773119319e8902f48e6"
+AI_SDLC_COMMIT="77158462473a4244d63329a55907d0c5ccc47757"
 AI_SDLC_SKILLS=(
   project-context
   create-issue
@@ -57,7 +57,7 @@ ensure_ai_sdlc() {
       exit 1
     }
   done
-  for required_tool in project_context.py work_claims.py workflow_claims.py; do
+  for required_tool in project_context.py; do
     [[ -f "${AI_SDLC_DIR}/tools/${required_tool}" ]] || {
       echo "pinned AI-SDLC revision is missing tools/${required_tool}" >&2
       exit 1
