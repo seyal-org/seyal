@@ -162,6 +162,9 @@ impl ApplicationRoot {
         // provisioning. Sidebar open/select of an existing pane tree must not
         // re-provision.
         let snap = self.shell.snapshot();
+        let previous_selected = snap.selected_workspace;
+        let previous_open = snap.open_workspaces.clone();
+        let host = self.shell.product_window_id().ok();
         let needs_bootstrap = !snap.open_workspaces.contains(&id)
             && !snap.windows.iter().any(|window| window.workspace == id);
         self.shell
@@ -169,13 +172,25 @@ impl ApplicationRoot {
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         self.drain_shell_effects();
         if needs_bootstrap && let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
-            if let Ok(window) = self.shell.product_window_id() {
-                let _ = self.shell.apply(crate::shell::ShellAction::CloseWindow {
-                    id: window,
-                    containment_generation: self.shell.containment_generation(),
-                });
+            // Rollback only the newly opened row/intent. Never CloseWindow the
+            // product host — it may still present unrelated open workspaces.
+            if let Some(host) = host {
+                let after = self.shell.snapshot();
+                if after.open_workspaces.len() > 1 && after.open_workspaces.contains(&id) {
+                    let _ = self.shell.apply(crate::shell::ShellAction::RemoveWorkspace {
+                        window: host,
+                        workspace: id,
+                        containment_generation: self.shell.containment_generation(),
+                    });
+                }
+                if previous_open.contains(&previous_selected)
+                    && self.shell.snapshot().selected_workspace != previous_selected
+                {
+                    let _ = self.shell.apply_activate_workspace(previous_selected);
+                }
                 self.drain_shell_effects();
             }
+            self.last_error = Some(error);
             return Err(error);
         }
         self.activate_focused_pane_authority();

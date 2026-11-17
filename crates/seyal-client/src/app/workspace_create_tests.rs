@@ -2,7 +2,7 @@
 
 use seyal_core::{AttachmentId, ExecutionId, WorkspaceId};
 
-use super::{ApplicationRoot, BindingEvidence};
+use super::{AppError, ApplicationRoot, BindingEvidence};
 use crate::composer::{ComposerAction, ComposerMode};
 
 #[test]
@@ -100,6 +100,40 @@ fn set_workspace_root_action_binds_default() {
 
 #[cfg(target_os = "macos")]
 #[test]
+fn select_workspace_bootstrap_failure_preserves_host_route() {
+    let mut app = ApplicationRoot::new();
+    let host = app.shell.product_window_id().unwrap();
+    let previous = app.shell.snapshot().selected_workspace;
+    let previous_open = app.shell.snapshot().open_workspaces.clone();
+    let empty = WorkspaceId::from_bytes([0x7a; 16]);
+    let root = std::env::temp_dir().join("seyal-select-ws-rollback");
+    let _ = std::fs::create_dir_all(&root);
+    app.shell
+        .record_workspace(empty, root.to_string_lossy().into_owned())
+        .expect("record empty workspace");
+    // Stale registry handle: has_wire_client is true but admit_create fails
+    // closed with NoLiveClient (empty None path would only queue pending).
+    app.wire_client = None;
+    app.pane_client_raws.clear();
+    app.client_handle = Some(crate::ffi::ClientRegistryHandle::new(u64::MAX));
+    let err = app
+        .select_workspace(empty)
+        .expect_err("bootstrap with a dead client must fail");
+    assert_eq!(err, AppError::NoLiveClient);
+    let after = app.shell.snapshot();
+    assert_eq!(after.active_window, Some(host), "host window must survive");
+    assert_eq!(
+        after.open_workspaces, previous_open,
+        "failed open must not leave a sticky sidebar row"
+    );
+    assert_eq!(after.selected_workspace, previous);
+    assert_eq!(app.shell.product_window_id().unwrap(), host);
+    // Clear before Drop so we do not attempt unregister of the fake handle.
+    app.client_handle = None;
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn install_terminal_authority_adopts_projected_composer_available() {
     use crate::local::reconstruction_probe_client;
     use seyal_protocol::local_ipc::framing::{ComposerEligibility, ComposerStatus, Role};
@@ -114,11 +148,12 @@ fn install_terminal_authority_adopts_projected_composer_available() {
             epoch: prior_epoch,
         })
         .unwrap();
-    // Leave prior Busy (no eligibility) so Available on the new pane is distinct.
-    assert!(matches!(
+    // Resting Raw keeps the prior pane Hidden (no Flow surface). Available on
+    // the newly installed pane must still be distinct and must not clobber draft.
+    assert_eq!(
         root.composer.snapshot(prior).unwrap().mode,
-        ComposerMode::Busy { .. }
-    ));
+        ComposerMode::Hidden
+    );
 
     let ws_root = std::env::temp_dir().join("seyal-app-ws-adopt");
     let _ = std::fs::create_dir_all(&ws_root);
@@ -165,18 +200,19 @@ fn install_terminal_authority_adopts_projected_composer_available() {
     let new_snap = root.composer.snapshot(pane).expect("new composer");
     assert_eq!(
         new_snap.mode,
-        ComposerMode::Available,
-        "focused Pane adopts its own client's Available projection"
+        ComposerMode::Hidden,
+        "resting Raw keeps the composer Hidden even when the client reports Available"
     );
     assert_eq!(
         root.composer.snapshot(prior).unwrap().draft,
         "sibling-draft",
         "adopt must not clear or overwrite the prior Pane draft"
     );
-    assert!(matches!(
+    assert_eq!(
         root.composer.snapshot(prior).unwrap().mode,
-        ComposerMode::Busy { .. }
-    ));
+        ComposerMode::Hidden,
+        "prior Raw pane stays Hidden after adopt"
+    );
     // Avoid double-unregister on Drop: clear ownership maps first.
     root.client_handle = None;
     root.pane_client_raws.remove(&pane);

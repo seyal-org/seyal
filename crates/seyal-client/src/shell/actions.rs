@@ -39,20 +39,28 @@ impl ShellState {
         previous_product: Option<WindowId>,
         request_native_activation: bool,
     ) -> Result<(), ShellError> {
-        let workspace_id = self
-            .find_window(window)
-            .map(|workspace| workspace.id)
-            .ok_or(ShellError::UnknownWindow)?;
+        let (workspace_id, realized) = {
+            let workspace = self
+                .find_window(window)
+                .ok_or(ShellError::UnknownWindow)?;
+            let item = workspace
+                .window(window)
+                .ok_or(ShellError::UnknownWindow)?;
+            (workspace.id, item.realized)
+        };
         let workspace = self.workspace_mut(workspace_id)?;
-        if workspace.window(window).is_none() {
-            return Err(ShellError::UnknownWindow);
-        }
         workspace.active_window = Some(window);
         self.last_active_workspace = workspace_id;
-        self.sidebar_host = Some(window);
-        self.record_window_focus(window)?;
-        if request_native_activation && previous_product != Some(window) {
-            self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+        // Unrealized pane-tree storage is not a native projection host. Keep
+        // sidebar_host on the realized presentation window (#1490).
+        if realized {
+            self.sidebar_host = Some(window);
+            self.record_window_focus(window)?;
+            if request_native_activation && previous_product != Some(window) {
+                self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+            }
+        } else {
+            self.record_window_focus(window)?;
         }
         Ok(())
     }
@@ -311,19 +319,25 @@ impl ShellState {
         if already_selected {
             return Ok(());
         }
+        // Already listed on this host: select in place. Do not raise a foreign
+        // solitary home that still holds a stale presenting_window pointer.
+        if already_open {
+            self.present_workspace_on_host(host, workspace)?;
+            self.last_active_workspace = workspace;
+            if let Ok(pane) = self.focused_pane_id() {
+                self.focus_history.record(pane);
+            }
+            return Ok(());
+        }
         if let Some(presenter) = self.foreign_presenter(workspace, host) {
             self.present_workspace_on_host(presenter, workspace)?;
             self.last_active_workspace = workspace;
             return self.activate_window(presenter);
         }
-        if !already_open {
-            self.require_containment_generation(containment_generation)?;
-            self.demote_prior_product_presentation(workspace, host)?;
-        }
+        self.require_containment_generation(containment_generation)?;
+        self.demote_prior_product_presentation(workspace, host)?;
         self.present_workspace_on_host(host, workspace)?;
-        if !already_open {
-            self.bump_containment_generation();
-        }
+        self.bump_containment_generation();
         self.last_active_workspace = workspace;
         if let Ok(pane) = self.focused_pane_id() {
             self.focus_history.record(pane);
@@ -342,10 +356,10 @@ impl ShellState {
             .iter()
             .flat_map(|item| &item.windows)
             .find(|item| item.id == presenter)?;
-        // Solitary home presentation is demoted into the host, not raised.
-        if !window.realized
-            || (window.workspace_id == workspace && window.open_workspaces.len() == 1)
-        {
+        // Unrealized storage is not a native projection; open on the host.
+        // Any realized presenter — including a solitary home window — raises
+        // per #1490 acceptance 6 (already-open workspace orders its window front).
+        if !window.realized {
             return None;
         }
         Some(presenter)
@@ -364,6 +378,8 @@ impl ShellState {
                 window.realized
                     && window.id != keep
                     && window.open_workspaces.contains(&workspace)
+                    // AC6: never demote a solitary realized home presentation.
+                    && !(window.workspace_id == workspace && window.open_workspaces.len() == 1)
             })
             .map(|window| window.id)
             .collect();
@@ -372,33 +388,13 @@ impl ShellState {
                 .find_window(window_id)
                 .map(|item| item.id)
                 .ok_or(ShellError::UnknownWindow)?;
-            let (is_home, only_member) = {
+            let only_member = {
                 let window = self
                     .workspace(owner)?
                     .window(window_id)
                     .ok_or(ShellError::UnknownWindow)?;
-                (
-                    window.workspace_id == workspace,
-                    window.open_workspaces.len() == 1,
-                )
+                window.open_workspaces.len() == 1
             };
-            if is_home {
-                let window = self
-                    .workspace_mut(owner)?
-                    .window_mut(window_id)
-                    .ok_or(ShellError::UnknownWindow)?;
-                window.realized = false;
-                window.open_workspaces.clear();
-                self.push_effect(ShellNativeEffect::DestroyWindowRealization {
-                    window: window_id,
-                });
-                if self.sidebar_host == Some(window_id) {
-                    self.sidebar_host = Some(keep);
-                }
-                // Home window is no longer a presenter; the host will claim it.
-                self.workspace_mut(workspace)?.presenting_window = None;
-                continue;
-            }
             if only_member {
                 self.close_window(window_id, self.containment_generation)?;
                 continue;
@@ -615,7 +611,7 @@ impl ShellState {
         Window::try_new(WindowId::new(), workspace, vec![tab], tab_id)
     }
 
-    fn new_tab_record(&mut self, allows_implicit_execution_bootstrap: bool) -> Tab {
+    fn new_tab_record(&mut self, _allows_implicit_execution_bootstrap: bool) -> Tab {
         let ordinal = self.next_tab_ordinal;
         self.next_tab_ordinal = self.next_tab_ordinal.saturating_add(1);
         let terminal_id = TerminalTabId::new();
@@ -628,7 +624,10 @@ impl ShellState {
                 execution: None,
             }],
             selected_terminal_tab: Some(terminal_id),
+            // New tabs never inherit implicit bootstrap; CreateWorkspace /
+            // CreateWindow seed the first leaf via new_window_record separately.
             allows_implicit_execution_bootstrap: false,
+            // Resting Raw only — never mint Flow routes from tab creation (#1490).
             presentation_mode: crate::presentation::PresentationMode::Raw,
             resting_presentation_mode: crate::presentation::PresentationMode::Raw,
         };

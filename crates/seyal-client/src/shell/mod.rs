@@ -466,14 +466,22 @@ impl ShellState {
                 .flat_map(|workspace| &workspace.windows)
                 .find(|window| window.id == host)
             {
-                return Some(window);
+                // Unrealized pane-tree storage must never become the product
+                // host (#1490): stable native WindowId / input / chrome route
+                // only through realized projections.
+                if window.realized {
+                    return Some(window);
+                }
             }
         }
         self.focus_history.panes().iter().find_map(|pane| {
             self.workspaces
                 .iter()
                 .flat_map(|workspace| &workspace.windows)
-                .find(|window| window.tabs.iter().any(|tab| tab.panes.contains_key(pane)))
+                .find(|window| {
+                    window.realized
+                        && window.tabs.iter().any(|tab| tab.panes.contains_key(pane))
+                })
         })
     }
 
@@ -741,7 +749,7 @@ impl ShellState {
         Ok(())
     }
 
-    fn sync_sidebar_after_focus(&mut self, workspace: WorkspaceId, tab: TabId) {
+    fn sync_sidebar_after_focus(&mut self, workspace: WorkspaceId, _tab: TabId) {
         let Some(host) = self.sidebar_host else {
             return;
         };
@@ -752,11 +760,10 @@ impl ShellState {
             .product_active_window()
             .map(|window| window.selected_workspace);
         if selected == Some(workspace) {
-            if let Some(target) = self.window_of_tab(tab) {
-                if target != host {
-                    self.sidebar_host = Some(target);
-                }
-            }
+            // Presentation host stays independent of pane-tree storage.
+            // Foreign selected workspaces often keep tabs on an unrealized
+            // storage WindowId; retargeting sidebar_host there would send
+            // input/chrome to a non-native id (#1490).
             return;
         }
         let _ = self.present_workspace_on_host(host, workspace);

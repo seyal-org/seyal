@@ -4,11 +4,22 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::{
     ShellAction, ShellError, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed,
-    ShellWindowSeed, ShellWorkspaceSeed,
+    ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
 };
 
 fn other_workspace() -> WorkspaceId {
     WorkspaceId::from_bytes([0x11; 16])
+}
+
+/// Unrealized pane-tree storage opens in the host; realized homes raise (AC6).
+fn mark_home_unrealized(shell: &mut ShellState, workspace: WorkspaceId) {
+    let item = shell
+        .workspaces
+        .iter_mut()
+        .find(|item| item.id == workspace)
+        .expect("workspace");
+    let window = item.windows.first_mut().expect("home window");
+    window.realized = false;
 }
 
 fn seed_two_workspaces() -> ShellState {
@@ -108,6 +119,7 @@ fn create_workspace_opens_in_the_current_window_without_realize() {
 #[test]
 fn close_last_pane_removes_workspace_from_sidebar() {
     let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
     let host = shell.product_window_id().unwrap();
     let first = WorkspaceId::m001_default();
     let second = other_workspace();
@@ -123,7 +135,7 @@ fn close_last_pane_removes_workspace_from_sidebar() {
             workspace: second,
             containment_generation: shell.containment_generation(),
         })
-        .expect("open second in host sidebar");
+        .expect("open unrealized second in host sidebar");
     assert_eq!(shell.snapshot().open_workspaces, vec![first, second]);
     assert_eq!(shell.snapshot().selected_workspace, second);
     assert_eq!(shell.snapshot().panes.len(), 1);
@@ -148,6 +160,7 @@ fn close_last_pane_removes_workspace_from_sidebar() {
 #[test]
 fn remove_workspace_detaches_without_terminating_bindings() {
     let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
     let host = shell.product_window_id().unwrap();
     let other = other_workspace();
     let pane = shell
@@ -185,15 +198,27 @@ fn remove_workspace_detaches_without_terminating_bindings() {
 
 #[test]
 fn open_rejects_copying_into_a_second_window_and_raises_presenter() {
+    // AC6: solitary realized home raises; absorbing into another host is forbidden.
     let mut shell = seed_two_workspaces();
     let first = shell.product_window_id().unwrap();
+    let other = other_workspace();
+    let other_home = shell
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == other)
+        .and_then(|workspace| workspace.active_window)
+        .expect("other home");
+    let _ = shell.take_effects();
     shell
         .apply(ShellAction::ActivateWorkspace {
-            workspace: other_workspace(),
+            workspace: other,
             containment_generation: shell.containment_generation(),
         })
-        .unwrap();
-    assert_eq!(shell.snapshot().active_window, Some(first));
+        .expect("raise solitary realized home");
+    assert_eq!(shell.snapshot().active_window, Some(other_home));
+    assert!(!shell.snapshot().windows.iter().any(|window| {
+        window.id == first && window.open_workspaces.contains(&other)
+    }));
     shell.set_allows_window_creation_for_test(true);
     shell
         .apply(ShellAction::CreateWindow {
@@ -202,22 +227,93 @@ fn open_rejects_copying_into_a_second_window_and_raises_presenter() {
         })
         .unwrap();
     let second = shell.product_window_id().unwrap();
-    assert_ne!(second, first);
+    assert_ne!(second, other_home);
     let _ = shell.take_effects();
     shell
         .apply(ShellAction::ActivateWorkspace {
-            workspace: other_workspace(),
+            workspace: other,
             containment_generation: shell.containment_generation(),
         })
-        .expect("raise the presenting window");
-    assert_eq!(shell.snapshot().active_window, Some(first));
-    assert_eq!(shell.snapshot().selected_workspace, other_workspace());
+        .expect("raise the presenting window again");
+    assert_eq!(shell.snapshot().active_window, Some(other_home));
+    assert_eq!(shell.snapshot().selected_workspace, other);
     assert!(!shell.snapshot().windows.iter().any(|window| {
-        window.id == second && window.open_workspaces.contains(&other_workspace())
+        window.id == second && window.open_workspaces.contains(&other)
     }));
     assert!(shell.take_effects().iter().any(|effect| {
-        matches!(effect, ShellNativeEffect::OrderFrontMakeKey { window } if *window == first)
+        matches!(effect, ShellNativeEffect::OrderFrontMakeKey { window } if *window == other_home)
     }));
+}
+
+#[test]
+fn focus_split_and_tab_in_foreign_workspace_keep_presentation_host() {
+    let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
+    shell.allows_pane_splitting = true;
+    let host = shell.product_window_id().unwrap();
+    let other = other_workspace();
+    let storage = shell
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == other)
+        .and_then(|workspace| workspace.active_window)
+        .expect("unrealized storage");
+    shell
+        .apply(ShellAction::ActivateWorkspace {
+            workspace: other,
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("open foreign workspace on host");
+    assert_eq!(shell.product_window_id().unwrap(), host);
+    assert_eq!(shell.sidebar_host, Some(host));
+
+    let tab = shell.snapshot().active_tab;
+    let pane = shell.snapshot().focused_pane;
+    shell
+        .commit_focus(other, tab, pane)
+        .expect("focus selected foreign pane");
+    assert_eq!(
+        shell.sidebar_host,
+        Some(host),
+        "focus must not retarget sidebar_host to unrealized storage"
+    );
+    assert_ne!(shell.sidebar_host, Some(storage));
+    assert_eq!(shell.product_window_id().unwrap(), host);
+
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("split in foreign workspace");
+    assert_eq!(shell.sidebar_host, Some(host));
+    assert_eq!(shell.product_window_id().unwrap(), host);
+    let split_snap = shell.snapshot();
+    assert_eq!(split_snap.panes.len(), 2);
+    shell
+        .commit_focus(other, split_snap.active_tab, split_snap.focused_pane)
+        .expect("focus after split");
+    assert_eq!(shell.sidebar_host, Some(host));
+
+    // Create a second terminal tab inside the foreign storage tree, then focus.
+    let foreign_window = storage;
+    shell
+        .apply(ShellAction::CreateTab {
+            window: foreign_window,
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("new tab on foreign storage window");
+    let after_tab = shell.snapshot();
+    assert_eq!(after_tab.tabs.len(), 2);
+    shell
+        .commit_focus(other, after_tab.active_tab, after_tab.focused_pane)
+        .expect("focus after tab switch");
+    assert_eq!(
+        shell.sidebar_host,
+        Some(host),
+        "tab switch in foreign workspace must keep presentation host"
+    );
+    assert_eq!(shell.product_window_id().unwrap(), host);
 }
 
 #[test]
