@@ -67,6 +67,22 @@ M004 is not a feature-count race. The release bar is that ordinary terminal user
 | Remote Runtime product, mobile, Linux, Windows | POST-LAUNCH | M007 | SSH as a terminal workload is required; Seyal remote-product features are not. |
 | Collaboration / enterprise control plane | POST-LAUNCH | M008/M009 | Built after stable local/remote/resource authority. |
 
+## Proposed V1 scope amendment (#1510)
+
+This amendment is conditional on product acceptance and accepted #1493 Raw-only authority (PR #1507). It is additive to the existing matrix except for explicit presentation reclassification below. No unresolved decision is a release waiver; #1510 owns final reconciliation.
+
+| Additional launch capability | Class after acceptance | Owner / dependency | Required evidence |
+|---|---|---|---|
+| In-window workspace sidebar, pane-local tabs and project navigation | LAUNCH BLOCKER | #1490/#674; accepted SPEC-032 and ADR-025/SPEC-031 | V1 multi-project workflow; preserve distinct execution identities and safe moves, including separately accepted cross-workspace transfer. |
+| Runtime session inventory and attach/detach/control | LAUNCH BLOCKER | #929 consumer; refine Runtime owner under #674/#687 | List live/ended and attached/detached facts; exact reattach and termination, controller fencing, GUI and CLI. |
+| Local CLI orchestration, templates and read-only project/worktree context | LAUNCH BLOCKER | #262/#674/#676; refine local authority | V1 programmable-workspace scenario including GUI absence, partial failure, denial and stable IDs. |
+| Advisory agent notifications | LAUNCH BLOCKER | #644/#680; refine SPEC-028/SPEC-022 ingress/retention | Supported real hooks and generic CLI, exact target, GUI-absent retention, deduplication and bounded delivery; no privileged approval. |
+| Raw trusted cursor placement and native interaction | LAUNCH BLOCKER | #1492/#1498/#1499/#1500 | Bash/Zsh/Fish wrapped/Unicode/multiline cursor mapping, selection, scroll, links, IME and TUI arbitration. |
+
+See [V1 scope and release scenarios](M004-V1-PRODUCT-SCOPE.md) for required behavior and dependency order. Existing layout/history and detach/reconnect rows additionally require atomic committed snapshots, migration/partial-restore and explicit recovery semantics described there.
+
+When #1493 and #1510 are accepted, the minimum Blocks/composer row is **POST-LAUNCH**, and Flow/Blocks/composer-only portions of other rows are deferred, not their shared Raw/TUI correctness, security, input or performance requirements. Rich shell integration beyond required trusted cursor placement and richer palette features remain optional; basic quick workspace switching is mandatory. Agent platform/orchestration stays post-launch except the bounded advisory notification subset above. No other launch blocker is reclassified. Existing M003 gates must be read with the conditional scope amendment in its milestone contract. Final reconciliation must update any remaining inconsistent row wording and issue dispositions before the release freeze.
+
 ## Benchmark gate rules
 
 #673 must publish numeric budgets before M002 implementation is declared Ready. M004 may not ship while key-to-photon, high-output throughput, startup or memory thresholds are still `TBD`.
