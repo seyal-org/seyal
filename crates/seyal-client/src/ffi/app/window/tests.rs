@@ -628,7 +628,7 @@ fn navigate_encodes_one_window_activation_effect() {
     let shell = seed_n_windows(2);
     let snap = shell.snapshot();
     let target_window = snap.windows[1].id;
-    let target_tab = snap.windows[1].tabs[0].id;
+    let _target_tab = snap.windows[1].tabs[0].id;
     let target_pane = snap.windows[1].tabs[0].focused_pane;
     let workspace = snap.active_workspace;
     install_shell(handle, shell);

@@ -1,9 +1,14 @@
 //! ApplicationRoot CreateWorkspace / SetWorkspaceRoot (ADR-028).
 
-use seyal_core::{AttachmentId, ExecutionId, WorkspaceId};
+use seyal_core::WorkspaceId;
 
-use super::{AppError, ApplicationRoot, BindingEvidence};
+use super::ApplicationRoot;
 use crate::composer::{ComposerAction, ComposerMode};
+
+#[cfg(target_os = "macos")]
+use super::{AppError, BindingEvidence};
+#[cfg(target_os = "macos")]
+use seyal_core::{AttachmentId, ExecutionId};
 
 #[test]
 fn create_workspace_with_minted_id_projects_root() {

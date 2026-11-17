@@ -71,7 +71,7 @@ fn two_pane_root() -> (ApplicationRoot, WorkspaceId, TabId, PaneId, PaneId) {
 
 #[test]
 fn navigate_records_and_back_moves_focus() {
-    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    let (mut root, w1, _t1, p1, p2) = two_pane_root();
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
@@ -123,7 +123,7 @@ fn select_tab_and_focus_pane_record_focus_history() {
 
 #[test]
 fn stale_history_back_rejects_without_focus_move() {
-    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    let (mut root, w1, _t1, p1, p2) = two_pane_root();
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
@@ -153,7 +153,7 @@ fn stale_history_back_rejects_without_focus_move() {
 
 #[test]
 fn close_focused_pane_purges_then_commits_successor() {
-    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    let (mut root, w1, _t1, p1, p2) = two_pane_root();
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
@@ -234,7 +234,7 @@ fn failed_split_rolls_back_its_history_entry_with_destroyed_pane() {
 
 #[test]
 fn successful_split_records_new_focused_leaf() {
-    let (mut root, workspace, tab, _p1, _p2) = two_pane_root();
+    let (mut root, workspace, _tab, _p1, _p2) = two_pane_root();
     root.apply(AppAction::SplitFocused {
         axis: SplitAxis::Right,
     })
@@ -729,7 +729,7 @@ fn focus_pane_onto_unbound_leaf_clears_authority() {
 
 #[test]
 fn zoom_and_directional_focus_commit_focus_and_input_authority() {
-    let (mut root, workspace, tab, p1, p2) = two_pane_root();
+    let (mut root, workspace, _tab, p1, p2) = two_pane_root();
     let bound = root.snapshot().execution;
     assert!(bound.is_some());
 

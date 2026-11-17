@@ -88,7 +88,7 @@ fn open_scope(state: &mut GotoState, shell: &ShellState, scope: GotoScope) {
 /// SPEC-022 §12 item 28: identical labels remain independently addressable.
 #[test]
 fn identical_labels_remain_independently_addressable() {
-    let (shell, w1, w2, t1, t2, p1, p2) = twin_shell();
+    let (shell, w1, w2, _t1, _t2, p1, p2) = twin_shell();
     let inventory = shell.navigation_inventory();
     let mut goto = GotoState::new();
 

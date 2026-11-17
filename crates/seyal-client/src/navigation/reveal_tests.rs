@@ -48,7 +48,7 @@ fn mini_shell() -> (ShellState, WorkspaceId, TabId, PaneId) {
 
 #[test]
 fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
-    let (mut shell, workspace, tab, pane) = mini_shell();
+    let (mut shell, workspace, _tab, pane) = mini_shell();
     let packed = pack_resource_address(ResourceAddress::Pane { workspace, pane });
     let mut history = FocusHistory::default();
     assert_eq!(

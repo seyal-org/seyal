@@ -293,7 +293,6 @@ fn resource_address_and_recency_history_omit_window_id() {
     };
     match address {
         ResourceAddress::Workspace { workspace: _ }
-        | ResourceAddress::Workspace { workspace: _ }
         | ResourceAddress::Pane {
             workspace: _,
             pane: _,

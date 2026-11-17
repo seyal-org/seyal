@@ -179,8 +179,8 @@ fn resource_address_is_copy_and_holds_no_string() {
 fn equality_is_component_wise_and_ignores_labels() {
     let w1 = WorkspaceId::m001_default();
     let w2 = workspace_b();
-    let t1 = TabId::from_bytes([0x01; 16]);
-    let t2 = TabId::from_bytes([0x02; 16]);
+    let _t1 = TabId::from_bytes([0x01; 16]);
+    let _t2 = TabId::from_bytes([0x02; 16]);
     let p1 = PaneId::from_bytes([0x03; 16]);
     let p2 = PaneId::from_bytes([0x04; 16]);
     let e1 = ExecutionId::from_bytes([0x05; 16]);
@@ -407,7 +407,7 @@ fn rejection_unknown_tab() {
 
 #[test]
 fn rejection_unknown_pane() {
-    let (shell, w1, _, t1, _, _, _) = seed_shell();
+    let (shell, w1, _, _t1, _, _, _) = seed_shell();
     assert_eq!(
         resolve(
             ResourceAddress::Pane {
@@ -564,7 +564,7 @@ fn not_composed_pane_under_wrong_tab_leaves_focus_unchanged() {
 
 #[test]
 fn resolution_never_mutates_shell_state() {
-    let (mut shell, w1, w2, t1, t2, p1, p2) = seed_shell();
+    let (mut shell, w1, w2, _t1, _t2, p1, p2) = seed_shell();
     let execution = ExecutionId::from_bytes([0x14; 16]);
     shell
         .apply(ShellAction::BindExecution {
@@ -696,7 +696,7 @@ fn navigate_pane_in_inactive_workspace_activates_all_in_one_transition() {
 
 #[test]
 fn navigate_already_active_pane_is_success_noop() {
-    let (mut shell, w1, _, t1, _, p1, _) = seed_shell();
+    let (mut shell, w1, _, _t1, _, p1, _) = seed_shell();
     let before = shell.focus_checkpoint();
     assert_eq!(
         navigate_apply_only(
@@ -803,7 +803,7 @@ fn navigate_unbound_execution_is_target_unbound_without_attach() {
 
 #[test]
 fn navigate_execution_rejection_matrix_r8_3() {
-    let (mut shell, w1, _, t1, _, p1, _) = seed_shell();
+    let (mut shell, w1, _, _t1, _, p1, _) = seed_shell();
     let exited = ExecutionId::from_bytes([0x23; 16]);
 
     // Exited, record held, no Pane bound → TargetTerminated.
@@ -1072,7 +1072,7 @@ fn address_run_reaches_original_target_after_ordinal_would_shift() {
 
 #[test]
 fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
-    let (mut shell, w1, _, t1, _, p1, _) = seed_shell();
+    let (mut shell, w1, _, _t1, _, p1, _) = seed_shell();
     shell
         .apply(ShellAction::SplitPane {
             id: p1,

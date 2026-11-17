@@ -1,5 +1,7 @@
 //! SPEC-032 §3.5 one-time migration off the outer Seyal Tab layer.
 
+#[cfg(test)]
+use seyal_core::ExecutionId;
 use seyal_core::{TabId, WindowId, WorkspaceId};
 
 use super::ShellState;
