@@ -3,6 +3,7 @@
 **Status:** Authoritative execution roadmap  
 **Scope:** Seyal OSS plus the public OSS seams consumed by higher editions  
 **First market-ready release:** M004  
+**Proposed V1 scope amendment (#1510):** [Persistent agent-aware terminal workspace](M004-V1-PRODUCT-SCOPE.md). Pending maintainer acceptance and launch-matrix reconciliation; existing milestone and architecture gates remain in force.  
 **Planning baseline:** `master` at `5594b8a37981a29819c2b87ec0cd5f9774f76d9c` on 2026-08-27
 
 This document turns the canonical product registry into a staged execution plan. `docs/product/FEATURES.md` remains the product capability registry. ADRs/specifications remain architecture authority. This roadmap answers **when**, **under which gate**, and **through which owning issue** accepted work is allowed to advance.
