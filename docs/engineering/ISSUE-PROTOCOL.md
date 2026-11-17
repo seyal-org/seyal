@@ -60,11 +60,11 @@ Rules:
 
 - Production implementation of a GitHub Issue must enter through `.agents/skills/implement-issue/SKILL.md`.
 - Resolve the authenticated **human GitHub owner** from project-approved GitHub tooling and the fresh Issue owner-record state. Never infer ownership from git author configuration, local username, chat name, an agent/bot account, or repository ownership.
-- Fetch the complete owner-record state fresh immediately before pickup: assignees plus active `Owner: @login` comments, including competing unacknowledged claims. Cached context is not ownership authority.
-- For an assignable contributor, add the authenticated **human** owner as assignee without replacing existing assignees; re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning. On an unassigned `help wanted` or `needs-refinement` issue, comment `Owner: @login` and continue; that comment is the claim. A maintainer acknowledgement is required only for a handoff or conflicting records. A coding-agent/bot identity must never be the owner record.
+- Fetch the complete owner-record state fresh immediately before pickup: assignees plus active `Owner: @login` comments, including competing self-authored claims. Cached context is not ownership authority.
+- For an assignable contributor, add the authenticated **human** owner as assignee without replacing existing assignees; re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning. On an unassigned `help wanted` or `needs-refinement` issue, post a self-authored `Owner: @login` comment and re-fetch before continuing. A maintainer acknowledgement is required only for a handoff or conflicting records. A coding-agent/bot identity must never be the owner record.
 - For external claims, accept a standalone `Owner: @login` comment only when authored by that authenticated human, or when a maintainer explicitly records an authorized transfer/resolution. Compare GitHub logins case-insensitively; ignore quoted examples and third-party nominations. A sole uncontested self-authored claim on an unassigned queue Issue is active immediately. A maintainer-recorded handoff/abandonment names the old and new owner (or unowned), identifies which earlier claim comments are superseded, and records the disposition of the existing branch/PR. Until resolved, competing active claims or an assignment that disagrees with an active comment block pickup. Do not infer expiration from age, session end, or lack of activity. Historical comments superseded by an explicit handoff are not active claims.
 - If the unique human owner record names a different contributor — by sole assignee or active external-owner claim — the Issue is already taken. Report that owner and stop before planning, worktree/branch creation, or production edits.
-- Multiple assignees, competing active external-owner claims (including uncontested or competing self-authored comments), or disagreement between assignment and owner claim are ownership collisions. Stop and require explicit resolution.
+- Multiple assignees, multiple distinct active external-owner claims (including self-authored comments not yet acknowledged by a maintainer), or disagreement between assignment and owner claim are ownership collisions. Stop and require explicit resolution.
 - If owner identity, owner-record write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
 - Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the **human-owner rule**.
 - For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the unique human owner. It may be in upstream or the contributor's fork. The **single human owner record coordinates contributors**; it is not a guarantee against simultaneous GitHub API writes. The human-namespaced branch is only that owner's deterministic audit/resume backstop. Do not create alternative agent prefixes or short-name branches to evade an existing owner record.
@@ -97,6 +97,22 @@ A handoff is explicit, never inferred from inactivity.
 - The new **human** implementer re-runs the full Ready/ownership preflight. Ownership handoff uses the recipient's human identity; migrate the deterministic branch to `<new-human-login>/issue/<number>` only as part of that explicit handoff, preserving the exact prior head and recording the old/new refs. No parallel implementation branch is created.
 - If work was abandoned before implementation, remove an unused claim branch before clearing/reassigning ownership.
 - An agent that merely suspects a stale claim must report it and stop; it must not self-unassign another contributor.
+
+### Representative ownership verification
+
+Use read-only snapshots or a disposable Issue/fork for the following scenarios; do not alter another contributor's real ownership just to test. This is a human coordination policy, not an executable locking protocol.
+
+| Scenario | Required decision |
+| --- | --- |
+| Ready, unowned; authenticated Alice adds herself and re-reads sole assignment | Alice may create her one candidate. |
+| Bob encounters Alice's sole assignment or active self-authored comment | Stop; no second candidate or owner overwrite. |
+| Unassignable Alice posts an uncontested self-authored claim | Re-read all records; proceed without waiting for acknowledgement. |
+| Two competing assignments/comments, or assignee disagrees with active comment | Both stop on detection; maintainer resolves explicitly. |
+| Alice's existing branch/draft or closed unmerged non-rejected candidate | Resume only when authorized; reuse the candidate. |
+| Maintainer records transfer, superseding Alice's claim and naming Bob | Verify old owner has stopped, preserve candidate, then Bob resumes. |
+| Umbrella parent with independent Ready child, versus overlapping implementation parent | Permit disjoint child; stop overlapping work. |
+
+A single snapshot cannot prove atomic exclusion; the final pre-edit/publication checks detect observed conflicts, and owners must coordinate overlapping edits. Record actual scenario evidence in the PR rather than introducing a second owner store.
 
 ## Production implementation vs POC
 

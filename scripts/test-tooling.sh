@@ -66,6 +66,9 @@ if [[ -f .cursor/hooks.json ]] && grep -Eq 'claim-gate\\.py|seyal-ai-sdlc-claim\
   fail "retired local agent claim hook remains configured"
 fi
 bash scripts/test-framework-pin.sh || fail "framework pin freshness/refresh regression"
+for adapter in project-context issue-refinement implementation-planning development-readiness implement-issue pr-review address-pr-review verification milestone-validation; do
+  grep -Fq 'scripts/bootstrap-dev.sh --check-framework' ".agents/skills/$adapter/SKILL.md" || fail "missing exact-pin preflight: $adapter"
+done
 active_workflow=(AGENTS.md docs/engineering/AGENT-TOOLING.md docs/engineering/AI-SDLC-REFERENCE-CONSUMER.md .agents/skills/implement-issue/SKILL.md .agents/skills/pr-review/SKILL.md .agents/skills/address-pr-review/SKILL.md scripts/bootstrap-dev.sh)
 if grep -Eq 'AI_SDLC_WORKER_ID|seyal-ai-sdlc-claim\.py|workflow_claims\.py|claim-gate\.py' "${active_workflow[@]}"; then
   fail "local agent claim requirement remains in active workflow"
@@ -100,7 +103,7 @@ grep -Fq 'Report the current human owner record and branch state' "$claim_skill"
 grep -Fq 'never overwrite another valid claim to win a race' "$claim_skill" || fail "implement-issue must not steal a concurrent claim"
 grep -Fq 'add the human as assignee without replacing others' "$claim_skill" || fail "implementor pickup must add rather than replace assignees"
 grep -Fq 'Recheck owner/candidate before push and publication' "$claim_skill" || fail "implementor must verify ownership before publication"
-grep -Fq 'including uncontested or competing self-authored comments' docs/engineering/ISSUE-PROTOCOL.md || fail "external claim collisions must include pending claims"
+grep -Fq 'including self-authored comments not yet acknowledged by a maintainer' docs/engineering/ISSUE-PROTOCOL.md || fail "external claim collisions must include pending claims"
 grep -Fq 'If the work item is a GitHub sub-issue, fetch its parent immediately' "$claim_skill" || fail "implement-issue must inspect the parent claim before a child slice"
 grep -Fq 'planning/umbrella parent is not an ownership lock' "$claim_skill" || fail "implement-issue must allow independent child ownership under planning parents"
 grep -Fqi 're-fetch both parent and child' "$claim_skill" || fail "implement-issue must re-fetch parent and child after claim and branch creation"
@@ -117,7 +120,7 @@ fi
 grep -Fq 'Issue has exactly one **human owner**' docs/engineering/DEVELOPMENT.md || fail "development workflow must make human ownership authoritative"
 grep -Fq 'unique owner record coordinates contributors' docs/engineering/DEVELOPMENT.md || fail "development workflow must make owner records authoritative across contributors"
 grep -Fq 'Transfer the **human owner record** explicitly' docs/engineering/DEVELOPMENT.md || fail "development workflow must support assignee and external-owner handoff"
-grep -Fq 'On an unassigned `help wanted` or `needs-refinement` issue, comment `Owner: @login` and continue; that comment is the claim.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must support non-assignable external human contributors"
+grep -Fq 'On an unassigned `help wanted` or `needs-refinement` issue, post a self-authored `Owner: @login` comment and re-fetch before continuing.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must support non-assignable external human contributors"
 grep -Fq 'durable ownership identity is always a human GitHub account' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must require human ownership"
 grep -Fq 'Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners.' AGENTS.md || fail "AGENTS.md must reject agent ownership"
 grep -Fq 'New implementation branches are named `<human-login>/issue/<number>`' AGENTS.md || fail "AGENTS.md must human-namespace branches"

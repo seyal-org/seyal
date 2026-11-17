@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"
+tmp="$(cd "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 remote="$tmp/remote"
 project="$tmp/project"
@@ -9,6 +10,9 @@ mkdir -p "$remote/tools" "$project/scripts"
 git -C "$remote" init -q
 git -C "$remote" config user.name 'Fixture'
 git -C "$remote" config user.email 'fixture@example.invalid'
+git -C "$remote" config commit.gpgsign false
+mkdir -p "$tmp/empty-hooks"
+git -C "$remote" config core.hooksPath "$tmp/empty-hooks"
 for skill in project-context create-issue implement-issue verification pr-review process-review pr-merge; do
   mkdir -p "$remote/skills/$skill"
   printf 'old\n' > "$remote/skills/$skill/SKILL.md"
