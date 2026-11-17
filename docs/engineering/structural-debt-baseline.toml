@@ -251,9 +251,9 @@ reason = "The palette keeps its existing frozen-command projection; #1492 adds a
 
 [[exception]]
 path = "crates/seyal-client/src/shell/mod.rs"
-ceiling_loc = 1022
+ceiling_loc = 1021
 issue = 1490
-responsibility = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1490 keeps presentation-host identity independent of unrealized pane-tree storage (sidebar sync, product_active_window, AC6 raise) on the same composition façade rather than inventing a second shell owner. Temporary exception while further responsibility extraction is scoped."
+responsibility = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1490 keeps presentation-host identity independent of unrealized pane-tree storage (sidebar sync, product_active_window, AC6 raise) on the same composition façade rather than inventing a second shell owner. Temporary exception while further responsibility extraction is scoped; ratchet ceiling after rustfmt."
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -321,9 +321,9 @@ reason = "ApplicationRoot attach/poll session stays one cold-path driver; #1490 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/chrome_apply.rs"
-acknowledged_loc = 783
+acknowledged_loc = 787
 issue = 1490
-reason = "Chrome apply remains the cold-path owner for workspace/tab chrome intents; #1490 adds select_workspace bootstrap rollback that preserves the multi-workspace host instead of CloseWindow."
+reason = "Chrome apply remains the cold-path owner for workspace/tab chrome intents; #1490 adds select_workspace bootstrap rollback that preserves the multi-workspace host instead of CloseWindow. rustfmt wrap raises four lines."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
