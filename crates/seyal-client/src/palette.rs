@@ -692,7 +692,9 @@ mod tests {
         // ADR-029: outer Tab switch rows are gone. NewTerminal adds a Surface
         // on the focused pane; Focus Pane still has nothing else to offer.
         assert!(
-            !labels.iter().any(|label| label.starts_with("Switch to Tab:")),
+            !labels
+                .iter()
+                .any(|label| label.starts_with("Switch to Tab:")),
             "outer Tab switch rows are not palette targets"
         );
         assert!(

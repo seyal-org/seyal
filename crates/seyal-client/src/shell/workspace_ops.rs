@@ -46,11 +46,7 @@ impl ShellState {
     ///
     /// Sibling terminal tabs in the same Pane keep their titles. `PaneId` and
     /// bindings are unchanged (ADR-029 display labels only).
-    pub fn rename_pane(
-        &mut self,
-        id: PaneId,
-        title: impl Into<String>,
-    ) -> Result<(), ShellError> {
+    pub fn rename_pane(&mut self, id: PaneId, title: impl Into<String>) -> Result<(), ShellError> {
         let title = normalize_display_name(&title.into())?;
         let (workspace_id, tab_id) = self.location_of_pane(id).ok_or(ShellError::UnknownPane)?;
         let workspace = self.workspace_mut(workspace_id)?;

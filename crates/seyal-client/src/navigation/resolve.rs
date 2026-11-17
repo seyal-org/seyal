@@ -138,9 +138,7 @@ pub fn resolve(
                 return Err(NavigationRejection::UnknownPane);
             };
             // Components exist but do not currently compose (R3.2).
-            if pane_workspace != workspace
-                || !shell.tab_contains_leaf(workspace, pane_tab, pane)
-            {
+            if pane_workspace != workspace || !shell.tab_contains_leaf(workspace, pane_tab, pane) {
                 return Err(NavigationRejection::NotComposed);
             }
             Ok(ResolvedTarget::Pane { workspace, pane })
@@ -163,10 +161,7 @@ pub fn resolve(
                     if !principal.allows_workspace(workspace) {
                         return Err(NavigationRejection::NavigationDenied);
                     }
-                    Ok(ResolvedTarget::Pane {
-                        workspace,
-                        pane,
-                    })
+                    Ok(ResolvedTarget::Pane { workspace, pane })
                 }
                 _ => {
                     // R3.4 step 2: any unauthorized binding Workspace is

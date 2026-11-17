@@ -152,9 +152,16 @@ fn close_last_pane_removes_workspace_from_sidebar() {
     assert_eq!(after.active_window, Some(host), "host window stays");
     assert_eq!(after.open_workspaces, vec![first]);
     assert_eq!(after.selected_workspace, first);
-    assert_eq!(after.panes.len(), 1, "successor workspace pane tree is shown");
+    assert_eq!(
+        after.panes.len(),
+        1,
+        "successor workspace pane tree is shown"
+    );
     assert_ne!(after.focused_pane, second_pane);
-    assert!(shell.workspaces.iter().any(|workspace| workspace.id == second));
+    assert!(shell
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == second));
 }
 
 #[test]
@@ -192,7 +199,10 @@ fn remove_workspace_detaches_without_terminating_bindings() {
     assert_eq!(snap.open_workspaces, vec![WorkspaceId::m001_default()]);
     assert_eq!(snap.selected_workspace, WorkspaceId::m001_default());
     assert_eq!(snap.active_window, Some(host));
-    assert!(shell.workspaces.iter().any(|workspace| workspace.id == other));
+    assert!(shell
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == other));
     assert_eq!(shell.pane_execution(pane).unwrap(), Some(execution));
 }
 
@@ -216,9 +226,11 @@ fn open_rejects_copying_into_a_second_window_and_raises_presenter() {
         })
         .expect("raise solitary realized home");
     assert_eq!(shell.snapshot().active_window, Some(other_home));
-    assert!(!shell.snapshot().windows.iter().any(|window| {
-        window.id == first && window.open_workspaces.contains(&other)
-    }));
+    assert!(!shell
+        .snapshot()
+        .windows
+        .iter()
+        .any(|window| { window.id == first && window.open_workspaces.contains(&other) }));
     shell.set_allows_window_creation_for_test(true);
     shell
         .apply(ShellAction::CreateWindow {
@@ -237,9 +249,11 @@ fn open_rejects_copying_into_a_second_window_and_raises_presenter() {
         .expect("raise the presenting window again");
     assert_eq!(shell.snapshot().active_window, Some(other_home));
     assert_eq!(shell.snapshot().selected_workspace, other);
-    assert!(!shell.snapshot().windows.iter().any(|window| {
-        window.id == second && window.open_workspaces.contains(&other)
-    }));
+    assert!(!shell
+        .snapshot()
+        .windows
+        .iter()
+        .any(|window| { window.id == second && window.open_workspaces.contains(&other) }));
     assert!(shell.take_effects().iter().any(|effect| {
         matches!(effect, ShellNativeEffect::OrderFrontMakeKey { window } if *window == other_home)
     }));

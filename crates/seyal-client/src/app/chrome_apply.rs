@@ -171,17 +171,21 @@ impl ApplicationRoot {
             .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         self.drain_shell_effects();
-        if needs_bootstrap && let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
+        if needs_bootstrap
+            && let Err(error) = self.begin_provisioning_for_focused_unbound_terminal()
+        {
             // Rollback only the newly opened row/intent. Never CloseWindow the
             // product host — it may still present unrelated open workspaces.
             if let Some(host) = host {
                 let after = self.shell.snapshot();
                 if after.open_workspaces.len() > 1 && after.open_workspaces.contains(&id) {
-                    let _ = self.shell.apply(crate::shell::ShellAction::RemoveWorkspace {
-                        window: host,
-                        workspace: id,
-                        containment_generation: self.shell.containment_generation(),
-                    });
+                    let _ = self
+                        .shell
+                        .apply(crate::shell::ShellAction::RemoveWorkspace {
+                            window: host,
+                            workspace: id,
+                            containment_generation: self.shell.containment_generation(),
+                        });
                 }
                 if previous_open.contains(&previous_selected)
                     && self.shell.snapshot().selected_workspace != previous_selected

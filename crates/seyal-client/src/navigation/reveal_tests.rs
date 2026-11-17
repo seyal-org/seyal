@@ -49,17 +49,11 @@ fn mini_shell() -> (ShellState, WorkspaceId, TabId, PaneId) {
 #[test]
 fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
     let (mut shell, workspace, tab, pane) = mini_shell();
-    let packed = pack_resource_address(ResourceAddress::Pane {
-        workspace,
-        pane,
-    });
+    let packed = pack_resource_address(ResourceAddress::Pane { workspace, pane });
     let mut history = FocusHistory::default();
     assert_eq!(
         unpack_resource_address(&packed).unwrap(),
-        ResourceAddress::Pane {
-            workspace,
-            pane,
-        }
+        ResourceAddress::Pane { workspace, pane }
     );
     assert_eq!(
         reveal_attention_target(
@@ -69,10 +63,7 @@ fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
             NavigationPrincipal::local_user(),
             &mut history
         ),
-        AttentionReveal::Focused(ResolvedTarget::Pane {
-            workspace,
-            pane,
-        })
+        AttentionReveal::Focused(ResolvedTarget::Pane { workspace, pane })
     );
     let before = shell.focus_checkpoint();
     let ghost = pack_resource_address(ResourceAddress::Workspace {

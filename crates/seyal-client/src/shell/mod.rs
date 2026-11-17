@@ -13,19 +13,17 @@ mod equalize;
 mod focus_direction;
 mod focus_history;
 mod inventory;
+mod migration;
 mod pane_ops;
 mod snapshot;
 mod terminal_tabs;
 mod tree;
-mod migration;
 mod unpresented;
 mod workspace;
 mod workspace_ops;
 
 #[cfg(test)]
 mod close_tests;
-#[cfg(test)]
-mod sidebar_tests;
 #[cfg(test)]
 mod pt1_tests;
 #[cfg(test)]
@@ -36,6 +34,8 @@ mod pt3_tests;
 mod pt4_tests;
 #[cfg(test)]
 mod pt6_tests;
+#[cfg(test)]
+mod sidebar_tests;
 #[cfg(test)]
 mod terminal_tabs_tests;
 #[cfg(test)]
@@ -479,8 +479,7 @@ impl ShellState {
                 .iter()
                 .flat_map(|workspace| &workspace.windows)
                 .find(|window| {
-                    window.realized
-                        && window.tabs.iter().any(|tab| tab.panes.contains_key(pane))
+                    window.realized && window.tabs.iter().any(|tab| tab.panes.contains_key(pane))
                 })
         })
     }

@@ -39,9 +39,7 @@ fn create_workspace_keeps_composer_text_area_while_unbound() {
     // not hide the Flow composer text area while create/attach is outstanding.
     app.activate_focused_pane_authority();
     let pane = app.shell.snapshot().focused_pane;
-    let composer = app
-        .composer_for_pane(pane)
-        .expect("focused pane composer");
+    let composer = app.composer_for_pane(pane).expect("focused pane composer");
     assert_ne!(
         composer.mode,
         ComposerMode::Hidden,
@@ -171,7 +169,8 @@ fn install_terminal_authority_adopts_projected_composer_available() {
         .overwrite_pane_execution_for_test(pane, execution)
         .unwrap();
 
-    let mut client = reconstruction_probe_client(Role::Controller, 24, 80, 1, execution, attachment);
+    let mut client =
+        reconstruction_probe_client(Role::Controller, 24, 80, 1, execution, attachment);
     client.composer_status = Some(ComposerStatus {
         attachment_id: attachment,
         eligibility: ComposerEligibility::Available,

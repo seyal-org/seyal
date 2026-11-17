@@ -267,9 +267,10 @@ fn activate_solitary_realized_home_raises_presenter() {
     let snapshot = shell.snapshot();
     assert_eq!(snapshot.active_window, Some(other_window));
     assert_eq!(snapshot.selected_workspace, other);
-    assert!(!snapshot.windows.iter().any(|window| {
-        window.id == first && window.open_workspaces.contains(&other)
-    }));
+    assert!(!snapshot
+        .windows
+        .iter()
+        .any(|window| { window.id == first && window.open_workspaces.contains(&other) }));
     assert!(shell.take_effects().iter().any(|effect| {
         matches!(effect, ShellNativeEffect::OrderFrontMakeKey { window } if *window == other_window)
     }));

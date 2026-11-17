@@ -75,7 +75,10 @@ fn rename_workspace_and_pane_update_labels_without_identity_change() {
         .expect("workspace row");
     assert_eq!(row.name, "Core");
     assert_eq!(
-        snap.panes.iter().find(|p| p.id == pane).map(|p| p.title.as_str()),
+        snap.panes
+            .iter()
+            .find(|p| p.id == pane)
+            .map(|p| p.title.as_str()),
         Some("Build")
     );
     assert_eq!(
@@ -140,7 +143,9 @@ fn rename_pane_updates_only_selected_terminal_and_sibling_pane() {
         .map(|pane| pane.title.clone())
         .expect("first title");
 
-    shell.rename_pane(second, "Build").expect("rename focused pane");
+    shell
+        .rename_pane(second, "Build")
+        .expect("rename focused pane");
 
     let after = shell.snapshot();
     let renamed = after

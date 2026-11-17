@@ -242,10 +242,7 @@ fn successful_split_records_new_focused_leaf() {
     let pane = root.snapshot().shell.focused_pane;
     assert_eq!(
         root.focus_history.cursor_target(),
-        Some(ResourceAddress::Pane {
-            workspace,
-            pane
-        })
+        Some(ResourceAddress::Pane { workspace, pane })
     );
 }
 

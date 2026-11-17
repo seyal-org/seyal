@@ -27,8 +27,7 @@ impl ApplicationRoot {
         // Outer-tab history entries no longer exist; pane closes use
         // record_destroyed_pane_focus. Keep the successor record when focus moved.
         if let Some(address) = successor {
-            self.focus_history
-                .on_destroy(|_| false, Some(address));
+            self.focus_history.on_destroy(|_| false, Some(address));
         }
     }
 

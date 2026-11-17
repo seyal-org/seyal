@@ -40,12 +40,8 @@ impl ShellState {
         request_native_activation: bool,
     ) -> Result<(), ShellError> {
         let (workspace_id, realized) = {
-            let workspace = self
-                .find_window(window)
-                .ok_or(ShellError::UnknownWindow)?;
-            let item = workspace
-                .window(window)
-                .ok_or(ShellError::UnknownWindow)?;
+            let workspace = self.find_window(window).ok_or(ShellError::UnknownWindow)?;
+            let item = workspace.window(window).ok_or(ShellError::UnknownWindow)?;
             (workspace.id, item.realized)
         };
         let workspace = self.workspace_mut(workspace_id)?;
@@ -247,11 +243,7 @@ impl ShellState {
         if has_window {
             if let Some(host) = self.sidebar_host {
                 if self.find_window(host).is_some() {
-                    return self.open_workspace_in_sidebar(
-                        host,
-                        workspace,
-                        containment_generation,
-                    );
+                    return self.open_workspace_in_sidebar(host, workspace, containment_generation);
                 }
             }
             let target = self
