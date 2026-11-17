@@ -3,7 +3,7 @@
 **Status:** Authoritative execution roadmap  
 **Scope:** Seyal OSS plus the public OSS seams consumed by higher editions  
 **First market-ready release:** M004  
-**Proposed V1 scope amendment (#1510):** [Persistent agent-aware terminal workspace](M004-V1-PRODUCT-SCOPE.md). Pending maintainer acceptance and launch-matrix reconciliation; existing milestone and architecture gates remain in force.  
+**Proposed V1 scope amendment (#1510):** [Persistent agent-aware terminal workspace](M004-V1-PRODUCT-SCOPE.md). Pending maintainer acceptance and #1493 Raw-only architecture acceptance; see the conditional scope rules in the launch matrix and M003 contract. No existing shared correctness or release gate is waived.  
 **Planning baseline:** `master` at `5594b8a37981a29819c2b87ec0cd5f9774f76d9c` on 2026-08-27
 
 This document turns the canonical product registry into a staged execution plan. `docs/product/FEATURES.md` remains the product capability registry. ADRs/specifications remain architecture authority. This roadmap answers **when**, **under which gate**, and **through which owning issue** accepted work is allowed to advance.
@@ -50,7 +50,7 @@ flowchart LR
   M008 --> M009
 ```
 
-M003 may develop in parallel with late M002 only at stable boundaries; terminal-state/VT/Unicode/reflow changes remain owned by the terminal lane. M005 R&D can continue before M004, but production agent integration does not enter the M004 release critical path.
+M003 may develop in parallel with late M002 only at stable boundaries; terminal-state/VT/Unicode/reflow changes remain owned by the terminal lane. M005 R&D can continue before M004, but production managed-agent integration does not enter the M004 release critical path. The proposed #1510 amendment promotes only advisory local agent notifications and bounded local CLI orchestration, not M005 as a prerequisite.
 
 ## Current work packages
 
@@ -67,11 +67,13 @@ M003 may develop in parallel with late M002 only at stable boundaries; terminal-
 - #686 trusted shell-integration/semantic-boundary spike.
 
 ### M004
+- Proposed #1510 scope amendment: [V1 delivery order and acceptance](M004-V1-PRODUCT-SCOPE.md). Establish the live Runtime session inventory/attachment contract before completing M003 workspace operations; durable restore then consumes that inventory. Promote bounded CLI/templates/project context and advisory notifications before release, subject to acceptance/refinement; full M005/M006 remain post-launch.
 - #677 market-ready macOS release, diagnostics, accessibility and release validation.
 - #687 durable workspace persistence and honest recovery spike.
 - #688 signing/notarization/update/rollback spike.
 
 ### M005
+- The proposed V1 amendment promotes the advisory notification subset of #680 only; managed AgentRun lifecycle, structured approval/actions and artifacts stay M005. Reuse the same Attention authority; do not create a second implementation.
 - #678 durable WorkItem/Attempt/AgentRun event foundation.
 - #679 local agent adapters/presence/external-adapter conformance.
 - #680 Attention/approvals/artifacts/exact-target UX.
@@ -97,6 +99,8 @@ M003 may develop in parallel with late M002 only at stable boundaries; terminal-
 - #699 fleet/private-deployment/upgrade-failure-domain spike.
 
 ## First market-ready release policy
+
+**Proposed #1510 release-scope amendment:** once the product decision and #1493 are accepted, the M003/M004 release outcome is Raw/TUI only (Blocks/composer-specific delivery deferred, shared terminal behavior retained); M004 also requires workspace orchestration, authoritative sessions and durable restore, local CLI/templates and advisory agent notifications as defined in [V1 scope](M004-V1-PRODUCT-SCOPE.md). Until both decisions are accepted, the legacy release-train wording remains conditional; no milestone closes on conflicting authority.
 
 M004 is the first release allowed to claim that Seyal can be used as a serious everyday macOS terminal. A feature is not a launch blocker merely because a competitor has it. The launch bar is instead: terminal fidelity for target workloads, predictable native workspace interaction, bounded resource use, honest detach/recovery, install/update safety, accessibility/diagnostics and documentation.
 
