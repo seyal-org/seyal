@@ -143,10 +143,7 @@ impl ShellState {
                     name: item.name.clone(),
                     // Prefer the bound root attribute for Path/secondary (ADR-028).
                     // `detail` alone can lag or be cleared by label-only edits.
-                    detail: item
-                        .root_path
-                        .clone()
-                        .or_else(|| item.detail.clone()),
+                    detail: item.root_path.clone().or_else(|| item.detail.clone()),
                     attention: item.attention,
                     tab_count: item.tab_count(),
                 })
