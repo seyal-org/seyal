@@ -16,6 +16,17 @@
 
 ---
 
+## Proposed V1 scope amendment (#1510)
+
+The [V1 product scope](../product/M004-V1-PRODUCT-SCOPE.md) and [M004 launch matrix](../product/MARKET-READY-M004.md) describe a proposed Raw-only, persistent, agent-aware first release. The following conditional classification applies only after product acceptance of #1510 and accepted #1493 architecture reconciliation. It is a release-scope change, not a declaration of technical acceptance or completion.
+
+- **M003 mandatory:** stable Runtime session inventory/adoption and controller fencing before workspace completion; in-window multiple-workspace containment, pane-local terminal tabs, safe moves, focus/resize/navigation, Raw/TUI interaction, local config, trusted cursor mapping, keybindings and #1492 exact-head acceptance. #929's UI is a consumer of the required Runtime inventory; durable history/layout restoration remains M004. Cross-workspace movement requires separately accepted ownership/rebinding authority.
+- **Deferred:** Flow/Blocks-only and composer-only behavior, design convergence, semantic transcript/composer recall and their headed acceptance. In the historical scope, child tables, §5 work queues, §8 acceptance ledger and §9 Done rules below, classify Block/Flow-only criteria POST-LAUNCH rather than requiring PASS for V1. Shared input, mouse/IME, history, TUI/alternate-screen, focus/isolation, accessibility, renderer and performance requirements stay mandatory; #1492 supplies the Raw qualification, not a waiver.
+- **Mixed issues:** #865/#866/#867/#868, #675 and UI/renderer slices must have each shared Raw obligation preserved and qualified independently; do not mark their complete original scope Done or skip raw/TUI tests merely because Flow is suspended. #1510 records explicit issue dispositions and reconciles §8 freeze evidence with the Raw-only contract before M003 may close.
+- **M004 additions:** full session inventory UI and durable restore, bounded CLI/templates, advisory agent notifications and release qualification remain M004 launch requirements, not a dependency on full M005. No new production pickup from this section alone.
+
+Until both decisions are accepted, the existing ADR/specification authority and milestone gates continue to apply. Historical tables below preserve work evidence and are not authorization to resume suspended Blocks work.
+
 ## 1. Goal
 
 M003 delivers Seyal's native local workspace around the **same** production terminal path:
