@@ -5,17 +5,15 @@ description: Seyal facade for generic AI-SDLC PR merge-readiness review, adding 
 
 # Pull request review
 
-Follow the canonical generic merge-readiness procedure in `.sdlc/framework/skills/pr-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
+Follow the canonical generic merge-readiness procedure in `.sdlc/framework/skills/pr-review/SKILL.md`. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
-Before changing PR state, publishing review comments or resolving threads, use the pinned executable claim via `python3 scripts/seyal-ai-sdlc-claim.py begin --repo seyal-org/seyal --phase review --number <PR>`; `verify` before each write, then `release` after review handoff. Require unique `AI_SDLC_WORKER_ID` per active worker and never substitute the human PR reviewer identity. A missing/held claim does not authorize a new PR.
+Use the portable coordination lane: source review is read-only; publishing feedback or changing PR state requires authorized reviewer scope and fresh head/base checks. Do not edit the implementer's source or take over their candidate.
 
 This is Seyal's single user-facing PR review and re-review entrypoint. The generic procedure reviews implementation correctness and merge readiness over the full current candidate, consumes exact-revision `verification`, and invokes only specialist reviews required by risk and project policy. There is no separate generic or Seyal `code-review` discovery surface.
 
-## One review cycle
+## Review convergence
 
-The first review of a candidate reads the whole pull request once and lists every material blocker in that pass. Do not stop at the first finding and leave the rest for a later cycle.
-
-`address-pr-review` fixes that recorded set on the same pull request. A remediation follow-up performs a **full-candidate re-review** against the exact current head, as required by the pinned generic procedure. Reuse unchanged valid evidence where project policy permits, but never treat review of only the latest comment or diff as independent approval. Run invalidated verification/specialist gates when the head or risk scope warrants them. Core and high-risk work still needs an independent human reviewer. The implementer does not self-approve.
+Follow `.sdlc/framework/docs/WORKING-LOOP.md#review-convergence-and-evidence-reuse` as the canonical rule: focused intermediate rechecks when safe, broader review for high-risk/unknown impact, final whole-candidate exact-head/base review. A clean first independent full review is final; no separate review invocation. Consolidate blockers and respect the cumulative remediation cap and early escalation. Core/high-risk work still requires independent human review. The implementer does not self-approve.
 
 ## Mandatory cross-platform UI ownership gate
 

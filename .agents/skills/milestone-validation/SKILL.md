@@ -5,7 +5,7 @@ description: Seyal milestone-level facade over AI-SDLC verification, adding aggr
 
 # Milestone validation
 
-Use the canonical evidence discipline in `.sdlc/framework/skills/verification/SKILL.md` for each milestone acceptance criterion. If it is unavailable, run `make bootstrap-agents` first.
+Use the canonical evidence discipline in `.sdlc/framework/skills/verification/SKILL.md` for each milestone acceptance criterion. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
 Milestone validation is a Seyal-specific aggregate gate, not a second generic verification procedure. Apply these additional rules:
 
