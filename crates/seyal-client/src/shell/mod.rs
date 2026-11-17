@@ -748,7 +748,7 @@ impl ShellState {
         Ok(())
     }
 
-    fn sync_sidebar_after_focus(&mut self, workspace: WorkspaceId, _tab: TabId) {
+    fn sync_sidebar_after_focus(&mut self, workspace: WorkspaceId, tab: TabId) {
         let Some(host) = self.sidebar_host else {
             return;
         };
@@ -759,10 +759,20 @@ impl ShellState {
             .product_active_window()
             .map(|window| window.selected_workspace);
         if selected == Some(workspace) {
-            // Presentation host stays independent of pane-tree storage.
-            // Foreign selected workspaces often keep tabs on an unrealized
-            // storage WindowId; retargeting sidebar_host there would send
-            // input/chrome to a non-native id (#1490).
+            // Same selected workspace: raise another realized window that
+            // hosts this tab. Never retarget sidebar_host to unrealized
+            // pane-tree storage (foreign workspace projection, #1490).
+            if let Some(target) = self.window_of_tab(tab)
+                && target != host
+            {
+                let realized = self
+                    .find_window(target)
+                    .and_then(|owner| owner.window(target))
+                    .is_some_and(|window| window.realized);
+                if realized {
+                    self.sidebar_host = Some(target);
+                }
+            }
             return;
         }
         let _ = self.present_workspace_on_host(host, workspace);

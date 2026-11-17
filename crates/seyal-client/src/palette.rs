@@ -603,7 +603,7 @@ mod tests {
         open_rebuilt(&mut palette, &shell, &chrome, true, true);
         let snap = palette.snapshot();
         assert!(snap.open);
-        assert!(labels(&snap.rows).contains(&"New Tab"));
+        assert!(labels(&snap.rows).contains(&"New Terminal"));
         assert!(
             !labels(&snap.rows)
                 .iter()

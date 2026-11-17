@@ -99,9 +99,11 @@ fn new_tabs_and_split_panes_remain_raw_and_bind_independently() {
     let sibling = root.snapshot().shell.focused_pane;
     assert_ne!(source, sibling);
     let after_split = root.snapshot();
-    let sibling_snapshot = after_split.shell.windows[0].tabs[1]
-        .panes
+    // ADR-029: SplitFocused adds a pane in the active tab, not a second outer Tab.
+    let sibling_snapshot = after_split.shell.windows[0]
+        .tabs
         .iter()
+        .flat_map(|tab| tab.panes.iter())
         .find(|pane| pane.id == sibling)
         .unwrap();
     assert_eq!(sibling_snapshot.presentation_mode, PresentationMode::Raw);

@@ -251,9 +251,9 @@ reason = "The palette keeps its existing frozen-command projection; #1492 adds a
 
 [[exception]]
 path = "crates/seyal-client/src/shell/mod.rs"
-ceiling_loc = 1021
+ceiling_loc = 1031
 issue = 1490
-responsibility = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1490 keeps presentation-host identity independent of unrealized pane-tree storage (sidebar sync, product_active_window, AC6 raise) on the same composition façade rather than inventing a second shell owner. Temporary exception while further responsibility extraction is scoped; ratchet ceiling after rustfmt."
+responsibility = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1490 keeps presentation-host identity independent of unrealized pane-tree storage while still raising realized same-workspace windows on focus (sidebar sync, product_active_window, AC6 raise) on the same composition façade rather than inventing a second shell owner. Temporary exception while further responsibility extraction is scoped."
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
