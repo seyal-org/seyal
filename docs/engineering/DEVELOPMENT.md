@@ -25,7 +25,7 @@ Default distributed-development unit:
 
 ```text
 one Ready Issue
-→ one authenticated **human** GitHub owner (assignee when assignable; acknowledged Owner claim otherwise)
+→ one authenticated **human** GitHub owner (assignee when assignable; active Owner claim otherwise)
 → the Issue body is the plan
 → one deterministic <human-login>/issue/<number> branch
 → coding agent may act only as delegated tool/co-author
@@ -35,16 +35,16 @@ one Ready Issue
 
 One Issue should produce one coherent outcome that can normally be tested, reviewed and merged independently. Large or cross-authority work is refined before implementation. Two active Issues must not mutate the same authoritative subsystem unless independence is explicit and reviewable.
 
-The Issue has exactly one **human owner**. The sole assignee is the preferred owner record when GitHub permits it. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor's `Owner: @login` comment is the claim. A maintainer acknowledgement is required only when another owner record already exists or two claims disagree. This unique owner record coordinates contributors, not atomic distributed exclusion. Add rather than replace assignees, verify the record before editing and publication, and stop on conflict. The human owner coordinates their agents and serializes overlapping edits; no local worker lock is required. The exact `<human-login>/issue/<number>` branch is that owner's deterministic audit/resume backstop and makes ownership visible in Git history. New implementation branches do not use agent/vendor prefixes or short-name suffixes. Coding agents may contribute under the human-owned branch and be credited as co-authors/tooling provenance. Legacy plain `issue/<number>`, issue-only/slugged, or agent-named branches require explicit human-owner disposition before they continue.
+The Issue has exactly one **human owner**. The sole assignee is the preferred owner record when GitHub permits it. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor's `Owner: @login` comment is the claim. A self-authored uncontested external-owner comment is active immediately; maintainer resolution is required for a transfer or competing records. See `ISSUE-PROTOCOL.md` for the exact record rules. This unique owner record coordinates contributors, not atomic distributed exclusion. Add rather than replace assignees, verify the record before editing and publication, and stop on conflict. The human owner coordinates their agents and serializes overlapping edits; no local worker lock is required. The exact `<human-login>/issue/<number>` branch is that owner's deterministic audit/resume backstop and makes ownership visible in Git history. New implementation branches do not use agent/vendor prefixes or short-name suffixes. Coding agents may contribute under the human-owned branch and be credited as co-authors/tooling provenance. Legacy plain `issue/<number>`, issue-only/slugged, or agent-named branches require explicit human-owner disposition before they continue.
 
 ## Mandatory flow
 
 1. When project context beyond the Issue links is needed, use `project-context` to retrieve the smallest relevant node/relationship set, validate the derived index, and read the returned authoritative sources. A stale/no-match index routes to targeted source search; it never authorizes guessing.
 2. Refine the Issue using `.agents/skills/issue-refinement/SKILL.md`. The same pass publishes the contributor queue: `help wanted` when the Ready checklist passes, `needs-refinement` while the plan is still open, or `blocked` when a named dependency remains.
 3. Leave a Ready issue unassigned and labeled `help wanted` until a developer claims it. Project status **Ready** follows that same checklist in `ISSUE-PROTOCOL.md`.
-4. Any request to implement/fix/finish/code a specific GitHub Issue must enter `.agents/skills/implement-issue/SKILL.md`. Resolve the authenticated **human GitHub owner** and fresh-read assignee/owner-claim state before planning or production work. Prefer sole assignment when GitHub permits it. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor comments `Owner: @login` and continues. A maintainer acknowledgement is required only when another owner record already exists or two claims disagree. A Cursor/Codex/Claude/Copilot/bot identity is never the work owner. Assigned-to-other, multiple-assignee, bot-owned, or identity-unavailable cases stop as `BLOCKED`.
+4. Any request to implement/fix/finish/code a specific GitHub Issue must enter `.agents/skills/implement-issue/SKILL.md`. Resolve the authenticated **human GitHub owner** and fresh-read assignee/owner-claim state before planning or production work. Prefer sole assignment when GitHub permits it. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor comments `Owner: @login` and continues. Follow the active-claim and conflict rules in `ISSUE-PROTOCOL.md`. A Cursor/Codex/Claude/Copilot/bot identity is never the work owner. Assigned-to-other, multiple-assignee, bot-owned, or identity-unavailable cases stop as `BLOCKED`.
 5. Treat the Issue body as the implementation plan (`ISSUE-PROTOCOL.md` §Accepted implementation plan). A chat outline is not that plan. Claim/Ready state still requires the body to state goal, scope, acceptance, tests, and dependencies.
-6. After the Ready/claim preflight passes, create the exact branch `<human-login>/issue/<number>` from current accepted `master`, where the login is the sole human owner. The branch may live in the upstream repository or the contributor's fork; ownership identity is still the human login. If that branch already exists, stop unless the human owner explicitly requested resume/continue of that existing work. Re-read the Issue after branch creation and require the same human to remain the unique owner through sole assignment or the acknowledged external-owner claim before creating the worktree or editing production files.
+6. After the Ready/claim preflight passes, create the exact branch `<human-login>/issue/<number>` from current accepted `master`, where the login is the sole human owner. The branch may live in the upstream repository or the contributor's fork; ownership identity is still the human login. If that branch already exists, stop unless the human owner explicitly requested resume/continue of that existing work. Re-read the Issue after branch creation and require the same human to remain the unique owner through sole assignment or the active external-owner claim before creating the worktree or editing production files.
 7. Create one isolated worktree from the deterministic Issue branch.
 8. Use tests/fixtures first for core behavior.
 9. Implement only the Issue scope.
@@ -55,13 +55,13 @@ The Issue has exactly one **human owner**. The sole assignee is the preferred ow
 14. Move to Validation where milestone/demo/performance evidence is required.
 15. Merge only after required gates pass. Do not start a dependent milestone early.
 
-Ownership handoff is explicit and human-to-human. The current owner stops editing and records branch/PR/check state. Transfer the **human owner record** explicitly: change the GitHub assignee when the recipient is assignable, otherwise replace the maintainer-acknowledged `Owner: @login` claim. The new human owner re-runs the full claim/readiness preflight; if the deterministic branch must move to the new owner's namespace, migrate the exact head and record both refs before deleting/retiring the old one. Switching coding agents alone never changes ownership. An agent must never self-clear or steal a claim because it appears stale.
+Ownership handoff is explicit and human-to-human. The current owner stops editing and records branch/PR/check state. Transfer the **human owner record** explicitly: change the GitHub assignee when the recipient is assignable, otherwise replace the active `Owner: @login` claim. The new human owner re-runs the full claim/readiness preflight; if the deterministic branch must move to the new owner's namespace, migrate the exact head and record both refs before deleting/retiring the old one. Switching coding agents alone never changes ownership. An agent must never self-clear or steal a claim because it appears stale.
 
 ## Human owner, agent assistance and attribution
 
 Seyal accepts AI-assisted development, but repository ownership remains human.
 
-- The Issue owner record (sole assignee when assignable, otherwise acknowledged `Owner: @login`) and branch namespace identify the responsible human GitHub contributor.
+- The Issue owner record (sole assignee when assignable, otherwise active `Owner: @login`) and branch namespace identify the responsible human GitHub contributor.
 - New implementation branches are `<human-login>/issue/<number>`; `cursor/`, `codex/`, `claude/`, `copilot/` and other agent/vendor namespaces are forbidden for new work.
 - Agents may implement, test, draft documentation, and assist reviews on behalf of the human owner.
 - Agent contribution may be acknowledged in the PR body and/or with a real standard `Co-authored-by:` trailer. Do not fabricate attribution identities.
@@ -275,7 +275,7 @@ Block reconciliation. In Flow mode also assert full-width, aligned Blocks and
 `flow-paint=ok`; the right-edge black strip is a separate Block/Metal clipping
 failure, not evidence that Return itself was dropped.
 
-There are no required private repositories, `seyal-commercial` dependencies, shell-profile assumptions, Homebrew assumptions or hidden environment variables for this canonical product flow. AI-SDLC is an optional public developer-framework dependency materialized only by `make bootstrap-agents`.
+There are no required private repositories, `seyal-commercial` dependencies, shell-profile assumptions, Homebrew assumptions or hidden environment variables for this canonical product flow. AI-SDLC is an optional public developer-framework dependency materialized by `make bootstrap-agents` or the framework-only refresh command.
 
 ## Generated and fixture data
 

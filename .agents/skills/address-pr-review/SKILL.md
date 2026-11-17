@@ -5,7 +5,7 @@ description: Seyal adapter for AI-SDLC review-stage remediation, adding GitHub P
 
 # Address PR review
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/process-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
+Follow the canonical generic procedure in `.sdlc/framework/skills/process-review/SKILL.md`. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
 Confirm the owning human's authorization, the current candidate and no conflicting edits before remediation or publication. Use portable coordination; do not require a local worker lock.
 

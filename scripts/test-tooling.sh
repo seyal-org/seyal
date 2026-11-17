@@ -59,9 +59,13 @@ grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/implementa
 grep -q '.sdlc/framework/skills/implement-issue/SKILL.md' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must delegate to current generic implement-issue"
 grep -q '.sdlc/framework/skills/process-review/SKILL.md' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must delegate to generic process-review"
 # Developer coordination is human GitHub ownership; legacy session locks must not return.
-for retired in scripts/seyal-ai-sdlc-claim.py scripts/test-seyal-ai-sdlc-claim.py .cursor/hooks/claim-gate.py scripts/test-cursor-claim-hook.py .cursor/hooks.json; do
+for retired in scripts/seyal-ai-sdlc-claim.py scripts/test-seyal-ai-sdlc-claim.py .cursor/hooks/claim-gate.py scripts/test-cursor-claim-hook.py; do
   [[ ! -e "$retired" ]] || fail "retired local agent claim component returned: $retired"
 done
+if [[ -f .cursor/hooks.json ]] && grep -Eq 'claim-gate\\.py|seyal-ai-sdlc-claim\\.py' .cursor/hooks.json; then
+  fail "retired local agent claim hook remains configured"
+fi
+bash scripts/test-framework-pin.sh || fail "framework pin freshness/refresh regression"
 active_workflow=(AGENTS.md docs/engineering/AGENT-TOOLING.md docs/engineering/AI-SDLC-REFERENCE-CONSUMER.md .agents/skills/implement-issue/SKILL.md .agents/skills/pr-review/SKILL.md .agents/skills/address-pr-review/SKILL.md scripts/bootstrap-dev.sh)
 if grep -Eq 'AI_SDLC_WORKER_ID|seyal-ai-sdlc-claim\.py|workflow_claims\.py|claim-gate\.py' "${active_workflow[@]}"; then
   fail "local agent claim requirement remains in active workflow"
@@ -83,7 +87,7 @@ claim_skill=.agents/skills/implement-issue/SKILL.md
 grep -Fq 'mandatory entrypoint for production implementation of a Seyal GitHub Issue' "$claim_skill" || fail "implement-issue must be the mandatory production entrypoint"
 grep -Fq 'responsible **human GitHub owner**' "$claim_skill" || fail "implement-issue must resolve a human GitHub owner"
 grep -Fq 'Issue #N is already taken by @login' "$claim_skill" || fail "implement-issue must report the existing assignee and stop"
-grep -Fq 'multiple assignees, multiple acknowledged owner claims' "$claim_skill" || fail "implement-issue must fail closed on conflicting human owner records"
+grep -Fq 'multiple assignees or competing active owner claims' "$claim_skill" || fail "implement-issue must fail closed on conflicting human owner records"
 grep -Fq 'exact branch name `<human-login>/issue/<number>`' "$claim_skill" || fail "implement-issue must use the human-owned deterministic issue branch"
 grep -Fq 'unique owner through either sole assignment' "$claim_skill" || fail "implement-issue must keep external-owner fallback valid after branch creation"
 grep -Fq 'unique human owner record coordinates contributors' "$claim_skill" || fail "implement-issue must make the human owner record authoritative across contributors"
@@ -96,7 +100,7 @@ grep -Fq 'Report the current human owner record and branch state' "$claim_skill"
 grep -Fq 'never overwrite another valid claim to win a race' "$claim_skill" || fail "implement-issue must not steal a concurrent claim"
 grep -Fq 'add the human as assignee without replacing others' "$claim_skill" || fail "implementor pickup must add rather than replace assignees"
 grep -Fq 'Recheck owner/candidate before push and publication' "$claim_skill" || fail "implementor must verify ownership before publication"
-grep -Fq 'including unacknowledged comments' docs/engineering/ISSUE-PROTOCOL.md || fail "external claim collisions must include pending claims"
+grep -Fq 'including uncontested or competing self-authored comments' docs/engineering/ISSUE-PROTOCOL.md || fail "external claim collisions must include pending claims"
 grep -Fq 'If the work item is a GitHub sub-issue, fetch its parent immediately' "$claim_skill" || fail "implement-issue must inspect the parent claim before a child slice"
 grep -Fq 'planning/umbrella parent is not an ownership lock' "$claim_skill" || fail "implement-issue must allow independent child ownership under planning parents"
 grep -Fqi 're-fetch both parent and child' "$claim_skill" || fail "implement-issue must re-fetch parent and child after claim and branch creation"

@@ -36,7 +36,7 @@ GitHub labels are how a contributor finds work. The full open-issue list is not 
 
 A finished plan does not stay in Refinement. The same pass that finishes the plan publishes `help wanted` or `blocked`.
 
-An unassigned issue in either queue is claimed by the human who starts it. If GitHub allows assignment, assign that person. If it does not, comment `Owner: @login` and continue. That comment is the claim. Wait for a maintainer only when another human already owns the issue or two claims disagree.
+An unassigned issue in either queue is claimed by the human who starts it. Refinement ownership does not make an Issue Ready for implementation. If GitHub allows assignment, assign that person. If it does not, comment `Owner: @login` and re-fetch. An uncontested self-authored comment is the claim. Wait for a maintainer only when another human already owns the issue or two claims disagree.
 
 ## Active implementation claim
 
@@ -47,7 +47,7 @@ The pickup contract is:
 ```text
 fresh open Ready Issue
 → resolve authenticated **human** GitHub owner
-→ exactly one human owner = sole assignee when assignable, otherwise acknowledged `Owner: @login`
+→ exactly one human owner = sole assignee when assignable, otherwise active `Owner: @login`
 → Issue body is the plan
 → create exact branch <human-login>/issue/<number>
 → re-read Issue and verify the same unique human owner record
@@ -61,13 +61,14 @@ Rules:
 - Production implementation of a GitHub Issue must enter through `.agents/skills/implement-issue/SKILL.md`.
 - Resolve the authenticated **human GitHub owner** from project-approved GitHub tooling and the fresh Issue owner-record state. Never infer ownership from git author configuration, local username, chat name, an agent/bot account, or repository ownership.
 - Fetch the complete owner-record state fresh immediately before pickup: assignees plus active `Owner: @login` comments, including competing unacknowledged claims. Cached context is not ownership authority.
-- For an assignable contributor, add the authenticated **human** owner as assignee without replacing existing assignees; re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning. On an unassigned `help wanted` or `needs-refinement` issue, comment `Owner: @login` and continue; that comment is the claim. A maintainer acknowledgement is required only when another owner record already exists or two claims disagree. A coding-agent/bot identity must never be the owner record.
-- If the unique human owner record names a different contributor — by sole assignee or acknowledged external-owner claim — the Issue is already taken. Report that owner and stop before planning, worktree/branch creation, or production edits.
-- Multiple assignees, competing active external-owner claims (including unacknowledged comments), or disagreement between assignment and owner claim are ownership collisions. Stop and require explicit resolution.
+- For an assignable contributor, add the authenticated **human** owner as assignee without replacing existing assignees; re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning. On an unassigned `help wanted` or `needs-refinement` issue, comment `Owner: @login` and continue; that comment is the claim. A maintainer acknowledgement is required only for a handoff or conflicting records. A coding-agent/bot identity must never be the owner record.
+- For external claims, accept a standalone `Owner: @login` comment only when authored by that authenticated human, or when a maintainer explicitly records an authorized transfer/resolution. Compare GitHub logins case-insensitively; ignore quoted examples and third-party nominations. A sole uncontested self-authored claim on an unassigned queue Issue is active immediately. A maintainer-recorded handoff/abandonment names the old and new owner (or unowned), identifies which earlier claim comments are superseded, and records the disposition of the existing branch/PR. Until resolved, competing active claims or an assignment that disagrees with an active comment block pickup. Do not infer expiration from age, session end, or lack of activity. Historical comments superseded by an explicit handoff are not active claims.
+- If the unique human owner record names a different contributor — by sole assignee or active external-owner claim — the Issue is already taken. Report that owner and stop before planning, worktree/branch creation, or production edits.
+- Multiple assignees, competing active external-owner claims (including uncontested or competing self-authored comments), or disagreement between assignment and owner claim are ownership collisions. Stop and require explicit resolution.
 - If owner identity, owner-record write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
 - Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the **human-owner rule**.
-- For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the unique human owner. It may be in upstream or the contributor's fork. The **single human owner record coordinates contributors**; it is not a guarantee against simultaneous GitHub API writes. the human-namespaced branch is only that owner's deterministic audit/resume backstop. Do not create alternative agent prefixes or short-name branches to evade an existing owner record.
-- Branch creation happens after the Issue is Ready. The Issue body is the plan. If that same human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim. A closed unmerged head that was not rejected as the wrong architecture is resumed by rebasing that head. Do not re-implement it.
+- For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the unique human owner. It may be in upstream or the contributor's fork. The **single human owner record coordinates contributors**; it is not a guarantee against simultaneous GitHub API writes. The human-namespaced branch is only that owner's deterministic audit/resume backstop. Do not create alternative agent prefixes or short-name branches to evade an existing owner record.
+- Branch creation happens after the Issue is Ready. The Issue body is the plan. If that same human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an active external-owner claim. A closed unmerged head that was not rejected as the wrong architecture is resumed by rebasing that head. Do not re-implement it.
 - Recheck the owner and candidate immediately before editing and before push/PR publication. If concurrent owner-record or branch operations produce disagreement, stop and require explicit ownership resolution. Never steal or overwrite another valid owner record to win a race.
 - The human implementor coordinates delegated agents; disjoint work may run in parallel, but overlapping edits to the same files/candidate must be serialized by the owner. Seyal requires no local agent-session lock, worker identity, token store or pre-tool claim hook. Read-only review requires no claim; authorized reviewers must not mutate the implementer's source.
 - Legacy `issue/<number>`, `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other pre-policy/agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
@@ -92,7 +93,7 @@ Seyal's durable ownership identity is always a human GitHub account.
 A handoff is explicit, never inferred from inactivity.
 
 - The current owner stops editing and records the exact branch/PR/check state.
-- Transfer the human owner record explicitly: change the GitHub assignee when the contributor is assignable, otherwise replace the acknowledged `Owner: @login` claim through a maintainer-recorded handoff.
+- Transfer the human owner record explicitly: change the GitHub assignee when the contributor is assignable, otherwise replace the active `Owner: @login` claim through a maintainer-recorded handoff.
 - The new **human** implementer re-runs the full Ready/ownership preflight. Ownership handoff uses the recipient's human identity; migrate the deterministic branch to `<new-human-login>/issue/<number>` only as part of that explicit handoff, preserving the exact prior head and recording the old/new refs. No parallel implementation branch is created.
 - If work was abandoned before implementation, remove an unused claim branch before clearing/reassigning ownership.
 - An agent that merely suspects a stale claim must report it and stop; it must not self-unassign another contributor.

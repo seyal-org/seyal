@@ -100,4 +100,4 @@ Repository integration evidence includes:
 
 This integration does not itself make AI-SDLC product/runtime authority and does not prove publication readiness. Generic framework defects belong in `ai-sdlc`; Seyal-specific terminal/product rules remain local.
 
-The former local agent claim wrapper/hook is retired; private legacy records are untouched. This document describes the integration contract, not a passing run. Exact-pin compatibility, tooling checks, representative ownership scenarios, and required candidate CI must be verified independently before merge.
+The former local agent claim wrapper/hook is retired; private legacy records are untouched. Generic delegation checks the exact materialized framework pin in the current worktree; refresh only the framework if needed. This document describes the integration contract, not a passing run. Exact-pin compatibility, tooling checks, representative ownership scenarios, and required candidate CI must be verified independently before merge.
