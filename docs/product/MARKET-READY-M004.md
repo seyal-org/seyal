@@ -67,9 +67,29 @@ M004 is not a feature-count race. The release bar is that ordinary terminal user
 | Remote Runtime product, mobile, Linux, Windows | POST-LAUNCH | M007 | SSH as a terminal workload is required; Seyal remote-product features are not. |
 | Collaboration / enterprise control plane | POST-LAUNCH | M008/M009 | Built after stable local/remote/resource authority. |
 
+## Proposed V1 scope amendment (#1510)
+
+This proposed amendment becomes normative only on merge of #1511 after accepted #1493 Raw-only authority (PR #1507). It adds mandatory gates to the existing matrix; merge order requires the actual Blocks/Raw row changes from #1507 to be present before #1511 merges. No unresolved decision is a release waiver.
+
+| Additional launch capability | Class after acceptance | Owner / dependency | Required evidence |
+|---|---|---|---|
+| In-window workspace sidebar, pane-local tabs and project navigation | LAUNCH BLOCKER | #1490/#674; accepted SPEC-032 and ADR-025/SPEC-031 | V1 multi-project workflow; preserve distinct execution identities and safe same-workspace moves. |
+| Explicit live cross-workspace transfer | LAUNCH BLOCKER | #674 separate refinement; ADR-028 amendment, #832/#680/SPEC-022 coordination | Preserve execution/PTY/VT identity, exact controller fencing and address/history reconciliation; interruption and termination races; not part of #1490. |
+| Runtime session inventory and attach/detach/control | LAUNCH BLOCKER | #929 consumer; extend existing SPEC-004 Runtime inventory under #674 | Multi-workspace identity, bounded complete pagination, explicit stale outcome, exact reattach/termination, controller fencing; no default-workspace guessing. |
+| Local CLI orchestration, templates and read-only project/worktree context | LAUNCH BLOCKER | #262/#674/#676; refine local authority | V1 programmable-workspace scenario including GUI absence, partial failure, denial and stable IDs. |
+| Interactive local CLI attachment | LAUNCH BLOCKER | #674/#262 separate display/attach refinement | Canonical snapshot/damage projection to host terminal, real shell/TUI/SSH, geometry and input fencing, backpressure, tty restoration; no second VT. |
+| Advisory agent notifications | LAUNCH BLOCKER | #644/#680; refine SPEC-028/SPEC-022 ingress/retention | Terminal-scoped authority without managed runs, supported provider/version event matrix, real hooks and generic CLI, opt-in/removal, exact target, GUI-absent retention, deduplication and bounded delivery; no privileged approval. |
+| Raw trusted cursor placement and native interaction | LAUNCH BLOCKER | #1492/#1498/#1499/#1500 | Bash/Zsh/Fish wrapped/Unicode/multiline cursor mapping, selection, scroll, links, IME and TUI arbitration. |
+
+See [V1 scope and release scenarios](M004-V1-PRODUCT-SCOPE.md) for required behavior and dependency order. Existing layout/history and detach/reconnect rows additionally require atomic committed snapshots, migration/partial-restore and explicit recovery semantics described there.
+
+When #1493 and #1510 are accepted, the minimum Blocks/composer row is **POST-LAUNCH**, and Flow/Blocks/composer-only portions of other rows are deferred, not their shared Raw/TUI correctness, security, input or performance requirements. Rich shell integration beyond required trusted cursor placement and richer palette features remain optional; basic quick workspace switching is mandatory. Agent platform/orchestration stays post-launch except the bounded advisory notification subset above. No other launch blocker is reclassified. Existing M003 gates must be read with the conditional scope amendment in its milestone contract. Before #1511 merges, verify #1507 has changed the actual Blocks/composer classification and shared Raw rows, and that the replacement M003 §8 and roadmap agree. Explicit issue dispositions remain required before milestone close.
+
 ## Benchmark gate rules
 
 #673 must publish numeric budgets before M002 implementation is declared Ready. M004 may not ship while key-to-photon, high-output throughput, startup or memory thresholds are still `TBD`.
+
+The V1 [release evidence](M004-V1-PRODUCT-SCOPE.md) defines the additional budget rows, pre-Ready numeric ceiling rule, and five-working-day/two-user physical RC soak plus 24-hour detached-session gate. All must pass before M004 release; no waiver by CI or host proxy.
 
 Every performance result used for a release decision records:
 - exact git SHA and build profile;
