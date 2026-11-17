@@ -178,10 +178,7 @@ impl PaletteState {
         }
     }
 
-    /// Rebuild the frozen projection from authoritative shell/chrome state.
-    /// Called after Open and SetQuery so Run never re-resolves by ordinal.
-    /// `resting_is_raw` is `Some` only for a bound Pane: `Some(true)` offers
-    /// Flow opt-in; `Some(false)` offers Raw; `None` omits both (#1438).
+    /// Rebuild the frozen projection from authoritative state; Run reads it.
     /// `unpresented` must already be sorted deterministically (ExecutionId order).
     pub fn rebuild(
         &mut self,
@@ -189,7 +186,7 @@ impl PaletteState {
         chrome: &ChromeSnapshot,
         allows_tab_creation: bool,
         allows_pane_splitting: bool,
-        resting_is_raw: Option<bool>,
+        _resting_is_raw: Option<bool>,
         unpresented: &[ExecutionId],
     ) {
         if !self.open {
@@ -201,7 +198,6 @@ impl PaletteState {
             chrome,
             allows_tab_creation,
             allows_pane_splitting,
-            resting_is_raw,
             unpresented,
         );
         self.projected = filter(&commands, &self.query);
@@ -300,26 +296,9 @@ fn build_commands(
     chrome: &ChromeSnapshot,
     allows_tab_creation: bool,
     allows_pane_splitting: bool,
-    resting_is_raw: Option<bool>,
     unpresented: &[ExecutionId],
 ) -> Vec<PaletteEntry> {
     let mut entries = Vec::new();
-
-    match resting_is_raw {
-        Some(true) => entries.push(PaletteEntry {
-            label: "Use Flow".to_owned(),
-            category: "Terminal",
-            address: None,
-            command: Some(PaletteCommand::SelectResting { raw: false }),
-        }),
-        Some(false) => entries.push(PaletteEntry {
-            label: "Use Raw Terminal".to_owned(),
-            category: "Terminal",
-            address: None,
-            command: Some(PaletteCommand::SelectResting { raw: true }),
-        }),
-        None => {}
-    }
 
     if allows_tab_creation {
         entries.push(PaletteEntry {
@@ -624,7 +603,13 @@ mod tests {
         open_rebuilt(&mut palette, &shell, &chrome, true, true);
         let snap = palette.snapshot();
         assert!(snap.open);
-        assert!(labels(&snap.rows).contains(&"New Terminal"));
+        assert!(labels(&snap.rows).contains(&"New Tab"));
+        assert!(
+            !labels(&snap.rows)
+                .iter()
+                .any(|label| *label == "Use Flow" || *label == "Use Raw Terminal"),
+            "Raw-only v1 must not offer a presentation switch"
+        );
         assert!(!labels(&snap.rows).contains(&"Switch to Tab: Core Terminal"));
         palette
             .apply(PaletteAction::SetQuery("split".into()), 0)
@@ -632,6 +617,27 @@ mod tests {
         palette.rebuild(&shell, &chrome, true, true, None, &[]);
         palette.apply(PaletteAction::Open, 0).unwrap();
         assert_eq!(palette.query(), "split", "reopen is a no-op while open");
+    }
+
+    #[test]
+    fn raw_v1_palette_never_offers_a_presentation_switch() {
+        let shell = seed_shell().snapshot();
+        let chrome = ChromeState::new().snapshot(&shell, &[]);
+
+        for resting_is_raw in [Some(true), Some(false)] {
+            let mut palette = PaletteState::new();
+            palette.apply(PaletteAction::Open, 0).unwrap();
+            palette.rebuild(&shell, &chrome, true, true, resting_is_raw, &[]);
+
+            let snapshot = palette.snapshot();
+            let rows = labels(&snapshot.rows);
+            assert!(
+                !rows
+                    .iter()
+                    .any(|label| *label == "Use Flow" || *label == "Use Raw Terminal"),
+                "Raw-only v1 must not offer presentation choices for {resting_is_raw:?}"
+            );
+        }
     }
 
     fn entry(label: &str) -> PaletteEntry {

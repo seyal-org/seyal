@@ -266,3 +266,32 @@ fn close_last_pane_of_created_workspace_removes_sidebar_row() {
     assert_eq!(after.selected_workspace, WorkspaceId::m001_default());
     assert_eq!(after.focused_pane, prior);
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn mint_workspace_candidates_include_pane_registry_without_client_handle() {
+    use crate::local::reconstruction_probe_client;
+    use seyal_protocol::local_ipc::framing::Role;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.shell.snapshot().focused_pane;
+    let execution = ExecutionId::from_bytes([0x91; 16]);
+    let attachment = AttachmentId::from_bytes([0x92; 16]);
+    let client = reconstruction_probe_client(Role::Controller, 24, 80, 1, execution, attachment);
+    let registered = crate::ffi::register_app_client(client).expect("register");
+    let raw = registered.raw();
+    root.pane_client_raws.insert(pane, raw);
+    // Production multipane often keeps only pane/terminal registry clients.
+    root.client_handle = None;
+    root.wire_client = None;
+
+    let candidates = root.attached_mint_client_raws_for_test();
+    assert_eq!(
+        candidates,
+        vec![raw],
+        "CreateWorkspace mint must see Attached pane Controllers before Ready fallback"
+    );
+
+    root.pane_client_raws.remove(&pane);
+    let _ = crate::ffi::unregister_client(raw);
+}

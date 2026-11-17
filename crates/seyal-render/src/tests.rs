@@ -4,7 +4,7 @@ use crate::damage::{RowDamage, DAMAGE_WORDS};
 use crate::glyph::{
     pack_color, CellSource, RenderAttributes, RenderCell, RenderCellRole, RenderColor,
     COLOR_TAG_INDEXED, COLOR_TAG_RGB, PREPARED_FLAG_BOLD, PREPARED_FLAG_HAS_GRAPHEME,
-    PREPARED_FLAG_UNDERLINE,
+    PREPARED_FLAG_INVERSE_DEFAULT_COLORS, PREPARED_FLAG_UNDERLINE,
 };
 use crate::prepare::{CommittedDisplay, CursorState, PrepareError, PreparedSurface};
 use std::cell::Cell;
@@ -386,6 +386,43 @@ fn inverse_is_resolved_without_baking_color_into_glyph_identity() {
     assert_eq!(prepared.background, pack_color(RenderColor::Indexed(1)));
     assert_eq!(prepared.scalar, 'Z' as u32);
     assert_eq!(prepared.flags, PREPARED_FLAG_BOLD | PREPARED_FLAG_UNDERLINE);
+}
+
+#[test]
+fn inverse_default_colors_retain_selection_intent_for_native_resolution() {
+    // Terminal defaults are resolved by the native theme at draw time. If
+    // Rust swaps two Default tags here, both stay zero and the selection is
+    // invisible. Carry the generic inverse intent across the prepared frame
+    // so the shader can swap the already-resolved theme defaults.
+    let cells = vec![RenderCell {
+        scalar: 'R',
+        role: RenderCellRole::Lead,
+        width: 1,
+        text: std::sync::Arc::from(b"R".as_slice()),
+        foreground: RenderColor::Default,
+        background: RenderColor::Default,
+        attributes: RenderAttributes {
+            inverse: true,
+            ..RenderAttributes::default()
+        },
+    }];
+    let mut surface = PreparedSurface::default();
+    surface
+        .prepare(
+            display(1, 1, 1, CursorState::default(), &cells),
+            RowDamage::none(),
+            false,
+        )
+        .unwrap();
+
+    let prepared = surface.prepared_cells()[0];
+    assert_eq!(prepared.foreground, pack_color(RenderColor::Default));
+    assert_eq!(prepared.background, pack_color(RenderColor::Default));
+    assert_ne!(
+        prepared.reserved & PREPARED_FLAG_INVERSE_DEFAULT_COLORS,
+        0,
+        "selection intent must survive deferred native default-color resolution"
+    );
 }
 
 #[test]

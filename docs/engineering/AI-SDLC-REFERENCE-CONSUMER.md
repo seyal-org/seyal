@@ -11,10 +11,10 @@ This is **reference-consumer integration evidence**, not the model/evaluation be
 Seyal consumes AI-SDLC `main` at exact commit:
 
 ```text
-4b4c603b2fc51105119a7773119319e8902f48e6
+77158462473a4244d63329a55907d0c5ccc47757
 ```
 
-This pin contains merged AI-SDLC PRs #24–#29, including executable local claim coordination. The Issue body is the plan; closed-unmerged candidates remain resumable when authorized. `pr-review` is the single review entrypoint and always re-reviews the full current candidate.
+This pin uses the portable coordination default and canonical bounded review convergence. The Issue body is the plan; closed-unmerged candidates remain resumable when authorized. `pr-review` is the single review entrypoint. A clean initial independent review can be final; follow the canonical recheck and final exact-head rules.
 
 The pin is developer tooling only and is materialized by `make bootstrap-agents` under ignored `.sdlc/framework/`. Product build/test/runtime paths do not depend on it.
 
@@ -48,7 +48,7 @@ implement-issue
 pr-review
   → one full current-candidate review, complete blocker list
   ├─ READY_TO_MERGE
-  ├─ CHANGES_REQUIRED → address-pr-review → full exact-head pr-review
+  ├─ CHANGES_REQUIRED → address-pr-review → scoped recheck → final exact-head review
   └─ BLOCKED_BY_DECISION → resolve the other decision, keep this candidate
 ```
 
@@ -58,7 +58,7 @@ A chat outline is not the plan. A separate plan comment is not required.
 
 `issue-refinement` produces one GitHub Issue whose body states outcome, scope, acceptance, dependencies, ownership boundary, and required evidence. That body is the plan. `development-readiness` applies the generic readiness gate plus Seyal's Ready checklist. `implementation-planning` runs only when the production path is still missing from the Issue. It does not claim the Issue or start production work.
 
-**Claim boundary:** Human Issue ownership (assignee/acknowledged owner record) and agent execution exclusion are distinct. The agent must run the pinned `tools/workflow_claims.py` begin/verify/release commands using one shared same-host private DB and a unique active worker identity. A label/branch is not an atomic agent claim. Cross-host collaboration requires a shared atomic backend.
+**Claim boundary:** The sole human GitHub owner coordinates the Issue and delegated agents using `ISSUE-PROTOCOL.md`. GitHub assignment and the external owner comment are contributor coordination, not atomic exclusion. No local agent identity, token or claim store is required.
 
 ## Reference scenario 2 — implementation and same-candidate continuation
 
@@ -80,7 +80,7 @@ A correct implementation handoff is implemented-for-review on a concrete candida
 
 For Seyal it additionally enforces terminal/runtime ownership, hot-path constraints, permanent production architecture, tests/evidence, measurements, security/domain gates and truthful Issue/PR state.
 
-When changes are required on an `IN_REVIEW` candidate, `address-pr-review` inventories the unresolved findings and failing required checks from that pass, fixes them on the same candidate, and reruns the evidence that fix invalidated. The follow-up performs a complete independent `pr-review` of the current candidate and reruns invalidated evidence on the new head. A review of only the latest comment or diff is insufficient.
+When changes are required on an `IN_REVIEW` candidate, `address-pr-review` inventories the unresolved findings and failing required checks from that pass, fixes them on the same candidate, and reruns the evidence that fix invalidated. The follow-up applies the pinned framework's convergence and evidence-reuse rules, with wider review for high-risk/unknown impact and a final independent whole-candidate exact-head/base verdict. No delta-only approval.
 
 ## Reference scenario 4 — verification
 
@@ -100,4 +100,4 @@ Repository integration evidence includes:
 
 This integration does not itself make AI-SDLC product/runtime authority and does not prove publication readiness. Generic framework defects belong in `ai-sdlc`; Seyal-specific terminal/product rules remain local.
 
-The pinned local claim workflow has a fail-closed project `preToolUse` gate for Cursor-dispatched mutation tools (`.cursor/hooks.json` and `.cursor/hooks/claim-gate.py`). Its private same-host SQLite claim store and session-derived worker identity do **not** constitute an OS, cross-host, or GitHub authorization boundary. A live multi-agent Cursor test must still demonstrate that the installed client actually invokes these hooks and rejects unauthorized writes; passing static/tooling tests alone does not prove enforcement. The separate macOS IPC suspension test failure originally observed on integration PR #1420 was addressed on runtime test PR #1423 (merged with green Foundation Quality and M001 Production Fuzz); the consumer PR must obtain fresh exact-head CI against the updated `master`.
+The former local agent claim wrapper/hook is retired; private legacy records are untouched. Generic delegation checks the exact materialized framework pin in the current worktree; refresh only the framework if needed. This document describes the integration contract, not a passing run. Exact-pin compatibility, tooling checks, representative ownership scenarios, and required candidate CI must be verified independently before merge.

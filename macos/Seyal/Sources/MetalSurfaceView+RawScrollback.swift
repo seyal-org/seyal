@@ -2,6 +2,29 @@ import AppKit
 
 @MainActor
 extension MetalSurfaceView {
+    func rawScrollDisplayHandle() -> UInt64 {
+        if transcriptDisplayHandle != 0 { return transcriptDisplayHandle }
+        guard let bridge else { return 0 }
+        return bridge.windowFocusedDisplayHandle != 0
+            ? bridge.windowFocusedDisplayHandle : bridge.clientHandle
+    }
+
+    var rawScrollOffset: UInt64 {
+        currentRawViewportPlan()?.offset_rows ?? 0
+    }
+
+    func currentRawViewportPlan() -> SeyalRawViewportPlan? {
+        guard let bridge, bridge.isConnected,
+            let frame = terminalCurrentFrame(),
+            frame.rows > 0,
+            let startLineID = terminalViewportStartLineID()
+        else { return nil }
+        let handle = rawScrollDisplayHandle()
+        guard handle != 0 else { return nil }
+        let plan = seyal_bridge_raw_viewport_plan_for(handle, startLineID, frame.rows)
+        return plan.active == 0 ? nil : plan
+    }
+
     /// Whether Raw local scrollback (not PTY mouse) should own wheel/Page keys.
     func prefersRawLocalScrollback(eligibility: UInt16, alternateScreen: Bool) -> Bool {
         eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue) && !alternateScreen
@@ -10,11 +33,10 @@ extension MetalSurfaceView {
     /// Drop presentation-local Raw scroll state. Does not change eligibility
     /// presentation (Flow/TUI/Raw) — callers set that after clearing.
     func clearRawScrollbackFollowTail() {
-        guard rawScrollOffset != 0 || rawScrollPaintedStartLineID != 0
-            || rawScrollDidRefillLeadingBlanks
-        else { return }
-        rawScrollOffset = 0
+        let handle = rawScrollDisplayHandle()
+        if handle != 0 { _ = seyal_bridge_raw_viewport_clear_for(handle) }
         rawScrollPaintedStartLineID = 0
+        rawScrollRequestedHistory = nil
         rawScrollDidRefillLeadingBlanks = false
         var except = Set(historyRanges.keys.map(\.blockID))
         except.remove(RawScrollbackViewport.correlationBlockID)
@@ -39,18 +61,20 @@ extension MetalSurfaceView {
         else {
             return false
         }
-        guard let startLineID = terminalViewportStartLineID(), startLineID > 0 else {
+        guard let startLineID = terminalViewportStartLineID(), startLineID > 0,
+            let frame = terminalCurrentFrame()
+        else {
             return false
         }
-        let next = RawScrollbackViewport.applyDelta(
-            startLineID: startLineID,
-            offset: rawScrollOffset,
-            deltaRows: deltaRows
-        )
-        if next == rawScrollOffset, next == 0 {
+        let handle = rawScrollDisplayHandle()
+        guard handle != 0 else { return false }
+        let plan = seyal_bridge_raw_viewport_apply_for(
+            handle, startLineID, frame.rows, Int32(clamping: deltaRows))
+        if plan.active == 0 {
+            restoreRawFollowTailLiveGrid()
             return true
         }
-        rawScrollOffset = next
+        rawScrollPaintedStartLineID = plan.start_line
         rawScrollDidRefillLeadingBlanks = false
         refreshRawScrollbackPaint(force: true)
         return true
@@ -64,7 +88,7 @@ extension MetalSurfaceView {
     }
 
     func refreshRawScrollbackPaint(force: Bool = false) {
-        guard rawScrollOffset > 0 else {
+        guard let plan = currentRawViewportPlan() else {
             if rawScrollPaintedStartLineID != 0 {
                 restoreRawFollowTailLiveGrid()
             }
@@ -79,44 +103,35 @@ extension MetalSurfaceView {
             return
         }
         guard let frame = terminalCurrentFrame(), frame.rows > 0 else { return }
-        guard let startLineID = terminalViewportStartLineID(), startLineID > 0 else { return }
-        rawScrollOffset = RawScrollbackViewport.clampOffset(
-            startLineID: startLineID,
-            offset: rawScrollOffset
-        )
-        guard rawScrollOffset > 0 else {
-            restoreRawFollowTailLiveGrid()
-            return
-        }
-        if !force, startLineID == rawScrollPaintedStartLineID { return }
-        guard
-            let window = RawScrollbackViewport.lineWindow(
-                startLineID: startLineID,
-                rows: frame.rows,
-                offset: rawScrollOffset
-            )
-        else {
-            restoreRawFollowTailLiveGrid()
-            return
-        }
-        rawScrollPaintedStartLineID = startLineID
+        if !force, plan.start_line == rawScrollPaintedStartLineID { return }
+        rawScrollPaintedStartLineID = plan.start_line
         // Keep live grid until history arrives. Suppressing early left a blank
         // surface when BlockTimeline purge dropped the in-flight MAX request.
+        var requestID: UInt64 = 0
+        let handle = rawScrollDisplayHandle()
         let result = requestHistoryRange(
-            startLine: window.start,
-            endLine: window.end,
-            blockID: RawScrollbackViewport.correlationBlockID
+            startLine: plan.start_line,
+            endLine: plan.end_line,
+            blockID: RawScrollbackViewport.correlationBlockID,
+            rawViewportColumns: frame.columns,
+            onRequestID: { requestID = $0 }
         )
         if result != 0 {
+            rawScrollRequestedHistory = nil
             restoreRawFollowTailLiveGrid()
+        } else {
+            rawScrollRequestedHistory = RawScrollbackRequest(
+                displayHandle: handle,
+                requestID: requestID,
+                startLine: plan.start_line,
+                endLine: plan.end_line
+            )
         }
     }
 
     func terminalViewportStartLineID() -> UInt64? {
         guard let bridge, bridge.isConnected else { return nil }
-        let handle =
-            bridge.windowFocusedDisplayHandle != 0
-            ? bridge.windowFocusedDisplayHandle : bridge.clientHandle
+        let handle = rawScrollDisplayHandle()
         let value =
             handle != 0
             ? seyal_bridge_viewport_start_line_id_for(handle)
@@ -126,7 +141,7 @@ extension MetalSurfaceView {
 
     func historyExceptPreservingRawScrollback(_ blockIDs: Set<UInt64>) -> Set<UInt64> {
         var kept = blockIDs
-        if rawScrollOffset > 0 {
+        if currentRawViewportPlan() != nil {
             kept.insert(RawScrollbackViewport.correlationBlockID)
         }
         return kept
@@ -135,7 +150,13 @@ extension MetalSurfaceView {
     @discardableResult
     func renderRawScrollbackHistoryIfNeeded(_ range: NativeHistoryRange) -> Bool {
         guard range.blockID == RawScrollbackViewport.correlationBlockID else { return false }
-        guard rawScrollOffset > 0 else { return false }
+        // Consume every Raw-correlated result here, including stale pages.
+        // Sending a late page through Flow's renderer resurrects removed
+        // transcript state and can paint the previous scroll position in place.
+        guard RawScrollbackViewport.isCurrentResponse(
+            range, expected: rawScrollRequestedHistory
+        ), currentRawViewportPlan() != nil else { return true }
+        rawScrollRequestedHistory = nil
         let eligibility =
             recoveryAppHandle != 0
             ? seyal_app_snapshot(recoveryAppHandle).eligibility : 0
@@ -157,11 +178,25 @@ extension MetalSurfaceView {
             let contentEnd = contentStart &+ UInt64(targetRows) &- 1
             if contentStart > range.startLine {
                 rawScrollDidRefillLeadingBlanks = true
-                _ = requestHistoryRange(
+                var requestID: UInt64 = 0
+                let handle = rawScrollDisplayHandle()
+                let requestResult = requestHistoryRange(
                     startLine: contentStart,
                     endLine: contentEnd,
-                    blockID: RawScrollbackViewport.correlationBlockID
+                    blockID: RawScrollbackViewport.correlationBlockID,
+                    rawViewportColumns: UInt16(clamping: columns),
+                    onRequestID: { requestID = $0 }
                 )
+                if requestResult == 0 {
+                    rawScrollRequestedHistory = RawScrollbackRequest(
+                        displayHandle: handle,
+                        requestID: requestID,
+                        startLine: contentStart,
+                        endLine: contentEnd
+                    )
+                } else {
+                    restoreRawFollowTailLiveGrid()
+                }
                 return true
             }
         }

@@ -2,14 +2,26 @@ import Foundation
 
 @MainActor
 extension RustDisplayBridge {
-  func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+  func requestHistoryRange(
+    startLine: UInt64,
+    endLine: UInt64,
+    blockID: UInt64,
+    rawViewportColumns: UInt16 = 0,
+    onRequestID: ((UInt64) -> Void)? = nil
+  ) -> Int32 {
+    let handle = Self.submissionHandle(
+      override: submissionDisplayHandleOverride,
+      focused: windowFocusedDisplayHandle,
+      client: clientHandle
+    )
     guard isConnected, handle != 0 else { return -4 }
     return requestHistoryRange(
       forDisplayHandle: handle,
       startLine: startLine,
       endLine: endLine,
-      blockID: blockID
+      blockID: blockID,
+      rawViewportColumns: rawViewportColumns,
+      onRequestID: onRequestID
     )
   }
 
@@ -19,7 +31,9 @@ extension RustDisplayBridge {
     forDisplayHandle handle: UInt64,
     startLine: UInt64,
     endLine: UInt64,
-    blockID: UInt64
+    blockID: UInt64,
+    rawViewportColumns: UInt16 = 0,
+    onRequestID: ((UInt64) -> Void)? = nil
   ) -> Int32 {
     guard isConnected, handle != 0 else { return -4 }
     guard blockID > 0, startLine > 0, endLine >= startLine else { return -4 }
@@ -27,15 +41,22 @@ extension RustDisplayBridge {
     // poll/flush; focused history FFI would hit FOCUSED_DISPLAY_HANDLE (#1426).
     let requestID = seyal_bridge_next_history_request_id_for(handle)
     guard requestID != 0 else { return -4 }
+    onRequestID?(requestID)
     let result = finishAddressedMutation(
       seyal_bridge_request_history_range_for(
-        handle, blockID, startLine, endLine, 512, 131_072, 0),
+        handle, blockID, startLine, endLine, 512, 131_072, 0, rawViewportColumns),
       forDisplayHandle: handle
     )
     if result == 0 {
       let requestKey = PaneHistoryRequestKey(
         displayHandle: handle, paneID: paneID, requestID: requestID)
-      requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
+      requestedHistoryRanges[requestKey] = PaneHistoryRangeRequest(
+        blockID: blockID,
+        startLine: startLine,
+        endLine: endLine,
+        rawViewportColumns: rawViewportColumns,
+        startUnit: 0
+      )
     }
     return result
   }
@@ -133,7 +154,8 @@ extension RustDisplayBridge {
       )
       let previous = historyContinuations[requestKey]
       let merged = mergeHistoryRange(previous?.range, chunk)
-      let leads = historyLeadCount(rows)
+      let leads = seyal_bridge_history_range_lead_count_for_handle(
+        handle, metadata.block_id, metadata.request_id)
       _ = seyal_bridge_history_range_consume_for_handle(
         handle, metadata.block_id, metadata.request_id)
       requestedHistoryRanges.removeValue(forKey: requestKey)
@@ -142,18 +164,19 @@ extension RustDisplayBridge {
       let truncated = metadata.reserved == 1
       if truncated, leads > 0, isConnected {
         let nextStart = (previous?.startUnit ?? 0) + leads
+        let continuation = request.continuation(startUnit: nextStart)
         let nextID = seyal_bridge_next_history_request_id_for(handle)
         if nextID != 0 {
           let continued = finishAddressedMutation(
             seyal_bridge_request_history_range_for(
-              handle, request.blockID, request.startLine, request.endLine, 512, 131_072,
-              nextStart),
+              handle, continuation.blockID, continuation.startLine, continuation.endLine,
+              512, 131_072, continuation.startUnit, continuation.rawViewportColumns),
             forDisplayHandle: handle
           )
           if continued == 0 {
             let nextKey = PaneHistoryRequestKey(
               displayHandle: handle, paneID: paneID, requestID: nextID)
-            requestedHistoryRanges[nextKey] = request
+            requestedHistoryRanges[nextKey] = continuation
             historyContinuations[nextKey] = (nextStart, merged)
           }
         }
@@ -174,7 +197,14 @@ extension RustDisplayBridge {
       return -14
     }
     let count = UInt32(byteCount)
-    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    // The selected pane can borrow this bridge while targeting its own
+    // Controller. Keep the addressed UTF-8 mutation on that same handle; using
+    // the window focus here silently sends committed text to a sibling pane.
+    let handle = Self.submissionHandle(
+      override: submissionDisplayHandleOverride,
+      focused: windowFocusedDisplayHandle,
+      client: clientHandle
+    )
     let result =
       text.utf8.withContiguousStorageIfAvailable { buffer -> Int32 in
         seyal_bridge_submit_utf8_for(handle, buffer.baseAddress, count)

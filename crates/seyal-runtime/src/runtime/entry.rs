@@ -47,6 +47,14 @@ pub(in crate::runtime) struct Entry {
     pub(in crate::runtime) mouse_buttons: u8,
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) mouse_host_anchor: Option<VisualPos>,
+    /// True from an authenticated local prompt marker until command input is
+    /// admitted. Raw click-to-place is enabled only during this trusted window.
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) prompt_ready: bool,
+    /// Cursor at the start of the editable command, captured after the shell
+    /// has drawn its prompt (on first input or first click).
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) prompt_anchor: Option<VisualPos>,
     /// The single in-flight composer submission awaiting a trusted `C`.
     /// This is metadata only; PTY input continues through `pending_input`.
     #[cfg(target_os = "macos")]

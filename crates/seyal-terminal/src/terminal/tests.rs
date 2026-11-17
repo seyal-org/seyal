@@ -3,7 +3,7 @@
 use super::*;
 use crate::line::LineIdAllocator;
 use crate::protocol_reply::MAX_PROTOCOL_REPLIES;
-use crate::{HistoryAnchor, HistoryAnchorResolution, LineId, TerminalError};
+use crate::{HistoryAnchor, HistoryAnchorResolution, LineId, TerminalError, VisualPos};
 
 #[test]
 fn line_identity_exhaustion_is_explicit_and_does_not_duplicate_scroll_id() {
@@ -201,6 +201,83 @@ fn prompt_start_marker_is_a_trusted_shell_event_with_exact_shape() {
             .feed(b"\x1b]133;A\x07\x1b]133;A;abababababababababababababababab;extra\x07\x1b]133;C;abababababababababababababababab;pwd\x07\x1b]133;B;abababababababababababababababab\x07")
             .unwrap();
     assert_eq!(terminal.take_shell_integration_event(), None);
+}
+
+#[test]
+fn prompt_cursor_delta_maps_ascii_and_unicode_cells_to_editor_characters() {
+    let mut terminal = TerminalState::new(80, 24).unwrap();
+    terminal.feed(b">echo word").unwrap();
+    assert_eq!(
+        terminal.prompt_cursor_delta(VisualPos { col: 1, row: 0 }, VisualPos { col: 6, row: 0 },),
+        Some(-4),
+        "clicking before `word` should move four editor characters left"
+    );
+
+    let mut unicode = TerminalState::new(80, 24).unwrap();
+    unicode.feed(">🙂z".as_bytes()).unwrap();
+    assert_eq!(
+        unicode.prompt_cursor_delta(VisualPos { col: 1, row: 0 }, VisualPos { col: 3, row: 0 },),
+        Some(-1),
+        "a two-cell grapheme is one shell-editor character"
+    );
+
+    let mut combining = TerminalState::new(80, 24).unwrap();
+    combining.feed(">e\u{301}x".as_bytes()).unwrap();
+    assert_eq!(
+        combining.prompt_cursor_delta(VisualPos { col: 1, row: 0 }, VisualPos { col: 2, row: 0 },),
+        Some(-1),
+        "a combining sequence is one grapheme for editor motion"
+    );
+}
+
+#[test]
+fn prompt_cursor_delta_maps_a_soft_wrapped_command_without_counting_prompt_cells() {
+    let mut terminal = TerminalState::new(4, 3).unwrap();
+    terminal.feed(b">abcdef").unwrap();
+    let cursor = terminal.cursor();
+    assert_eq!((cursor.col, cursor.row), (3, 1));
+    assert_eq!(
+        terminal.prompt_cursor_delta(VisualPos { col: 1, row: 0 }, VisualPos { col: 1, row: 1 },),
+        Some(-2),
+        "the click is after `abcd`; the wrapped `>` prompt prefix is not command text"
+    );
+}
+
+#[test]
+fn prompt_cursor_delta_counts_unicode_graphemes_across_soft_wraps_and_rejects_hard_breaks() {
+    let mut unicode = TerminalState::new(4, 3).unwrap();
+    unicode.feed(">a🙂bc".as_bytes()).unwrap();
+    assert_eq!(
+        unicode.prompt_cursor_delta(VisualPos { col: 1, row: 0 }, VisualPos { col: 1, row: 1 },),
+        Some(-1),
+        "the two-cell emoji is one editor character across the wrapped command"
+    );
+
+    let mut multiline = TerminalState::new(8, 3).unwrap();
+    multiline.feed(b">first\r\n second").unwrap();
+    assert_eq!(
+        multiline.prompt_cursor_delta(VisualPos { col: 1, row: 0 }, VisualPos { col: 2, row: 1 },),
+        None,
+        "a hard line break may include a shell continuation prompt, so Raw must not guess"
+    );
+}
+
+#[test]
+fn raw_double_click_selects_unicode_word_and_triple_click_selects_wrapped_line() {
+    let mut words = TerminalState::new(24, 4).unwrap();
+    words.feed("one café two".as_bytes()).unwrap();
+    assert!(words.select_word_at(VisualPos { col: 7, row: 0 }));
+    assert_eq!(words.copy_selection_text().unwrap(), "café");
+
+    let mut combining = TerminalState::new(24, 4).unwrap();
+    combining.feed("e\u{301}x stop".as_bytes()).unwrap();
+    assert!(combining.select_word_at(VisualPos { col: 0, row: 0 }));
+    assert_eq!(combining.copy_selection_text().unwrap(), "e\u{301}x");
+
+    let mut wrapped = TerminalState::new(4, 3).unwrap();
+    wrapped.feed(b"abcdef\r\nxyz").unwrap();
+    assert!(wrapped.select_logical_line_at(VisualPos { col: 1, row: 1 }));
+    assert_eq!(wrapped.copy_selection_text().unwrap(), "abcdef");
 }
 
 #[test]

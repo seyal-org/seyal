@@ -173,6 +173,7 @@ fn terminal_mouse_round_trips() {
         modifiers: TerminalKeyV2Modifiers::SHIFT,
         col: 3,
         row: 4,
+        click_count: 2,
     };
     assert_eq!(TerminalMouse::decode(&event.encode()).unwrap(), event);
     let mut reserved = event.encode();
@@ -181,6 +182,13 @@ fn terminal_mouse_round_trips() {
         TerminalMouse::decode(&reserved),
         Err(FramingError::MalformedPayload)
     );
+
+    let mut invalid = event;
+    invalid.kind = TerminalMouseKind::Move;
+    assert_eq!(invalid.validate(), Err(FramingError::MalformedPayload));
+    invalid = event;
+    invalid.click_count = 4;
+    assert_eq!(invalid.validate(), Err(FramingError::MalformedPayload));
 }
 
 #[test]

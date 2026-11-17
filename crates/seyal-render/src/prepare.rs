@@ -7,8 +7,8 @@
 use crate::damage::{RowDamage, MAX_RENDER_COLUMNS, MAX_RENDER_ROWS};
 use crate::glyph::{
     pack_color, CellSource, PreparedCell, RenderCellRole, PREPARED_FLAG_BOLD,
-    PREPARED_FLAG_HAS_GRAPHEME, PREPARED_FLAG_UNDERLINE, PREPARED_ROLE_CONTINUATION,
-    PREPARED_ROLE_EMPTY, PREPARED_ROLE_LEAD,
+    PREPARED_FLAG_HAS_GRAPHEME, PREPARED_FLAG_INVERSE_DEFAULT_COLORS, PREPARED_FLAG_UNDERLINE,
+    PREPARED_ROLE_CONTINUATION, PREPARED_ROLE_EMPTY, PREPARED_ROLE_LEAD,
 };
 
 pub use crate::damage::PrepareError;
@@ -248,6 +248,12 @@ impl PreparedSurface {
             };
             let width = cell.width.min(2) as u16;
             let mut reserved = role | (width << 2);
+            if cell.attributes.inverse
+                && cell.foreground == crate::glyph::RenderColor::Default
+                && cell.background == crate::glyph::RenderColor::Default
+            {
+                reserved |= PREPARED_FLAG_INVERSE_DEFAULT_COLORS;
+            }
             let scalar = if cell.role == RenderCellRole::Continuation {
                 0
             } else {

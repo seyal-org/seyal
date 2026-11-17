@@ -264,31 +264,82 @@ impl ApplicationRoot {
 
     #[cfg(target_os = "macos")]
     fn mint_workspace_id(&mut self) -> Result<WorkspaceId, AppError> {
-        // Prefer the live Attached Controller (same CAP path as New Terminal /
-        // CreateExecution). A dedicated Ready connect can hit MAX_CONNECTIONS
-        // and stall until StartupDeadlineExceeded → ABI 13 NoLiveClient.
+        // Prefer every Attached Controller (wire harness, focused client_handle,
+        // and production pane/terminal registry clients). A dedicated Ready
+        // connect while those Controllers already hold slots hits
+        // MAX_CONNECTIONS and surfaces as ABI 35 ProvisioningRejected.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        if self.has_wire_client() {
-            match self.with_wire_client_mut(|client| client.mint_workspace_blocking(deadline)) {
+        let mut last_error = None;
+        let mut tried_attached = false;
+
+        if let Some(client) = self.wire_client.as_mut() {
+            tried_attached = true;
+            match client.mint_workspace_blocking(deadline) {
                 Ok(id) => return Ok(id),
-                Err(AppError::NoLiveClient) | Err(AppError::ProvisioningRejected) => {}
-                Err(error) => return Err(error),
+                Err(error) => last_error = Some(super::provisioning_apply::client_error(error)),
             }
         }
-        // Fallback: ADR-028 §2.5 Ready control connection when no Attached client.
-        crate::local::LocalDisplayClient::mint_workspace_via_ready_connection(deadline).map_err(
-            |error| match error {
-                crate::local::ClientError::UnsupportedInteractiveCapability => {
-                    AppError::ProvisioningRejected
+
+        for handle in self.attached_mint_client_raws() {
+            tried_attached = true;
+            match crate::ffi::with_client_mut(handle, |client| {
+                client.mint_workspace_blocking(deadline)
+            }) {
+                Some(Ok(id)) => return Ok(id),
+                Some(Err(error)) => {
+                    last_error = Some(super::provisioning_apply::client_error(error))
                 }
-                crate::local::ClientError::LostController => AppError::NotController,
-                crate::local::ClientError::Discovery(_) => AppError::NoLiveClient,
-                crate::local::ClientError::StartupDeadlineExceeded => {
-                    AppError::ProvisioningRejected
-                }
-                _ => AppError::ProvisioningRejected,
-            },
-        )
+                None => last_error = Some(AppError::NoLiveClient),
+            }
+        }
+
+        if tried_attached {
+            return Err(last_error.unwrap_or(AppError::NoLiveClient));
+        }
+
+        // Cold start only: ADR-028 §2.5 Ready control connection.
+        crate::local::LocalDisplayClient::mint_workspace_via_ready_connection(deadline)
+            .map_err(super::provisioning_apply::client_error)
+    }
+
+    /// Attached Controllers that can admit MintWorkspace (ADR-028 §2.5).
+    /// Focused / authority pane clients are tried before other registry entries.
+    #[cfg(target_os = "macos")]
+    fn attached_mint_client_raws(&self) -> Vec<u64> {
+        let mut handles = Vec::new();
+        let mut push = |raw: u64| {
+            if !handles.contains(&raw) {
+                handles.push(raw);
+            }
+        };
+        if let Some(raw) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+        {
+            push(raw);
+        }
+        let focused = self.shell.snapshot().focused_pane;
+        if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
+            push(raw);
+        }
+        if let Some(authority_pane) = self.authority.map(|authority| authority.pane)
+            && let Some(raw) = self.pane_client_raws.get(&authority_pane).copied()
+        {
+            push(raw);
+        }
+        for raw in self.pane_client_raws.values().copied() {
+            push(raw);
+        }
+        for raw in self.terminal_client_raws.values().copied() {
+            push(raw);
+        }
+        handles
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn attached_mint_client_raws_for_test(&self) -> Vec<u64> {
+        self.attached_mint_client_raws()
     }
 
     #[cfg(not(target_os = "macos"))]

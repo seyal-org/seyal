@@ -75,7 +75,7 @@ pub(crate) use types::{
     SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus, SeyalComposerTarget,
     SeyalCopiedText, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange,
     SeyalHistoryRow, SeyalHistorySidecar, SeyalPass9DiagSnapshot, SeyalPreparedFrame,
-    SeyalRecoveryResult, SeyalSessionSurface,
+    SeyalRawViewportPlan, SeyalRecoveryResult, SeyalSessionSurface,
 };
 
 #[allow(unused_imports)]
@@ -115,17 +115,20 @@ pub use display::{
     seyal_bridge_ensure_prepared_for, seyal_bridge_execution_block_metadata,
     seyal_bridge_flush_writable, seyal_bridge_flush_writable_for, seyal_bridge_frame,
     seyal_bridge_frame_for, seyal_bridge_history_range_consume,
-    seyal_bridge_history_range_consume_for_handle, seyal_bridge_history_range_peek_for,
+    seyal_bridge_history_range_consume_for_handle,
+    seyal_bridge_history_range_lead_count_for_handle, seyal_bridge_history_range_peek_for,
     seyal_bridge_history_range_peek_for_handle, seyal_bridge_history_range_row_for,
     seyal_bridge_history_range_row_for_handle, seyal_bridge_history_range_sidecar_for,
     seyal_bridge_history_range_sidecar_for_handle, seyal_bridge_next_composer_request_id,
     seyal_bridge_next_history_request_id, seyal_bridge_next_history_request_id_for,
-    seyal_bridge_poll, seyal_bridge_poll_for, seyal_bridge_request_history_range,
-    seyal_bridge_request_history_range_for, seyal_bridge_session_consent,
-    seyal_bridge_session_copy, seyal_bridge_session_request_for_handle,
-    seyal_bridge_session_surface, seyal_bridge_session_surface_for_handle,
-    seyal_bridge_viewport_start_line_id, seyal_bridge_viewport_start_line_id_for,
-    seyal_bridge_wants_write, seyal_bridge_wants_write_for,
+    seyal_bridge_poll, seyal_bridge_poll_for, seyal_bridge_raw_viewport_apply_for,
+    seyal_bridge_raw_viewport_clear_for, seyal_bridge_raw_viewport_plan_for,
+    seyal_bridge_request_history_range, seyal_bridge_request_history_range_for,
+    seyal_bridge_session_consent, seyal_bridge_session_copy,
+    seyal_bridge_session_request_for_handle, seyal_bridge_session_surface,
+    seyal_bridge_session_surface_for_handle, seyal_bridge_viewport_start_line_id,
+    seyal_bridge_viewport_start_line_id_for, seyal_bridge_wants_write,
+    seyal_bridge_wants_write_for,
 };
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]

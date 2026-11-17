@@ -96,6 +96,7 @@ fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
         },
     })
     .unwrap();
+    root.force_flow_test_fixture();
     root.apply(AppAction::ApplyRuntimeBlocks {
         fence: root.fence(),
         records: Some(vec![
@@ -242,11 +243,7 @@ fn execution_ended_pane_can_rebind_fresh_execution_and_clear_latch() {
         },
     })
     .unwrap();
-    root.apply(AppAction::SelectRestingPresentation {
-        fence: root.fence(),
-        raw: false,
-    })
-    .unwrap();
+    root.force_flow_test_fixture();
     let pane = root.snapshot().shell.focused_pane;
     root.apply(AppAction::BeginRecovery {
         now: Duration::ZERO,
@@ -323,6 +320,7 @@ fn execution_ended_pane_can_rebind_fresh_execution_and_clear_latch() {
         pty_generation: 1,
     })
     .expect("New shell binds the created ExecutionId");
+    root.force_flow_test_fixture();
     assert!(!root.replacement_bootstrap_pending());
     assert!(
         !root.composer.execution_ended(pane),

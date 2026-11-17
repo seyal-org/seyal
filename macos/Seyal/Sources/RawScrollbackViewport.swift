@@ -1,9 +1,13 @@
 import Foundation
 
-/// Presentation-local Raw scrollback window over SPEC-010 primary history.
-///
-/// Offset is rows above the live viewport origin (`ViewportLineIds[0]`).
-/// `offset == 0` means follow-tail / live grid. Never mutates PTY or VT.
+struct RawScrollbackRequest: Equatable {
+    let displayHandle: UInt64
+    let requestID: UInt64
+    let startLine: UInt64
+    let endLine: UInt64
+}
+
+/// Renderer-only row normalization for a Rust-authored Raw viewport plan.
 enum RawScrollbackViewport {
     /// Correlation id for `HistoryRangeRequest` (Runtime echoes; fetch is by LineId).
     /// Not a BlockTimeline identity. Must match
@@ -11,45 +15,18 @@ enum RawScrollbackViewport {
     /// so client BlockTimeline purge retains in-flight Raw scrollback.
     static let correlationBlockID: UInt64 = .max
 
-    /// Visible LineId window for a non-zero offset, or `nil` when follow-tail.
-    ///
-    /// When the window starts at LineId 1, over-fetch one extra page so leading
-    /// blank sealed rows can be trimmed while still filling the live grid.
-    static func lineWindow(
-        startLineID: UInt64,
-        rows: UInt16,
-        offset: UInt64
-    ) -> (start: UInt64, end: UInt64)? {
-        guard startLineID > 0, rows > 0 else { return nil }
-        let maxOffset = startLineID &- 1
-        let clamped = min(offset, maxOffset)
-        guard clamped > 0 else { return nil }
-        let rowCount = UInt64(rows)
-        let start = startLineID > clamped ? startLineID &- clamped : 1
-        let span = start == 1 ? rowCount &+ rowCount : rowCount
-        let end = start &+ span &- 1
-        return (start, end)
-    }
-
-    static func clampOffset(startLineID: UInt64, offset: UInt64) -> UInt64 {
-        guard startLineID > 1 else { return 0 }
-        return min(offset, startLineID &- 1)
-    }
-
-    static func applyDelta(
-        startLineID: UInt64,
-        offset: UInt64,
-        deltaRows: Int
-    ) -> UInt64 {
-        guard deltaRows != 0 else { return clampOffset(startLineID: startLineID, offset: offset) }
-        if deltaRows > 0 {
-            let add = UInt64(deltaRows)
-            let next = offset > UInt64.max &- add ? UInt64.max : offset &+ add
-            return clampOffset(startLineID: startLineID, offset: next)
-        }
-        let sub = UInt64(-deltaRows)
-        let next = offset > sub ? offset &- sub : 0
-        return clampOffset(startLineID: startLineID, offset: next)
+    /// History requests can complete out of order while the reader scrolls.
+    /// Only the exact latest request may replace the visible Raw page.
+    static func isCurrentResponse(
+        _ range: NativeHistoryRange,
+        expected: RawScrollbackRequest?
+    ) -> Bool {
+        guard let expected else { return false }
+        return range.blockID == correlationBlockID
+            && range.sourceDisplayHandle == expected.displayHandle
+            && range.requestID == expected.requestID
+            && range.startLine == expected.startLine
+            && range.endLine == expected.endLine
     }
 
     /// True when a history row has no visible glyphs (space-only / empty).

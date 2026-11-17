@@ -69,8 +69,8 @@ extension ProductChromeHostView {
             alert.messageText = "Could not create workspace"
             alert.informativeText =
                 "CreateWorkspace failed (apply=\(code), last_error=\(error)). "
-                + "13=NoLiveClient, 35=ProvisioningRejected. Wait until a terminal "
-                + "is live, then retry +."
+                + "13=NoLiveClient, 35=ProvisioningRejected. If a terminal is already "
+                + "live, retry +; otherwise wait for Runtime attach, then retry."
             alert.alertStyle = .warning
             alert.runModal()
         }

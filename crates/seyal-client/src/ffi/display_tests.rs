@@ -6,27 +6,130 @@ use seyal_runtime::local_ipc::framing::{
 };
 
 use super::display::{
-    seyal_bridge_history_range_consume_for_handle, seyal_bridge_history_range_peek_for_handle,
+    seyal_bridge_history_range_consume_for_handle,
+    seyal_bridge_history_range_lead_count_for_handle, seyal_bridge_history_range_peek_for_handle,
     seyal_bridge_history_range_row_for_handle, seyal_bridge_next_history_request_id_for,
     seyal_bridge_request_history_range_for, seyal_bridge_session_request_for_handle,
     seyal_bridge_session_surface_for_handle,
 };
 use crate::{
     ffi::{CLIENTS, FOCUSED_DISPLAY_HANDLE},
-    local::test_client_for_ffi,
+    local::{test_client_for_ffi, LocalDisplayClient},
 };
 
 #[test]
 fn unknown_handle_history_apis_fail_closed() {
     assert_eq!(seyal_bridge_next_history_request_id_for(0), 0);
     assert_eq!(
-        seyal_bridge_request_history_range_for(0, 1, 1, 2, 512, 131_072, 0),
+        seyal_bridge_request_history_range_for(0, 1, 1, 2, 512, 131_072, 0, 0),
         -1
     );
     let peek = seyal_bridge_history_range_peek_for_handle(0, 1, 1);
     assert_eq!(peek.block_id, 0);
     assert_eq!(peek.request_id, 0);
     assert_eq!(seyal_bridge_history_range_consume_for_handle(0, 1, 1), 0);
+}
+
+#[test]
+fn raw_history_viewport_width_stays_client_side_for_named_controller() {
+    const HANDLE: u64 = u64::MAX - 103;
+    let (stream, _peer) = UnixStream::pair().expect("controller stream");
+    let client = test_client_for_ffi(stream);
+    CLIENTS.with(|clients| {
+        assert!(clients
+            .borrow_mut()
+            .insert(HANDLE, Box::new(client))
+            .is_none());
+    });
+
+    assert_eq!(seyal_bridge_next_history_request_id_for(HANDLE), 1);
+    assert_eq!(
+        seyal_bridge_request_history_range_for(
+            HANDLE,
+            LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID,
+            10,
+            20,
+            512,
+            131_072,
+            0,
+            80,
+        ),
+        0
+    );
+    let request = CLIENTS.with(|clients| {
+        clients
+            .borrow()
+            .get(&HANDLE)
+            .unwrap()
+            .history_requests
+            .get(&1)
+            .copied()
+    });
+    assert_eq!(
+        request,
+        Some((
+            LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID,
+            10,
+            20,
+            80,
+        ))
+    );
+
+    CLIENTS.with(|clients| {
+        clients.borrow_mut().remove(&HANDLE);
+    });
+}
+
+#[test]
+fn raw_history_lead_count_is_available_until_the_page_is_consumed() {
+    const HANDLE: u64 = u64::MAX - 104;
+    let (stream, _peer) = UnixStream::pair().expect("controller stream");
+    let mut client = test_client_for_ffi(stream);
+    let block_id = LocalDisplayClient::PRESENTATION_HISTORY_CORRELATION_BLOCK_ID;
+    client.history_ranges.insert(
+        (block_id, 9),
+        HistoryRangeSnapshot {
+            request_id: 9,
+            block_id,
+            revision: 2,
+            status: HistoryRangeStatus::Truncated,
+            rows: vec![HistoryRow {
+                line_id: 10,
+                cells: vec![HistoryCell {
+                    scalar: b'a' as u32,
+                    foreground: 0,
+                    background: 0,
+                    flags: 0,
+                    reserved: 0,
+                }],
+            }],
+            sidecar: Vec::new(),
+        },
+    );
+    client.history_range_lead_counts.insert((block_id, 9), 17);
+    CLIENTS.with(|clients| {
+        assert!(clients
+            .borrow_mut()
+            .insert(HANDLE, Box::new(client))
+            .is_none());
+    });
+
+    assert_eq!(
+        seyal_bridge_history_range_lead_count_for_handle(HANDLE, block_id, 9),
+        17
+    );
+    assert_eq!(
+        seyal_bridge_history_range_consume_for_handle(HANDLE, block_id, 9),
+        1
+    );
+    assert_eq!(
+        seyal_bridge_history_range_lead_count_for_handle(HANDLE, block_id, 9),
+        0
+    );
+
+    CLIENTS.with(|clients| {
+        clients.borrow_mut().remove(&HANDLE);
+    });
 }
 
 #[test]

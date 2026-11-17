@@ -5,7 +5,7 @@ description: Seyal adapter for AI-SDLC implementation planning, adding terminal 
 
 # Implementation planning
 
-Use the issue-owned 3–7-step implementation plan from `.sdlc/framework/skills/create-issue/SKILL.md`. This is a **supporting Seyal planning adapter**, not a separate generic approval or execution skill. If it is unavailable, run `make bootstrap-agents` first.
+Use the issue-owned 3–7-step implementation plan from `.sdlc/framework/skills/create-issue/SKILL.md`. This is a **supporting Seyal planning adapter**, not a separate generic approval or execution skill. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
 For Seyal, apply only these project-specific deltas:
 

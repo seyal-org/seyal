@@ -10,9 +10,34 @@
 use super::*;
 
 impl ApplicationRoot {
-    /// An explicit split opts all panes in its Tab into Flow. TUI remains the
-    /// visible takeover while this updates the stored resting choice.
-    pub(super) fn select_split_tab_flow_resting_mode(&mut self, pane: seyal_core::PaneId) {
+    /// Exercise legacy Flow-only reducers without exposing Flow through the
+    /// production presentation action while Blocks are suspended.
+    #[cfg(test)]
+    pub(crate) fn force_flow_test_fixture(&mut self) {
+        let Some(bound) = self.authority else {
+            panic!("Flow fixture requires a bound execution");
+        };
+        let identity = PresentationIdentity::new(bound.execution, bound.pty_generation)
+            .expect("bound fixture has a valid PTY generation");
+        let epoch = self.presentation.snapshot().epoch;
+        self.presentation
+            .apply(PresentationAction::Transition {
+                mode: PresentationMode::Flow,
+                identity,
+                explicit: true,
+                epoch,
+            })
+            .expect("Flow fixture transition");
+        self.explicit_flow = true;
+        self.resting = PresentationMode::Flow;
+        self.sync_focused_presentation_mode();
+        self.sync_composer_presentation();
+        assert_eq!(self.snapshot().eligibility, PresentationEligibility::Flow);
+    }
+
+    /// Keep every pane in the Tab on the conventional Raw resting surface.
+    /// TUI remains the visible takeover while this updates the stored choice.
+    pub(super) fn select_split_tab_raw_resting_mode(&mut self, pane: seyal_core::PaneId) {
         let snap = self.shell.snapshot();
         if let Some(tab) = snap
             .windows
@@ -23,7 +48,7 @@ impl ApplicationRoot {
             for candidate in &tab.panes {
                 let _ = self
                     .shell
-                    .set_resting_presentation_mode(candidate.id, PresentationMode::Flow);
+                    .set_resting_presentation_mode(candidate.id, PresentationMode::Raw);
             }
         }
     }
@@ -75,26 +100,10 @@ impl ApplicationRoot {
             self.sync_composer_presentation();
             return Ok(());
         };
-        let focused_pane = self.shell.snapshot().focused_pane;
-        let direct_interaction = self.interactive_raw_target.is_some_and(
-            |(pane, execution, block_id, target_generation)| {
-                pane == focused_pane
-                    && self
-                        .authority
-                        .is_some_and(|bound| bound.execution == execution)
-                    && self.runtime_composer_target.is_some_and(|target| {
-                        target.block_id == block_id
-                            && target.target_generation == target_generation
-                            && target.target_class == 2 // ForegroundProgram (ADR-026)
-                    })
-            },
-        );
         let desired = if alternate_screen {
             PresentationMode::Tui
-        } else if direct_interaction {
-            PresentationMode::Raw
         } else {
-            self.resting
+            PresentationMode::Raw
         };
         let current = self.presentation.snapshot();
         if current.mode == desired {
@@ -123,38 +132,28 @@ impl ApplicationRoot {
     }
 
     pub(super) fn recompute_resting(&mut self) {
-        // Blocks-first: trusted sessions rest in Flow automatically. Raw is
-        // reserved for the safe fallback when integration is unsupported.
-        self.resting = if self.integration_unsupported {
-            PresentationMode::Raw
-        } else {
-            PresentationMode::Flow
-        };
+        self.resting = PresentationMode::Raw;
     }
 
     pub(super) fn select_resting_presentation(
         &mut self,
         fence: AppFence,
-        raw: bool,
+        _raw: bool,
     ) -> Result<(), AppError> {
         self.require_fence(fence)?;
         if self.authority.is_none() {
             return Err(AppError::UnboundUnauthorized);
         }
-        // `raw == true` clears the Flow opt-in; `raw == false` opts into Flow.
-        self.explicit_flow = !raw;
-        self.recompute_resting();
+        // Flow/Blocks are suspended. Any stale menu or keybinding action is
+        // resolved to the only supported resting presentation.
+        self.explicit_flow = false;
+        self.resting = PresentationMode::Raw;
         self.derive_presentation(self.alternate_screen)
     }
 
-    /// `Some(true)` only while a Pane is in unsupported Raw fallback, so the
-    /// palette may offer Flow if trust state later permits it. Supported Flow
-    /// panes never expose a Raw choice.
+    /// Blocks are suspended; the palette must not offer a Flow opt-in.
     pub(super) fn resting_palette_choice(&self) -> Option<bool> {
-        (self.authority.is_some()
-            && self.integration_unsupported
-            && self.resting == PresentationMode::Raw)
-            .then_some(true)
+        None
     }
 
     pub(super) fn sync_focused_presentation_mode(&mut self) {

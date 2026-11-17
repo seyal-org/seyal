@@ -204,7 +204,7 @@ impl ApplicationRoot {
             }
             return Err(error);
         }
-        self.select_split_tab_flow_resting_mode(pane);
+        self.select_split_tab_raw_resting_mode(pane);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -950,10 +950,11 @@ fn provisioning_app_error(failure: ProvisioningFailure) -> AppError {
 }
 
 #[cfg(target_os = "macos")]
-fn client_error(error: ClientError) -> AppError {
+pub(super) fn client_error(error: ClientError) -> AppError {
     match error {
         ClientError::UnsupportedInteractiveCapability => AppError::ProvisioningRejected,
         ClientError::LostController => AppError::NotController,
+        ClientError::Discovery(_) => AppError::NoLiveClient,
         _ => AppError::ProvisioningRejected,
     }
 }

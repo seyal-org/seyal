@@ -28,6 +28,17 @@ pub(crate) use planner::{
     ResizeRecord, RetrySuppression,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TerminalMouseInput {
+    pub kind: TerminalMouseKind,
+    pub button: u8,
+    pub modifiers: TerminalKeyV2Modifiers,
+    pub col: u16,
+    pub row: u16,
+    pub click_count: u8,
+    pub action_id: u32,
+}
+
 impl LocalDisplayClient {
     pub fn input_failure(&self) -> Option<InputAdmissionFailure> {
         self.input_failure
@@ -223,38 +234,39 @@ impl LocalDisplayClient {
         self.flush_control_write()
     }
 
-    pub fn submit_terminal_mouse(
+    pub(crate) fn submit_terminal_mouse(
         &mut self,
-        kind: TerminalMouseKind,
-        button: u8,
-        modifiers: TerminalKeyV2Modifiers,
-        col: u16,
-        row: u16,
-        action_id: u32,
+        input: TerminalMouseInput,
     ) -> Result<(), ClientError> {
         self.require_controller()?;
-        if action_id == 0 || action_id <= self.last_admitted_mouse_action_id {
+        if input.action_id == 0 || input.action_id <= self.last_admitted_mouse_action_id {
             return Err(ClientError::Protocol);
         }
         let event = TerminalMouse {
             attachment_id: self.attachment_id,
-            action_id,
-            kind,
-            button,
-            modifiers,
-            col,
-            row,
+            action_id: input.action_id,
+            kind: input.kind,
+            button: input.button,
+            modifiers: input.modifiers,
+            col: input.col,
+            row: input.row,
+            click_count: input.click_count,
         };
         if event.validate().is_err() {
             return Err(ClientError::Protocol);
         }
         let payload = event.encode();
         let frame = encode_frame(MessageType::TerminalMouse, &payload);
-        if let Err(error) = self.admit_frame(frame, OutboundKind::TerminalMouse { action_id }) {
+        if let Err(error) = self.admit_frame(
+            frame,
+            OutboundKind::TerminalMouse {
+                action_id: input.action_id,
+            },
+        ) {
             self.input_failure = Some(InputAdmissionFailure::ClientBackpressure);
             return Err(error);
         }
-        self.last_admitted_mouse_action_id = action_id;
+        self.last_admitted_mouse_action_id = input.action_id;
         self.input_failure = None;
         self.flush_control_write()
     }

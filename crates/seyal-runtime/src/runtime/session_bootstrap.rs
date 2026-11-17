@@ -143,11 +143,17 @@ impl Runtime {
         id: ExecutionId,
         event: ShellIntegrationEvent,
     ) -> Result<bool, RuntimeError> {
+        let prompt_state = match event {
+            ShellIntegrationEvent::PromptStarted { .. } => Some((true, None)),
+            ShellIntegrationEvent::CommandStarted { .. }
+            | ShellIntegrationEvent::CommandFinished { .. } => Some((false, None)),
+            ShellIntegrationEvent::Readiness { .. } => None,
+        };
         let (token, integration_event) = match event {
             ShellIntegrationEvent::Readiness { token, shell } => {
                 return self.accept_readiness(id, token, shell);
             }
-            ShellIntegrationEvent::PromptStarted { token } => {
+            ShellIntegrationEvent::PromptStarted { token, .. } => {
                 (token, IntegrationEvent::PromptStarted)
             }
             ShellIntegrationEvent::CommandStarted { token, line } => {
@@ -192,6 +198,10 @@ impl Runtime {
                         .entries
                         .get_mut(&id)
                         .ok_or(RuntimeError::UnknownExecution)?;
+                    if let Some((ready, anchor)) = prompt_state {
+                        entry.prompt_ready = ready;
+                        entry.prompt_anchor = anchor;
+                    }
                     super::shell_integration::apply_local_integration_event(
                         entry,
                         integration_event,

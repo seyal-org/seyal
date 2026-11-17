@@ -54,7 +54,7 @@ impl ShellState {
         // Its own bind decides whether trusted Flow is eligible; unsupported
         // integration will fall back to Raw in the presentation reducer.
         // Never inherit TUI takeover or the source Pane's Raw selection.
-        let inherited_presentation = crate::presentation::PresentationMode::Flow;
+        let inherited_presentation = crate::presentation::PresentationMode::Raw;
         let terminal_id = TerminalTabId::new();
         let title = format!("Pane {}", pane_count + 1);
         let pane = Pane {

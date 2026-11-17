@@ -61,6 +61,10 @@ pub const PREPARED_ROLE_EMPTY: u16 = 0;
 pub const PREPARED_ROLE_LEAD: u16 = 1;
 pub const PREPARED_ROLE_CONTINUATION: u16 = 2;
 pub const PREPARED_FLAG_HAS_GRAPHEME: u16 = 1 << 4;
+/// `PreparedCell.reserved` bit 5: Rust selected inverse for two unresolved
+/// terminal-default colors, so the native shader must swap the resolved theme
+/// foreground/background after applying the current theme.
+pub const PREPARED_FLAG_INVERSE_DEFAULT_COLORS: u16 = 1 << 5;
 
 /// Read-only cell source used by the preparation engine.
 ///

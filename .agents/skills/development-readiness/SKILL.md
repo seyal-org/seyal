@@ -3,7 +3,7 @@ name: development-readiness
 description: Seyal adapter for AI-SDLC development readiness with the repository Ready gate and terminal-specific authority checks.
 ---
 
-Use the 12-point readiness assessment in `.sdlc/framework/docs/WORKING-LOOP.md` and the issue refinement procedure in `.sdlc/framework/skills/create-issue/SKILL.md`. This Seyal readiness adapter adds repository-specific checks; it does not create a second mandatory human approval. If it is unavailable, run `make bootstrap-agents` first.
+Use the 12-point readiness assessment in `.sdlc/framework/docs/WORKING-LOOP.md` and the issue refinement procedure in `.sdlc/framework/skills/create-issue/SKILL.md`. This Seyal readiness adapter adds repository-specific checks; it does not create a second mandatory human approval. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
 For Seyal, a generic `READY` verdict is necessary but not sufficient. Also enforce every Ready checkbox in `docs/engineering/ISSUE-PROTOCOL.md`, the authority chain in `AGENTS.md`, and any applicable terminal/runtime architecture trigger. Route architecture gaps to `architecture-change`; route missing terminal evidence requirements back to `issue-refinement`.
 

@@ -68,6 +68,7 @@ let instanceGlyphFlag: UInt32 = 1 << 0
 let instanceUnderlineFlag: UInt32 = 1 << 1
 let instanceCursorFlag: UInt32 = 1 << 2
 let instanceWideGlyphFlag: UInt32 = 1 << 3
+let instanceInverseDefaultColorsFlag: UInt32 = 1 << 4
 
 struct TerminalInstance {
     var origin: SIMD2<Float>

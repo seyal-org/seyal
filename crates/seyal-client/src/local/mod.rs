@@ -9,6 +9,7 @@ mod poll;
 mod provisioning_wire;
 #[cfg(any(test, target_os = "macos"))]
 mod quit_probe;
+mod raw_viewport;
 mod viewport_line_ids;
 
 use std::{
@@ -40,6 +41,8 @@ use seyal_runtime::local_ipc::framing::{
 
 pub use attach::force_bootstrap_attach_failure_for_test;
 pub use discovery::DiscoveryFailure;
+pub(crate) use display_apply::HistoryRangeInput;
+pub(crate) use input_resize::TerminalMouseInput;
 pub use input_resize::{
     cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, LayoutMetrics,
     ResizeFailure,
@@ -159,8 +162,14 @@ pub struct LocalDisplayClient {
     /// anchor coordinates are retained only in the outstanding request value
     /// for validation and never used as a response lookup key.
     pub(crate) history_ranges: HashMap<(u64, u64), HistoryRangeSnapshot>,
-    pub(crate) history_requests: HashMap<u64, (u64, u64, u64)>,
+    /// Lead cells before Raw viewport clipping, used to continue bounded pages
+    /// without repeating cells discarded only for display geometry.
+    pub(crate) history_range_lead_counts: HashMap<(u64, u64), u32>,
+    /// Expected history identity plus an optional Raw viewport width. A zero
+    /// width keeps completed-Block/Flow history unchanged.
+    pub(crate) history_requests: HashMap<u64, (u64, u64, u64, u16)>,
     pub(crate) next_history_request_id: u64,
+    pub(crate) raw_viewport: raw_viewport::RawViewport,
     pub(crate) copied_text: Vec<u8>,
     /// Connection-local SPEC-006 §21.5 sent/highest-error bounds. Zero means none.
     /// `last_admitted` is the highest V2 ID accepted into the outbound FIFO.
@@ -434,6 +443,13 @@ impl LocalDisplayClient {
         self.history_ranges.get(&(block_id, request_id))
     }
 
+    pub fn history_range_lead_count(&self, block_id: u64, request_id: u64) -> u32 {
+        self.history_range_lead_counts
+            .get(&(block_id, request_id))
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// Drops one copied history response after the native consumer has
     /// materialized its rows. The block/request pair is required so an older
     /// overlapping range can never consume a newer response.
@@ -443,22 +459,19 @@ impl LocalDisplayClient {
             .remove(&(block_id, request_id))
             .is_some();
         if removed {
+            self.history_range_lead_counts
+                .remove(&(block_id, request_id));
             self.history_requests.remove(&request_id);
         }
         removed
     }
 
-    pub fn request_history_range(
+    pub(crate) fn request_history_range(
         &mut self,
-        block_id: u64,
-        start_line: u64,
-        end_line: u64,
-        max_lines: u16,
-        max_cells: u32,
-        start_unit: u32,
+        input: HistoryRangeInput,
     ) -> Result<(), ClientError> {
         self.require_controller()?;
-        if block_id == 0 || start_line == 0 || end_line < start_line {
+        if input.block_id == 0 || input.start_line == 0 || input.end_line < input.start_line {
             return Err(ClientError::Protocol);
         }
         let request_id = self.next_history_request_id;
@@ -466,18 +479,25 @@ impl LocalDisplayClient {
         let payload = HistoryRangeRequest {
             attachment_id: self.attachment_id,
             request_id,
-            block_id,
-            start_line,
-            end_line,
-            max_lines,
-            max_cells,
-            start_unit,
+            block_id: input.block_id,
+            start_line: input.start_line,
+            end_line: input.end_line,
+            max_lines: input.max_lines,
+            max_cells: input.max_cells,
+            start_unit: input.start_unit,
         }
         .encode();
         let frame = encode_frame(MessageType::HistoryRangeRequest, &payload);
         self.admit_frame(frame, input_resize::OutboundKind::HistoryRangeRequest)?;
-        self.history_requests
-            .insert(request_id, (block_id, start_line, end_line));
+        self.history_requests.insert(
+            request_id,
+            (
+                input.block_id,
+                input.start_line,
+                input.end_line,
+                input.raw_viewport_columns,
+            ),
+        );
         self.flush_control_write()
     }
 
@@ -505,8 +525,10 @@ impl LocalDisplayClient {
         };
         self.history_ranges
             .retain(|(block_id, _), _| keep(*block_id));
+        self.history_range_lead_counts
+            .retain(|(block_id, _), _| keep(*block_id));
         self.history_requests
-            .retain(|_, (block_id, _, _)| keep(*block_id));
+            .retain(|_, (block_id, _, _, _)| keep(*block_id));
     }
 
     fn quarantine_block_metadata(&mut self) -> ClientError {
@@ -614,8 +636,10 @@ fn reconstruction_probe_client_with_stream(
         pending_composer_requests: std::collections::HashSet::new(),
         next_composer_request_id: 1,
         history_ranges: HashMap::new(),
+        history_range_lead_counts: HashMap::new(),
         history_requests: HashMap::new(),
         next_history_request_id: 1,
+        raw_viewport: raw_viewport::RawViewport::default(),
         copied_text: Vec::new(),
         last_admitted_v2_action_id: 0,
         last_sent_v2_action_id: 0,

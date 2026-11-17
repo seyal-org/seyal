@@ -2,6 +2,8 @@ use super::presentation_tests::runtime_available;
 use super::*;
 use crate::presentation::InputRoute;
 mod close_disposition_tests;
+#[path = "raw_only_tests.rs"]
+mod raw_only_tests;
 mod window_effect_tests;
 fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
@@ -13,13 +15,9 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     }
 }
 
-/// Supported sessions start in Flow; Runtime Available status admits composer input.
+/// Flow-only reducers use an internal fixture while production stays Raw-only.
 fn opt_in_flow(root: &mut ApplicationRoot) {
-    root.apply(AppAction::SelectRestingPresentation {
-        fence: root.fence(),
-        raw: false,
-    })
-    .unwrap();
+    root.force_flow_test_fixture();
 }
 
 #[test]
@@ -141,7 +139,7 @@ fn unbound_cannot_authorize_flow_or_composer() {
         .any(|node| node.role == AccessibilityRole::Composer));
     assert_eq!(
         root.presentation.snapshot().input_route,
-        InputRoute::Composer
+        InputRoute::DirectTerminal
     );
     assert_ne!(snap.eligibility, PresentationEligibility::Flow);
 }
@@ -158,8 +156,8 @@ fn bind_then_focus_keeps_one_execution() {
     .unwrap();
     let snap = root.snapshot();
     assert_eq!(snap.execution, Some(bound.execution));
-    assert_eq!(snap.eligibility, PresentationEligibility::Flow);
-    assert!(snap.composer_eligible);
+    assert_eq!(snap.eligibility, PresentationEligibility::Raw);
+    assert!(!snap.composer_eligible);
     let focused = snap.pane;
     root.apply(AppAction::Focus {
         fence: root.fence(),
@@ -195,8 +193,8 @@ fn refresh_alternate_screen_takeover_is_not_latched_at_bind() {
         evidence: evidence(2, true, false),
     })
     .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
-    assert!(root.snapshot().composer_eligible);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    assert!(!root.snapshot().composer_eligible);
     root.apply(AppAction::Refresh {
         fence: root.fence(),
         alternate_screen: true,
@@ -211,8 +209,8 @@ fn refresh_alternate_screen_takeover_is_not_latched_at_bind() {
     })
     .unwrap();
     let raw = root.snapshot();
-    assert_eq!(raw.eligibility, PresentationEligibility::Flow);
-    assert!(raw.composer_eligible);
+    assert_eq!(raw.eligibility, PresentationEligibility::Raw);
+    assert!(!raw.composer_eligible);
 }
 
 #[test]

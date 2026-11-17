@@ -24,9 +24,9 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 937
-issue = 1442
-reason = "Metal surface remains the thin historyRanges/hit-test owner; #1442 adds presentation-local Raw scroll offset fields and hit/history-except hooks that call into MetalSurfaceView+RawScrollback without inventing a second VT/history authority."
+acknowledged_loc = 939
+issue = 1492
+reason = "Metal surface remains the thin frame, geometry and hit-test owner; #1492 routes Raw viewport and history presentation through its existing Rust-owned execution without adding a second VT or scroll authority."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -78,7 +78,7 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1067
+ceiling_loc = 1065
 issue = 1440
 responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority."
 
@@ -100,6 +100,11 @@ acknowledged_loc = 817
 issue = 1451
 reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149/#1388/#1440 lifecycle fixtures remain here. #1451 adds should_confirm_quit FFI proofs beside the existing AppHandle ABI cases; rustfmt wrap raises three lines."
 
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/display.rs"
+acknowledged_loc = 767
+issue = 1492
+reason = "Display FFI stays a single cold-path C façade; #1492 carries Raw viewport width and pre-clipping page lead counts only through named-controller APIs, leaving the Runtime HistoryRange wire unchanged and clipping/pagination policy in Rust."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
 acknowledged_loc = 944
@@ -240,9 +245,9 @@ responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proof
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 905
-issue = 1092
-reason = "Command palette query, frozen rows, and run dispatch stay one reducer; #1092 carries containment generation through window-aware actions, #1175 adds the P4 Terminate Execution verb, and #1123 keeps W4a fixture admission policy in the Rust shell."
+acknowledged_loc = 911
+issue = 1492
+reason = "The palette keeps its existing frozen-command projection; #1492 adds a Raw-only regression proving presentation choices stay absent while Blocks are suspended."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
@@ -265,15 +270,15 @@ issue_url = "https://github.com/seyal-org/seyal/issues/1467"
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
-acknowledged_loc = 752
-issue = 1467
-reason = "Local display-client protocol proofs stay one module; #1467 adds DirectInput projection coverage beside existing type-45 Submit/Relay/Unavailable fixtures rather than a second client test file."
+acknowledged_loc = 756
+issue = 1492
+reason = "Local display-client protocol tests stay one module; #1492 extends the history-request correlation fixture with Raw-only viewport width and keeps client-side lead-count metadata separate from the unchanged Runtime wire request."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
-acknowledged_loc = 848
-issue = 1467
-reason = "Interactive Metal remains the AppKit input owner; #1467/#1468 admit Flow Block-scoped DirectInput keys/IME, sticky ForegroundProgram ownership after Ctrl+C, and C0/deleteForward EOF while keeping empty-canvas mouse reports on Raw/TUI only. LOC includes the #1470 master merge into the DirectInput head."
+acknowledged_loc = 870
+issue = 1492
+reason = "Interactive Metal remains the AppKit keyboard, IME and mouse adapter; #1492 keeps Raw selection, prompt click mapping and native mouse forwarding on the existing Runtime-owned input path."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/shell_integration.rs"
@@ -289,9 +294,9 @@ reason = "ADR-026 F4 overlay transitions, wire projection, and composer derivati
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/session_bootstrap.rs"
-acknowledged_loc = 703
-issue = 1398
-reason = "Spawn-time SSH session payload assembly stays one Runtime cold-path module; #1398 adds the remote TERM fallback assertion beside the existing OSC 133 / stty echo payload proofs without a second bootstrap test authority."
+acknowledged_loc = 713
+issue = 1492
+reason = "Session bootstrap remains one cold-path owner for local and SSH shell setup; #1492 validates Raw local shell behavior and real SSH without introducing a parallel bootstrap path."
 
 # ProductChromeHostView+Recovery.swift is below review_loc after #1379
 # New-shell logging cleanup; no cohesion acknowledgement remains.
@@ -332,3 +337,9 @@ path = "crates/seyal-runtime/src/runtime/local/ingress.rs"
 acknowledged_loc = 982
 issue = 1388
 reason = "Input admission stays one ingress module. #1388 adds the fenced composer command path and the direct-input hold mapping; SessionConsent decoding lives in session_consent.rs."
+
+[[exception]]
+path = "crates/seyal-runtime/src/runtime/local/ingress.rs"
+ceiling_loc = 1044
+issue = 1492
+responsibility = "The single Runtime ingress path owns authenticated Raw terminal key and mouse events, including host selection override, shell click mapping and native mouse-report routing. Splitting these event-authorization and ordering rules would weaken the single input authority. #1492 constrains future changes to this measured ceiling."

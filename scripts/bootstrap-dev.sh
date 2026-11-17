@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BIN_DIR="${HOME}/.local/bin"
 GITHUB_WRAPPER="${BIN_DIR}/seyal-github-mcp"
 AI_SDLC_DIR="${ROOT}/.sdlc/framework"
@@ -9,7 +9,7 @@ AI_SDLC_DIR="${ROOT}/.sdlc/framework"
 # Reviewed/pinned developer-tool inputs. Update only through a normal Seyal PR.
 XCODEBUILD_MCP_VERSION="2.7.0"
 AI_SDLC_REPO="https://github.com/mahboobmonnamd/ai-sdlc.git"
-AI_SDLC_COMMIT="4b4c603b2fc51105119a7773119319e8902f48e6"
+AI_SDLC_COMMIT="77158462473a4244d63329a55907d0c5ccc47757"
 AI_SDLC_SKILLS=(
   project-context
   create-issue
@@ -31,39 +31,63 @@ ensure_submodules() {
   fi
 }
 
-ensure_ai_sdlc() {
-  mkdir -p "${ROOT}/.sdlc"
+framework_checkout() {
+  [[ -d "${AI_SDLC_DIR}/.git" && ! -L "${AI_SDLC_DIR}" ]] &&
+    [[ "$(git -C "${AI_SDLC_DIR}" rev-parse --show-toplevel)" == "${AI_SDLC_DIR}" ]] &&
+    [[ "$(git -C "${AI_SDLC_DIR}" remote get-url origin)" == "${AI_SDLC_REPO}" ]]
+}
 
-  if [[ ! -d "${AI_SDLC_DIR}/.git" ]]; then
-    rm -rf "${AI_SDLC_DIR}"
-    info "cloning AI-SDLC developer framework"
-    git clone --filter=blob:none --no-checkout "${AI_SDLC_REPO}" "${AI_SDLC_DIR}"
+framework_clean() {
+  local changes
+  changes="$(git -C "${AI_SDLC_DIR}" status --porcelain)" || return 1
+  [[ -z "${changes}" ]]
+}
+
+check_framework() {
+  if ! framework_checkout || ! framework_clean ||
+     [[ "$(git -C "${AI_SDLC_DIR}" rev-parse HEAD)" != "${AI_SDLC_COMMIT}" ]]; then
+    warn "AI-SDLC missing, stale or not a clean expected checkout; run bash scripts/bootstrap-dev.sh --framework-only"
+    return 1
   fi
-
-  info "materializing pinned AI-SDLC ${AI_SDLC_COMMIT}"
-  git -C "${AI_SDLC_DIR}" fetch --depth 1 origin "${AI_SDLC_COMMIT}"
-  local fetched
-  fetched="$(git -C "${AI_SDLC_DIR}" rev-parse FETCH_HEAD)"
-  if [[ "${fetched}" != "${AI_SDLC_COMMIT}" ]]; then
-    echo "AI-SDLC pin mismatch: expected ${AI_SDLC_COMMIT}, fetched ${fetched}" >&2
-    exit 1
-  fi
-  git -C "${AI_SDLC_DIR}" checkout --detach --force "${AI_SDLC_COMMIT}"
-
-  local skill
+  local skill required_tool
   for skill in "${AI_SDLC_SKILLS[@]}"; do
     [[ -f "${AI_SDLC_DIR}/skills/${skill}/SKILL.md" ]] || {
-      echo "pinned AI-SDLC revision is missing skills/${skill}/SKILL.md" >&2
-      exit 1
+      warn "pinned AI-SDLC revision is missing skills/${skill}/SKILL.md"
+      return 1
     }
   done
-  for required_tool in project_context.py work_claims.py workflow_claims.py; do
+  for required_tool in project_context.py; do
     [[ -f "${AI_SDLC_DIR}/tools/${required_tool}" ]] || {
-      echo "pinned AI-SDLC revision is missing tools/${required_tool}" >&2
-      exit 1
+      warn "pinned AI-SDLC revision is missing tools/${required_tool}"
+      return 1
     }
   done
+}
 
+ensure_ai_sdlc() {
+  if ! check_framework; then
+    if [[ -e "${AI_SDLC_DIR}" || -L "${AI_SDLC_DIR}" ]]; then
+      if ! framework_checkout || ! framework_clean; then
+        warn "refusing to overwrite dirty or unexpected AI-SDLC checkout: ${AI_SDLC_DIR}"
+        return 1
+      fi
+    else
+      mkdir -p "${ROOT}/.sdlc"
+      info "cloning AI-SDLC developer framework"
+      git clone --filter=blob:none --no-checkout "${AI_SDLC_REPO}" "${AI_SDLC_DIR}"
+    fi
+
+    info "materializing pinned AI-SDLC ${AI_SDLC_COMMIT}"
+    git -C "${AI_SDLC_DIR}" fetch --depth 1 origin "${AI_SDLC_COMMIT}"
+    local fetched
+    fetched="$(git -C "${AI_SDLC_DIR}" rev-parse FETCH_HEAD)"
+    if [[ "${fetched}" != "${AI_SDLC_COMMIT}" ]]; then
+      warn "AI-SDLC pin mismatch: expected ${AI_SDLC_COMMIT}, fetched ${fetched}"
+      return 1
+    fi
+    git -C "${AI_SDLC_DIR}" checkout --detach "${AI_SDLC_COMMIT}"
+  fi
+  check_framework || return 1
   info "validating Seyal derived project context"
   python3 "${AI_SDLC_DIR}/tools/project_context.py" --root "${ROOT}" validate
 }
@@ -259,4 +283,21 @@ main() {
   info "Seyal-specific skills stay in-repo; generic project-context and core development loop are pinned from AI-SDLC; no credentials were written"
 }
 
-main "$@"
+case "${1:-}" in
+  --check-framework)
+    [[ "$#" -eq 1 ]] || exit 2
+    check_framework
+    ;;
+  --framework-only)
+    [[ "$#" -eq 1 ]] || exit 2
+    ensure_ai_sdlc
+    ;;
+  "")
+    [[ "$#" -eq 0 ]] || exit 2
+    main
+    ;;
+  *)
+    echo "usage: $0 [--check-framework|--framework-only]" >&2
+    exit 2
+    ;;
+esac

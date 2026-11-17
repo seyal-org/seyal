@@ -7,7 +7,8 @@ use super::{
     error_code, with_active_client, with_active_client_mut, with_display_client,
     with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
     SeyalComposerTarget, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange,
-    SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame, SeyalSessionSurface,
+    SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame, SeyalRawViewportPlan,
+    SeyalSessionSurface,
 };
 
 #[unsafe(no_mangle)]
@@ -106,6 +107,20 @@ pub extern "C" fn seyal_bridge_history_range_peek_for_handle(
         history_range_peek_from_client(client, block_id, request_id)
     })
     .unwrap_or_else(SeyalHistoryRange::empty)
+}
+
+/// Original lead-cell count before client-side Raw clipping, used for exact
+/// `start_unit` pagination on a named registry Controller.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_lead_count_for_handle(
+    handle: u64,
+    block_id: u64,
+    request_id: u64,
+) -> u32 {
+    super::with_client(handle, |client| {
+        client.history_range_lead_count(block_id, request_id)
+    })
+    .unwrap_or(0)
 }
 
 fn history_range_peek_from_client(
@@ -585,9 +600,9 @@ pub extern "C" fn seyal_bridge_request_history_range(
     start_unit: u32,
 ) -> i32 {
     with_display_client_mut(|client| {
-        client.request_history_range(
-            block_id, start_line, end_line, max_lines, max_cells, start_unit,
-        )
+        client.request_history_range(crate::local::HistoryRangeInput::new(
+            block_id, start_line, end_line, max_lines, max_cells, start_unit, 0,
+        ))
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
@@ -605,11 +620,18 @@ pub extern "C" fn seyal_bridge_request_history_range_for(
     max_lines: u16,
     max_cells: u32,
     start_unit: u32,
+    raw_viewport_columns: u16,
 ) -> i32 {
     super::with_client_mut(handle, |client| {
-        client.request_history_range(
-            block_id, start_line, end_line, max_lines, max_cells, start_unit,
-        )
+        client.request_history_range(crate::local::HistoryRangeInput::new(
+            block_id,
+            start_line,
+            end_line,
+            max_lines,
+            max_cells,
+            start_unit,
+            raw_viewport_columns,
+        ))
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
@@ -657,6 +679,60 @@ pub extern "C" fn seyal_bridge_viewport_start_line_id_for(handle: u64) -> u64 {
         client.viewport_line_ids().first().copied().unwrap_or(0)
     })
     .unwrap_or(0)
+}
+
+/// Apply an input-device scroll delta and return the Rust-owned Raw viewport.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_raw_viewport_apply_for(
+    handle: u64,
+    start_line_id: u64,
+    rows: u16,
+    delta_rows: i32,
+) -> SeyalRawViewportPlan {
+    super::with_client_mut(handle, |client| {
+        raw_viewport_plan(client, start_line_id, rows, Some(delta_rows))
+    })
+    .unwrap_or_else(SeyalRawViewportPlan::empty)
+}
+
+/// Reconcile a viewport against a newly published terminal origin or geometry.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_raw_viewport_plan_for(
+    handle: u64,
+    start_line_id: u64,
+    rows: u16,
+) -> SeyalRawViewportPlan {
+    super::with_client_mut(handle, |client| {
+        raw_viewport_plan(client, start_line_id, rows, None)
+    })
+    .unwrap_or_else(SeyalRawViewportPlan::empty)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_raw_viewport_clear_for(handle: u64) -> i32 {
+    super::with_client_mut(handle, |client| client.raw_viewport.clear()).map_or(-1, |_| 0)
+}
+
+fn raw_viewport_plan(
+    client: &mut LocalDisplayClient,
+    start_line_id: u64,
+    rows: u16,
+    delta_rows: Option<i32>,
+) -> SeyalRawViewportPlan {
+    let plan = match delta_rows {
+        Some(delta) => client.raw_viewport.apply_delta(start_line_id, rows, delta),
+        None => client.raw_viewport.plan(start_line_id, rows),
+    };
+    let Some(plan) = plan else {
+        return SeyalRawViewportPlan::empty();
+    };
+    SeyalRawViewportPlan {
+        active: 1,
+        reserved: [0; 7],
+        offset_rows: plan.offset_rows,
+        start_line: plan.start_line,
+        end_line: plan.end_line,
+    }
 }
 
 fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {

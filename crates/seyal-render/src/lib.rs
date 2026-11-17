@@ -15,7 +15,8 @@ mod tests;
 pub use damage::{PrepareError, RowDamage, MAX_RENDER_COLUMNS, MAX_RENDER_ROWS};
 pub use glyph::{
     pack_color, CellSource, PreparedCell, RenderAttributes, RenderCell, RenderCellRole,
-    RenderColor, PREPARED_FLAG_BOLD, PREPARED_FLAG_HAS_GRAPHEME, PREPARED_FLAG_UNDERLINE,
-    PREPARED_ROLE_CONTINUATION, PREPARED_ROLE_EMPTY, PREPARED_ROLE_LEAD,
+    RenderColor, PREPARED_FLAG_BOLD, PREPARED_FLAG_HAS_GRAPHEME,
+    PREPARED_FLAG_INVERSE_DEFAULT_COLORS, PREPARED_FLAG_UNDERLINE, PREPARED_ROLE_CONTINUATION,
+    PREPARED_ROLE_EMPTY, PREPARED_ROLE_LEAD,
 };
 pub use prepare::{CommittedDisplay, CursorState, PreparationResult, PreparedSurface};

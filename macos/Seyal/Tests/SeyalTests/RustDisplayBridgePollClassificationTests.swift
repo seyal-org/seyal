@@ -47,4 +47,18 @@ final class RustDisplayBridgePollClassificationTests: XCTestCase {
         XCTAssertFalse(RustDisplayBridge.pollResultClosesConnection(0))
         XCTAssertFalse(RustDisplayBridge.pollResultClosesConnection(1))
     }
+
+    func testPaneSubmissionTargetOverridesWindowFocusForCommittedText() {
+        XCTAssertEqual(
+            RustDisplayBridge.submissionHandle(
+                override: 7,
+                focused: 9,
+                client: 11
+            ),
+            7,
+            "committed text must target its owning pane even when window focus differs"
+        )
+        XCTAssertEqual(RustDisplayBridge.submissionHandle(override: 0, focused: 9, client: 11), 9)
+        XCTAssertEqual(RustDisplayBridge.submissionHandle(override: 0, focused: 0, client: 11), 11)
+    }
 }
