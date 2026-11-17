@@ -1792,10 +1792,11 @@ every possible future RegionGrid design.
 The comparison does not complete every #1493 experiment. The retained record
 does not include byte-for-byte output and screenshot replay, keyboard-to-pixel
 p50/p95, frame time, CPU/RSS, allocation/copy counts, or the candidate's
-120×40 / 50,000-iteration result. Those rows must be completed and compared
-with the agreed G9 ceilings before the architecture issue is accepted. The
-90-second run is enough to reject this candidate as the storage baseline, not
-to claim the full performance matrix or establish a root cause.
+120×40 / 50,000-iteration result. SPEC-029 G9 is a release-reproducibility
+probe, not a Raw performance threshold. These missing measurements remain in
+#1492/#1505 and must use the accepted performance contract and a matched
+baseline. The 90-second run is enough to reject this candidate as the storage
+baseline, not to claim the full performance matrix or establish a root cause.
 
 ### Proposed decision
 
@@ -1861,14 +1862,16 @@ the earlier grid-first Raw direction in ADR-009 while making Flow unavailable
 during the suspension. It does not weaken the single-execution,
 VT/history/Unicode/input, Metal, or Rust-ownership invariants.
 
-After acceptance, reconcile ADR-004/010 and update SPEC-008 (and SPEC-024 only if its current text
-conflicts), the M004 market-readiness matrix, the User Guide, and the affected
-Issues before returning #1492 to Ready for its remaining implementation scope.
-Explicitly reconcile #1482, #1484, #1440 and any active candidate that could
-restore Flow. Preserve closed-unmerged PR #1485 and its checkpoint branch as
-evidence; do not alter or transplant that work. The M004 Blocks/composer row
-must be amended through product/roadmap authority rather than silently marked
-green by suspending the feature.
+The companion status reconciliation is included with this amendment in #1493:
+ADR-004/010 retain `Screen` + `HistoryStore` as production authority; SPEC-006,
+SPEC-008 and SPEC-024 record Raw/TUI as the active v1 routes and Flow as
+suspended; the M004 matrix moves Blocks/composer to post-launch; and the User
+Guide documents Raw-only presentation. On acceptance, reconcile the status
+and links on #1482, #1484, #1440 and any active candidate that could restore
+Flow. Preserve closed-unmerged PR #1485 and its checkpoint branch as evidence;
+do not alter or transplant that work. The M004 Blocks/composer row is changed
+through product/roadmap authority, not silently marked green by suspending the
+feature.
 
 ### Flow/Blocks reopening gate
 

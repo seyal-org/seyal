@@ -10,6 +10,12 @@
 
 ## 2026-11-12 accepted native Block-region history clarification (#1480 / #1482)
 
+**Raw v1 status proposed under #1493:** Block-owned regions remain a preserved
+architecture target, not the active production storage path during the
+Blocks suspension. `Screen` + `HistoryStore` remains the current authority.
+This reconciliation becomes normative when the separate #1493 architecture
+PR is accepted and makes no implementation-cleanup claim.
+
 The accepted target architecture in [ADR-009](ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md) makes Block prompt/command/output regions **canonical content owners**, not merely history-range annotations. ADR-010's **one retained-history authority remains mandatory**: one `RegionStore` / shared immutable `HistoryStore` segment allocator per execution, one source-order chronological retained-history view, and no second writable raw transcript or copied per-Block historical payload. Block-owned `RegionGrid` records refer to their own canonical source runs by `BlockId` and `RegionId`; canonical cell/source-unit bytes reside only once in the shared allocator.
 
 Mutable cells are sealed **only when no longer writable through the terminal's primary VT window** (scroll-off/approved ED2 semantics), never merely when a command is marked Completed. `LineId`, unit offsets, hard/soft wrap lineage, grapheme width, selection/search/copy anchors, stable reflow, explicit eviction and per-execution/aggregate byte budgets remain unchanged. An old Block index may be evicted without discarding still-retained terminal content. Read-only history projection is allowed; multiple canonical history engines are not.

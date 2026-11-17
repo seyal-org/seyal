@@ -22,18 +22,18 @@ M004 is not a feature-count race. The release bar is that ordinary terminal user
 | SSH and nested SSH as shell workloads | LAUNCH BLOCKER | #672 | Remote shell/TUI workload matrix through ordinary PTY; remote product attachment is M007, not required. |
 | git, Docker, kubectl, terraform and high-output DevOps CLIs | LAUNCH BLOCKER | #672/#673 | Correct ANSI/TUI rendering plus bounded high-output throughput/resource benchmark. |
 | Unicode grapheme clusters, combining marks, emoji, width policy | LAUNCH BLOCKER | #684 -> M002 implementation | Golden grid/render cases, cursor/cell-width invariants, fuzz/property tests and representative fonts. |
-| macOS IME/text input contract | LAUNCH BLOCKER | #684 -> M002/M003 | Native IME composition tests plus no corruption when switching raw/composer/TUI input ownership. |
+| macOS IME/text input contract | LAUNCH BLOCKER | #684 -> M002/M003 | Native IME composition tests plus no corruption across Raw/TUI input ownership. |
 | Scrollback with bounded retention | LAUNCH BLOCKER | #685 -> M002 implementation | Long-output, eviction, search/selection stability and memory-bound tests. |
 | Resize reflow | LAUNCH BLOCKER | #685 -> M002 implementation | Golden reflow cases across wrapped/unwrapped/wide/combining content; repeated-resize stress. |
-| Selection, rectangular selection, copy/paste | LAUNCH BLOCKER | #672/#675 | Mouse + keyboard tests in primary screen/Blocks; raw TUI mouse arbitration preserved. |
+| Selection, rectangular selection, copy/paste | LAUNCH BLOCKER | #672/#675 | Mouse + keyboard tests in the Raw primary screen; TUI mouse arbitration preserved. |
 | Mouse reporting and host override | LAUNCH BLOCKER | #672/#675 | SGR/legacy mode fixtures and Shift-host-selection arbitration. |
-| Search retained terminal history | LAUNCH BLOCKER | #672/#675 | Search across bounded history/Blocks without blocking PTY progress. |
+| Search retained terminal history | LAUNCH BLOCKER | #672/#675 | Search across bounded Raw history without blocking PTY progress. |
 | OSC 8 hyperlinks and safe URL/path opening | LAUNCH BLOCKER | #672/#675 | Parser/state golden cases plus trust/sanitization/open-policy tests. |
 | Native macOS windows | LAUNCH BLOCKER | #674 | Lifecycle/focus/close/quit tests; window close never silently kills unrelated Runtime state. |
 | Tabs | LAUNCH BLOCKER | #674 | Create/switch/reorder/close with inactive executions remaining live. |
 | Nested horizontal/vertical splits | LAUNCH BLOCKER | #674 | Layout/focus/resize/move tests; one PTY per terminal leaf. |
 | Raw terminal input path | LAUNCH BLOCKER | #675 | Direct same-execution input, no composer/Block semantic interception in raw/TUI mode. |
-| Minimum Blocks/composer projection | LAUNCH BLOCKER | #675/#686 | Same-execution command boundary, pending/background output, prompt drain and escape-to-raw behavior; shell truth only from trusted integration. |
+| Blocks/composer presentation | POST-LAUNCH | #1493 (reopening decision required) | Suspended for Raw v1. Preserve existing code and contracts; do not expose Flow/Blocks as a resting presentation until a separate architecture decision and headed acceptance gate pass. |
 | Fonts/fallback | LAUNCH BLOCKER | #676 | Configured font + fallback + supplementary-plane smoke; missing glyphs fail visibly, not corrupt layout. |
 | Themes/light-dark/contrast | LAUNCH BLOCKER | #676 | Deterministic theme schema, OS mode transition, readable defaults and contrast checks. |
 | Local TOML config | LAUNCH BLOCKER | #676 | Parse/validation/error-path tests; invalid config cannot brick terminal startup. |

@@ -22,7 +22,7 @@ As implementation lands, this section will expand into guides for:
 
 - shells and terminal compatibility,
 - tabs, panes and workspaces,
-- Blocks,
+- Blocks and the Flow composer (suspended for v1; no user-facing presentation switch),
 - configuration and themes (local TOML at `SEYAL_CONFIG` or `~/.config/seyal/config.toml` sets appearance, font sizes, padding, and material preference at cold startup; font family is not applied yet; there is no settings UI or Lua runtime yet),
 - SSH and remote execution,
 - persistent/detached execution,
