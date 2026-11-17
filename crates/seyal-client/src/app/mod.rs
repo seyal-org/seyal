@@ -10,6 +10,7 @@ mod accessibility;
 mod action_types;
 mod apply;
 mod chrome_apply;
+mod chrome_workspace_apply;
 mod close_apply;
 mod composer_apply;
 mod errors;
@@ -33,7 +34,6 @@ mod recovery_apply;
 mod session;
 mod terminal_termination;
 mod unpresented_apply;
-
 #[cfg(target_os = "macos")]
 pub(crate) use pane_recovery::PaneRecoveryTarget;
 

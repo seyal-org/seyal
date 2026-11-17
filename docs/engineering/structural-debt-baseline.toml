@@ -319,17 +319,14 @@ acknowledged_loc = 775
 issue = 1490
 reason = "ApplicationRoot attach/poll session stays one cold-path driver; #1490 keeps workspace mint/select bootstrap on the existing attach/provision session path without inventing a second session loop."
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/app/chrome_apply.rs"
-acknowledged_loc = 787
-issue = 1490
-reason = "Chrome apply remains the cold-path owner for workspace/tab chrome intents; #1490 adds select_workspace bootstrap rollback that preserves the multi-workspace host instead of CloseWindow. rustfmt wrap raises four lines."
+# chrome_apply.rs dropped below review_loc after #1490 extracted workspace
+# create/mint/root into chrome_workspace_apply.rs; no cohesion ack remains.
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
-acknowledged_loc = 849
+acknowledged_loc = 788
 issue = 1490
-reason = "Chrome action selectors stay one AppKit adapter for Create/Rename Workspace and pane rename; #1490 keeps toast/error surfacing for CreateWorkspace on that sibling rather than a second chrome controller."
+reason = "Chrome action selectors remain the AppKit adapter for pane/tab/layout chrome; #1490 extracted CreateWorkspace/Folder/SetWorkspaceRoot/leave-offer into ProductChromeHostView+WorkspaceChrome.swift and ratchets this sibling down after that split."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"

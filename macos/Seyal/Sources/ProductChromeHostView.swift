@@ -568,11 +568,8 @@ final class ProductChromeHostView: NSView {
         let recoverySnap = seyal_app_snapshot(pane.appHandle)
         recoveryLabel.stringValue = recoveryText(recoverySnap)
         updateNewShellRecoveryAction()
-        // Reclaim product input on every generation bump, not only eligibility
-        // changes. Sidebar workspace rows and New Terminal keep Raw/TUI
-        // eligibility stable while moving first responder onto the chrome
-        // control; skipping routeFocus left the terminal unable to type after
-        // the first successful session (#1490).
+        // Reclaim input every generation: sidebar/New Terminal keep Raw/TUI
+        // eligibility while FR moves to chrome (#1490 typing).
         routeFocus()
         applyTheme()
         applyPresentationTierFromSnapshot()

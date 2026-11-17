@@ -83,6 +83,7 @@
 		A100000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */; };
 		A1000000000000000000005B /* ProductChromeHostView+Recovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */; };
 		A1000000000000000000005C /* ProductChromeHostView+ChromeActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */; };
+		A100000000000000000000F2 /* ProductChromeHostView+WorkspaceChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F2 /* ProductChromeHostView+WorkspaceChrome.swift */; };
 		A1000000000000000000005D /* RendererValidationDisplayLinkDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */; };
 		A1000000000000000000005E /* RendererValidation+OffscreenSelfTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005E /* RendererValidation+OffscreenSelfTests.swift */; };
 		A1000000000000000000005F /* RendererValidation+LiveSelfTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005F /* RendererValidation+LiveSelfTest.swift */; };
@@ -203,6 +204,7 @@
 		A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+TranscriptLayout.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+Recovery.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+ChromeActions.swift"; sourceTree = "<group>"; };
+		A200000000000000000000F2 /* ProductChromeHostView+WorkspaceChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+WorkspaceChrome.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererValidationDisplayLinkDriver.swift; sourceTree = "<group>"; };
 		A2000000000000000000005E /* RendererValidation+OffscreenSelfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RendererValidation+OffscreenSelfTests.swift"; sourceTree = "<group>"; };
 		A2000000000000000000005F /* RendererValidation+LiveSelfTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RendererValidation+LiveSelfTest.swift"; sourceTree = "<group>"; };
@@ -325,6 +327,7 @@
 				A200000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift */,
 				A2000000000000000000005B /* ProductChromeHostView+Recovery.swift */,
 				A2000000000000000000005C /* ProductChromeHostView+ChromeActions.swift */,
+				A200000000000000000000F2 /* ProductChromeHostView+WorkspaceChrome.swift */,
 				A2000000000000000000005D /* RendererValidationDisplayLinkDriver.swift */,
 				A2000000000000000000005E /* RendererValidation+OffscreenSelfTests.swift */,
 				A2000000000000000000005F /* RendererValidation+LiveSelfTest.swift */,
@@ -570,6 +573,7 @@
 				A100000000000000000000F1 /* ProductChromeHostView+TranscriptLayout.swift in Sources */,
 				A1000000000000000000005B /* ProductChromeHostView+Recovery.swift in Sources */,
 				A1000000000000000000005C /* ProductChromeHostView+ChromeActions.swift in Sources */,
+				A100000000000000000000F2 /* ProductChromeHostView+WorkspaceChrome.swift in Sources */,
 				A1000000000000000000005D /* RendererValidationDisplayLinkDriver.swift in Sources */,
 				A1000000000000000000005E /* RendererValidation+OffscreenSelfTests.swift in Sources */,
 				A1000000000000000000005F /* RendererValidation+LiveSelfTest.swift in Sources */,
