@@ -135,7 +135,56 @@ extension ProductChromeHostView {
         {
             return stage
         }
-        return "\(stage) · attempts \(snapshot.recovery_attempts)"
+        let base = "\(stage) · attempts \(snapshot.recovery_attempts)"
+        guard let reason = Self.recoveryDiagnosticLabel(
+            seyal_app_recovery_diagnostic(pane.appHandle)
+        ) else {
+            return base
+        }
+        return "\(base) · \(reason)"
+    }
+
+    /// Stable non-secret tokens from `SeyalAppRecoveryDiagnostic` (#1421).
+    static func recoveryDiagnosticLabel(_ code: UInt32) -> String? {
+        switch code {
+        case UInt32(SEYAL_APP_RECOVERY_DIAG_HELPER_MISSING.rawValue):
+            return "helperMissing"
+        case UInt32(SEYAL_APP_RECOVERY_DIAG_HELPER_PATH_INVALID.rawValue):
+            return "helperPathInvalid"
+        case UInt32(SEYAL_APP_RECOVERY_DIAG_HELPER_TRUST_INVALID.rawValue):
+            return "helperTrustInvalid"
+        case UInt32(SEYAL_APP_RECOVERY_DIAG_LAUNCH_DENIED.rawValue):
+            return "launchDenied"
+        case UInt32(SEYAL_APP_RECOVERY_DIAG_LAUNCH_FAILED.rawValue):
+            return "launchFailed"
+        case UInt32(SEYAL_APP_RECOVERY_DIAG_RUNTIME_STARTUP_FAILED.rawValue):
+            return "runtimeStartupFailed"
+        case UInt32(SEYAL_APP_RECOVERY_DIAG_ENDPOINT_REJECTED.rawValue):
+            return "endpointRejected"
+        default:
+            return nil
+        }
+    }
+
+    static func recoveryLaunchCode(
+        from error: BundledRuntimeLaunchError?
+    ) -> SeyalAppRecoveryLaunch {
+        guard let error else {
+            // Bridge absent or launch failed without a typed error: fail closed.
+            return SEYAL_APP_RECOVERY_LAUNCH_HELPER_MISSING
+        }
+        switch error {
+        case .helperMissing:
+            return SEYAL_APP_RECOVERY_LAUNCH_HELPER_MISSING
+        case .helperPathInvalid:
+            return SEYAL_APP_RECOVERY_LAUNCH_HELPER_PATH_INVALID
+        case .helperTrustInvalid:
+            return SEYAL_APP_RECOVERY_LAUNCH_HELPER_TRUST_INVALID
+        case .launchDenied:
+            return SEYAL_APP_RECOVERY_LAUNCH_DENIED
+        case .launchFailed:
+            return SEYAL_APP_RECOVERY_LAUNCH_FAILED
+        }
     }
 
     /// #1379 Defect B: show New shell only when Rust admits it for the focused
@@ -299,15 +348,16 @@ extension ProductChromeHostView {
                 driveRecovery()
                 return
             }
-            let launched = pane.inputSurface.bridge?.launchBundledRuntime() ?? false
+            let bridge = pane.inputSurface.bridge
+            let launched = bridge?.launchBundledRuntime() ?? false
             ackRecovery()
             // Any failed launch (missing, untrusted, denied, spawn failure)
-            // blocks the episode; retrying cannot produce a Runtime.
+            // blocks the episode with a distinct non-secret diagnostic.
             if !launched {
                 completeRecovery(
                     generation: generation,
                     outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING,
-                    launch: SEYAL_APP_RECOVERY_LAUNCH_HELPER_MISSING
+                    launch: Self.recoveryLaunchCode(from: bridge?.lastLaunchError)
                 )
             }
             driveRecovery()
@@ -330,13 +380,14 @@ extension ProductChromeHostView {
             schedulePaneRecoveryTimer(pin: pin, delayMs: effect.parameter)
             _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
         case UInt16(SEYAL_APP_RECOVERY_EFFECT_LAUNCH_HELPER.rawValue):
-            let launched = pane.inputSurface.bridge?.launchBundledRuntime() ?? false
+            let bridge = pane.inputSurface.bridge
+            let launched = bridge?.launchBundledRuntime() ?? false
             _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
             if !launched {
                 _ = completePaneRecovery(
                     target: target,
                     outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING,
-                    launch: SEYAL_APP_RECOVERY_LAUNCH_HELPER_MISSING
+                    launch: Self.recoveryLaunchCode(from: bridge?.lastLaunchError)
                 )
             }
             driveRecovery()

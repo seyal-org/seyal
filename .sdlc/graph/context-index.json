@@ -138,7 +138,7 @@
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
-          "fingerprint": "6a40a4f3c45c499315749bfd539799bdc6b577c4"
+          "fingerprint": "7853f595af1c7265427c1ca6d252c56cb2f79739"
         },
         {
           "path": "docs/architecture/ADR-015-RUST-PRODUCT-UI-THIN-SWIFT-HOST.md",

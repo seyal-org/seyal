@@ -181,6 +181,10 @@ fn rejected_opened_handle_is_disposed_and_blocked() {
     );
     assert_eq!(effects, vec![RecoveryEffect::DisposeHandle(103)]);
     assert_eq!(coordinator.state().stage, RecoveryStage::Blocked);
+    assert_eq!(
+        coordinator.diagnostic(),
+        RecoveryDiagnostic::EndpointRejected
+    );
     assert!(!coordinator.has_scheduled_attempt());
 }
 
@@ -200,6 +204,7 @@ fn helper_missing_blocks_without_scheduling() {
     assert_eq!(effects, vec![RecoveryEffect::LaunchHelper { generation }]);
     assert_eq!(coordinator.state().stage, RecoveryStage::Blocked);
     assert!(coordinator.blocked_launch());
+    assert_eq!(coordinator.diagnostic(), RecoveryDiagnostic::HelperMissing);
     assert!(!coordinator.has_scheduled_attempt());
 }
 
@@ -504,4 +509,110 @@ fn late_helper_missing_ignored_after_successful_connect() {
     assert!(ignored.is_empty());
     assert_eq!(c.state().stage, RecoveryStage::Reconstructing);
     assert!(!c.blocked_launch());
+}
+
+#[test]
+fn distinct_launch_failures_block_with_stable_diagnostics() {
+    use super::RecoveryDiagnostic;
+
+    let cases = [
+        (
+            LaunchResult::HelperMissing,
+            RecoveryDiagnostic::HelperMissing,
+        ),
+        (
+            LaunchResult::HelperPathInvalid,
+            RecoveryDiagnostic::HelperPathInvalid,
+        ),
+        (
+            LaunchResult::HelperTrustInvalid,
+            RecoveryDiagnostic::HelperTrustInvalid,
+        ),
+        (LaunchResult::LaunchDenied, RecoveryDiagnostic::LaunchDenied),
+        (LaunchResult::LaunchFailed, RecoveryDiagnostic::LaunchFailed),
+    ];
+    for (launch, expected) in cases {
+        let mut c = RecoveryCoordinator::default();
+        let started = c.begin_episode(Duration::ZERO);
+        let RecoveryEffect::PerformAttempt { generation, .. } = started[0] else {
+            panic!("expected attempt");
+        };
+        let claimed = c.complete_attempt(
+            generation,
+            AttemptOutcome::EndpointMissing,
+            Duration::ZERO,
+            None,
+        );
+        assert!(claimed.contains(&RecoveryEffect::LaunchHelper { generation }));
+        let blocked = c.complete_attempt(
+            generation,
+            AttemptOutcome::EndpointMissing,
+            Duration::from_millis(1),
+            Some(launch),
+        );
+        assert!(blocked.is_empty());
+        assert_eq!(c.state().stage, RecoveryStage::Blocked);
+        assert!(c.blocked_launch());
+        assert_eq!(c.diagnostic(), expected);
+        assert_eq!(c.attempt_count(), 1);
+    }
+}
+
+#[test]
+fn fail_closed_blocked_outcome_exposes_endpoint_rejected() {
+    use super::RecoveryDiagnostic;
+
+    let mut c = RecoveryCoordinator::default();
+    let started = c.begin_episode(Duration::ZERO);
+    let RecoveryEffect::PerformAttempt { generation, .. } = started[0] else {
+        panic!("expected attempt");
+    };
+    let effects = c.complete_attempt(generation, AttemptOutcome::Blocked, Duration::ZERO, None);
+    assert!(effects.is_empty());
+    assert_eq!(c.state().stage, RecoveryStage::Blocked);
+    assert_eq!(c.diagnostic(), RecoveryDiagnostic::EndpointRejected);
+    assert_eq!(c.attempt_count(), 1);
+}
+
+#[test]
+fn exhaustion_after_helper_launch_is_runtime_startup_failure() {
+    use super::RecoveryDiagnostic;
+
+    let mut c = RecoveryCoordinator::default();
+    let mut now = Duration::ZERO;
+    let mut effects = c.begin_episode(now);
+    for _ in 0..20 {
+        let next = match effects.as_slice() {
+            [RecoveryEffect::PerformAttempt { generation, .. }] => {
+                let generation = *generation;
+                c.complete_attempt(
+                    generation,
+                    AttemptOutcome::EndpointMissing,
+                    now,
+                    Some(LaunchResult::Started),
+                )
+            }
+            [RecoveryEffect::LaunchHelper { .. }, RecoveryEffect::Schedule { generation, delay }] =>
+            {
+                let generation = *generation;
+                let delay = *delay;
+                now += delay;
+                c.scheduled_fire(generation, now)
+            }
+            [RecoveryEffect::Schedule { generation, delay }] => {
+                let generation = *generation;
+                let delay = *delay;
+                now += delay;
+                c.scheduled_fire(generation, now)
+            }
+            [] => break,
+            other => panic!("unexpected effects {other:?}"),
+        };
+        effects = next;
+        if c.state().stage == RecoveryStage::Exhausted {
+            break;
+        }
+    }
+    assert_eq!(c.state().stage, RecoveryStage::Exhausted);
+    assert_eq!(c.diagnostic(), RecoveryDiagnostic::RuntimeStartupFailed);
 }

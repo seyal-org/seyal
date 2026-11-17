@@ -213,3 +213,79 @@ fn isolated_helper_binary_does_not_occupy_the_canonical_socket() {
         "helper --runtime-dir must not bind the user control socket"
     );
 }
+
+/// #1421: a dead Runtime that leaves `control.sock` behind must be recoverable
+/// by a new singleton contender. Only Runtime may verify/remove the stale leaf.
+#[test]
+fn helper_recovers_verified_stale_control_socket_without_client_unlink() {
+    use std::os::unix::net::{UnixListener, UnixStream};
+
+    let dir = unique_dir("stale");
+    std::fs::create_dir_all(&dir).expect("runtime dir");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("0700");
+    }
+    let socket = dir.join("control.sock");
+    {
+        let listener = UnixListener::bind(&socket).expect("bind stale leaf");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))
+                .expect("0600");
+        }
+        drop(listener);
+    }
+    assert!(
+        matches!(
+            UnixStream::connect(&socket)
+                .map(|_| ())
+                .map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::ConnectionRefused)
+        ),
+        "precondition: stale leaf must refuse connects"
+    );
+    let before = std::fs::symlink_metadata(&socket).expect("stale metadata");
+    assert!(
+        std::os::unix::fs::FileTypeExt::is_socket(&before.file_type()),
+        "precondition: leaf must be a socket"
+    );
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_seyal-runtime"))
+        .args([
+            "--runtime-dir",
+            dir.to_str().expect("utf8 runtime dir"),
+            "/bin/sleep",
+            "30",
+        ])
+        .spawn()
+        .expect("spawn helper against stale socket");
+    let helper_pid = child.id();
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut live = false;
+    while Instant::now() < deadline {
+        if UnixStream::connect(&socket).is_ok() {
+            live = true;
+            break;
+        }
+        if let Ok(Some(_)) = child.try_wait() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        live,
+        "helper must replace the stale leaf and accept connects"
+    );
+    assert_eq!(
+        child.try_wait().expect("try_wait"),
+        None,
+        "helper pid {helper_pid} must still be running after bind"
+    );
+
+    let _ = child.kill();
+    let _ = child.wait();
+}

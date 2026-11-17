@@ -581,7 +581,50 @@ fn recovery_endpoint_missing_launches_once_then_seven_attempts() {
     assert_eq!(launches, 1);
     assert_eq!(root.snapshot().recovery_attempts, MAXIMUM_ATTEMPTS);
     assert_eq!(root.snapshot().recovery_stage, RecoveryStage::Exhausted);
+    assert_eq!(
+        root.snapshot().recovery_diagnostic,
+        crate::recovery::RecoveryDiagnostic::RuntimeStartupFailed
+    );
     assert_eq!(RETRY_DELAYS.len() as u32 + 1, MAXIMUM_ATTEMPTS);
+}
+
+#[test]
+fn helper_trust_failure_blocks_with_distinct_diagnostic() {
+    use crate::recovery::RecoveryDiagnostic;
+
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    root.apply(AppAction::AckRecoveryEffect).unwrap();
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::EndpointMissing,
+        now: Duration::ZERO,
+        launch: None,
+    })
+    .unwrap();
+    assert!(matches!(
+        root.snapshot().recovery_effect,
+        Some(RecoveryEffect::LaunchHelper { .. })
+    ));
+    root.apply(AppAction::AckRecoveryEffect).unwrap();
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::EndpointMissing,
+        now: Duration::from_millis(1),
+        launch: Some(LaunchResult::HelperTrustInvalid),
+    })
+    .unwrap();
+    let snap = root.snapshot();
+    assert_eq!(snap.recovery_stage, RecoveryStage::Blocked);
+    assert_eq!(snap.recovery_attempts, 1);
+    assert_eq!(
+        snap.recovery_diagnostic,
+        RecoveryDiagnostic::HelperTrustInvalid
+    );
 }
 
 #[test]
