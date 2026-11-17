@@ -6,6 +6,13 @@
 
 ## 2026-11-12 accepted native Block-region clarification (#1480 / #1482)
 
+**Raw v1 status proposed under #1493:** Blocks/Flow are suspended as a
+production presentation while the product uses Raw and same-execution TUI.
+The existing `Screen` + `HistoryStore` path remains the production storage
+authority. This status reconciliation becomes normative when the separate
+#1493 architecture PR is accepted; it does not delete or clean up the Block
+architecture or implementation.
+
 The product owner accepted native Block-owned primary content as Seyal's **target architecture** after merging PR #1481. The original “one canonical VT/grid/state instance” prohibits **multiple competing terminal engines or shadow primary screens**, not multiple independently addressable **RegionGrids inside a single terminal state**.
 
 Under that target, one `TerminalExecution` keeps exactly one PTY, parser, global VT cursor/mode/width authority, damage generation and `TerminalState`. Its primary `PrimaryBlockEngine` owns ordered Block and Unstructured RegionGrids through one physical `RegionStore`; a **non-owning** `VTWindowMap` maps the single PTY-sized screen coordinate space to those canonical cell handles. No independent Block parser, cursor/mode state, PTY, child process or second writable conventional primary grid is allowed. Alternate-screen semantics remain exclusive. Block lifecycle changes never override real VT cursor/erase/scroll/margin operations.
