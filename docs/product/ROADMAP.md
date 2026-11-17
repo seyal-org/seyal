@@ -3,7 +3,7 @@
 **Status:** Authoritative execution roadmap  
 **Scope:** Seyal OSS plus the public OSS seams consumed by higher editions  
 **First market-ready release:** M004  
-**Proposed V1 scope amendment (#1510):** [Persistent agent-aware terminal workspace](M004-V1-PRODUCT-SCOPE.md). Pending maintainer acceptance and #1493 Raw-only architecture acceptance; see the conditional scope rules in the launch matrix and M003 contract. No existing shared correctness or release gate is waived.  
+**Proposed V1 scope amendment (#1510):** [Persistent agent-aware terminal workspace](M004-V1-PRODUCT-SCOPE.md). Merge after accepted #1493 Raw-only architecture (PR #1507), refreshed exact-head reconciliation and maintainer acceptance; see the release gates below. No existing shared correctness or release gate is waived.  
 **Planning baseline:** `master` at `5594b8a37981a29819c2b87ec0cd5f9774f76d9c` on 2026-08-27
 
 This document turns the canonical product registry into a staged execution plan. `docs/product/FEATURES.md` remains the product capability registry. ADRs/specifications remain architecture authority. This roadmap answers **when**, **under which gate**, and **through which owning issue** accepted work is allowed to advance.
@@ -24,9 +24,9 @@ The terminal hot path must never synchronously depend on agents, cloud services,
 |---|---|---|---|---|
 | M001 | #5 | Permanent production foundation (**Done / closed**) | Complete — Passes 1–10; #5/#727 closed on freeze `c536c54…` | Seyal-owned VT/PTY/Runtime/display/Metal foundation accepted. Contributor/nightly quality only; no market-readiness claim. Machine RSS gate **`CLIENT_RSS_KIB = 1536`**. |
 | M002 | #664 | Market-parity terminal fundamentals | M001 complete | Target shells, TUIs, nested mux/SSH workloads, Unicode, scrollback/reflow, terminal search/input/mouse/link behavior and performance/resource gates are credible for technical preview. |
-| M003 | #665 | Core Seyal workspace | Stable M002 terminal contracts; native seams ready | macOS windows/tabs/splits/navigation, raw/Block/composer presentation, local config/themes/fonts/keybindings and trusted shell-integration boundary form a coherent local workspace. Alpha/beta quality; still not market-ready. |
-| M004 | #666 | Durable local workspace / market-ready v0.1 | M002 + M003 complete; M004 spikes resolved | Durable detach/reconnect/layout/history behavior is honest, signed/notarized/updateable macOS distribution exists, diagnostics/accessibility/docs/install/recovery/performance gates pass on one release SHA. **First serious public launch.** |
-| M005 | #667 | Agent-native local substrate | M004 stable; agent R&D contracts accepted | WorkItem/Attempt/AgentRun, provider-neutral adapters, Attention, context/privacy/routing/evaluation foundations. Terminal remains independent of agent progress. |
+| M003 | #665 | Core Seyal workspace | Stable M002 terminal contracts; native seams ready | Live session inventory/adoption, in-window workspace sidebar, pane-local tabs/splits/navigation, Raw/TUI presentation, local config/themes/fonts/keybindings and trusted shell integration form a coherent local workspace; Blocks/composer deferred under #1493. Alpha/beta quality; still not market-ready. |
+| M004 | #666 | Durable local workspace / market-ready v0.1 | M002 + M003 complete; M004 spikes resolved | Durable detach/reconnect/layout/history, explicit cross-workspace transfer, local CLI orchestration and interactive attach, templates/project context and terminal-scoped advisory notifications; signed/notarized/updateable distribution and all exact-head release/soak gates pass. **First serious public launch.** |
+| M005 | #667 | Agent-native local substrate | M004 stable; agent R&D contracts accepted | WorkItem/Attempt/AgentRun, provider-neutral adapters, managed-agent Attention/approval/actions (shared with V1 advisory authority), context/privacy/routing/evaluation foundations. Terminal remains independent of agent progress. |
 | M006 | #668 | Automation, coding & multi-agent workflows | M005 local substrate | Command Library, safe workflow DAG, writer-isolated multi-agent work, bounded coding/SCM/DevOps surfaces and extension model. |
 | M007 | #669 | Platform reach & remote continuity | M002 terminal seams stable; M004 durability assumptions explicit | Linux/Windows host work, secure SSH/remote attach, mobile/thin-client and selective sync are proven without weakening terminal ownership. |
 | M008 | #670 | Collaboration platform | Stable resource addressing, remote and agent/workflow identity | Authorized exact handoff/sharing/presence/shared workflows. Public OSS contains generic seams; proprietary collaboration implementation belongs outside OSS. |
@@ -62,7 +62,7 @@ M003 may develop in parallel with late M002 only at stable boundaries; terminal-
 ### M003
 - Implementation contract: [`docs/milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md). Parallel with late M002 only at stable terminal seams; do not implement #674 as one PR.
 - #674 native hierarchy/windows/tabs/splits/navigation (umbrella).
-- #675 pane input, Blocks, selection and same-execution presentation.
+- #675 pane input, selection and same-execution Raw/TUI presentation under #1492; Blocks/composer-only scope deferred.
 - #676 local config/themes/fonts/keybindings/launch policy.
 - #686 trusted shell-integration/semantic-boundary spike.
 
@@ -100,7 +100,7 @@ M003 may develop in parallel with late M002 only at stable boundaries; terminal-
 
 ## First market-ready release policy
 
-**Proposed #1510 release-scope amendment:** once the product decision and #1493 are accepted, the M003/M004 release outcome is Raw/TUI only (Blocks/composer-specific delivery deferred, shared terminal behavior retained); M004 also requires workspace orchestration, authoritative sessions and durable restore, local CLI/templates and advisory agent notifications as defined in [V1 scope](M004-V1-PRODUCT-SCOPE.md). Until both decisions are accepted, the legacy release-train wording remains conditional; no milestone closes on conflicting authority.
+**Proposed #1510 release-scope amendment:** once the product decision and #1493 are accepted, the M003/M004 release outcome is Raw/TUI only (Blocks/composer-specific delivery deferred, shared terminal behavior retained); M004 also requires workspace orchestration, authoritative sessions and durable restore, local CLI/templates and advisory agent notifications as defined in [V1 scope](M004-V1-PRODUCT-SCOPE.md). The release-train rows above are the proposed replacement, not an architectural amendment. #1507 must merge first; verify the reconciled matrix and M003 ledger on this PR before merge. No milestone closes on conflicting authority.
 
 M004 is the first release allowed to claim that Seyal can be used as a serious everyday macOS terminal. A feature is not a launch blocker merely because a competitor has it. The launch bar is instead: terminal fidelity for target workloads, predictable native workspace interaction, bounded resource use, honest detach/recovery, install/update safety, accessibility/diagnostics and documentation.
 
