@@ -422,7 +422,11 @@ final class SeyalHostComponentTests: XCTestCase {
             accessibilityChild(view, identifier: "seyal-agents-heading"),
             "empty AGENTS chrome must not appear when Rust projects zero agents"
         )
-        let workspaceRow = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-workspace-0") as? NSButton)
+        let workspaceRow = try XCTUnwrap(
+            accessibilityChildren(view) {
+                $0.hasPrefix("seyal-workspace-")
+            }.compactMap { $0 as? NSButton }.first
+        )
         let workspaceLabel = workspaceRow.accessibilityLabel() ?? workspaceRow.accessibilityTitle() ?? ""
         XCTAssertTrue(
             workspaceLabel.localizedCaseInsensitiveContains("Local"),

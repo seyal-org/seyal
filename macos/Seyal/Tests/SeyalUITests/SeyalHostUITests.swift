@@ -223,7 +223,12 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-workspaces-heading"].firstMatch.exists)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-layouts-heading"].firstMatch.exists)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-layout-0"].firstMatch.exists)
-        XCTAssertTrue(app.descendants(matching: .any)["seyal-workspace-0"].firstMatch.exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier MATCHES %@", #"^seyal-workspace-[0-9]+-[0-9]+$"#)
+            ).firstMatch.waitForExistence(timeout: 5),
+            "identity-keyed workspace row must project (#1490)"
+        )
         XCTAssertFalse(app.descendants(matching: .any)["seyal-left-tabs"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["seyal-tabs-heading"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["seyal-terminal-tab-left-0"].exists)
