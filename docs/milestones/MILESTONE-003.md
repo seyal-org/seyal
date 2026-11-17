@@ -1,6 +1,6 @@
 # Milestone 003 — Core Seyal Workspace
 
-**Status:** **In progress.** Not Done. This file is the M003 implementation contract. It does **not** claim beta, M003 complete, or market-ready.
+**Status:** **In progress.** Not Done. Proposed V1 gate replacement under #1510; merge only after #1493 / #1507 is accepted. This file is the M003 implementation contract. It does **not** claim beta, M003 complete, or market-ready.
 
 **GitHub epic:** [#665](https://github.com/seyal-org/seyal/issues/665)  
 **Hierarchy umbrella:** [#674](https://github.com/seyal-org/seyal/issues/674)  
@@ -18,10 +18,10 @@
 
 ## Proposed V1 scope amendment (#1510)
 
-The [V1 product scope](../product/M004-V1-PRODUCT-SCOPE.md) and [M004 launch matrix](../product/MARKET-READY-M004.md) describe a proposed Raw-only, persistent, agent-aware first release. The following conditional classification applies only after product acceptance of #1510 and accepted #1493 architecture reconciliation. It is a release-scope change, not a declaration of technical acceptance or completion.
+The [V1 product scope](../product/M004-V1-PRODUCT-SCOPE.md) and [M004 launch matrix](../product/MARKET-READY-M004.md) describe a proposed Raw-only, persistent, agent-aware first release. The gate replacements below become operative only when this PR merges after accepted #1493 architecture reconciliation. Historical issue tables are retained as evidence; the revised §8 is the close-out authority. It is a release-scope change, not a declaration of technical acceptance or completion.
 
-- **M003 mandatory:** stable Runtime session inventory/adoption and controller fencing before workspace completion; in-window multiple-workspace containment, pane-local terminal tabs, safe moves, focus/resize/navigation, Raw/TUI interaction, local config, trusted cursor mapping, keybindings and #1492 exact-head acceptance. #929's UI is a consumer of the required Runtime inventory; durable history/layout restoration remains M004. Cross-workspace movement requires separately accepted ownership/rebinding authority.
-- **Deferred:** Flow/Blocks-only and composer-only behavior, design convergence, semantic transcript/composer recall and their headed acceptance. In the historical scope, child tables, §5 work queues, §8 acceptance ledger and §9 Done rules below, classify Block/Flow-only criteria POST-LAUNCH rather than requiring PASS for V1. Shared input, mouse/IME, history, TUI/alternate-screen, focus/isolation, accessibility, renderer and performance requirements stay mandatory; #1492 supplies the Raw qualification, not a waiver.
+- **M003 mandatory:** stable Runtime session inventory/adoption and controller fencing before workspace completion; in-window multiple-workspace containment, pane-local terminal tabs, safe moves, focus/resize/navigation, Raw/TUI interaction, local config, trusted cursor mapping, keybindings and #1492 exact-head acceptance. #929's UI is a consumer of the required Runtime inventory; durable history/layout restoration remains M004. Same-workspace movement is M003; cross-workspace transfer requires separately accepted ownership/rebinding authority and is a distinct M004 launch gate, not an expansion of #1490.
+- **Deferred:** Flow/Blocks-only and composer-only behavior, design convergence, semantic transcript/composer recall and their headed acceptance. In historical child tables and §5 work queues, Block/Flow-only criteria are POST-LAUNCH. The replacement §8 explicitly defines the mandatory Raw gates. Shared input, mouse/IME, history, TUI/alternate-screen, focus/isolation, accessibility, renderer and performance requirements stay mandatory; #1492 supplies the Raw qualification, not a waiver.
 - **Mixed issues:** #865/#866/#867/#868, #675 and UI/renderer slices must have each shared Raw obligation preserved and qualified independently; do not mark their complete original scope Done or skip raw/TUI tests merely because Flow is suspended. #1510 records explicit issue dispositions and reconciles §8 freeze evidence with the Raw-only contract before M003 may close.
 - **M004 additions:** full session inventory UI and durable restore, bounded CLI/templates, advisory agent notifications and release qualification remain M004 launch requirements, not a dependency on full M005. No new production pickup from this section alone.
 
@@ -35,11 +35,11 @@ M003 delivers Seyal's native local workspace around the **same** production term
 PTY → VT/parser → TerminalState/grid → damage → projection → Metal
 ```
 
-Windows, tabs, splits, navigation, pane-scoped Flow/Raw/TUI presentation, local config/themes/fonts/keybindings, and a trusted shell-integration boundary must form a coherent headed workspace **without** changing `TerminalExecution` ownership.
+Windows, in-window workspace sidebar, pane-local tabs, splits, navigation, Raw/TUI presentation, local config/themes/fonts/keybindings, and a trusted shell-integration boundary must form a coherent headed workspace **without** changing `TerminalExecution` ownership.
 
 Roadmap exit ([`docs/product/ROADMAP.md`](../product/ROADMAP.md)):
 
-> macOS windows/tabs/splits/navigation, raw/Block/composer presentation, local config/themes/fonts/keybindings and trusted shell-integration boundary form a coherent local workspace. Alpha/beta quality; still not market-ready.
+> Live session inventory/adoption, in-window workspace sidebar, pane-local tabs/splits/navigation, Raw/TUI presentation, local config/themes/fonts/keybindings and trusted shell integration form a coherent local workspace; Blocks/composer deferred under #1493. Alpha/beta quality; still not market-ready.
 
 M003 is **not** market-ready. That remains M004 / #666. M003 is **not** the M002 terminal-engine close-out and **not** the agent platform.
 
@@ -76,8 +76,8 @@ M003 implements and proves, on the permanent path:
 
 - native macOS windows, tabs, nested splits, focus, and navigation
 - Workspace / Tab / Pane identities over the existing Rust `ShellState` (do not port `SeyalShellState`)
-- pane-scoped composer plus mutually exclusive Flow / Raw / TUI
-- minimum Command Block lifecycle as a projection of Runtime `BlockTimeline`
+- pane-scoped Raw/TUI presentation with #1492 acceptance; no user-facing Flow switch
+- Runtime-authoritative multi-workspace inventory and adoption, independent controller fencing, safe same-workspace moves
 - local TOML config, themes, fonts, keybindings, and startup shell/CWD policy
 - trusted shell-integration seam where signals are available; raw mode remains fully functional without it
 - headed tests that closing chrome does not kill unrelated live executions
@@ -92,7 +92,8 @@ Do **not** pull these into M003. They are not “remaining M003 work.”
 ```text
 M002 terminal-engine close-out (#824 / #673 / #837 / #664)
 mutating TerminalState / VT / Unicode / reflow as an M003 PR
-durable disk recovery / signing / notarization / market release (M004)
+durable disk recovery / cross-workspace execution transfer / interactive CLI attach / signing / notarization / market release (M004)
+Flow/Blocks and composer-only presentation (post-launch)
 agent runtime / memory / context production (M005)
 full workflow / coding surfaces (M006)
 graphics / image protocols (#689)
@@ -434,18 +435,18 @@ Label every performance/presentation claim: `CI` | `controlled-host` | `PLATFORM
 - one authoritative `TerminalState` per `TerminalExecution`; no second VT/grid/renderer
 - tabs/splits/windows never own a PTY; a terminal leaf binds at most one execution
 - Rust owns portable product/UI; Swift remains a thin host (ADR-015)
-- Flow/Raw/TUI are mutually exclusive; Flow has no coexisting raw input viewport
+- Raw/TUI use one authoritative execution and input route; Flow/Blocks/composer are suspended; no user-facing switch or duplicate raw/Flow surface
 - closing/reparenting chrome does not terminate an unrelated live execution
 - no agent/persistence/cloud/licensing on the terminal hot path
 - OSS has no commercial dependency
 
 **Workspace**
 
-- #674 children covering windows/tabs/nested splits/focus and the #994-derived execution-provisioning seam are Done or explicitly classified
-- #675 / #865–#867 presentation rows are usable with real shell/TUI workloads, or classified
+- #674 children covering windows, multi-workspace sidebar, pane-local tabs, nested splits, focus and same-workspace movement plus #994-derived provisioning seam are Done; prove Runtime inventory/adoption and controller fencing before workspace completion
+- #1492 Raw/TUI acceptance is PASS on the freeze SHA, including real shell/TUI workloads, trusted Bash/Zsh/Fish cursor mapping and mouse/keyboard/IME/scroll/selection behavior; #675 mixed issues retain every shared Raw gate; Flow-only criteria are deferred with an explicit disposition
 - #676 children, beginning with #993, prove config/themes/fonts/keybindings/launch policy are usable without an account
 - #686 is Closed; a #675 semantic-boundary claim may depend on a new Issue only if it still needs contract work beyond that closed spike
-- #936 multi-live Metal uses distinct Runtime-owned executions through the accepted provisioning seam and is Done or explicitly deferred with an owning follow-up
+- #936 multi-live Metal behavior uses distinct Runtime-owned executions through the accepted provisioning seam; required simultaneous visible-pane behavior passes (no deferral of this shared requirement)
 
 **Performance / resources**
 
@@ -472,12 +473,12 @@ make check
 make bench
 ```
 
-Plus the headed window/tab/split/focus procedure recorded by the remaining #674/#923/#936 evidence files, and the Flow/Raw/TUI procedure from #868 when that Issue is in the freeze set.
+Plus exact packaged-app Raw/TUI acceptance (#1492), headed multi-workspace/tab/split/focus and same-workspace move procedures, inventory/adoption and controller conflict/reconnect evidence. Flow-only #868 scenarios are not V1 requirements; retain shared TUI/input scenarios. No full desktop takeover on a developer workstation.
 
 ---
 
 ## 9. What “M003 Done” means
 
-Epic #665 reaches Done when the §8 ledger is `PASS` on the freeze SHA and the §5 umbrellas/required children are Done or explicitly classified. It authorizes **beta** in the roadmap release-channel sense. It does **not** authorize M004 launch claims, M002 technical-preview claims, or agent production.
+Epic #665 reaches Done when the replacement §8 ledger is `PASS` on the freeze SHA and the §5 required Raw/workspace children are Done; classify suspended Block-only and mixed-issue residuals explicitly with owning follow-ups, never waive a shared mandatory criterion. It authorizes **beta** in the roadmap release-channel sense. It does **not** authorize M004 launch claims, M002 technical-preview claims, or agent production.
 
 M002 performance/workload close-out may still be open at that moment only if every M003 merge stayed off the terminal-state/VT/Unicode/reflow contracts. If an M003 change violated that seam, stop and restore the terminal lane before claiming either milestone.
