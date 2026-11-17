@@ -519,6 +519,7 @@ impl ApplicationRoot {
 }
 
 /// Map LocalDisplayClient projected eligibility bytes (1–5) onto product enums.
+#[cfg(target_os = "macos")]
 fn projected_composer_eligibility(code: u8) -> Option<RuntimeComposerEligibility> {
     match code {
         1 => Some(RuntimeComposerEligibility::Available),
