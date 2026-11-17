@@ -83,6 +83,15 @@ RUNTIME_BINARY="${ROOT}/target/$([[ "$CONFIGURATION" == "Release" ]] && echo rel
 install -m 755 "$RUNTIME_BINARY" "${HELPERS_DIR}/seyal-runtime"
 [[ -x "${HELPERS_DIR}/seyal-runtime" ]] || { echo "failed to package bundled Runtime helper" >&2; exit 1; }
 
+# xcodebuild test can leave hollow SeyalTests.xctest under Contents/PlugIns in
+# the shared derived-data app. That is not a production subcomponent and makes
+# codesign report "bundle format unrecognized". Strip before sealing.
+PLUGINS_DIR="${APP_BUNDLE}/Contents/PlugIns"
+if [[ -d "$PLUGINS_DIR" ]]; then
+  find "$PLUGINS_DIR" -maxdepth 1 -name '*.xctest' -exec rm -rf {} +
+  rmdir "$PLUGINS_DIR" 2>/dev/null || true
+fi
+
 # Sign the nested helper before sealing the outer app. Debug's ad-hoc allowance
 # is compiled out of Release; distribution builds must name an Apple-issued
 # identity whose Team ID is inherited by both signatures.

@@ -570,6 +570,11 @@ final class SeyalHostComponentTests: XCTestCase {
         let create = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace"))
         XCTAssertFalse(create.isHidden, "Create Workspace stays on the Workspaces left panel")
         XCTAssertEqual(create.accessibilityLabel(), "Create Workspace")
+        let folder = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-create-workspace-folder")
+        )
+        XCTAssertFalse(folder.isHidden, "Create Workspace from Folder stays on the Workspaces rail")
+        XCTAssertEqual(folder.accessibilityLabel(), "Create Workspace from Folder")
 
         var tabs = SeyalAppAction()
         tabs.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -596,6 +601,49 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(
             try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace")).isHidden
         )
+    }
+
+    /// #1490 / ADR-028: SetWorkspaceRoot updates Path on the targeted workspace
+    /// without minting. Folder chrome uses CreateWorkspace (separate path).
+    @MainActor
+    func testSetWorkspaceRootUpdatesSelectedPathWithoutMinting() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+
+        let before = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_WORKSPACE), 0)
+        let beforeDetail = utf8Detail(before)
+        let beforeTitle = utf8(before)
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-1490-set-root-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        XCTAssertEqual(
+            view.commitSetWorkspaceRootOnSelected(root: root.path),
+            0,
+            "SetWorkspaceRoot must apply on the selected workspace"
+        )
+
+        let after = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_WORKSPACE), 0)
+        let afterDetail = utf8Detail(after)
+        XCTAssertNotEqual(
+            afterDetail,
+            beforeDetail,
+            "bound root detail must change away from the prior Home/system path"
+        )
+        XCTAssertTrue(
+            afterDetail.contains(root.lastPathComponent),
+            "sidebar detail should reflect the bound folder; got \(afterDetail)"
+        )
+        XCTAssertEqual(
+            seyal_app_shell(handle).workspace_count,
+            1,
+            "SetWorkspaceRoot must not mint a second workspace"
+        )
+        // Name follows the folder component; prior Local label is not preserved.
+        XCTAssertNotEqual(utf8(after), beforeTitle)
     }
 
     /// #1413 / #1414: SetWorkspaceRoot + ObserveTrustedForegroundCwd leave-offer ABI.
@@ -1148,6 +1196,78 @@ final class SeyalHostComponentTests: XCTestCase {
             "routeFocus must leave the hidden root composer for the visible pane editor"
         )
         XCTAssertFalse(window.firstResponder === hiddenEditor)
+    }
+
+    /// #1490: Raw-stable chrome navigation must reclaim Metal first responder.
+    /// Sidebar / New Terminal clicks leave FR on chrome while eligibility stays
+    /// Raw; reconcile must still call routeFocus so typing keeps working.
+    @MainActor
+    func testReconcileReclaimsMetalFirstResponderWhenRawEligibilityStable() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let handle = view.pane.appHandle
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1515_1515_1515_1515
+        bind.target_attachment_lo = 0x1616_1616_1616_1616
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        snap = seyal_app_snapshot(handle)
+        XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue))
+
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let metal = view.focusedInputSurface()
+        metal.syncInputRoutePresentation()
+        XCTAssertTrue(metal.acceptsFirstResponder)
+        XCTAssertTrue(window.makeFirstResponder(metal))
+        XCTAssertTrue(window.firstResponder === metal)
+
+        // Sidebar / + click: FR moves onto chrome while Raw stays Raw.
+        XCTAssertTrue(window.makeFirstResponder(view.createWorkspaceButton))
+        XCTAssertFalse(window.firstResponder === metal)
+
+        // Generation bump that does not change eligibility (left-panel toggle).
+        var tabs = SeyalAppAction()
+        tabs.version = UInt16(SEYAL_APP_ABI_VERSION)
+        tabs.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        tabs.kind = UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue)
+        tabs.reserved = 1
+        XCTAssertEqual(seyal_app_apply(handle, &tabs), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+            "fixture must keep Raw so only the generation-stable routeFocus path is under test"
+        )
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            window.firstResponder === view.focusedInputSurface(),
+            "reconcile must reclaim Metal FR after Raw-stable chrome navigation"
+        )
     }
 
     @MainActor
@@ -5988,6 +6108,14 @@ private func reloadUiConfig(path: String) -> Int32 {
 private func utf8(_ row: SeyalAppRow) -> String {
     guard row.title_len > 0, let title = row.title else { return "" }
     return String(decoding: UnsafeBufferPointer(start: title, count: Int(row.title_len)), as: UTF8.self)
+}
+
+private func utf8Detail(_ row: SeyalAppRow) -> String {
+    guard row.detail_len > 0, let detail = row.detail else { return "" }
+    return String(
+        decoding: UnsafeBufferPointer(start: detail, count: Int(row.detail_len)),
+        as: UTF8.self
+    )
 }
 
 @MainActor

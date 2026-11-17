@@ -39,29 +39,36 @@ extension ProductChromeHostView {
     }
 
     /// CreateWorkspace (ADR-028 / ADR-029 / cmux): add an open workspace in the
-    /// current window's sidebar. Default (+) inherits the selected workspace
-    /// root (or HOME). Folder control always opens a directory picker.
+    /// current window's sidebar. `+` inherits the selected workspace root (or
+    /// HOME) with no picker. Folder always opens a directory picker.
     @objc func createWorkspace() {
         commitCreateWorkspace(root: inheritedWorkspaceRootPath())
     }
 
     /// Folder control: pick an explicit root, then CreateWorkspace.
     @objc func createWorkspaceFromFolder() {
+        pickFolderAndCreateWorkspace()
+    }
+
+    func pickFolderAndCreateWorkspace() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Create Workspace"
-        panel.message = "Choose a folder to bind as the workspace root."
+        panel.message = "Choose a folder to bind as the new workspace root."
         panel.directoryURL = URL(fileURLWithPath: inheritedWorkspaceRootPath(), isDirectory: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        commitCreateWorkspace(root: url.path)
+        // Prefer the filesystem path the panel resolved (symlink-stable).
+        let root = url.standardizedFileURL.path
+        commitCreateWorkspace(root: root)
     }
 
     func commitCreateWorkspace(root: String) {
+        let rootPath = (root as NSString).standardizingPath
         let code = applyPayloadReturning(
             UInt16(SEYAL_APP_ACTION_CREATE_WORKSPACE.rawValue),
-            text: root
+            text: rootPath
         )
         if code != 0 {
             let error = seyal_app_last_error(pane.appHandle)
@@ -69,16 +76,81 @@ extension ProductChromeHostView {
             alert.messageText = "Could not create workspace"
             alert.informativeText =
                 "CreateWorkspace failed (apply=\(code), last_error=\(error)). "
-                + "13=NoLiveClient, 35=ProvisioningRejected. If a terminal is already "
-                + "live, retry +; otherwise wait for Runtime attach, then retry."
+                + "13=NoLiveClient, 35=ProvisioningRejected. Quit Seyal fully (stop any "
+                + "leftover seyal-runtime), relaunch so the bundled Runtime attaches, "
+                + "then retry +. A live terminal alone is not enough if mint cannot "
+                + "reach Runtime CAP_EXECUTION_PROVISIONING."
+            alert.alertStyle = .warning
+            alert.runModal()
+            routeFocus()
+            return
+        }
+        // CreateWorkspace selects the new row. If Path still shows Home/system
+        // root, re-bind the selected workspace to the folder that was picked.
+        ensureSelectedWorkspaceRoot(rootPath)
+        routeFocus()
+    }
+
+    /// After create, force the selected workspace Path to the picked folder.
+    func ensureSelectedWorkspaceRoot(_ rootPath: String) {
+        guard let selected = selectedWorkspaceRow() else { return }
+        let shown = productChromeCopyUTF8(selected.detail, selected.detail_len) ?? ""
+        let shownPath = (shown as NSString).standardizingPath
+        let wanted = (rootPath as NSString).standardizingPath
+        if !shownPath.isEmpty, shownPath == wanted { return }
+        _ = applyWorkspacePayloadReturning(
+            UInt16(SEYAL_APP_ACTION_SET_WORKSPACE_ROOT.rawValue),
+            text: wanted,
+            targetLo: selected.id_lo,
+            targetHi: selected.id_hi
+        )
+    }
+
+    /// ADR-028 SetWorkspaceRoot on the selected open-workspace row.
+    @discardableResult
+    func commitSetWorkspaceRootOnSelected(root: String) -> Int32 {
+        guard let selected = selectedWorkspaceRow() else {
+            let alert = NSAlert()
+            alert.messageText = "Could not set workspace folder"
+            alert.informativeText = "No workspace is selected."
+            alert.alertStyle = .warning
+            alert.runModal()
+            routeFocus()
+            return -1
+        }
+        let code = applyWorkspacePayloadReturning(
+            UInt16(SEYAL_APP_ACTION_SET_WORKSPACE_ROOT.rawValue),
+            text: root,
+            targetLo: selected.id_lo,
+            targetHi: selected.id_hi
+        )
+        if code != 0 {
+            let error = seyal_app_last_error(pane.appHandle)
+            let alert = NSAlert()
+            alert.messageText = "Could not set workspace folder"
+            alert.informativeText =
+                "SetWorkspaceRoot failed (apply=\(code), last_error=\(error))."
             alert.alertStyle = .warning
             alert.runModal()
         }
         routeFocus()
+        return code
     }
 
     /// Prefer the selected open-workspace detail (bound root); else HOME.
     func inheritedWorkspaceRootPath() -> String {
+        if let selected = selectedWorkspaceRow(),
+           let detail = productChromeCopyUTF8(selected.detail, selected.detail_len)
+        {
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, trimmed.hasPrefix("/") {
+                return trimmed
+            }
+        }
+        return NSHomeDirectory()
+    }
+
+    func selectedWorkspaceRow() -> SeyalAppRow? {
         let shell = seyal_app_shell(pane.appHandle)
         for index in 0..<Int(shell.workspace_count) {
             let row = seyal_app_shell_row(
@@ -86,17 +158,11 @@ extension ProductChromeHostView {
                 UInt16(SEYAL_APP_ROW_WORKSPACE),
                 UInt32(index)
             )
-            let selected = row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0
-            guard selected else { continue }
-            if let detail = productChromeCopyUTF8(row.detail, row.detail_len) {
-                let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty, trimmed.hasPrefix("/") {
-                    return trimmed
-                }
+            if row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0 {
+                return row
             }
-            break
         }
-        return NSHomeDirectory()
+        return nil
     }
 
     @objc func selectWorkspace(_ sender: NSButton) {
@@ -414,10 +480,38 @@ extension ProductChromeHostView {
         return code
     }
 
+    /// SetWorkspaceRoot / RenameWorkspace: payload + WorkspaceId target fields.
+    @discardableResult
+    func applyWorkspacePayloadReturning(
+        _ kind: UInt16,
+        text: String,
+        targetLo: UInt64,
+        targetHi: UInt64
+    ) -> Int32 {
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = kind
+        action.applySnapshotFence(snapshot)
+        action.target_execution_lo = targetLo
+        action.target_execution_hi = targetHi
+        let utf8 = Array(text.utf8)
+        var code: Int32 = -1
+        utf8.withUnsafeBufferPointer { buffer in
+            action.payload = buffer.baseAddress
+            action.payload_len = UInt32(buffer.count)
+            code = seyal_app_apply(pane.appHandle, &action)
+        }
+        reconcileChrome()
+        return code
+    }
+
     func configureChromeButtons() {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
-        // cmux: leading + creates a workspace. Folder picks an explicit root.
+        // cmux: leading + creates a workspace (inherits selected root). Folder
+        // creates one with an explicitly picked root.
         createWorkspaceButton.bezelStyle = .inline
         createWorkspaceButton.isBordered = false
         createWorkspaceButton.title = ""
@@ -431,7 +525,7 @@ extension ProductChromeHostView {
         createWorkspaceButton.setAccessibilityIdentifier("seyal-create-workspace")
         createWorkspaceButton.setAccessibilityLabel("Create Workspace")
         createWorkspaceButton.toolTip =
-            "Create Workspace — opens immediately using the current workspace folder (or Home)."
+            "Create Workspace — new sidebar row using the selected workspace folder (or Home)."
         createWorkspaceButton.target = self
         createWorkspaceButton.action = #selector(createWorkspace)
 
@@ -448,7 +542,7 @@ extension ProductChromeHostView {
         createWorkspaceFromFolderButton.setAccessibilityIdentifier("seyal-create-workspace-folder")
         createWorkspaceFromFolderButton.setAccessibilityLabel("Create Workspace from Folder")
         createWorkspaceFromFolderButton.toolTip =
-            "Create Workspace from Folder — choose a directory to bind as the new workspace root."
+            "Create Workspace from Folder — pick a directory for the new sidebar row."
         createWorkspaceFromFolderButton.target = self
         createWorkspaceFromFolderButton.action = #selector(createWorkspaceFromFolder)
 

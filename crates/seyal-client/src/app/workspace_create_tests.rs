@@ -6,21 +6,36 @@ use super::ApplicationRoot;
 use crate::composer::{ComposerAction, ComposerMode};
 
 #[cfg(target_os = "macos")]
-use super::{AppError, BindingEvidence};
+use super::{AppAction, AppError, BindingEvidence};
 #[cfg(target_os = "macos")]
 use seyal_core::{AttachmentId, ExecutionId};
 
 #[test]
 fn create_workspace_with_minted_id_projects_root() {
     let mut app = ApplicationRoot::new();
+    let local = WorkspaceId::m001_default();
+    let prior_local_root = app
+        .shell
+        .workspace_root(local)
+        .map(str::to_owned)
+        .expect("Local starts with a bound root");
     let root = std::env::temp_dir().join("seyal-app-ws-create");
     let _ = std::fs::create_dir_all(&root);
     let path = root.to_string_lossy().into_owned();
     let id = WorkspaceId::from_bytes([0x71; 16]);
-    app.create_workspace_with_minted_id_for_test(id, path)
+    app.create_workspace_with_minted_id_for_test(id, path.clone())
         .expect("create");
     assert_eq!(app.shell.active_workspace_id(), id);
-    assert!(app.shell.workspace_root(id).is_some());
+    let bound = app.shell.workspace_root(id).expect("new root");
+    assert!(
+        bound.contains("seyal-app-ws-create"),
+        "new workspace must bind the picked folder, not Home; got {bound}"
+    );
+    assert_eq!(
+        app.shell.workspace_root(local).map(str::to_owned),
+        Some(prior_local_root),
+        "CreateWorkspace must not mutate Local's bound root"
+    );
     let snap = app.shell.snapshot();
     assert_eq!(
         snap.open_workspaces,
@@ -29,6 +44,16 @@ fn create_workspace_with_minted_id_projects_root() {
     );
     assert_eq!(snap.selected_workspace, id);
     assert_eq!(snap.panes.len(), 1, "new workspace projects one pane tree");
+    let row = snap
+        .workspaces
+        .iter()
+        .find(|ws| ws.id == id)
+        .expect("new workspace row");
+    assert_eq!(
+        row.detail.as_deref(),
+        Some(bound),
+        "snapshot Path/detail must project the bound root_path"
+    );
 }
 
 #[test]
@@ -331,6 +356,60 @@ fn mint_workspace_candidates_include_pane_registry_without_client_handle() {
         vec![raw],
         "CreateWorkspace mint must see Attached pane Controllers before Ready fallback"
     );
+
+    root.pane_client_raws.remove(&pane);
+    let _ = crate::ffi::unregister_client(raw);
+}
+
+/// Non-provisioning Attached handles must not surface ABI 35 and block Ready.
+/// Without a live Runtime socket, Ready fails closed as NoLiveClient (13).
+#[cfg(target_os = "macos")]
+#[test]
+fn create_workspace_mint_skips_non_provisioning_attached_for_ready() {
+    use crate::local::reconstruction_probe_client;
+    use seyal_protocol::local_ipc::framing::Role;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.shell.snapshot().focused_pane;
+    let execution = ExecutionId::from_bytes([0x93; 16]);
+    let attachment = AttachmentId::from_bytes([0x94; 16]);
+    let client = reconstruction_probe_client(Role::Controller, 24, 80, 1, execution, attachment);
+    assert!(
+        !client.execution_provisioning_negotiated(),
+        "probe client must lack CAP_EXECUTION_PROVISIONING"
+    );
+    let registered = crate::ffi::register_app_client(client).expect("register");
+    let raw = registered.raw();
+    root.pane_client_raws.insert(pane, raw);
+    root.client_handle = None;
+    root.wire_client = None;
+
+    let path = std::env::temp_dir().join("seyal-app-ws-mint-skip-cap");
+    let _ = std::fs::create_dir_all(&path);
+    match root.apply(AppAction::CreateWorkspace {
+        root_path: path.to_string_lossy().into_owned(),
+    }) {
+        Ok(()) => {
+            // Live production Runtime accepted the Ready mint — proves mint did
+            // not stop at the non-provisioning Attached handle with ABI 35.
+            assert!(
+                root.shell.snapshot().open_workspaces.len() >= 2,
+                "Ready mint must open the created workspace in the sidebar"
+            );
+        }
+        Err(err) => {
+            assert_ne!(
+                err,
+                AppError::ProvisioningRejected,
+                "non-provisioning Attached must not return ABI 35"
+            );
+            assert_eq!(
+                err,
+                AppError::NoLiveClient,
+                "without Runtime, Ready must fail closed as NoLiveClient"
+            );
+        }
+    }
 
     root.pane_client_raws.remove(&pane);
     let _ = crate::ffi::unregister_client(raw);

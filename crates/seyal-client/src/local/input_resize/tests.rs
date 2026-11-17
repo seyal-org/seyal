@@ -484,6 +484,15 @@ fn runtime_input_backpressure_is_visible_without_fatal_disconnect() {
         }),
         Ok(None)
     );
+    assert_eq!(
+        classify_server_error(ErrorMessage {
+            error_code: ErrorCode::UnknownMessage as u16,
+            offending_message_type: MessageType::MintWorkspaceRequest as u16,
+            detail_code: 0,
+        }),
+        Ok(None),
+        "MintWorkspace refusals must not tear down the live Attached terminal"
+    );
 }
 
 #[test]

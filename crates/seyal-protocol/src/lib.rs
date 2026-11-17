@@ -14,6 +14,8 @@ pub mod framing;
 mod pass7;
 pub mod pass8;
 pub mod runtime_dir;
+#[cfg(target_os = "macos")]
+pub mod workspace_spawn_cwd;
 
 /// Compatibility namespace matching the protocol modules' historical Runtime
 /// location while Runtime and clients migrate to the physical protocol crate.

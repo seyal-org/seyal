@@ -217,6 +217,7 @@ impl ApplicationRoot {
                 crate::shell::ShellError::DuplicateWorkspace => AppError::UnknownChromeWorkspace,
                 _ => AppError::UnknownChromeWorkspace,
             })?;
+        self.stage_workspace_spawn_cwd(id);
         self.drain_shell_effects();
         // Keep the open sidebar row even when the first surface provision fails.
         // cmux / ADR-029: CreateWorkspace must appear in the host window's open
@@ -243,10 +244,27 @@ impl ApplicationRoot {
                 crate::shell::ShellError::InvalidWorkspaceRoot => AppError::InvalidPayload,
                 _ => AppError::UnknownChromeWorkspace,
             })?;
+        self.stage_workspace_spawn_cwd(id);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    /// Stage the bound ADR-028 root so Runtime interactive create can spawn
+    /// with cwd_override (no typed `cd` in the PTY).
+    fn stage_workspace_spawn_cwd(&self, id: WorkspaceId) {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(root) = self.shell.workspace_root(id) else {
+                return;
+            };
+            let _ = seyal_protocol::workspace_spawn_cwd::stage(id, root);
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+        }
     }
 
     pub(super) fn rename_workspace(
@@ -283,42 +301,55 @@ impl ApplicationRoot {
 
     #[cfg(target_os = "macos")]
     fn mint_workspace_id(&mut self) -> Result<WorkspaceId, AppError> {
-        // Prefer every Attached Controller (wire harness, focused client_handle,
-        // and production pane/terminal registry clients). A dedicated Ready
-        // connect while those Controllers already hold slots hits
-        // MAX_CONNECTIONS and surfaces as ABI 35 ProvisioningRejected.
+        // ADR-028 §2.5 Ready cold path first. Blocking mint on the live
+        // Attached Controller runs poll_prepare + sleep on the UI thread and
+        // can leave a fatal Error frame that makes the terminal unresponsive
+        // after CreateWorkspace fails. Ready uses a dedicated short-lived
+        // control connection and never touches the terminal's read buffer.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut last_error = None;
-        let mut tried_attached = false;
+        match crate::local::LocalDisplayClient::mint_workspace_via_ready_connection(deadline) {
+            Ok(id) => return Ok(id),
+            Err(error) => {
+                let ready = super::provisioning_apply::client_error(error);
+                // Only fall back to Attached when Ready could not connect at
+                // all. Capacity / protocol refusals must not poke the live
+                // terminal socket (MAX_CONNECTIONS is Ready's problem).
+                if !matches!(ready, AppError::NoLiveClient) {
+                    return Err(ready);
+                }
+            }
+        }
 
-        if let Some(client) = self.wire_client.as_mut() {
-            tried_attached = true;
-            match client.mint_workspace_blocking(deadline) {
+        // Cold-start / Discovery miss: try provisioning-capable Attached
+        // Controllers with a short deadline so the UI cannot freeze for 5s.
+        let attached_deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
+        let mut last_error = Some(AppError::NoLiveClient);
+
+        if let Some(client) = self.wire_client.as_mut()
+            && client.execution_provisioning_negotiated()
+        {
+            match client.mint_workspace_blocking(attached_deadline) {
                 Ok(id) => return Ok(id),
                 Err(error) => last_error = Some(super::provisioning_apply::client_error(error)),
             }
         }
 
         for handle in self.attached_mint_client_raws() {
-            tried_attached = true;
             match crate::ffi::with_client_mut(handle, |client| {
-                client.mint_workspace_blocking(deadline)
+                if !client.execution_provisioning_negotiated() {
+                    return None;
+                }
+                Some(client.mint_workspace_blocking(attached_deadline))
             }) {
-                Some(Ok(id)) => return Ok(id),
-                Some(Err(error)) => {
+                Some(Some(Ok(id))) => return Ok(id),
+                Some(Some(Err(error))) => {
                     last_error = Some(super::provisioning_apply::client_error(error))
                 }
-                None => last_error = Some(AppError::NoLiveClient),
+                Some(None) | None => {}
             }
         }
 
-        if tried_attached {
-            return Err(last_error.unwrap_or(AppError::NoLiveClient));
-        }
-
-        // Cold start only: ADR-028 §2.5 Ready control connection.
-        crate::local::LocalDisplayClient::mint_workspace_via_ready_connection(deadline)
-            .map_err(super::provisioning_apply::client_error)
+        Err(last_error.unwrap_or(AppError::NoLiveClient))
     }
 
     /// Attached Controllers that can admit MintWorkspace (ADR-028 §2.5).

@@ -163,5 +163,22 @@ pub(crate) fn classify_server_error(
     {
         return Ok(None);
     }
+    // CreateWorkspace mint refusals are per-action. A fatal classify here used
+    // to abort poll_prepare before advancing read_offset, leaving the Error
+    // frame stuck and making the live terminal stop accepting input.
+    if error.offending_message_type == MessageType::MintWorkspaceRequest as u16
+        && matches!(
+            ErrorCode::from_u16(error.error_code),
+            Some(
+                ErrorCode::UnknownMessage
+                    | ErrorCode::InvalidState
+                    | ErrorCode::MalformedPayload
+                    | ErrorCode::PermissionDenied
+                    | ErrorCode::CapacityExceeded
+            )
+        )
+    {
+        return Ok(None);
+    }
     Err(server_error(error.error_code))
 }

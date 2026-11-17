@@ -175,7 +175,18 @@ impl Runtime {
         launch_policy_detail_negotiated: bool,
         workspace_id: WorkspaceId,
     ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
-        let resolution = match crate::launch_policy::resolve_default_interactive() {
+        // ADR-020: cwd is Runtime-owned via LaunchProfileIntent. When
+        // CreateWorkspace staged a trusted ADR-028 root for this admitted
+        // workspace, apply it as cwd_override so the child never needs a
+        // typed `cd` (and CreateExecution still carries no path string).
+        let resolution = match {
+            let (mut intent, _) = crate::launch_policy::load_launch_profile_intent();
+            #[cfg(target_os = "macos")]
+            if let Some(cwd) = seyal_protocol::workspace_spawn_cwd::load(workspace_id) {
+                intent.cwd_override = Some(cwd);
+            }
+            crate::launch_policy::resolve_interactive_intent(&intent)
+        } {
             Ok(resolution) => resolution,
             Err(failure) => return Err(RuntimeError::LaunchPolicy(failure)),
         };
