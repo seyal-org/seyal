@@ -1,6 +1,6 @@
 # #1421 Stale control.sock recovery evidence
 
-Exact head: 
+Exact head: `8bddaf899d76498b592124edb9a4665bb4a69f3a` (implementation); tip `mahboobmonnamd/issue/1421`
 Packaged app: `/Users/mahboob/Developer/seyal-worktrees/seyal-1421/target/macos-derived-data/Build/Products/Debug/Seyal.app`
 Helper identifier: `dev.seyal.Seyal.runtime` (adhoc Debug)
 
