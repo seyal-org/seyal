@@ -57,24 +57,41 @@ impl ApplicationRoot {
 
     /// Runtime-admitted spawn cwd for `id` (BindWorkspaceRoot). Propagates
     /// failure — never silently ignore (#1490 NO-GO).
+    ///
+    /// Unit tests exercise shell/product state without a live Runtime socket
+    /// (same pattern as the NewWindow mint test stub); production remains
+    /// fail-closed on the Ready control path.
+    #[cfg(test)]
     pub(super) fn bind_workspace_spawn_root(
         &self,
         id: WorkspaceId,
         root: &str,
     ) -> Result<(), AppError> {
-        #[cfg(target_os = "macos")]
-        {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            crate::local::LocalDisplayClient::bind_workspace_root_via_ready_connection(
-                id, root, deadline,
-            )
-            .map_err(super::provisioning_apply::client_error)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (id, root);
-            Err(AppError::NoLiveClient)
-        }
+        let _ = (self, id, root);
+        Ok(())
+    }
+
+    #[cfg(all(not(test), target_os = "macos"))]
+    pub(super) fn bind_workspace_spawn_root(
+        &self,
+        id: WorkspaceId,
+        root: &str,
+    ) -> Result<(), AppError> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        crate::local::LocalDisplayClient::bind_workspace_root_via_ready_connection(
+            id, root, deadline,
+        )
+        .map_err(super::provisioning_apply::client_error)
+    }
+
+    #[cfg(all(not(test), not(target_os = "macos")))]
+    pub(super) fn bind_workspace_spawn_root(
+        &self,
+        id: WorkspaceId,
+        root: &str,
+    ) -> Result<(), AppError> {
+        let _ = (self, id, root);
+        Err(AppError::NoLiveClient)
     }
 
     pub(super) fn rename_workspace(
