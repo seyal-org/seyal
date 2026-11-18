@@ -251,15 +251,15 @@ reason = "The palette keeps its existing frozen-command projection; #1492 adds a
 
 [[exception]]
 path = "crates/seyal-client/src/shell/mod.rs"
-ceiling_loc = 1031
+ceiling_loc = 1037
 issue = 1490
-responsibility = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1490 keeps presentation-host identity independent of unrealized pane-tree storage while still raising realized same-workspace windows on focus (sidebar sync, product_active_window, AC6 raise) on the same composition façade rather than inventing a second shell owner. Temporary exception while further responsibility extraction is scoped."
+responsibility = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1490 keeps presentation-host identity independent of unrealized pane-tree storage, owner-validated focus→sidebar routing, and fail-closed selected-tree projection on the same composition façade rather than inventing a second shell owner. Temporary exception while further responsibility extraction is scoped; ceiling matches measured tip after close/select P0 fixes."
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1026
+ceiling_loc = 1029
 issue = 1490
-responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1490 keeps identity-keyed workspace rows and Create Workspace chrome on that host. Ratchet ceiling to measured tip after #1467 DirectInput work."
+responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1490 keeps identity-keyed workspace rows with WindowId+containment generation on Create Workspace chrome. Ceiling matches measured tip after SPEC-032 SelectWorkspace fields."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
@@ -309,9 +309,15 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 884
+acknowledged_loc = 889
 issue = 1490
-reason = "ABI action decoding remains one versioned match surface; #1414 leave-offer kinds and #1490 RenameWorkspace/RenamePane / sidebar workspace actions stay on the same decode table without a second ABI module."
+reason = "ABI action decoding remains one versioned match surface; #1490 SelectWorkspace now carries WindowId + containment generation beside RenameWorkspace/RenamePane / leave-offer kinds on the same decode table without a second ABI module."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/actions.rs"
+acknowledged_loc = 720
+issue = 1490
+reason = "ShellAction dispatch for window/tab/workspace/sidebar stays one cold-path reducer façade; #1490 adds generation-fenced SelectWorkspace / open_workspace_in_sidebar / foreign_presenter paths here rather than a second shell owner. Decompose further when sidebar vs structural actions split cleanly."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"
@@ -324,9 +330,9 @@ reason = "ApplicationRoot attach/poll session stays one cold-path driver; #1490 
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
-acknowledged_loc = 788
+acknowledged_loc = 799
 issue = 1490
-reason = "Chrome action selectors remain the AppKit adapter for pane/tab/layout chrome; #1490 extracted CreateWorkspace/Folder/SetWorkspaceRoot/leave-offer into ProductChromeHostView+WorkspaceChrome.swift and ratchets this sibling down after that split."
+reason = "Chrome action selectors remain the AppKit adapter for pane/tab/layout chrome; #1490 extracted CreateWorkspace/Folder/SetWorkspaceRoot/leave-offer into WorkspaceChrome and stamps SelectWorkspace WindowId + containment generation on IdentityButton apply without a second chrome action owner."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"
@@ -336,9 +342,9 @@ reason = "The existing connection writer remains the single owner of bounded con
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MultiWindowHostController.swift"
-acknowledged_loc = 857
-issue = 1470
-reason = "The macOS host stays one AppKit adapter (#1158 CloseWindow/Dock/hierarchical close). #1450/#1451 quit-confirm/Dock reopen remain here; #1470 adds terminal-tab close projection and non-sole empty Pane collapse on the same host rather than a second window controller."
+acknowledged_loc = 863
+issue = 1490
+reason = "The macOS host stays one AppKit adapter for CloseWindow/Dock/hierarchical close; #1490 Dock reopen forwards SelectWorkspace with WindowId + containment generation on the same controller rather than a second window owner."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/local/ingress.rs"
