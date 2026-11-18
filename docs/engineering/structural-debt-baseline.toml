@@ -249,11 +249,11 @@ acknowledged_loc = 911
 issue = 1492
 reason = "The palette keeps its existing frozen-command projection; #1492 adds a Raw-only regression proving presentation choices stay absent while Blocks are suspended."
 
-[[exception]]
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-ceiling_loc = 1037
+acknowledged_loc = 877
 issue = 1490
-responsibility = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1490 keeps presentation-host identity independent of unrealized pane-tree storage, owner-validated focus→sidebar routing, and fail-closed selected-tree projection on the same composition façade rather than inventing a second shell owner. Temporary exception while further responsibility extraction is scoped; ceiling matches measured tip after close/select P0 fixes."
+reason = "ShellState composition façade after #1490 extracted sidebar_ops, focus_commit, and dispatch; remaining LOC is identity/lookup/seed ownership. Ceiling ratcheted down from the prior >1000 exception."
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -313,11 +313,8 @@ acknowledged_loc = 889
 issue = 1490
 reason = "ABI action decoding remains one versioned match surface; #1490 SelectWorkspace now carries WindowId + containment generation beside RenameWorkspace/RenamePane / leave-offer kinds on the same decode table without a second ABI module."
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/shell/actions.rs"
-acknowledged_loc = 720
-issue = 1490
-reason = "ShellAction dispatch for window/tab/workspace/sidebar stays one cold-path reducer façade; #1490 adds generation-fenced SelectWorkspace / open_workspace_in_sidebar / foreign_presenter paths here rather than a second shell owner. Decompose further when sidebar vs structural actions split cleanly."
+# shell/actions.rs dropped below review_loc after #1490 extracted sidebar_ops;
+# no cohesion acknowledgement remains.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"

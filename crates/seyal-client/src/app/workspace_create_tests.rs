@@ -44,6 +44,10 @@ fn create_workspace_with_minted_id_projects_root() {
     );
     assert_eq!(snap.selected_workspace, id);
     assert_eq!(snap.panes.len(), 1, "new workspace projects one pane tree");
+    // No live Runtime: provision queues pending (Ok) so last_error stays clear.
+    // Production create_workspace still assigns Err to last_error without
+    // rolling back this sidebar row (#1490 recoverable surface).
+    assert_eq!(app.snapshot().last_error, None);
     let row = snap
         .workspaces
         .iter()

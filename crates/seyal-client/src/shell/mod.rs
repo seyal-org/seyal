@@ -8,13 +8,16 @@
 mod action_types;
 mod actions;
 mod close;
+mod dispatch;
 mod effects;
 mod equalize;
+mod focus_commit;
 mod focus_direction;
 mod focus_history;
 mod inventory;
 mod migration;
 mod pane_ops;
+mod sidebar_ops;
 mod snapshot;
 mod terminal_tabs;
 mod tree;
@@ -459,7 +462,7 @@ impl ShellState {
             .unwrap_or(self.last_active_workspace)
     }
 
-    fn product_active_window(&self) -> Option<&Window> {
+    pub(in crate::shell) fn product_active_window(&self) -> Option<&Window> {
         if let Some(host) = self.sidebar_host
             && let Some(window) = self
                 .workspaces
@@ -710,79 +713,6 @@ impl ShellState {
             .map(|item| item.focused)
     }
 
-    /// Atomically set Workspace + Tab + Pane focus. Validates composition
-    /// before any write so a failure leaves prior focus unchanged.
-    pub fn commit_focus(
-        &mut self,
-        workspace: WorkspaceId,
-        tab: TabId,
-        pane: PaneId,
-    ) -> Result<(), ShellError> {
-        if !self.contains_workspace(workspace) {
-            return Err(ShellError::UnknownWorkspace);
-        }
-        let Some(owner) = self.workspace_of_tab(tab) else {
-            return Err(ShellError::UnknownTab);
-        };
-        if owner != workspace {
-            return Err(ShellError::UnknownTab);
-        }
-        let Some((pane_workspace, pane_tab)) = self.location_of_pane(pane) else {
-            return Err(ShellError::UnknownPane);
-        };
-        if pane_workspace != workspace
-            || pane_tab != tab
-            || !self.tab_contains_leaf(workspace, tab, pane)
-        {
-            return Err(ShellError::UnknownPane);
-        }
-        let workspace_mut = self.workspace_mut(workspace)?;
-        workspace_mut.select_tab(tab)?;
-        let active_tab = workspace_mut.active_tab_mut()?;
-        if active_tab.zoomed.is_some_and(|zoomed| zoomed != pane) {
-            active_tab.zoomed = None;
-        }
-        active_tab.focused = pane;
-        self.focus_history.record(pane);
-        self.sync_sidebar_after_focus(workspace, tab);
-        self.last_active_workspace = workspace;
-        self.last_error = None;
-        Ok(())
-    }
-
-    fn sync_sidebar_after_focus(&mut self, workspace: WorkspaceId, tab: TabId) {
-        let Some(host) = self.sidebar_host else {
-            return;
-        };
-        if self.find_window(host).is_none() {
-            return;
-        }
-        let selected = self
-            .product_active_window()
-            .map(|window| window.selected_workspace);
-        if selected == Some(workspace) {
-            // Same selected workspace: raise another realized window that
-            // hosts this tab. Never retarget sidebar_host to unrealized
-            // pane-tree storage (foreign workspace projection, #1490).
-            if let Some(target) = self.window_of_tab(tab)
-                && target != host
-            {
-                let realized = self
-                    .find_window(target)
-                    .and_then(|owner| owner.window(target))
-                    .is_some_and(|window| window.realized);
-                if realized {
-                    self.sidebar_host = Some(target);
-                }
-            }
-            return;
-        }
-        // Owner-validated select path only — never bypass foreign_presenter /
-        // membership generation via present_workspace_on_host (#1490).
-        let generation = self.containment_generation;
-        let _ = self.open_workspace_in_sidebar(host, workspace, generation);
-    }
-
     pub fn snapshot(&self) -> ShellSnapshot {
         self.build_snapshot()
     }
@@ -805,101 +735,7 @@ impl ShellState {
         }
     }
 
-    fn dispatch(&mut self, action: ShellAction) -> Result<(), ShellError> {
-        match action {
-            ShellAction::CreateWindow { .. }
-            | ShellAction::ActivateWorkspace { .. }
-            | ShellAction::SelectWorkspace { .. }
-            | ShellAction::SelectWindow { .. }
-            | ShellAction::NativeWindowBecameKey { .. }
-            | ShellAction::ObserveWindowBecameKey { .. }
-            | ShellAction::SelectTab { .. }
-            | ShellAction::CreateTab { .. }
-            | ShellAction::CycleWindow { .. }
-            | ShellAction::CycleTab { .. }
-            | ShellAction::MoveTabBefore { .. }
-            | ShellAction::MoveTabToWindow { .. }
-            | ShellAction::MoveTabToNewWindow { .. }
-            | ShellAction::RemoveWorkspace { .. } => self.dispatch_w2a(action),
-            ShellAction::CloseWindow { .. }
-            | ShellAction::CloseTab { .. }
-            | ShellAction::ClosePane { .. } => self.dispatch_close(action),
-            ShellAction::SplitFocused {
-                axis,
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| {
-                    let focused = self.focused_pane_id()?;
-                    self.split_pane(focused, axis).map(|_| ())
-                }),
-            ShellAction::SplitPane {
-                id,
-                axis,
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.split_pane(id, axis).map(|_| ())),
-            ShellAction::FocusPane { id } => self.focus_pane(id),
-            ShellAction::ZoomPane { id } => self.zoom_pane(id),
-            ShellAction::Unzoom => self.unzoom(),
-            ShellAction::SwapPanes {
-                a,
-                b,
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.swap_panes(a, b)),
-            ShellAction::MovePaneBeside {
-                pane,
-                neighbor,
-                side,
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.move_pane_beside(pane, neighbor, side)),
-            ShellAction::FocusDirection { direction } => self.focus_direction(direction),
-            ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
-            ShellAction::EqualizeTab {
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.equalize_tab()),
-            ShellAction::EqualizeFocused {
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.equalize_focused()),
-            ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
-            ShellAction::NewTerminalTab {
-                pane,
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.new_terminal_tab(pane).map(|_| ())),
-            ShellAction::SelectTerminalTab { pane, terminal_tab } => {
-                self.select_terminal_tab(pane, terminal_tab)
-            }
-            ShellAction::BindTerminalExecution {
-                pane,
-                terminal_tab,
-                execution,
-            } => self.bind_terminal_execution(pane, terminal_tab, execution),
-            ShellAction::UnbindTerminal(pane, terminal_tab) => self.unbind(pane, terminal_tab),
-            ShellAction::CloseTerminalTab {
-                pane,
-                terminal_tab,
-                containment_generation,
-            } => self
-                .require_containment_generation(containment_generation)
-                .and_then(|()| self.close_terminal_tab(pane, terminal_tab)),
-            ShellAction::RecordUnpresented { .. }
-            | ShellAction::ForgetUnpresented { .. }
-            | ShellAction::AdoptExecution { .. } => self.dispatch_unpresented(action),
-        }
-    }
-
-    fn focus_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
+    pub(super) fn focus_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace_id())?;
         let tab = workspace.active_tab_mut()?;
         if !tab.panes.contains_key(&id) {
@@ -913,7 +749,7 @@ impl ShellState {
         Ok(())
     }
 
-    fn zoom_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
+    pub(super) fn zoom_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace_id())?;
         let tab = workspace.active_tab_mut()?;
         if !tab.panes.contains_key(&id) {
@@ -924,7 +760,7 @@ impl ShellState {
         Ok(())
     }
 
-    fn unzoom(&mut self) -> Result<(), ShellError> {
+    pub(super) fn unzoom(&mut self) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace_id())?;
         let tab = workspace.active_tab_mut()?;
         if tab.zoomed.is_none() {
@@ -934,7 +770,11 @@ impl ShellState {
         Ok(())
     }
 
-    fn set_split_ratio(&mut self, pane: PaneId, ratio: SplitRatio) -> Result<(), ShellError> {
+    pub(super) fn set_split_ratio(
+        &mut self,
+        pane: PaneId,
+        ratio: SplitRatio,
+    ) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace_id())?;
         let tab = workspace.active_tab_mut()?;
         if !tab.panes.contains_key(&pane) {
@@ -947,7 +787,7 @@ impl ShellState {
         }
     }
 
-    fn bind_execution(
+    pub(super) fn bind_execution(
         &mut self,
         pane_id: PaneId,
         execution: ExecutionId,
@@ -959,7 +799,7 @@ impl ShellState {
         self.bind_terminal_execution(pane_id, terminal_tab, execution)
     }
 
-    fn focused_pane_id(&self) -> Result<PaneId, ShellError> {
+    pub(super) fn focused_pane_id(&self) -> Result<PaneId, ShellError> {
         Ok(self.focused_pane()?.id)
     }
 

@@ -121,30 +121,18 @@ impl ApplicationRoot {
     /// Remove a Window's chrome. Bound panes detach only; executions stay live
     /// and enumerable. Outstanding create intents are marked dead for §6.3.
     ///
-    /// Disposition uses Shell's per-pane workspace ownership — never the
-    /// projected selected tree alone (SPEC-032 / #1490 close ownership).
+    /// Presentation disposal follows Shell's transactional per-workspace
+    /// disposition (`take_removed_tab_panes` / released bindings) — never the
+    /// host's projected selected tree alone (SPEC-032 / #1490).
     pub(super) fn close_window(
         &mut self,
         id: WindowId,
         containment_generation: u64,
     ) -> Result<(), AppError> {
         let before = self.shell.snapshot();
-        let removed_window = before
-            .windows
-            .iter()
-            .find(|window| window.id == id)
-            .ok_or(AppError::UnknownWindow)?;
-        // Owner storage tabs only (not a foreign selected projection).
-        let owner_workspace = removed_window.workspace;
-        let removed_tabs: Vec<TabId> = if removed_window.selected_workspace == owner_workspace {
-            removed_window.tabs.iter().map(|tab| tab.id).collect()
-        } else {
-            // Selected foreign tree is detach-only; owner tab ids are not in
-            // the projection. Focus disposal below keys off destroyed owner
-            // identity via was_active + successor activation instead.
-            Vec::new()
-        };
-        let removed_active_tab = removed_window.active_tab;
+        if !before.windows.iter().any(|window| window.id == id) {
+            return Err(AppError::UnknownWindow);
+        }
         let was_active = before.active_window == Some(id);
         self.shell
             .apply(ShellAction::CloseWindow {
@@ -153,15 +141,11 @@ impl ApplicationRoot {
             })
             .map_err(close_window_error)?;
         self.drain_shell_effects();
+        // Shell already recorded owner + every listed foreign workspace's
+        // pane/terminal/execution ownership; dispose from that alone.
         let removed = self.shell.take_removed_tab_panes();
         self.dispose_removed_panes(removed)?;
         let after = self.shell.snapshot();
-        for tab in removed_tabs {
-            self.record_destroyed_tab_focus(
-                tab,
-                was_active && tab == removed_active_tab && after.active_window.is_some(),
-            );
-        }
         if was_active && after.active_window.is_some() {
             self.activate_focused_pane_authority();
         }

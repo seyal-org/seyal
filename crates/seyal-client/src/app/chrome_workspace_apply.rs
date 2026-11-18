@@ -26,9 +26,10 @@ impl ApplicationRoot {
         // Keep the open sidebar row even when the first surface provision fails.
         // cmux / ADR-029: CreateWorkspace must appear in the host window's open
         // list; unbound recovery owns the terminal surface, not RemoveWorkspace.
-        if let Err(error) = self.begin_provisioning_for_focused_unbound_terminal() {
-            self.last_error = Some(error);
-        }
+        // Surface the failure on AppSnapshot.last_error so chrome can show
+        // recoverable UI without rolling back the workspace row (#1490).
+        let provision_error = self.begin_provisioning_for_focused_unbound_terminal().err();
+        self.last_error = provision_error;
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         let _ = self
@@ -137,6 +138,9 @@ impl ApplicationRoot {
             .create_workspace(id, root_path, self.shell.containment_generation())
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         self.drain_shell_effects();
+        // Mirror production: keep the sidebar row and surface provision failure
+        // on AppSnapshot.last_error for recoverable chrome (#1490).
+        self.last_error = self.begin_provisioning_for_focused_unbound_terminal().err();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
