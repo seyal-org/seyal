@@ -10,6 +10,7 @@ use crate::{
         connection::ConnectionState as LocalIpcConnState,
         framing::{
             self, CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode,
+            BindWorkspaceRootRequest, BindWorkspaceRootResult, BindWorkspaceRootResultCode,
             ErrorCode, MessageType, MintWorkspaceRequest, MintWorkspaceResult,
             MintWorkspaceResultCode, CAP_EXECUTION_PROVISIONING,
         },
@@ -461,6 +462,93 @@ impl Runtime {
         let _ = self.send_mandatory_frame(
             token,
             framing::encode_frame(MessageType::MintWorkspaceResult, &message.encode()),
+        );
+    }
+
+    pub(super) fn handle_bind_workspace_root_request(&mut self, token: u64, payload: &[u8]) {
+        let negotiated = self.local_ipc.as_ref().is_some_and(|state| {
+            state
+                .connections
+                .get(&token)
+                .is_some_and(|meta| meta.client_capabilities & CAP_EXECUTION_PROVISIONING != 0)
+        });
+        if !negotiated {
+            self.send_error(
+                token,
+                ErrorCode::UnknownMessage,
+                MessageType::BindWorkspaceRootRequest as u16,
+            );
+            return;
+        }
+
+        let Some(current_state) = self
+            .local_ipc
+            .as_ref()
+            .and_then(|state| state.server.state_of(token))
+        else {
+            return;
+        };
+        if !matches!(
+            current_state,
+            LocalIpcConnState::Ready | LocalIpcConnState::Attached
+        ) {
+            self.send_error(
+                token,
+                ErrorCode::InvalidState,
+                MessageType::BindWorkspaceRootRequest as u16,
+            );
+            return;
+        }
+
+        let Ok(request) = BindWorkspaceRootRequest::decode(payload) else {
+            self.send_error(
+                token,
+                ErrorCode::MalformedPayload,
+                MessageType::BindWorkspaceRootRequest as u16,
+            );
+            return;
+        };
+
+        let id_ok = self.local_ipc.as_mut().is_some_and(|state| {
+            let Some(meta) = state.connections.get_mut(&token) else {
+                return false;
+            };
+            if request.request_id <= meta.last_provisioning_request_id {
+                false
+            } else {
+                meta.last_provisioning_request_id = request.request_id;
+                true
+            }
+        });
+        if !id_ok {
+            let message = BindWorkspaceRootResult {
+                workspace_id: 0,
+                request_id: request.request_id,
+                result_code: BindWorkspaceRootResultCode::Error(ErrorCode::MalformedPayload),
+            };
+            let _ = self.send_mandatory_frame(
+                token,
+                framing::encode_frame(MessageType::BindWorkspaceRootResult, &message.encode()),
+            );
+            return;
+        }
+
+        let workspace = WorkspaceId::from_u128(request.workspace_id);
+        let result = match self.bind_workspace_spawn_root(workspace, &request.root_path) {
+            Ok(()) => BindWorkspaceRootResult {
+                workspace_id: request.workspace_id,
+                request_id: request.request_id,
+                result_code: BindWorkspaceRootResultCode::Bound,
+            },
+            Err(code) => BindWorkspaceRootResult {
+                workspace_id: 0,
+                request_id: request.request_id,
+                result_code: BindWorkspaceRootResultCode::Error(code),
+            },
+        };
+        let _ = self.send_mandatory_frame(
+            token,
+            framing::encode_frame(MessageType::BindWorkspaceRootResult, &result.encode()),
         );
     }
 }

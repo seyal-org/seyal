@@ -1,6 +1,6 @@
 //! Pane-local terminal-tab selection and execution bindings.
 
-use seyal_core::{ExecutionId, PaneId, TerminalTabId};
+use seyal_core::{ExecutionId, PaneId, TerminalTabId, WorkspaceId};
 
 use super::{ShellError, ShellState};
 
@@ -22,7 +22,9 @@ impl ShellState {
             .ok_or(ShellError::UnknownTerminalTab)
     }
 
-    pub fn take_released_executions(&mut self) -> Vec<(PaneId, TerminalTabId, ExecutionId)> {
+    pub fn take_released_executions(
+        &mut self,
+    ) -> Vec<(PaneId, TerminalTabId, ExecutionId, WorkspaceId)> {
         std::mem::take(&mut self.last_released_executions)
     }
 

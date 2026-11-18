@@ -1,7 +1,9 @@
-//! Cold-path CreateExecution / TerminateExecution / MintWorkspace wire helpers.
+//! Cold-path CreateExecution / TerminateExecution / MintWorkspace /
+//! BindWorkspaceRoot wire helpers.
 //!
-//! Never called from the display/frame hot path. Payloads are fixed-width and
-//! carry no program, argv, environment, cwd, or terminal content.
+//! Never called from the display/frame hot path. CreateExecution still carries
+//! no program/argv/env/cwd; BindWorkspaceRoot is the admitted Runtime spawn-cwd
+//! control path.
 
 use std::time::Instant;
 
@@ -9,6 +11,7 @@ use seyal_core::WorkspaceId;
 use seyal_runtime::{
     local_ipc::framing::{
         encode_frame, CreateExecutionRequest, CreateExecutionResult, ErrorMessage, MessageType,
+        BindWorkspaceRootRequest, BindWorkspaceRootResult, BindWorkspaceRootResultCode,
         MintWorkspaceRequest, MintWorkspaceResult, MintWorkspaceResultCode,
         TerminateExecutionRequest, TerminateExecutionResult, CAP_EXECUTION_PROVISIONING,
     },
@@ -309,6 +312,59 @@ impl LocalDisplayClient {
         match result.result_code {
             MintWorkspaceResultCode::Minted => Ok(WorkspaceId::from_u128(result.workspace_id)),
             MintWorkspaceResultCode::Error(_) => Err(ClientError::Protocol),
+        }
+    }
+
+    /// Admit spawn cwd for `id` on a dedicated Ready control connection.
+    ///
+    /// Same-user Runtime socket trust boundary. Failures propagate — callers
+    /// must not ignore the Result (#1490 NO-GO).
+    pub fn bind_workspace_root_via_ready_connection(
+        id: WorkspaceId,
+        root: &str,
+        deadline: Instant,
+    ) -> Result<(), ClientError> {
+        let socket_path = canonical_control_socket_path()?;
+        let mut stream = connect_stream_until(&socket_path, deadline)?;
+        let exchange = hello_until_with_legacy_key_fallback(
+            &mut stream,
+            || connect_stream_until(&socket_path, deadline),
+            false,
+            false,
+            deadline,
+        )?;
+        if !provisioning_negotiated(exchange.server.server_capabilities)
+            || exchange.client_capabilities & CAP_EXECUTION_PROVISIONING == 0
+        {
+            return Err(ClientError::UnsupportedInteractiveCapability);
+        }
+        let request = BindWorkspaceRootRequest {
+            request_id: 1,
+            workspace_id: id.to_u128(),
+            root_path: root.to_owned(),
+        };
+        send_control_until(
+            &mut stream,
+            MessageType::BindWorkspaceRootRequest,
+            &request.encode(),
+            deadline,
+        )?;
+        let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)?;
+        if kind == MessageType::Error {
+            let error = ErrorMessage::decode(&payload).map_err(|_| ClientError::Protocol)?;
+            return Err(server_error(error.error_code));
+        }
+        if kind != MessageType::BindWorkspaceRootResult {
+            return Err(ClientError::Protocol);
+        }
+        let result =
+            BindWorkspaceRootResult::decode(&payload).map_err(|_| ClientError::Protocol)?;
+        if result.request_id != 1 {
+            return Err(ClientError::Protocol);
+        }
+        match result.result_code {
+            BindWorkspaceRootResultCode::Bound => Ok(()),
+            BindWorkspaceRootResultCode::Error(_) => Err(ClientError::Protocol),
         }
     }
 

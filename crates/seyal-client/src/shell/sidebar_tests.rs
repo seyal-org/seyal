@@ -462,3 +462,233 @@ fn migration_keeps_active_tab_and_unpresents_other_tab_executions() {
     let unpresented = shell.unpresented_executions_for_test();
     assert!(unpresented.contains(&(drop_exec, workspace)));
 }
+
+#[test]
+fn close_host_clears_foreign_presenting_window_and_releases_all_listed() {
+    let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
+    let host = shell.product_window_id().unwrap();
+    let owner = WorkspaceId::m001_default();
+    let other = other_workspace();
+    let owner_pane = shell.snapshot().focused_pane;
+    let owner_exec = ExecutionId::from_bytes([0xa1; 16]);
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: owner_pane,
+            execution: owner_exec,
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::ActivateWorkspace {
+            workspace: other,
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("open foreign on host");
+    assert_eq!(shell.snapshot().selected_workspace, other);
+    assert_eq!(
+        shell.workspace(other).unwrap().presenting_window,
+        Some(host)
+    );
+    let foreign_pane = shell.snapshot().focused_pane;
+    let foreign_exec = ExecutionId::from_bytes([0xa2; 16]);
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: foreign_pane,
+            execution: foreign_exec,
+        })
+        .unwrap();
+    let generation = shell.containment_generation();
+    let _ = shell.take_effects();
+    shell
+        .apply(ShellAction::CloseWindow {
+            id: host,
+            containment_generation: generation,
+        })
+        .expect("close host");
+    assert!(shell.snapshot().windows.is_empty());
+    assert_eq!(shell.workspace(other).unwrap().presenting_window, None);
+    // Foreign storage tree retained; owner host storage destroyed.
+    assert!(shell.pane_execution(foreign_pane).is_ok());
+    assert!(shell.pane_execution(owner_pane).is_err());
+    let released = shell.take_released_executions();
+    assert!(released
+        .iter()
+        .any(|(pane, _, exec, ws)| *pane == owner_pane && *exec == owner_exec && *ws == owner));
+    assert!(released
+        .iter()
+        .any(|(pane, _, exec, ws)| *pane == foreign_pane && *exec == foreign_exec && *ws == other));
+    assert!(shell
+        .take_effects()
+        .iter()
+        .all(|effect| { !matches!(effect, ShellNativeEffect::OrderFrontMakeKey { .. }) }));
+}
+
+#[test]
+fn select_workspace_rejects_stale_generation_and_unlisted_id() {
+    let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
+    let host = shell.product_window_id().unwrap();
+    let other = other_workspace();
+    shell
+        .apply(ShellAction::ActivateWorkspace {
+            workspace: other,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    let generation = shell.containment_generation();
+    let before = shell.containment_fingerprint();
+    assert_eq!(
+        shell.apply(ShellAction::SelectWorkspace {
+            window: host,
+            workspace: other,
+            containment_generation: generation.wrapping_sub(1),
+        }),
+        Err(ShellError::StaleContainment)
+    );
+    assert_eq!(shell.containment_fingerprint(), before);
+    let missing = WorkspaceId::from_bytes([0xee; 16]);
+    shell.workspaces.push(super::workspace::Workspace {
+        id: missing,
+        name: "Ghost".to_owned(),
+        root_path: None,
+        detail: None,
+        attention: false,
+        windows: Vec::new(),
+        active_window: None,
+        presenting_window: None,
+    });
+    assert_eq!(
+        shell.apply(ShellAction::SelectWorkspace {
+            window: host,
+            workspace: missing,
+            containment_generation: shell.containment_generation(),
+        }),
+        Err(ShellError::UnknownWorkspace)
+    );
+}
+
+#[test]
+fn window_snapshot_fail_closed_when_foreign_storage_empty() {
+    let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
+    let host = shell.product_window_id().unwrap();
+    let other = other_workspace();
+    shell
+        .apply(ShellAction::ActivateWorkspace {
+            workspace: other,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    // Corrupt foreign storage to empty tabs while selected.
+    {
+        let storage = shell
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == other)
+            .and_then(|workspace| workspace.active_window)
+            .expect("storage");
+        let window = shell
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == other)
+            .and_then(|workspace| workspace.window_mut(storage))
+            .expect("storage window");
+        window.tabs.clear();
+    }
+    let snap = shell.snapshot();
+    assert_eq!(snap.selected_workspace, other);
+    let projected = snap
+        .windows
+        .iter()
+        .find(|window| window.id == host)
+        .expect("host");
+    assert_eq!(projected.selected_workspace, other);
+    assert!(
+        projected.tabs.is_empty(),
+        "must not fall back to owner tree when foreign storage is empty"
+    );
+    assert_ne!(projected.workspace, other);
+}
+
+#[test]
+fn migration_collapses_multi_window_workspace_to_one_tree() {
+    let workspace = WorkspaceId::m001_default();
+    let first_window = WindowId::new();
+    let second_window = WindowId::new();
+    let first_tab = TabId::new();
+    let second_tab = TabId::new();
+    let first_pane = PaneId::new();
+    let second_pane = PaneId::new();
+    let mut shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: workspace,
+            name: "Local".to_owned(),
+            detail: None,
+            attention: false,
+            active_window: first_window,
+            windows: vec![
+                ShellWindowSeed {
+                    id: first_window,
+                    active_tab: first_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: first_tab,
+                        title: "Keep".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: first_pane,
+                            title: "Pane 1".to_owned(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
+                },
+                ShellWindowSeed {
+                    id: second_window,
+                    active_tab: second_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: second_tab,
+                        title: "Drop".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: second_pane,
+                            title: "Pane 1".to_owned(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
+                },
+            ],
+        }],
+        workspace,
+        false,
+        true,
+        true,
+    )
+    .expect("fixture");
+    let drop_exec = ExecutionId::from_bytes([0x2c; 16]);
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: second_window,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: second_pane,
+            execution: drop_exec,
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: first_window,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    shell.migrate_seyal_tabs_to_sidebar_containment();
+    let item = shell.workspace(workspace).unwrap();
+    assert_eq!(item.windows.len(), 1);
+    assert_eq!(item.windows[0].id, first_window);
+    assert_eq!(item.presenting_window, Some(first_window));
+    assert!(shell.pane_execution(second_pane).is_err());
+    assert!(shell
+        .unpresented_executions_for_test()
+        .contains(&(drop_exec, workspace)));
+}

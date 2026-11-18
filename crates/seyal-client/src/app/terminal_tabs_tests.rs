@@ -1,5 +1,6 @@
 use crate::app::{AppAction, ApplicationRoot};
 use crate::keybinding::{BindingContext, WorkspaceCommand, WorkspaceCommandId};
+use seyal_core::WindowId;
 
 #[test]
 fn new_terminal_action_adds_tab_to_focused_pane_without_splitting() {
@@ -180,8 +181,13 @@ fn dock_reopen_after_closing_split_terminals_one_by_one() {
         .expect("close next terminal");
     }
 
-    root.apply(AppAction::SelectWorkspace { id: workspace })
-        .expect("Dock ActivateWorkspace after multi-close must create");
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::SelectWorkspace {
+        window: WindowId::from_bytes([0; 16]),
+        id: workspace,
+        containment_generation: generation,
+    })
+    .expect("Dock ActivateWorkspace after multi-close must create");
     assert_eq!(root.snapshot().shell.windows.len(), 1);
     assert!(
         !root.snapshot().shell.panes.is_empty(),

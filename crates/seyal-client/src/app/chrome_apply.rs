@@ -157,43 +157,82 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    pub(super) fn select_workspace(&mut self, id: WorkspaceId) -> Result<(), AppError> {
-        // ActivateWorkspace create path only: empty workspaces need #994
-        // provisioning. Sidebar open/select of an existing pane tree must not
-        // re-provision.
+    pub(super) fn select_workspace(
+        &mut self,
+        window: WindowId,
+        id: WorkspaceId,
+        containment_generation: u64,
+    ) -> Result<(), AppError> {
+        // SPEC-032: named window + generation. Listed → select-only; absent →
+        // OpenWorkspace semantics on that host. Empty workspaces still need
+        // #994 provisioning after open.
         let snap = self.shell.snapshot();
         let previous_selected = snap.selected_workspace;
         let previous_open = snap.open_workspaces.clone();
-        let host = self.shell.product_window_id().ok();
-        let needs_bootstrap = !snap.open_workspaces.contains(&id)
-            && !snap.windows.iter().any(|window| window.workspace == id);
-        self.shell
-            .apply_activate_workspace(id)
-            .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        let listed = snap
+            .windows
+            .iter()
+            .find(|item| item.id == window)
+            .is_some_and(|item| item.open_workspaces.contains(&id));
+        let needs_bootstrap = !listed && !snap.windows.iter().any(|item| item.workspace == id);
+        if listed {
+            self.shell
+                .apply(ShellAction::SelectWorkspace {
+                    window,
+                    workspace: id,
+                    containment_generation,
+                })
+                .map_err(|error| match error {
+                    crate::shell::ShellError::StaleContainment => AppError::StaleContainment,
+                    _ => AppError::UnknownChromeWorkspace,
+                })?;
+        } else {
+            self.shell
+                .apply(ShellAction::ActivateWorkspace {
+                    workspace: id,
+                    containment_generation,
+                })
+                .map_err(|error| match error {
+                    crate::shell::ShellError::StaleContainment => AppError::StaleContainment,
+                    _ => AppError::UnknownChromeWorkspace,
+                })?;
+        }
         self.drain_shell_effects();
+        // Re-admit spawn cwd before bootstrap create so open/select uses the
+        // bound ADR-028 root (BindWorkspaceRoot / #1490). Propagate on
+        // bootstrap; ignore only when no new surface is being created.
+        if let Some(root) = self.shell.workspace_root(id) {
+            match self.bind_workspace_spawn_root(id, root) {
+                Ok(()) => {}
+                Err(error) if needs_bootstrap => return Err(error),
+                Err(_) => {}
+            }
+        }
         if needs_bootstrap
             && let Err(error) = self.begin_provisioning_for_focused_unbound_terminal()
         {
             // Rollback only the newly opened row/intent. Never CloseWindow the
             // product host — it may still present unrelated open workspaces.
-            if let Some(host) = host {
-                let after = self.shell.snapshot();
-                if after.open_workspaces.len() > 1 && after.open_workspaces.contains(&id) {
-                    let _ = self
-                        .shell
-                        .apply(crate::shell::ShellAction::RemoveWorkspace {
-                            window: host,
-                            workspace: id,
-                            containment_generation: self.shell.containment_generation(),
-                        });
-                }
-                if previous_open.contains(&previous_selected)
-                    && self.shell.snapshot().selected_workspace != previous_selected
-                {
-                    let _ = self.shell.apply_activate_workspace(previous_selected);
-                }
-                self.drain_shell_effects();
+            let after = self.shell.snapshot();
+            if after.open_workspaces.len() > 1 && after.open_workspaces.contains(&id) {
+                let _ = self
+                    .shell
+                    .apply(crate::shell::ShellAction::RemoveWorkspace {
+                        window,
+                        workspace: id,
+                        containment_generation: self.shell.containment_generation(),
+                    });
             }
+            if previous_open.contains(&previous_selected)
+                && self.shell.snapshot().selected_workspace != previous_selected
+            {
+                let _ = self.shell.apply(ShellAction::SelectWorkspace {
+                    window,
+                    workspace: previous_selected,
+                    containment_generation: self.shell.containment_generation(),
+                });
+            }
+            self.drain_shell_effects();
             self.last_error = Some(error);
             return Err(error);
         }
@@ -450,6 +489,7 @@ impl ApplicationRoot {
                 .map(str::to_owned)
                 .ok_or(AppError::InvalidPayload)?;
             let id = self.mint_workspace_id_for_new_window()?;
+            self.bind_workspace_spawn_root(id, &root)?;
             self.shell
                 .record_workspace(id, root)
                 .map_err(|error| match error {

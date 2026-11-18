@@ -834,7 +834,10 @@ final class ProductChromeHostView: NSView {
                         action: #selector(selectWorkspace(_:)),
                         kind: UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue),
                         idLo: row.id_lo,
-                        idHi: row.id_hi
+                        idHi: row.id_hi,
+                        windowLo: shell.active_window_lo,
+                        windowHi: shell.active_window_hi,
+                        containmentGeneration: shell.containment_generation
                     )
                 )
             }

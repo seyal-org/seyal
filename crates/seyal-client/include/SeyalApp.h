@@ -41,6 +41,12 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_SELECT_AGENT = 16,
     SEYAL_APP_ACTION_OPEN_ATTENTION = 17,
     SEYAL_APP_ACTION_REPLACE_CHROME = 18,
+    /*
+     * SELECT_WORKSPACE (SPEC-032 §3.1 / #1490):
+     * target_execution_lo/hi = WorkspaceId;
+     * target_attachment_lo/hi = WindowId;
+     * target_generation = containment_generation.
+     */
     SEYAL_APP_ACTION_SELECT_WORKSPACE = 19,
     SEYAL_APP_ACTION_SELECT_TAB = 20,
     SEYAL_APP_ACTION_FOCUS_PANE = 21,

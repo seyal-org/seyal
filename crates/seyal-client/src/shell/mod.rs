@@ -282,10 +282,11 @@ pub struct ShellState {
     /// Execution released by the most recent successful `ClosePane`, if any.
     /// Portable provisioning records it as unreferenced (ADR-017 §6.1).
     last_released_execution: Option<(PaneId, ExecutionId)>,
-    last_released_executions: Vec<(PaneId, TerminalTabId, ExecutionId)>,
+    last_released_executions: Vec<(PaneId, TerminalTabId, ExecutionId, WorkspaceId)>,
     last_removed_terminal_execution: Option<(PaneId, TerminalTabId, ExecutionId)>,
-    /// Pane ids removed by the most recent successful `CloseTab` (detach-only).
-    last_removed_tab_panes: Vec<PaneId>,
+    /// Pane ids + owning Workspace removed/detached by the last successful
+    /// CloseWindow / CloseTab / hierarchical ClosePane (detach-only).
+    last_removed_tab_panes: Vec<(PaneId, WorkspaceId)>,
     /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
     pending_effects: Vec<ShellNativeEffect>,
     /// Live executions with no Pane binding in this headed session (ADR-018 §3.3).
@@ -575,8 +576,9 @@ impl ShellState {
         self.last_released_execution.take()
     }
 
-    /// Take Pane ids removed by the last successful `CloseTab` (detach-only).
-    pub fn take_removed_tab_panes(&mut self) -> Vec<PaneId> {
+    /// Take Pane ids + Workspace removed/detached by the last successful
+    /// CloseWindow / CloseTab / hierarchical ClosePane (detach-only).
+    pub fn take_removed_tab_panes(&mut self) -> Vec<(PaneId, WorkspaceId)> {
         std::mem::take(&mut self.last_removed_tab_panes)
     }
 
@@ -775,7 +777,10 @@ impl ShellState {
             }
             return;
         }
-        let _ = self.present_workspace_on_host(host, workspace);
+        // Owner-validated select path only — never bypass foreign_presenter /
+        // membership generation via present_workspace_on_host (#1490).
+        let generation = self.containment_generation;
+        let _ = self.open_workspace_in_sidebar(host, workspace, generation);
     }
 
     pub fn snapshot(&self) -> ShellSnapshot {
@@ -804,6 +809,7 @@ impl ShellState {
         match action {
             ShellAction::CreateWindow { .. }
             | ShellAction::ActivateWorkspace { .. }
+            | ShellAction::SelectWorkspace { .. }
             | ShellAction::SelectWindow { .. }
             | ShellAction::NativeWindowBecameKey { .. }
             | ShellAction::ObserveWindowBecameKey { .. }

@@ -1,6 +1,6 @@
 //! Issue #1149 / M003 C2 — headed tab creation on the C1 provisioning route.
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, WindowId};
 use seyal_protocol::framing::ErrorCode;
 use seyal_runtime::local_ipc::framing::{
     CreateExecutionResult, CreateExecutionResultCode, MessageType, TerminateExecutionResult,
@@ -1028,8 +1028,13 @@ fn dock_activate_workspace_create_begins_provisioning() {
     })
     .expect("close to zero windows");
     assert!(root.snapshot().shell.windows.is_empty());
-    root.apply(AppAction::SelectWorkspace { id: workspace })
-        .expect("Dock ActivateWorkspace create");
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::SelectWorkspace {
+        window: WindowId::from_bytes([0; 16]),
+        id: workspace,
+        containment_generation: generation,
+    })
+    .expect("Dock ActivateWorkspace create");
     assert_eq!(root.snapshot().shell.windows.len(), 1);
     let pane = root.snapshot().shell.focused_pane;
     assert!(
@@ -1043,9 +1048,14 @@ fn dock_activate_workspace_raise_does_not_reprovision_bound_leaf() {
     let execution = exec(77);
     let (mut root, pane) = bound_root_with_wire_client(execution);
     let workspace = root.snapshot().shell.active_workspace;
+    let snap = root.snapshot().shell;
     assert!(root.provisioning().pending_intent(pane).is_none());
-    root.apply(AppAction::SelectWorkspace { id: workspace })
-        .expect("raise existing workspace");
+    root.apply(AppAction::SelectWorkspace {
+        window: snap.active_window.expect("seed window"),
+        id: workspace,
+        containment_generation: snap.containment_generation,
+    })
+    .expect("raise existing workspace");
     assert!(
         root.provisioning().pending_intent(pane).is_none(),
         "raise must not begin a second create for an already-bound leaf"

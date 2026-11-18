@@ -60,6 +60,47 @@ impl Runtime {
         self.admitted_workspaces.contains(&workspace)
     }
 
+    /// Admit or replace the spawn cwd for an already-admitted WorkspaceId.
+    ///
+    /// Same-user local IPC trust boundary: the path is validated (absolute,
+    /// existing directory, canonicalized, bounded length) before storage.
+    /// Invalid roots fail closed and leave any prior admission unchanged.
+    pub fn bind_workspace_spawn_root(
+        &mut self,
+        workspace: WorkspaceId,
+        root: &str,
+    ) -> Result<(), seyal_protocol::framing::ErrorCode> {
+        use seyal_protocol::framing::{ErrorCode, MAX_WORKSPACE_SPAWN_ROOT_BYTES};
+        if !self.is_workspace_admitted(workspace) {
+            return Err(ErrorCode::InvalidWorkspace);
+        }
+        let trimmed = root.trim();
+        if trimmed.is_empty()
+            || trimmed.len() > MAX_WORKSPACE_SPAWN_ROOT_BYTES
+            || trimmed.as_bytes().contains(&0)
+        {
+            return Err(ErrorCode::MalformedPayload);
+        }
+        let path = std::path::Path::new(trimmed);
+        if !path.is_absolute() {
+            return Err(ErrorCode::MalformedPayload);
+        }
+        let canonical = std::fs::canonicalize(path).map_err(|_| ErrorCode::MalformedPayload)?;
+        if !canonical.is_dir() {
+            return Err(ErrorCode::MalformedPayload);
+        }
+        self.workspace_spawn_roots.insert(workspace, canonical);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn workspace_spawn_root_for_test(
+        &self,
+        workspace: WorkspaceId,
+    ) -> Option<&std::path::Path> {
+        self.workspace_spawn_roots.get(&workspace).map(AsRef::as_ref)
+    }
+
     pub fn execution_count(&self) -> usize {
         self.entries.len()
     }
@@ -175,20 +216,13 @@ impl Runtime {
         launch_policy_detail_negotiated: bool,
         workspace_id: WorkspaceId,
     ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
-        // ADR-020: cwd is Runtime-owned via LaunchProfileIntent. When
-        // CreateWorkspace staged a trusted ADR-028 root for this admitted
-        // workspace, apply it as cwd_override so the child never needs a
-        // typed `cd` (and CreateExecution still carries no path string).
-        #[cfg(target_os = "macos")]
-        let intent = {
-            let (mut intent, _) = crate::launch_policy::load_launch_profile_intent();
-            if let Some(cwd) = seyal_protocol::workspace_spawn_cwd::load(workspace_id) {
-                intent.cwd_override = Some(cwd);
-            }
-            intent
-        };
-        #[cfg(not(target_os = "macos"))]
-        let intent = crate::launch_policy::load_launch_profile_intent().0;
+        // ADR-020: cwd is Runtime-owned via LaunchProfileIntent. An explicit
+        // BindWorkspaceRoot admission supplies cwd_override for this workspace
+        // (CreateExecution still carries no path string).
+        let (mut intent, _) = crate::launch_policy::load_launch_profile_intent();
+        if let Some(cwd) = self.workspace_spawn_roots.get(&workspace_id) {
+            intent.cwd_override = Some(cwd.clone());
+        }
         let resolution = match crate::launch_policy::resolve_interactive_intent(&intent) {
             Ok(resolution) => resolution,
             Err(failure) => return Err(RuntimeError::LaunchPolicy(failure)),

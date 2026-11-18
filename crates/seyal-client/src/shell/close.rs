@@ -8,6 +8,14 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::{ShellError, ShellNativeEffect, ShellState};
 
+/// Presentation detach disposition for a foreign workspace listed on a
+/// closing host: release controllers without destroying storage windows.
+struct WorkspacePresentationDisposition {
+    released_executions: Vec<(ExecutionId, WorkspaceId)>,
+    released_bindings: Vec<(PaneId, seyal_core::TerminalTabId, ExecutionId, WorkspaceId)>,
+    removed_panes: Vec<(PaneId, WorkspaceId)>,
+}
+
 impl ShellState {
     pub(super) fn close_window(
         &mut self,
@@ -15,31 +23,68 @@ impl ShellState {
         containment_generation: u64,
     ) -> Result<(), ShellError> {
         self.require_containment_generation(containment_generation)?;
-        let (workspace_id, was_product_active) = {
-            let workspace = self.find_window(id).ok_or(ShellError::UnknownWindow)?;
-            let workspace_id = workspace.id;
-            let was_product_active = self.product_active_window_id() == Some(id);
-            (workspace_id, was_product_active)
+        let (owner_workspace, was_product_active, open_list) = {
+            let owner = self.find_window(id).ok_or(ShellError::UnknownWindow)?;
+            let window = owner.window(id).ok_or(ShellError::UnknownWindow)?;
+            (
+                owner.id,
+                self.product_active_window_id() == Some(id),
+                window.open_workspaces.clone(),
+            )
         };
 
-        let released = self.window_released_executions(id)?;
-        self.last_released_executions = self.window_released_terminal_bindings(id)?;
+        // Transactional detach: every workspace listed on this host, not only
+        // the storage-owner tabs (SPEC-032 / #1490 close ownership).
+        let mut released_executions = Vec::new();
+        let mut released_bindings = Vec::new();
+        let mut removed_panes = Vec::new();
+
+        // Owner storage window is always destroyed even if open_workspaces is
+        // incomplete; foreign listed workspaces detach presentation only.
+        released_executions.extend(self.window_released_executions(id)?);
+        for (pane, terminal, execution) in self.window_released_terminal_bindings(id)? {
+            released_bindings.push((pane, terminal, execution, owner_workspace));
+        }
+        for pane in self.window_pane_ids(id)? {
+            removed_panes.push((pane, owner_workspace));
+        }
+        if let Ok(workspace) = self.workspace_mut(owner_workspace)
+            && workspace.presenting_window == Some(id)
+        {
+            workspace.presenting_window = None;
+        }
+
+        for workspace_id in &open_list {
+            if *workspace_id == owner_workspace {
+                continue;
+            }
+            if let Ok(workspace) = self.workspace_mut(*workspace_id)
+                && workspace.presenting_window == Some(id)
+            {
+                workspace.presenting_window = None;
+            }
+            let foreign = self.workspace_presentation_disposition(*workspace_id)?;
+            released_executions.extend(foreign.released_executions);
+            released_bindings.extend(foreign.released_bindings);
+            removed_panes.extend(foreign.removed_panes);
+        }
+
+        self.last_released_executions = released_bindings;
         self.last_released_execution = self
             .last_released_executions
             .first()
-            .map(|(pane, _, execution)| (*pane, *execution));
-        self.last_removed_tab_panes = self.window_pane_ids(id)?;
-        self.last_released_execution = None;
+            .map(|(pane, _, execution, _)| (*pane, *execution));
+        self.last_removed_tab_panes = removed_panes;
         self.remove_window_record(id)?;
         self.push_effect(ShellNativeEffect::DestroyWindowRealization { window: id });
 
-        for (execution, workspace) in released {
+        for (execution, workspace) in released_executions {
             self.unpresented.insert(execution, workspace);
         }
         self.purge_missing_panes();
 
         if was_product_active {
-            if let Some(successor) = self.successor_after_close(workspace_id) {
+            if let Some(successor) = self.successor_after_close(owner_workspace) {
                 self.activate_window(successor)?;
                 if !self.pending_effects.iter().any(|effect| {
                     matches!(effect, ShellNativeEffect::OrderFrontMakeKey { window } if *window == successor)
@@ -49,7 +94,7 @@ impl ShellState {
             }
             // Zero-Window: last_active_workspace stays unchanged (ADR-018 §3.2 / §3.3a).
         } else {
-            self.repair_workspace_active_window(workspace_id);
+            self.repair_workspace_active_window(owner_workspace);
         }
 
         self.bump_containment_generation();
@@ -101,7 +146,12 @@ impl ShellState {
             });
             (removed, successor_focus)
         };
-        self.last_removed_tab_panes = removed.panes.keys().copied().collect();
+        self.last_removed_tab_panes = removed
+            .panes
+            .keys()
+            .copied()
+            .map(|pane| (pane, workspace_id))
+            .collect();
         self.last_released_executions = removed
             .panes
             .values()
@@ -109,14 +159,14 @@ impl ShellState {
                 pane.terminal_tabs.iter().filter_map(move |terminal| {
                     terminal
                         .execution
-                        .map(|execution| (pane.id, terminal.id, execution))
+                        .map(|execution| (pane.id, terminal.id, execution, workspace_id))
                 })
             })
             .collect();
         self.last_released_execution = self
             .last_released_executions
             .first()
-            .map(|(pane, _, execution)| (*pane, *execution));
+            .map(|(pane, _, execution, _)| (*pane, *execution));
         for pane in removed.panes.values() {
             for execution in pane
                 .terminal_tabs
@@ -213,7 +263,7 @@ impl ShellState {
         self.last_removed_tab_panes.clear();
         self.last_released_executions = released
             .iter()
-            .map(|(terminal, execution)| (pane_id, *terminal, *execution))
+            .map(|(terminal, execution)| (pane_id, *terminal, *execution, workspace_id))
             .collect();
         self.last_released_execution = released.first().map(|(_, execution)| (pane_id, *execution));
         for (_, execution) in released {
@@ -255,7 +305,7 @@ impl ShellState {
         Err(ShellError::UnknownTab)
     }
 
-    fn window_released_executions(
+    pub(super) fn window_released_executions(
         &self,
         window: WindowId,
     ) -> Result<Vec<(ExecutionId, WorkspaceId)>, ShellError> {
@@ -299,6 +349,41 @@ impl ShellState {
             .collect())
     }
 
+    fn workspace_presentation_disposition(
+        &self,
+        workspace_id: WorkspaceId,
+    ) -> Result<WorkspacePresentationDisposition, ShellError> {
+        let workspace = self.workspace(workspace_id)?;
+        let mut released_executions = Vec::new();
+        let mut released_bindings = Vec::new();
+        let mut removed_panes = Vec::new();
+        for window in &workspace.windows {
+            for tab in &window.tabs {
+                for pane in tab.panes.values() {
+                    removed_panes.push((pane.id, workspace_id));
+                    for terminal in &pane.terminal_tabs {
+                        if let Some(execution) = terminal.execution {
+                            released_executions.push((execution, workspace_id));
+                            released_bindings.push((pane.id, terminal.id, execution, workspace_id));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(WorkspacePresentationDisposition {
+            released_executions,
+            released_bindings,
+            removed_panes,
+        })
+    }
+
+    fn window_is_realized(&self, window: WindowId) -> bool {
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| &workspace.windows)
+            .any(|item| item.id == window && item.realized)
+    }
+
     fn window_pane_ids(&self, window: WindowId) -> Result<Vec<PaneId>, ShellError> {
         let workspace = self.find_window(window).ok_or(ShellError::UnknownWindow)?;
         let window_ref = workspace.window(window).ok_or(ShellError::UnknownWindow)?;
@@ -309,7 +394,7 @@ impl ShellState {
             .collect())
     }
 
-    fn remove_window_record(&mut self, window: WindowId) -> Result<(), ShellError> {
+    pub(super) fn remove_window_record(&mut self, window: WindowId) -> Result<(), ShellError> {
         let workspace_id = self
             .find_window(window)
             .map(|workspace| workspace.id)
@@ -328,16 +413,25 @@ impl ShellState {
     }
 
     fn successor_after_close(&self, closed_workspace: WorkspaceId) -> Option<WindowId> {
-        self.derived_mru_window(closed_workspace).or_else(|| {
-            for pane in self.focus_history.panes() {
-                if let Some(window) = self.window_of_pane(*pane) {
-                    return Some(window);
+        // Never OrderFront an unrealized storage window (#1490 close ownership).
+        self.derived_mru_window(closed_workspace)
+            .filter(|window| self.window_is_realized(*window))
+            .or_else(|| {
+                for pane in self.focus_history.panes() {
+                    if let Some(window) = self.window_of_pane(*pane)
+                        && self.window_is_realized(window)
+                    {
+                        return Some(window);
+                    }
                 }
-            }
-            self.workspaces
-                .iter()
-                .find_map(|workspace| workspace.windows.first().map(|window| window.id))
-        })
+                self.workspaces.iter().find_map(|workspace| {
+                    workspace
+                        .windows
+                        .iter()
+                        .find(|window| window.realized)
+                        .map(|window| window.id)
+                })
+            })
     }
 
     fn repair_workspace_active_window(&mut self, workspace: WorkspaceId) {

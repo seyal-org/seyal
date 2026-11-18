@@ -140,8 +140,11 @@ pub enum AppAction {
         agents: Vec<crate::chrome::AgentRecord>,
         attention: Vec<crate::chrome::AttentionItem>,
     },
+    /// SPEC-032 §3.1: names the host window and containment generation.
     SelectWorkspace {
+        window: WindowId,
         id: WorkspaceId,
+        containment_generation: u64,
     },
     /// ADR-028: create a Workspace with an explicit root; Runtime mints the id.
     CreateWorkspace {

@@ -86,6 +86,8 @@ pub struct Runtime {
     default_workspace: WorkspaceId,
     /// ADR-028 §2.5 interim admitted WorkspaceIds (includes default).
     admitted_workspaces: std::collections::HashSet<WorkspaceId>,
+    /// Admitted spawn cwd per WorkspaceId (BindWorkspaceRoot → LaunchProfileIntent).
+    workspace_spawn_roots: std::collections::HashMap<WorkspaceId, std::path::PathBuf>,
     #[allow(dead_code)]
     singleton: SingletonGuard,
     reactor: ExecutionReactor,
@@ -151,6 +153,7 @@ impl Runtime {
             id: RuntimeId::new(),
             default_workspace,
             admitted_workspaces,
+            workspace_spawn_roots: std::collections::HashMap::new(),
             singleton,
             reactor,
             entries: HashMap::new(),

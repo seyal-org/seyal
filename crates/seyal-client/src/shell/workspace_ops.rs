@@ -96,6 +96,9 @@ impl ShellState {
         root_path: String,
         containment_generation: u64,
     ) -> Result<(), ShellError> {
+        // Validate generation before recording so a stale create cannot leave
+        // an orphan workspace row (SPEC-032 / #1490).
+        self.require_containment_generation(containment_generation)?;
         self.record_workspace(id, root_path)?;
         self.activate_workspace(id, containment_generation)
     }

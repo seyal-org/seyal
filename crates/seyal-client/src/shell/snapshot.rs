@@ -187,24 +187,61 @@ impl ShellState {
     /// SPEC-032: a realized window projects the selected workspace's pane tree.
     /// Home selection uses this window's tabs; a foreign sidebar selection uses
     /// that workspace's storage window (often unrealized after CreateWorkspace).
+    ///
+    /// Fail closed: never substitute the host owner's tree when the selected
+    /// foreign workspace is missing/empty — that would disagree with
+    /// `selected_workspace` (#1490).
     fn window_snapshot_for(
         &self,
         owner: &Workspace,
         host: &Window,
         product_window: Option<WindowId>,
     ) -> WindowSnapshot {
-        let (content_window, content_tabs) = if host.selected_workspace == host.workspace_id {
-            (host, host.tabs.as_slice())
-        } else {
-            self.workspace(host.selected_workspace)
-                .ok()
-                .and_then(|workspace| {
-                    let content_window = workspace.active_window()?;
-                    let tabs = content_window.tabs.as_slice();
-                    (!tabs.is_empty()).then_some((content_window, tabs))
-                })
-                .unwrap_or((host, host.tabs.as_slice()))
-        };
+        if host.selected_workspace == host.workspace_id {
+            return self.window_snapshot_with_tabs(
+                owner,
+                host,
+                host,
+                host.tabs.as_slice(),
+                product_window,
+            );
+        }
+        match self
+            .workspace(host.selected_workspace)
+            .ok()
+            .and_then(|workspace| {
+                let content_window = workspace.active_window()?;
+                let tabs = content_window.tabs.as_slice();
+                (!tabs.is_empty()).then_some((content_window, tabs))
+            }) {
+            Some((content_window, content_tabs)) => self.window_snapshot_with_tabs(
+                owner,
+                host,
+                content_window,
+                content_tabs,
+                product_window,
+            ),
+            None => WindowSnapshot {
+                id: host.id,
+                workspace: owner.id,
+                open_workspaces: host.open_workspaces.clone(),
+                selected_workspace: host.selected_workspace,
+                title: String::new(),
+                attention: false,
+                tabs: Vec::new(),
+                active_tab: TabId::from_bytes([0; 16]),
+            },
+        }
+    }
+
+    fn window_snapshot_with_tabs(
+        &self,
+        owner: &Workspace,
+        host: &Window,
+        content_window: &Window,
+        content_tabs: &[Tab],
+        product_window: Option<WindowId>,
+    ) -> WindowSnapshot {
         let active_tab_id = content_window.active_tab;
         let active_tab = content_tabs
             .iter()

@@ -287,7 +287,46 @@ impl ShellState {
         Ok(window_id)
     }
 
-    fn open_workspace_in_sidebar(
+    /// SPEC-032 §3.1: select only. Does not append, raise another window, or
+    /// create a pane tree.
+    pub(super) fn select_workspace_on_window(
+        &mut self,
+        window: WindowId,
+        workspace: WorkspaceId,
+        containment_generation: u64,
+    ) -> Result<(), ShellError> {
+        self.require_containment_generation(containment_generation)?;
+        self.workspace(workspace)?;
+        let host_owner = self
+            .find_window(window)
+            .map(|owner| owner.id)
+            .ok_or(ShellError::UnknownWindow)?;
+        let (listed, already_selected) = {
+            let item = self
+                .workspace(host_owner)?
+                .window(window)
+                .ok_or(ShellError::UnknownWindow)?;
+            (
+                item.open_workspaces.contains(&workspace),
+                item.selected_workspace == workspace,
+            )
+        };
+        if !listed {
+            return Err(ShellError::UnknownWorkspace);
+        }
+        if already_selected {
+            return Ok(());
+        }
+        self.present_workspace_on_host(window, workspace)?;
+        self.bump_containment_generation();
+        self.last_active_workspace = workspace;
+        if let Ok(pane) = self.focused_pane_id() {
+            self.focus_history.record(pane);
+        }
+        Ok(())
+    }
+
+    pub(super) fn open_workspace_in_sidebar(
         &mut self,
         host: WindowId,
         workspace: WorkspaceId,
@@ -308,6 +347,9 @@ impl ShellState {
                 window.selected_workspace == workspace,
             )
         };
+        // SPEC-032 §§2–3: every select/open path validates containment
+        // generation so stale native events no-mutate.
+        self.require_containment_generation(containment_generation)?;
         if already_selected {
             return Ok(());
         }
@@ -315,6 +357,7 @@ impl ShellState {
         // solitary home that still holds a stale presenting_window pointer.
         if already_open {
             self.present_workspace_on_host(host, workspace)?;
+            self.bump_containment_generation();
             self.last_active_workspace = workspace;
             if let Ok(pane) = self.focused_pane_id() {
                 self.focus_history.record(pane);
@@ -323,10 +366,10 @@ impl ShellState {
         }
         if let Some(presenter) = self.foreign_presenter(workspace, host) {
             self.present_workspace_on_host(presenter, workspace)?;
+            self.bump_containment_generation();
             self.last_active_workspace = workspace;
             return self.activate_window(presenter);
         }
-        self.require_containment_generation(containment_generation)?;
         self.demote_prior_product_presentation(workspace, host)?;
         self.present_workspace_on_host(host, workspace)?;
         self.bump_containment_generation();
@@ -661,6 +704,11 @@ impl ShellState {
                 workspace,
                 containment_generation,
             } => self.activate_workspace(workspace, containment_generation),
+            ShellAction::SelectWorkspace {
+                window,
+                workspace,
+                containment_generation,
+            } => self.select_workspace_on_window(window, workspace, containment_generation),
             ShellAction::RemoveWorkspace {
                 window,
                 workspace,

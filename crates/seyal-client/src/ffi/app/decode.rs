@@ -159,10 +159,15 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             attention: Vec::new(),
         }),
         19 => Ok(AppAction::SelectWorkspace {
+            window: WindowId::from_bytes(id16(
+                action.target_attachment_lo,
+                action.target_attachment_hi,
+            )?),
             id: WorkspaceId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         20 => Ok(AppAction::SelectTab {
             id: TabId::from_bytes(id16(

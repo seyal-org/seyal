@@ -120,6 +120,9 @@ impl ApplicationRoot {
 
     /// Remove a Window's chrome. Bound panes detach only; executions stay live
     /// and enumerable. Outstanding create intents are marked dead for §6.3.
+    ///
+    /// Disposition uses Shell's per-pane workspace ownership — never the
+    /// projected selected tree alone (SPEC-032 / #1490 close ownership).
     pub(super) fn close_window(
         &mut self,
         id: WindowId,
@@ -131,8 +134,16 @@ impl ApplicationRoot {
             .iter()
             .find(|window| window.id == id)
             .ok_or(AppError::UnknownWindow)?;
-        let removed_tabs: Vec<TabId> = removed_window.tabs.iter().map(|tab| tab.id).collect();
-        let removed_workspace = removed_window.workspace;
+        // Owner storage tabs only (not a foreign selected projection).
+        let owner_workspace = removed_window.workspace;
+        let removed_tabs: Vec<TabId> = if removed_window.selected_workspace == owner_workspace {
+            removed_window.tabs.iter().map(|tab| tab.id).collect()
+        } else {
+            // Selected foreign tree is detach-only; owner tab ids are not in
+            // the projection. Focus disposal below keys off destroyed owner
+            // identity via was_active + successor activation instead.
+            Vec::new()
+        };
         let removed_active_tab = removed_window.active_tab;
         let was_active = before.active_window == Some(id);
         self.shell
@@ -143,7 +154,7 @@ impl ApplicationRoot {
             .map_err(close_window_error)?;
         self.drain_shell_effects();
         let removed = self.shell.take_removed_tab_panes();
-        self.dispose_removed_panes(removed, removed_workspace)?;
+        self.dispose_removed_panes(removed)?;
         let after = self.shell.snapshot();
         for tab in removed_tabs {
             self.record_destroyed_tab_focus(
@@ -168,15 +179,17 @@ impl ApplicationRoot {
         containment_generation: u64,
     ) -> Result<(), AppError> {
         let before = self.shell.snapshot();
-        let (window_id, workspace, active_tab) = before
+        // Prefer storage-owner workspace of the Tab, not the host projection's
+        // selected_workspace (which may be a foreign sidebar row).
+        let (window_id, active_tab) = before
             .windows
             .iter()
             .find_map(|window| {
-                window.tabs.iter().any(|tab| tab.id == id).then_some((
-                    window.id,
-                    window.workspace,
-                    window.active_tab,
-                ))
+                window
+                    .tabs
+                    .iter()
+                    .any(|tab| tab.id == id)
+                    .then_some((window.id, window.active_tab))
             })
             .ok_or(AppError::UnknownChromeTab)?;
         let was_active = before.active_window == Some(window_id) && active_tab == id;
@@ -188,7 +201,7 @@ impl ApplicationRoot {
             .map_err(close_tab_error)?;
         self.drain_shell_effects();
         let removed = self.shell.take_removed_tab_panes();
-        self.dispose_removed_panes(removed, workspace)?;
+        self.dispose_removed_panes(removed)?;
         let after = self.shell.snapshot();
         self.record_destroyed_tab_focus(id, was_active && after.active_window.is_some());
         if was_active && after.active_window.is_some() {
@@ -200,18 +213,14 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    fn dispose_removed_panes(
-        &mut self,
-        panes: Vec<PaneId>,
-        workspace: WorkspaceId,
-    ) -> Result<(), AppError> {
+    fn dispose_removed_panes(&mut self, panes: Vec<(PaneId, WorkspaceId)>) -> Result<(), AppError> {
         let mut effects = Vec::new();
         let released = self.shell.take_released_executions();
-        for pane in panes {
+        for (pane, workspace) in panes {
             let mut released_any_terminal = false;
-            for (_, terminal_tab, execution) in released
+            for (_, terminal_tab, execution, binding_workspace) in released
                 .iter()
-                .filter(|(owner_pane, _, _)| *owner_pane == pane)
+                .filter(|(owner_pane, _, _, _)| *owner_pane == pane)
             {
                 released_any_terminal = true;
                 effects.extend(
@@ -220,7 +229,7 @@ impl ApplicationRoot {
                 );
                 #[cfg(target_os = "macos")]
                 self.release_terminal_presentation_controller(*terminal_tab, *execution);
-                self.record_unpresented(*execution, workspace)?;
+                self.record_unpresented(*execution, *binding_workspace)?;
             }
             self.provisioning.mark_terminal_pane_intents_dead(pane);
             if !released_any_terminal {
@@ -278,6 +287,12 @@ impl ApplicationRoot {
         let was_focused = before.active_window == Some(window.id)
             && window.active_tab == tab.id
             && tab.focused_pane == id;
+        // Prefer storage-owner workspace of the Pane over host projection.
+        let ownership_workspace = self
+            .shell
+            .location_of_pane(id)
+            .map(|(ws, _)| ws)
+            .unwrap_or(workspace);
         self.shell
             .apply(ShellAction::ClosePane {
                 id,
@@ -288,7 +303,7 @@ impl ApplicationRoot {
         let removed = self.shell.take_removed_tab_panes();
         if removed.is_empty() {
             if let Some((pane, execution)) = self.shell.take_released_execution() {
-                self.dispose_removed_panes(vec![pane], workspace)?;
+                self.dispose_removed_panes(vec![(pane, ownership_workspace)])?;
                 debug_assert!(
                     self.provisioning.is_unreferenced(execution),
                     "bound close must retain an unreferenced live record"
@@ -307,7 +322,7 @@ impl ApplicationRoot {
             }
         } else {
             let _ = self.shell.take_released_execution();
-            self.dispose_removed_panes(removed, workspace)?;
+            self.dispose_removed_panes(removed)?;
             let after = self.shell.snapshot();
             self.record_destroyed_tab_focus(tab_id, was_focused && after.active_window.is_some());
             if was_focused && after.active_window.is_some() {

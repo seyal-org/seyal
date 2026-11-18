@@ -274,8 +274,13 @@ extension ProductChromeHostView {
         action.target_execution_hi = tagged.idHi
         if kind == UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue)
             || kind == UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+            || kind == UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
         {
             action.target_generation = tagged.containmentGeneration
+        }
+        if kind == UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue) {
+            action.target_attachment_lo = tagged.windowLo
+            action.target_attachment_hi = tagged.windowHi
         }
         _ = seyal_app_apply(pane.appHandle, &action)
         reconcileChrome()
@@ -619,7 +624,10 @@ extension ProductChromeHostView {
         idLo: UInt64,
         idHi: UInt64,
         paneLo: UInt64 = 0,
-        paneHi: UInt64 = 0
+        paneHi: UInt64 = 0,
+        windowLo: UInt64 = 0,
+        windowHi: UInt64 = 0,
+        containmentGeneration: UInt64 = 0
     ) -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -686,6 +694,9 @@ extension ProductChromeHostView {
         hit.idHi = idHi
         hit.paneLo = paneLo
         hit.paneHi = paneHi
+        hit.windowLo = windowLo
+        hit.windowHi = windowHi
+        hit.containmentGeneration = containmentGeneration
         hit.kind = kind
         hit.bezelStyle = .inline
         hit.isBordered = false

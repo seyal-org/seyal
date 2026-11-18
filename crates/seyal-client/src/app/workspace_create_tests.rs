@@ -144,8 +144,9 @@ fn select_workspace_bootstrap_failure_preserves_host_route() {
     app.wire_client = None;
     app.pane_client_raws.clear();
     app.client_handle = Some(crate::ffi::ClientRegistryHandle::new(u64::MAX));
+    let generation = app.shell.containment_generation();
     let err = app
-        .select_workspace(empty)
+        .select_workspace(host, empty, generation)
         .expect_err("bootstrap with a dead client must fail");
     assert_eq!(err, AppError::NoLiveClient);
     let after = app.shell.snapshot();
@@ -332,40 +333,11 @@ fn close_last_pane_of_created_workspace_removes_sidebar_row() {
     assert_eq!(after.focused_pane, prior);
 }
 
+/// Mint uses the Ready cold path only — Attached Controllers are never poked
+/// (#1490). Without a live Runtime socket, CreateWorkspace fails closed.
 #[cfg(target_os = "macos")]
 #[test]
-fn mint_workspace_candidates_include_pane_registry_without_client_handle() {
-    use crate::local::reconstruction_probe_client;
-    use seyal_protocol::local_ipc::framing::Role;
-
-    let mut root = ApplicationRoot::new();
-    let pane = root.shell.snapshot().focused_pane;
-    let execution = ExecutionId::from_bytes([0x91; 16]);
-    let attachment = AttachmentId::from_bytes([0x92; 16]);
-    let client = reconstruction_probe_client(Role::Controller, 24, 80, 1, execution, attachment);
-    let registered = crate::ffi::register_app_client(client).expect("register");
-    let raw = registered.raw();
-    root.pane_client_raws.insert(pane, raw);
-    // Production multipane often keeps only pane/terminal registry clients.
-    root.client_handle = None;
-    root.wire_client = None;
-
-    let candidates = root.attached_mint_client_raws_for_test();
-    assert_eq!(
-        candidates,
-        vec![raw],
-        "CreateWorkspace mint must see Attached pane Controllers before Ready fallback"
-    );
-
-    root.pane_client_raws.remove(&pane);
-    let _ = crate::ffi::unregister_client(raw);
-}
-
-/// Non-provisioning Attached handles must not surface ABI 35 and block Ready.
-/// Without a live Runtime socket, Ready fails closed as NoLiveClient (13).
-#[cfg(target_os = "macos")]
-#[test]
-fn create_workspace_mint_skips_non_provisioning_attached_for_ready() {
+fn create_workspace_mint_uses_ready_only_without_attached_fallback() {
     use crate::local::reconstruction_probe_client;
     use seyal_protocol::local_ipc::framing::Role;
 
@@ -374,39 +346,27 @@ fn create_workspace_mint_skips_non_provisioning_attached_for_ready() {
     let execution = ExecutionId::from_bytes([0x93; 16]);
     let attachment = AttachmentId::from_bytes([0x94; 16]);
     let client = reconstruction_probe_client(Role::Controller, 24, 80, 1, execution, attachment);
-    assert!(
-        !client.execution_provisioning_negotiated(),
-        "probe client must lack CAP_EXECUTION_PROVISIONING"
-    );
     let registered = crate::ffi::register_app_client(client).expect("register");
     let raw = registered.raw();
     root.pane_client_raws.insert(pane, raw);
     root.client_handle = None;
     root.wire_client = None;
 
-    let path = std::env::temp_dir().join("seyal-app-ws-mint-skip-cap");
+    let path = std::env::temp_dir().join("seyal-app-ws-mint-ready-only");
     let _ = std::fs::create_dir_all(&path);
     match root.apply(AppAction::CreateWorkspace {
         root_path: path.to_string_lossy().into_owned(),
     }) {
         Ok(()) => {
-            // Live production Runtime accepted the Ready mint — proves mint did
-            // not stop at the non-provisioning Attached handle with ABI 35.
             assert!(
                 root.shell.snapshot().open_workspaces.len() >= 2,
                 "Ready mint must open the created workspace in the sidebar"
             );
         }
         Err(err) => {
-            assert_ne!(
-                err,
-                AppError::ProvisioningRejected,
-                "non-provisioning Attached must not return ABI 35"
-            );
-            assert_eq!(
-                err,
-                AppError::NoLiveClient,
-                "without Runtime, Ready must fail closed as NoLiveClient"
+            assert!(
+                matches!(err, AppError::NoLiveClient | AppError::ProvisioningRejected),
+                "Ready-only mint must fail closed without Attached fallback, got {err:?}"
             );
         }
     }

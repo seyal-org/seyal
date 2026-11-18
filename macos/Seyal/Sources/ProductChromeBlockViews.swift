@@ -11,6 +11,9 @@ final class IdentityButton: NSButton {
     /// Owning PaneId for left C03 TerminalTab rows (#1412); unused otherwise.
     var paneLo: UInt64 = 0
     var paneHi: UInt64 = 0
+    /// Host WindowId for SPEC-032 SelectWorkspace (#1490).
+    var windowLo: UInt64 = 0
+    var windowHi: UInt64 = 0
     var containmentGeneration: UInt64 = 0
 
     /// Transparent hit target for C04 rows that paint their own labels.
