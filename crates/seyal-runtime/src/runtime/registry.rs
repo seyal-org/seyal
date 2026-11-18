@@ -93,16 +93,6 @@ impl Runtime {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn workspace_spawn_root_for_test(
-        &self,
-        workspace: WorkspaceId,
-    ) -> Option<&std::path::Path> {
-        self.workspace_spawn_roots
-            .get(&workspace)
-            .map(AsRef::as_ref)
-    }
-
     pub fn execution_count(&self) -> usize {
         self.entries.len()
     }
