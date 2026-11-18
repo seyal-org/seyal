@@ -9,10 +9,10 @@ use crate::{
     local_ipc::{
         connection::ConnectionState as LocalIpcConnState,
         framing::{
-            self, CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode,
-            BindWorkspaceRootRequest, BindWorkspaceRootResult, BindWorkspaceRootResultCode,
-            ErrorCode, MessageType, MintWorkspaceRequest, MintWorkspaceResult,
-            MintWorkspaceResultCode, CAP_EXECUTION_PROVISIONING,
+            self, BindWorkspaceRootRequest, BindWorkspaceRootResult, BindWorkspaceRootResultCode,
+            CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode, ErrorCode,
+            MessageType, MintWorkspaceRequest, MintWorkspaceResult, MintWorkspaceResultCode,
+            CAP_EXECUTION_PROVISIONING,
         },
     },
     ExecutionId, RuntimeError, WorkspaceId,

@@ -98,7 +98,9 @@ impl Runtime {
         &self,
         workspace: WorkspaceId,
     ) -> Option<&std::path::Path> {
-        self.workspace_spawn_roots.get(&workspace).map(AsRef::as_ref)
+        self.workspace_spawn_roots
+            .get(&workspace)
+            .map(AsRef::as_ref)
     }
 
     pub fn execution_count(&self) -> usize {

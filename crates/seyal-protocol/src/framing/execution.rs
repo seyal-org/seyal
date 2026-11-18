@@ -421,7 +421,9 @@ impl BindWorkspaceRootRequest {
             return Err(FramingError::MalformedPayload);
         }
         let len = self.root_path.len();
-        if len == 0 || len > MAX_WORKSPACE_SPAWN_ROOT_BYTES || self.root_path.as_bytes().contains(&0)
+        if len == 0
+            || len > MAX_WORKSPACE_SPAWN_ROOT_BYTES
+            || self.root_path.as_bytes().contains(&0)
         {
             return Err(FramingError::MalformedPayload);
         }
