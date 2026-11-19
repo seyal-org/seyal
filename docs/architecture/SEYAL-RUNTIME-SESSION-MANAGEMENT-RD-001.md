@@ -78,7 +78,7 @@ Paths are relative to the repository root at `1ef183f`. Bare file names are unde
 **G10. Intentional headed Quit terminates the GUI-spawned Runtime and therefore every execution it owns, against accepted text.**
 
 - Code: `MultiWindowHostController.performQuitCleanup` calls `BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit` (SIGTERM to the helper's process group, SIGKILL after 0.4 s; `macos/Seyal/Sources/BundledRuntimeLauncher.swift:41-64`; `MultiWindowHostController.swift:509-523`), which ends every execution via `begin_shutdown` (`registry.rs:460-471`). It was merged by #1453 (commit `7388d45`).
-- Accepted authority says the opposite: ADR-018 §8 invariant 6 ("Headless Runtime survives every window close, last-window close and quit") and SPEC-009 ("Runtime survival across Quit is unchanged").
+- Accepted authority says the opposite: ADR-018 §8 invariant 6 ("Headless Runtime survives every window close, last-window close and quit") and SPEC-009 §16 repeats "Runtime survival across Quit is unchanged" only inside an item conditioned on #1447 acceptance, so it is not cited as independent authority.
 - The only text that authorizes the kill is ADR-018 §13 (#1447) item 4 and §4.0, and **§13 is itself Proposed and "not normative"** (ADR-018 header and §13 status). The merged implementation therefore realizes an unaccepted amendment against accepted text. The "until a separate headless Runtime packaging ADR lands" wording is that amendment's own caveat, not accepted authority.
 - Scope of the kill: it targets `launchedHelperPid`, recorded only by the GUI instance that spawned the helper (`BundledRuntimeLauncher.swift:154`). A Runtime started by an earlier GUI instance or another process is not recorded and survives a later GUI's Quit. Whether sessions survive Quit currently depends on which process spawned the Runtime; AC5 tests both.
 - Reach: closing the **last** window also quits (ADR-018 §13 item 3, `applicationShouldTerminateAfterLastWindowClosed`), so it kills sessions too. Closing a non-last window, a pane or a tab, or a GUI crash, preserves them.
@@ -129,7 +129,7 @@ Per the adversarial-lifecycle rules, independent facts are never collapsed into 
 
 | Fact | Values | Authority |
 |---|---|---|
-| Process | `Running`, `Draining`, `TerminatingGraceful`, `TerminatingForced`, `TerminationFailed`, `Exited{code \| signal}` |
+| Process | `Running`, `Draining`, `TerminatingGraceful`, `TerminatingForced`, `TerminationFailed`, `Exited{code \| signal}` | `TerminalExecution` / Runtime lifecycle |
 | Endpoint | PTY endpoint open/closed (`endpoint_closed`), independent of Process: PTY EOF with a live child is `Running` + closed | `TerminalExecution` / Runtime lifecycle |
 | Presentation | `attachment_count` (observers + controller), `has_controller` | Attachment registry |
 | Association | `WorkspaceId` | Runtime/workspace metadata (ADR-007) |
@@ -272,7 +272,7 @@ These are **proposed ceilings, not measurements.** Each owning work item must fr
 ```text
   create ──► Running ──terminate request──► Terminating(graceful) ─deadline─► Terminating(forced)
                │                                 │                               │
-               │ child exits / PTY EOF           │                               ├─ reaped ─┐
+               │ child exit (confirmed/reaped)   │                               ├─ reaped ─┐
                └──────────────► draining ◄───────┴───────────────────────────────┘          │
                                    │                         └─ not reaped ─► TerminationFailed (retry, keeps ownership)
                                    ▼
@@ -307,7 +307,7 @@ These are **proposed ceilings, not measurements.** Each owning work item must fr
 
 ## 7. Acceptance criteria and test strategy
 
-Each criterion is measurable and assigned to a work item (§8).
+Each criterion is measurable; the work items in §8 own the criteria for the area they change.
 
 | ID | Criterion | Evidence |
 |---|---|---|
@@ -325,6 +325,7 @@ Each criterion is measurable and assigned to a work item (§8).
 | AC12 | Resource ceilings in §5.12 are met at 1, 10, 50 and 100 detached executions (the M003 §8.2 scaling rows) | Frozen budget table with raw samples |
 | AC13 | Persistent-failure cases: repeated inventory requests from a misbehaving connection stay within the per-turn budget and unrelated PTY work continues; resources return to baseline | Repeated N-times fault injection |
 | AC14 | CLI `list` works with no GUI process and no GUI-spawned Runtime; output is stable and contains no terminal-controlled text | CLI integration test |
+| AC16 | **Release gate:** a session whose controller is connected but wedged can still be explicitly terminated, or the shipped product documents an accepted alternative decided in the WI-1/WI-3 ADRs; AGENTS.md requires a valid terminate path regardless of attachment state | WI-3/WI-1 decision plus real-process test |
 | AC15 | Runtime crash test: executions are reported lost by the persistence layer (when present) and never as live; no replacement shell is started automatically | Crash injection (with #832) |
 
 Adversarial lifecycle cases required before merge of the Runtime work items (per `AGENTS.md`): attached/detached × controller/observer × terminating/not × child alive/dead × GUI connected/disconnected, including PTY EOF with the child still alive and disconnect with a healthy execution.
@@ -337,17 +338,17 @@ All items are drafts for refinement; none is Ready. Ownership and Issue creation
 |---|---|---|---|
 | WI-0 | Accept this R&D | #1515 review | Docs only. |
 | WI-0b | Apply the accepted inventory proposal to SPEC-004 (including the Legacy hello chain and §18.5 `TerminationFailed` row) in its own PR, rebased on then-current SPEC-004 | WI-0 | Docs only; must land before WI-2. |
-| WI-1 | **ADR: Runtime hosting and Quit semantics.** Must reconcile the merged #1453 behaviour with accepted ADR-018 §8.6 / SPEC-009 and may reject or replace the Proposed ADR-018 §13 item 4 | spike on launchd/SMAppService feasibility, Dock behaviour, update/rollback, version skew | Separate Architecture PR; no implementation in it. Gates AC5 for Quit. |
-| WI-2 | Runtime: `ExecutionInventory` paged contract, tombstone ring, legacy-list `CapacityExceeded`, terminating-state attach rules (G1, G2, G4, G8, G9) | WI-0 accepted; **sequenced after #1494 merges, or coordinated with it**: it edits `message.rs`, `session.rs`, `registry.rs` and `runtime/mod.rs` and #1494 claims types 48/49 | Crates `seyal-protocol`, `seyal-runtime`. Fuzz and integration tests. Renumber to the then-free types. |
-| WI-3 | Runtime: controller handoff (`TakeControl`, `ControllerRevoked`), per-attachment input tagging, and the answer to "what ends a stalled-controller session" | **ADR-017 amendment accepted in its own PR** with a threat model | **Required by the V1 scope** (or the scope must be amended). Blocked on the ADR; no timeout steal unless the ADR defines a Runtime-observable stall rule. |
+| WI-1 | **ADR: Runtime hosting and Quit semantics.** Must reconcile the merged #1453 behaviour with accepted ADR-018 §8 invariant 6 and may reject or replace the Proposed ADR-018 §13 item 4 | spike on launchd/SMAppService feasibility, Dock behaviour, update/rollback, version skew | Separate Architecture PR; no implementation in it. Gates AC5 for Quit. |
+| WI-2 | Runtime: `ExecutionInventory` paged contract, tombstone ring, legacy-list `CapacityExceeded`, terminating-state attach rules, new `endpoint_closed` source field (G1, G2, G4, G8, G9) | WI-0b merged (and so WI-0); **sequenced after #1494 merges, or coordinated with it**: it edits `message.rs`, `session.rs`, `registry.rs` and `runtime/mod.rs` and #1494 claims types 48/49 | Crates `seyal-protocol`, `seyal-runtime`. Fuzz and integration tests. Renumber to the then-free types. |
+| WI-3 | Runtime: controller handoff (`TakeControl`, `ControllerRevoked`), per-attachment input tagging, and the answer to "what ends a stalled-controller session" | **ADR-017 amendment accepted in its own PR** with a threat model; WI-2 (shares its request-ID space and the same files as #1494, so the same coordination applies); the demoted-GUI fail-closed client behaviour is a co-requisite | **Required by the V1 scope** (or the scope must be amended). Blocked on the ADR; no timeout steal unless the ADR defines a Runtime-observable stall rule. |
 | WI-4 | Runtime: `InventoryChanged` hint | WI-2 | Capability-gated, coalesced. Same-file overlap with #1494 as WI-2. |
-| WI-5a | Client library: inventory codec and consumer in `seyal-client::local` (no GUI behaviour change) | WI-2 | Library-only; unblocks the CLI. Coordinate file overlap with #1494. |
+| WI-5a | Client library: inventory codec and consumer in `seyal-client::local`, plus the client side of the extended Legacy-hello fallback (proposal §2.1) (no GUI behaviour change) | WI-2 | Library-only; unblocks the CLI. Coordinate file overlap with #1494. |
 | WI-5b | GUI migration: remove the default-workspace guess, replace the polling thread with hints | WI-5a, WI-4, **#1494 merged** | Edits `app/unpresented_apply.rs` and `local/poll.rs`, which #1494 also changes (§9). Unblocks #929. |
-| WI-6 | Hosting implementation: launchd-managed Runtime, Quit choice | WI-1 accepted | Swift is a thin adapter (ADR-015); Quit policy is Rust-owned. |
+| WI-6 | Hosting implementation: launchd-managed Runtime, Quit choice | WI-1 accepted; **GA also requires WI-3 or an accepted WI-1 shutdown-authority decision (AC16)**: a Runtime that outlives the GUI with a wedged controller otherwise has no product-visible way to end that session | Swift is a thin adapter (ADR-015); Quit policy is Rust-owned. Edits `MultiWindowHostController.swift`, which #1494 also changes: coordinate with it as well as #1514. |
 | WI-7 | CLI: list/watch/terminate over the client library (take-control only if WI-3) | WI-5a; #262 owner | Interactive attach is the separate gate in the V1 scope. |
 | WI-8 | Durable reconciliation: derive `Live`/`Ended`/`Lost` from durable records versus live inventory | WI-2, #832 accepted | Never infers liveness from disk. |
 | WI-9 | #929 Sessions view | WI-5b and #922 | Consumer only. |
-| WI-10 | Performance and soak evidence | WI-2, WI-4, WI-6 | Freezes §5.12, runs the V1 soak. |
+| WI-10 | Performance and soak evidence | WI-2, WI-4, WI-6, WI-7 | Freezes §5.12 (the CLI cold-list ceiling needs WI-7), runs the V1 soak. |
 
 Implementation sequence (recommended):
 
@@ -402,7 +403,7 @@ Rules for the amendment:
 ## 11. Open questions and blockers
 
 1. **Blocker (decision):** Runtime hosting and Quit semantics (WI-1). Cannot be settled without a macOS spike; nothing here pre-judges it beyond the recommendation.
-2. **Blocker for WI-3 only:** controller handoff is a security-boundary change (§5.6) and needs an ADR-017 amendment with a threat model; V1 can ship without it.
+2. **Blocker for WI-3 only:** controller handoff is a security-boundary change (§5.6) and needs an ADR-017 amendment with a threat model; The handoff or an accepted alternative is on the V1 critical path (WI-3).
 3. Decision: a Runtime-owned settable `label` is deferred (no setter exists); `created_unix_ms` is mandatory in the proposal entry. Confirm both choices.
 4. Decision: tombstone ring size (64 is a proposal, not a measurement).
 5. Unverified: effect of Runtime death on background or `nohup` children; `SMAppService` constraints; whether the tmux, Zellij, WezTerm and cmux behaviours match the secondary descriptions summarized in §3.
@@ -425,7 +426,7 @@ An independent read-only review (a fresh agent given only the two files and the 
 | 4 | Blocker | Input fence and generation do not exist | Stated as a new mechanism; guarantee narrowed to one lease |
 | 5 | Blocker | Controller handoff is a security-boundary change | Moved to an ADR-017 amendment; WI-3 blocked on it (made required by the V1 scope in the second review) |
 | 6 | Blocker | Terminating states could never be disposed of | Controller attach allowed for terminate/detach only; AC9 |
-| 7 | Major | Authority and scope of the Quit kill misstated | Verified: §13 is Proposed, accepted ADR-018 §8.6 and SPEC-009 say otherwise; last-window close and spawner scope added |
+| 7 | Major | Authority and scope of the Quit kill misstated | Verified: §13 is Proposed, accepted ADR-018 §8 invariant 6 says otherwise; last-window close and spawner scope added |
 | 8 | Major | Label layout inconsistent, no setter | Label removed from V1 |
 | 9 | Major | Types 52/53 unspecified | Specified (proposal §8); enqueue failure closes the connection |
 | 10 | Major | Draining states and signal encoding | `Draining` added; signal encoded once |
@@ -457,4 +458,6 @@ A second independent read-only review on head `fc214ca` found 3 blockers, 9 majo
 | 12 | Major | Pagination may be an unnecessary layer | Kept only because the V1 scope requires it; single-frame alternative documented |
 | 13–19 | Minor | Hot-path checker overclaim, TakeControl as lesson, endianness, zero continuation, hint cause, empty workspaces, ownership-check wording, test gaps, result-code numbering | Fixed or documented as above |
 
-A third pass on the corrected head is recorded in the PR.
+## 15. Third review log
+
+A third independent read-only review on head `378b847` found no blockers, 4 majors and 8 minors, all addressed in this revision: `Draining` definition unified with the code (PTY EOF is a separate `endpoint_closed` fact with a new Runtime-owned source field); the termination-invariant contradiction removed and gated by AC16 and WI-6 GA; work-item dependencies completed (WI-3 on WI-2 and #1494 coordination, WI-2 on WI-0b, hello fallback owned by WI-5a, WI-10 includes WI-7, WI-6 coordinates with #1494); tombstone scans ignore `max_entries`; request-ID and continuation rules stated; hello-drop tradeoff and bit 16 stated; SPEC-004 §18.5 rows extended; SPEC-009 §16 no longer cited as independent authority; table cell and test gaps fixed.
