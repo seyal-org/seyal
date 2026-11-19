@@ -129,12 +129,10 @@ struct ContractSession {
 #[cfg(target_os = "macos")]
 fn start_contract_session(workload: Workload, columns: u16, rows: u16) -> ContractSession {
     let suffix = format!("{:x}", process::id());
-    let mut config = RuntimeConfig::m001().expect("M001 config");
-    config.singleton_path = env::temp_dir().join(format!("s5c-{suffix}.lock"));
     let runtime_dir = env::temp_dir().join(format!("s5c-{suffix}"));
-    config.local_ipc = LocalIpcMode::Enabled {
-        runtime_dir_override: Some(runtime_dir.clone()),
-    };
+    let mut config = RuntimeConfig::m001()
+        .expect("M001 config")
+        .isolated_to(runtime_dir.clone());
     config.max_executions = 1;
     config.graceful_termination = Duration::from_millis(100);
     config.forced_reap = Duration::from_millis(500);
@@ -614,12 +612,10 @@ fn worker() {
     let requested_fanout = args[6].parse::<usize>().expect("fanout");
 
     let suffix = format!("{:x}", process::id());
-    let mut config = RuntimeConfig::m001().expect("M001 config");
-    config.singleton_path = env::temp_dir().join(format!("s5p-{suffix}.lock"));
     let runtime_dir = env::temp_dir().join(format!("s5d-{suffix}"));
-    config.local_ipc = LocalIpcMode::Enabled {
-        runtime_dir_override: Some(runtime_dir.clone()),
-    };
+    let mut config = RuntimeConfig::m001()
+        .expect("M001 config")
+        .isolated_to(runtime_dir.clone());
     config.max_executions = requested_population.max(1);
     config.graceful_termination = Duration::from_millis(100);
     config.forced_reap = Duration::from_millis(500);
