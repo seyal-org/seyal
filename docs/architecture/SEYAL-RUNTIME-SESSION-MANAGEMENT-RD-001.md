@@ -15,7 +15,7 @@ Out of scope and untouched by this PR:
 
 | Area | Owner / authority | Boundary |
 |---|---|---|
-| Workspace containment, sidebar, per-workspace pane trees | #1490 / PR #1494 (@anulalbs), ADR-029 / SPEC-032 | Not read for design; read only to find file overlap (§9). No containment decision here. |
+| Workspace containment, sidebar, per-workspace pane trees | #1490 / PR #1494 (@anulalbs), ADR-029 / SPEC-032 | Read as evidence for **file and wire-number overlap** (§9): #1494 already claims message types 48/49 and edits the Runtime registry/session files this design would change. No containment decision here. |
 | Durable persistence, layout/history restoration | #687 (@anulalbs), #832, proposed ADR-023 | This document defines **live** continuity only and has no persistence dependency. It names the seam where durable records later plug in (§5.9). |
 | OSC 8 hyperlinks | PR #1513 / ADR-030 (@crdileep82) | Orthogonal. No overlap in design; only shared index files (§9). |
 | Stale-socket recovery diagnostics | PR #1514 (edits SPEC-009) | SPEC-009 is not edited here. |
@@ -42,7 +42,7 @@ Two different guarantees must never be conflated:
 
 ## 2. Current implementation, source-backed
 
-Paths are relative to the repository root at `1ef183f`.
+Paths are relative to the repository root at `1ef183f`. Bare file names are under `crates/seyal-protocol/src/framing/` (`payload.rs`, `envelope.rs`, `message.rs`) or `crates/seyal-runtime/src/runtime/` (`config.rs`, `registry.rs`, `entry.rs`, `lifecycle.rs`, `local/session.rs`).
 
 ### 2.1 What already works (do not rebuild)
 
@@ -56,7 +56,7 @@ Paths are relative to the repository root at `1ef183f`.
 | Explicit termination, Controller-fenced, ordered graceful→forced→reap | `runtime/local/disposition.rs:17-158`; `registry.rs:423-539` | ADR-005 policy; process-group verified signalling. |
 | Provisioning with workspace association | `provisioning.rs:37-197` | SPEC-004 §18. |
 | Live-unpresented enumerate/adopt/terminate in the client | `app/unpresented_apply.rs`; `shell/unpresented.rs`; M003 W6 #1143, W2b #1153 | Client catalog is derived state; Runtime has no "unpresented" concept and needs none. |
-| Bounded per-client queues, delivery suspend/resume | `connection/mod.rs:30,37`; SPEC-004 §19 | Slow observers get snapshot resync, not unbounded buffering. |
+| Bounded per-client queues, delivery suspend/resume | `local_ipc/connection/mod.rs:30` (`MAX_OUTBOUND_QUEUE_BYTES`); SPEC-004 §19 | Slow observers get snapshot resync, not unbounded buffering. |
 | Same-UID peer authentication | `local_ipc/auth.rs`; SPEC-004 §4 | Authentication does not grant attachment authority. |
 
 ### 2.2 What is incomplete
@@ -71,15 +71,19 @@ Paths are relative to the repository root at `1ef183f`.
 | G6 | No controller handoff. A controller whose connection is alive but stalled cannot be replaced; termination of a detached execution first needs the controller slot. | `session.rs:249-253`; `unpresented_apply.rs:178-188` |
 | G7 | No GUI-less client. Discovery/list/attach exist only as `seyal-client::local` library code. | no `[[bin]]` outside `seyal-agent-backend` and the Runtime helper |
 | G8 | `handle_attach` checks only that the entry exists. Attaching (including as Controller) to an execution that is already terminating is accepted. | `session.rs:224-262` (no lifecycle guard) |
-| G9 | No Runtime-side human-meaningful identity: no label, no created-at. A CLI user sees opaque u128 values. | `entry.rs:36-113` |
+| G9 | No Runtime-side created-at or exit information and no label. A CLI user sees opaque u128 values. V1 adds timestamps and exit detail; a Runtime-owned label is deliberately deferred (no setter exists; §5.3). | `entry.rs:36-113` |
 
 ### 2.3 What must change: the blocking contradiction
 
-**G10. Intentional headed Quit terminates the Runtime and therefore every execution.** `MultiWindowHostController.performQuitCleanup` calls `BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit` (SIGTERM to the helper's process group, then SIGKILL after 0.4 s; `macos/Seyal/Sources/BundledRuntimeLauncher.swift:41-64`; `MultiWindowHostController.swift:509-523`). Rationale in ADR-018 §4.0: the GUI-spawned helper would otherwise keep `Seyal.app` as `(exited-with-subordinates)` in the Dock. ADR-018 §4.0 itself says this holds "until" a launchd-/LSUIElement-packaged headless Runtime exists under a separate Architecture Issue.
+**G10. Intentional headed Quit terminates the GUI-spawned Runtime and therefore every execution it owns, against accepted text.**
 
-This conflicts with the accepted V1 scope ("GUI close/quit/crash and reopen reattach same live executions", `M004-V1-PRODUCT-SCOPE.md`) and with ADR-018's own close-last-Window row, which says executions "all stay live across headed Quit (Runtime survives)". Both cannot hold. Closing the window or crashing the GUI already preserves sessions; only intentional Quit does not.
+- Code: `MultiWindowHostController.performQuitCleanup` calls `BundledRuntimeLauncher.terminateLaunchedHelperForHeadedQuit` (SIGTERM to the helper's process group, SIGKILL after 0.4 s; `macos/Seyal/Sources/BundledRuntimeLauncher.swift:41-64`; `MultiWindowHostController.swift:509-523`), which ends every execution via `begin_shutdown` (`registry.rs:460-471`). It was merged by #1453 (commit `7388d45`).
+- Accepted authority says the opposite: ADR-018 §8 invariant 6 ("Headless Runtime survives every window close, last-window close and quit") and SPEC-009 ("Runtime survival across Quit is unchanged").
+- The only text that authorizes the kill is ADR-018 §13 (#1447) item 4 and §4.0, and **§13 is itself Proposed and "not normative"** (ADR-018 header and §13 status). The merged implementation therefore realizes an unaccepted amendment against accepted text. The "until a separate headless Runtime packaging ADR lands" wording is that amendment's own caveat, not accepted authority.
+- Scope of the kill: it targets `launchedHelperPid`, recorded only by the GUI instance that spawned the helper (`BundledRuntimeLauncher.swift:154`). A Runtime started by an earlier GUI instance or another process is not recorded and survives a later GUI's Quit. Whether sessions survive Quit currently depends on which process spawned the Runtime; AC5 tests both.
+- Reach: closing the **last** window also quits (ADR-018 §13 item 3, `applicationShouldTerminateAfterLastWindowClosed`), so it kills sessions too. Closing a non-last window, a pane or a tab, or a GUI crash, preserves them.
 
-No amount of inventory work delivers the tmux-like promise while Quit kills the server. This is the first architectural dependency (WI-1) and it is an ADR-level decision (process model), so it is **not** decided in this document: this document recommends it and specifies what the ADR must settle (§5.5).
+This conflicts with the accepted V1 scope ("GUI close/quit/crash and reopen reattach same live executions", `M004-V1-PRODUCT-SCOPE.md`). No inventory work delivers the tmux-like promise while Quit ends the server. This is the first architectural dependency (WI-1) and an ADR-level process-model decision, so it is **recommended here and not decided here**. WI-1 may need to reject or replace ADR-018 §13 item 4, not merely add to it.
 
 ## 3. Prior art
 
@@ -125,7 +129,7 @@ Per the adversarial-lifecycle rules, independent facts are never collapsed into 
 
 | Fact | Values | Authority |
 |---|---|---|
-| Process | `Running`, `Terminating{graceful, forced, failed}`, `Exited{status \| signal}` | `TerminalExecution` / Runtime lifecycle |
+| Process | `Running`, `Draining`, `TerminatingGraceful`, `TerminatingForced`, `TerminationFailed`, `Exited{code \| signal}` (a PTY endpoint ending while the child lives stays `Running`) | `TerminalExecution` / Runtime lifecycle |
 | Presentation | `attachment_count` (observers + controller), `has_controller` | Attachment registry |
 | Association | `WorkspaceId` | Runtime/workspace metadata (ADR-007) |
 | Identity | `RuntimeId` (incarnation) + `ExecutionId` | Runtime |
@@ -140,7 +144,7 @@ Derived, never stored:
 
 ### 5.2 Stable identity and workspace association
 
-- Within one `RuntimeId`, `ExecutionId` and its `WorkspaceId` association are immutable for the execution's life. A replacement shell gets a new `ExecutionId` (SPEC-009 §11.3).
+- Within one `RuntimeId`, `ExecutionId` and its `WorkspaceId` association are immutable **in this contract version**; the V1 launch-blocking cross-workspace transfer is a separate decision that would add its own reassociation message and an epoch bump. A replacement shell gets a new `ExecutionId` (SPEC-009 §11.3).
 - The inventory entry identity is the pair `(RuntimeId, ExecutionId)`; a client that sees a different `RuntimeId` discards all prior session knowledge and claims no continuity (SPEC-009 §5).
 - The Runtime, not any client, reports `WorkspaceId`. Fresh clients never guess the default workspace for an unknown execution. Unknown association is an explicit inventory error, not a silent default (fixes G3).
 - Workspace metadata (names, roots, layout) remains client/Rust-presentation state; the inventory carries only the opaque id.
@@ -150,12 +154,12 @@ Derived, never stored:
 
 Contract summarized here; normative text is in the companion proposal.
 
-- Keyset pagination ordered by `ExecutionId` (a total order that is stable under insertion/removal). Each page carries `inventory_epoch`, `total_live`, `total_tombstones`, `has_more` and a continuation token.
-- `inventory_epoch` is a per-incarnation monotonic counter bumped on any list-visible change. If the epoch differs between pages, the final page reports `snapshot_changed`. Guarantee: any execution that was live and unchanged for the whole scan appears exactly once; entries created or ended mid-scan may be absent or present. Clients needing exactness rescan. No server-side snapshot is held, so memory cost is zero per scan.
-- **No silent truncation, ever.** The legacy `ListExecutions` is retained for old clients but fails closed (an explicit error) if the live set would exceed its 512-entry frame limit, rather than truncating.
-- Page size is fixed by capability (proposed 128 entries, fixed-width entries, under 16 KiB), so 512 executions need at most four pages and the frame limit (262,144 B) is never approached.
-- Ended executions: a bounded in-memory tombstone ring (proposed 64 per Runtime incarnation, oldest evicted, never persisted, never attachable) retains `ExecutionId`, `WorkspaceId`, exit status or signal and end time so that "exited while detached" is distinguishable from "never existed". It is not live resolution, so SPEC-009 §11.3 ("a retired finalized execution is absent from live resolution") still holds. Durable records of ended executions belong to #832.
-- Inventory is a read-only, non-attaching, non-spawning operation (V1 scope). It reveals no terminal text, cwd, title, argv or environment, which keeps CLI/GUI output free of terminal-controlled strings by construction. A Runtime-owned bounded `label` and `created_at` are specified as optional fields so that CLI output is human-usable (G9); labels are set only through provisioning or a Controller-fenced rename, never inferred from terminal output.
+- Keyset pagination ordered by `ExecutionId` (a total order that is stable under insertion/removal). Each page carries `inventory_epoch`, `event_seq`, `total_live`, `total_tombstones`, `tombstones_evicted`, `has_more` and a continuation token.
+- `inventory_epoch` is a per-incarnation monotonic counter bumped only on execution create, finalize/exit and process-state change; attachment/controller changes bump a separate `event_seq`, so a busy GUI does not invalidate scans. The **client** detects changed membership by comparing the epoch across the pages of one scan (the Runtime keeps no scan state and cannot). Guarantee: any execution that was live and membership-unchanged for the whole scan appears exactly once; entries created or ended mid-scan may be absent or present. Clients needing exactness rescan. No server-side snapshot is held; the only transient cost is sorting at most 512 identifiers (≤ 8 KiB) per page.
+- **No silent truncation, ever.** The legacy `ListExecutions` is retained for old clients but returns `CapacityExceeded` if the live set would exceed its 512-entry limit, rather than truncating. Today this cannot occur (`max_executions == 512`), so no current behavior changes.
+- Page size is fixed by capability (proposed 128 entries of 64 bytes plus a 72-byte header, 8,264 bytes, under 16 KiB), so 512 live executions need at most four pages and the frame limit (262,144 B) is never approached. A tombstone scan is a separate single page.
+- Ended executions: a bounded in-memory tombstone ring (proposed 64 per Runtime incarnation, oldest evicted, never persisted, never attachable, scanned separately from live executions) retains `ExecutionId`, `WorkspaceId`, exit code or signal and end time. A monotonic `tombstones_evicted` counter tells a client whether an absent id may have been evicted or cannot have existed in this incarnation. Because the ring (64) is smaller than the registry cap (512) the guarantee is **no silent loss**, not no loss; durable ended-execution records are #832's. It is a new bounded Runtime memory class that must be classified under ADR-007 §4 at acceptance. It is not live resolution, so SPEC-009 §11.3 ("a retired finalized execution is absent from live resolution") still holds.
+- Inventory is a read-only, non-attaching, non-spawning operation (V1 scope). It reveals no terminal text, cwd, title, argv, environment or label, which keeps CLI/GUI output free of terminal-controlled strings by construction. Entries carry `created_unix_ms` and exit detail so CLI output is meaningful. A Runtime-owned `label` is deferred: no message can set one and a variable-length field would break the fixed-width entry; names stay in Rust presentation state until #832 or a CLI consumer justifies a settable, bounded label as its own capability.
 
 ### 5.4 GUI closure without terminating executions
 
@@ -163,9 +167,9 @@ Three distinct events, each with a defined outcome:
 
 | Event | Outcome required | Status |
 |---|---|---|
-| Close pane/tab/window (detach) | Attachment released; execution live; reachable via inventory | Works (SPEC-009 §6, ADR-018 §3.1) |
+| Close pane, tab or non-last window (detach) | Attachment released; execution live; reachable via inventory | Works (SPEC-009 §6, ADR-018 §3.1) |
 | GUI crash / SIGKILL | Runtime revokes attachments and controller leases; execution live | Works (SPEC-009 §7; `connection.rs:71-158`) |
-| Intentional Quit | Must **not** end the Runtime when live executions exist unless the user explicitly chose to end them | **Broken today (G10)**; fixed by WI-1 |
+| Intentional Quit and last-window close (which quits) | Must **not** end the Runtime when live executions exist unless the user explicitly chose to end them | **Broken today for a GUI-spawned Runtime (G10)**; fixed by WI-1/WI-6 |
 
 ### 5.5 Runtime hosting (input to the WI-1 ADR)
 
@@ -183,10 +187,10 @@ Reattach reuses the accepted path unchanged: connect, `Hello`, same `RuntimeId`,
 
 Changes:
 
-- **Attach to a terminating execution (G8):** Observer attach is allowed (to watch the exit), Controller attach returns `InvalidState`. Attach to a tombstone returns `InvalidExecution`.
-- **Multiple clients:** unchanged limits (SPEC-004 §5); observers do not affect input.
-- **`TakeControl` (G6):** an attached Observer of the execution may request the Controller lease explicitly. Runtime performs one atomic step: revoke the old lease, demote the old holder to Observer, discard its unwritten input and bump the input generation (so stale input can never reach the PTY), grant the lease to the requester, and send the old holder a `ControllerRevoked` indication. Rules: explicit user intent only, never automatic, never on a timer (a hung client must not lose a lease to a heuristic and risk wrong-target input), no effect without an existing attachment. This deliberately replaces the "controller requests never preempt" sentence in SPEC-004 §5 for this one explicit message and so is isolated as its own optional section of the amendment (WI-3) for separate architecture review.
-- **Exclusive ownership invariant:** at most one controller per `ExecutionId` at every instant; no window in which two clients can write. Tested with an interleaving harness (§7).
+- **Terminating executions (G8):** Observer attach is allowed (to watch the exit). Controller attach is also allowed, but while the execution is `Draining` or any `Terminating*` state a controller may only **dispose** (idempotent `TerminateExecutionRequest`) and detach; input, paste, key, mouse, resize and composer return `InvalidState`. Rejecting Controller attach outright would strand a `TerminationFailed` execution (which retains ownership and waits for a re-arm, `lifecycle.rs`) whose first controller disconnected. Attach to a tombstone returns `InvalidExecution`.
+- **Multiple clients:** unchanged limits (SPEC-004 §5: 16 connections, 100 attachments); observers do not affect input. A CLI uses one transient connection; GUI hosts should multiplex attachments on one connection as ADR-018 §5 already requires.
+- **Controller handoff (`TakeControl`, G6): proposed but not accepted here.** Today a same-UID process cannot take a live shell a GUI controls (SPEC-004 §4: same-UID authentication "does not grant attachment or mutation authority"; §5 and ADR-017: a controller request "cannot preempt a Controller"). A handoff lets any same-UID process holding an Observer attachment take control without the holder's consent, and the Runtime cannot verify "explicit user intent". That is a **security-boundary change**, so it requires an **ADR-017 amendment in its own PR** with a threat model; WI-3 is blocked on it. The ADR must choose among options such as holder-notified take-over with a grace period, take-over only for a Runtime-observable stalled holder, or no take-over. It also requires a new Runtime mechanism that does not exist today: input is not tagged per attachment (`Entry.reserved_input` is an execution-wide counter) and bytes already written to the PTY cannot be recalled, so the guarantee is **one controller lease at every instant**, not "no stale byte ever". Delivery-suspend state, composer-target generation (type 45), correlated-resize fences and SPEC-009 §8.3 reacquisition must be specified. Contract sketch: [SPEC-004 proposal §8](../specs/SPEC-004-PROPOSAL-SESSION-INVENTORY-001.md).
+- **Exclusive ownership invariant:** at most one controller lease per `ExecutionId` at every instant (reactor-serialized, as today). Tested with an interleaving harness (§7).
 
 ### 5.7 Session lifecycle notifications
 
@@ -197,7 +201,7 @@ Changes:
 ### 5.8 Termination and cleanup
 
 - Termination stays explicit, exact-identity and Controller-fenced (ADR-017 §6.3, SPEC-004 §18). Detach, window close and GUI death never terminate.
-- Terminating a detached execution that another client controls is `TakeControl` then terminate, two explicit steps; a CLI `kill` may combine them behind an explicit flag, but the wire stays two operations so each is separately authorized.
+- Terminating a detached execution: attach as Controller (allowed even while terminating, §5.6) then terminate. If another client holds the lease the CLI reports `ControllerBusy`; forcing past it is only possible if the handoff ADR (WI-3) is accepted, and then as two separately authorized wire operations.
 - Ordering, signalling and reap are unchanged (ADR-005; `registry.rs:423-539`). The inventory now exposes the termination phase and, after finalization, the tombstone, so a client sees `Exited` rather than silence.
 - Resource cleanup is as today: finalize drops the entry and the PTY, removes attachments and retires block records. The tombstone holds a fixed-size record only.
 - Runtime shutdown terminates every execution (`begin_shutdown`); it is only reachable by the explicit "End sessions"/stop-Runtime paths (§5.5).
@@ -216,12 +220,14 @@ Changes:
 - Inspection and mutation are distinct commands and distinct wire permissions. Destructive commands require the exact id (never a prefix or "first/only").
 - Output is built from fixed-width Runtime fields; because the inventory carries no terminal-controlled text, CLI output needs no escape sanitization beyond the bounded `label`, which is restricted to printable UTF-8 and escaped by the CLI.
 
+- If no Runtime is running the CLI reports `Unknown`/not running and **never spawns one** to answer a list. Packaging the CLI as a new binary and product surface is decided under #262, not here.
+
 ### 5.11 Security
 
 Same-UID peer check remains the trust boundary (SPEC-004 §4). Added requirements:
 
 - Inventory and lifecycle hints require the existing authenticated connection; they grant no attachment, control or termination authority.
-- `TakeControl` and termination require an attachment of the same connection to that exact execution.
+- Termination requires a Controller attachment of the same connection to that exact execution. Any controller handoff is a boundary change that must be decided by the ADR-017 amendment (§5.6) before it is specified further.
 - Enumeration is bounded per connection (one request in flight; page work budget per reactor turn like provisioning's one create per turn) to prevent a same-UID client from starving the reactor.
 - The wire carries no paths, argv, environment or terminal text (inventory), so a hostile program in a session cannot inject through discovery.
 - Tombstones and labels contain no secrets by construction.
@@ -236,7 +242,7 @@ These are **proposed ceilings, not measurements.** Each owning work item must fr
 | PTY hot-path change | **Zero** added instructions, locks, allocations, copies or IPC; enforced by `scripts/check-hot-path.py` |
 | Added Runtime memory per execution | ≤ 128 bytes (fixed-width inventory metadata) |
 | Tombstone ring | ≤ 64 fixed-size records per Runtime incarnation |
-| Inventory page | ≤ 128 entries, ≤ 16 KiB; ≤ 4 pages for 512 executions |
+| Inventory page | ≤ 128 entries, ≤ 16 KiB (8,264 B at 128 × 64 B + 72 B header); ≤ 4 live pages for 512 executions plus one tombstone page |
 | Inventory request service time | p99 ≤ 2 ms for a full 512-execution scan on the approved Apple Silicon host; bounded work per reactor turn |
 | Hint delivery | ≤ 1 pending slot per connection; coalesced; ≤ 1 hint per lifecycle transition |
 | Idle detached execution | No added wakeups or CPU versus an attached idle execution; RSS growth bounded by the existing history caps (32 MiB per execution, 256 MiB aggregate) |
@@ -302,15 +308,15 @@ Each criterion is measurable and assigned to a work item (§8).
 
 | ID | Criterion | Evidence |
 |---|---|---|
-| AC1 | `ExecutionInventory` returns every live execution exactly once across pages with 0, 1, 127, 128, 129, 512 executions; `total_live` equals the entries seen | Runtime integration tests; fuzz of the page codec |
+| AC1 | With no concurrent mutation, `ExecutionInventory` returns every live execution exactly once across pages with 0, 1, 127, 128, 129, 512 executions, and the sum of `entry_count` equals `total_live` | Runtime integration tests; fuzz of the page codec |
 | AC2 | Neither new nor legacy list ever truncates silently; legacy list fails closed when the live set exceeds its frame limit | Test with a raised registry cap |
-| AC3 | Mutation between pages (create, finalize, attach) never duplicates an entry; `snapshot_changed` is set when the epoch moved; an unchanged execution is never omitted | Interleaving tests with forced epoch changes |
+| AC3 | Mutation between pages (create, finalize, attach) never duplicates an entry; an unchanged execution is never omitted; a client comparing `inventory_epoch` across pages detects a membership change, and attach/controller changes alone do not move the epoch | Interleaving tests with forced epoch changes |
 | AC4 | Every entry carries the authoritative `WorkspaceId`; a fresh client with a non-default-workspace execution reports the correct workspace and never defaults | Client test (consumes WI-2) |
-| AC5 | Close window, kill the GUI with SIGKILL, and intentional Quit with "Keep sessions running": the same `ExecutionId`, child PID and PTY survive; output produced while detached is visible on reattach | Real-process test; headed validation |
-| AC6 | Exactly one controller at every observable instant under concurrent `Attach`/`TakeControl`/disconnect; input from a demoted holder never reaches the PTY | Concurrency harness with injected delays; inverse test (revoked holder keeps sending) |
+| AC5 | Close a non-last window, kill the GUI with SIGKILL, and Quit / close the last window with "Keep sessions running": the same `ExecutionId`, child PID and PTY survive; output produced while detached is visible on reattach. Repeat with the Runtime spawned by this GUI instance and by an earlier GUI instance | Real-process test; headed validation (Quit rows after WI-6) |
+| AC6 | Exactly one controller lease at every observable instant under concurrent `Attach`/disconnect (and `TakeControl` if its ADR is accepted); input from a demoted holder after the switch never reaches the PTY | Concurrency harness with injected delays; inverse test (revoked holder keeps sending) |
 | AC7 | Terminate by exact id ends only that process group; siblings keep running; ordering matches ADR-005; detach alone never signals | Existing `w6_unpresented_terminate`-style tests plus a no-signal-on-detach test |
-| AC8 | Exited-while-detached is listed as `Exited` with status; absent and unreachable are reported as different outcomes | Tombstone tests; IPC-failure test |
-| AC9 | Attach to terminating: Observer allowed, Controller `InvalidState`; to tombstone: `InvalidExecution` | Runtime tests |
+| AC8 | Exited-while-detached is listed as `Exited` with code or signal; an id absent from both scans is reported as possibly evicted iff `tombstones_evicted > 0`; unreachable Runtime is reported `Unknown` | Tombstone and eviction tests; IPC-failure test |
+| AC9 | Attach to a terminating execution: Observer allowed; Controller allowed but only terminate/detach, every mutating command `InvalidState`; `TerminationFailed` is re-armable by a second controller after the first disconnects; attach to a tombstone: `InvalidExecution` | Runtime tests |
 | AC10 | `InventoryChanged` is delivered for create, finalize, attach/controller change; coalesces under a burst of N changes into at most one pending slot | Burst test; queue-bound assertion |
 | AC11 | Hot-path checker passes unchanged; a before/after benchmark of PTY throughput and latency shows no regression beyond measurement noise | `scripts/check-hot-path.py`; `performance-gate` evidence |
 | AC12 | Resource ceilings in §5.12 are met at 1, 10, 50 and 100 detached executions (the M003 §8.2 scaling rows) | Frozen budget table with raw samples |
@@ -327,10 +333,10 @@ All items are drafts for refinement; none is Ready. Ownership and Issue creation
 | WI | Title | Depends on | Notes |
 |---|---|---|---|
 | WI-0 | Accept this R&D and the SPEC-004 amendment proposal | #1515 review | Docs only. |
-| WI-1 | **ADR: Runtime hosting and Quit semantics** (supersedes the "until" clause of ADR-018 §4.0) | spike on launchd/SMAppService feasibility, Dock behaviour, update/rollback | Separate Architecture PR; no implementation in it. Gates AC5 for Quit. |
-| WI-2 | Runtime: `ExecutionInventory` paged contract, tombstone ring, fail-closed legacy list, attach lifecycle guard (G1, G2, G4, G8, G9 fields) | WI-0 accepted; no dependency on #1494 or #832 | Crates `seyal-protocol`, `seyal-runtime`. Fuzz and integration tests. |
-| WI-3 | Runtime: `TakeControl` and `ControllerRevoked` | WI-0 and a separate architecture review of the SPEC-004 §5 change | Independent of WI-2 except shared capability numbering. |
-| WI-4 | Runtime: `InventoryChanged` hint | WI-2 | Capability-gated, coalesced. |
+| WI-1 | **ADR: Runtime hosting and Quit semantics.** Must reconcile the merged #1453 behaviour with accepted ADR-018 §8.6 / SPEC-009 and may reject or replace the Proposed ADR-018 §13 item 4 | spike on launchd/SMAppService feasibility, Dock behaviour, update/rollback, version skew | Separate Architecture PR; no implementation in it. Gates AC5 for Quit. |
+| WI-2 | Runtime: `ExecutionInventory` paged contract, tombstone ring, legacy-list `CapacityExceeded`, terminating-state attach rules (G1, G2, G4, G8, G9) | WI-0 accepted; **sequenced after #1494 merges, or coordinated with it**: it edits `message.rs`, `session.rs`, `registry.rs` and `runtime/mod.rs` and #1494 claims types 48/49 | Crates `seyal-protocol`, `seyal-runtime`. Fuzz and integration tests. Renumber to the then-free types. |
+| WI-3 | Runtime: controller handoff (`TakeControl`, `ControllerRevoked`) and per-attachment input tagging | **ADR-017 amendment accepted in its own PR** with a threat model | Optional; the product may ship without it (CLI reports `ControllerBusy`). |
+| WI-4 | Runtime: `InventoryChanged` hint | WI-2 | Capability-gated, coalesced. Same-file overlap with #1494 as WI-2. |
 | WI-5 | Client library: consume inventory, remove default-workspace guess, replace the polling thread | WI-2, WI-4, **and #1494 merged** | Edits `seyal-client` files that #1494 also changes (§9). Unblocks #929. |
 | WI-6 | Hosting implementation: launchd-managed Runtime, Quit choice | WI-1 accepted | Swift is a thin adapter (ADR-015); Quit policy is Rust-owned. |
 | WI-7 | CLI: list/watch/take-control/terminate/stop-Runtime over the client library | WI-2, WI-5; #262 owner | Interactive attach is the separate gate in the V1 scope. |
@@ -341,8 +347,8 @@ All items are drafts for refinement; none is Ready. Ownership and Issue creation
 Implementation sequence (recommended):
 
 1. WI-0 (this PR) and WI-1's spike and ADR start in parallel; they touch only docs.
-2. WI-2 can start as soon as WI-0 is accepted; it does not need #1494 or #832.
-3. WI-3 after its own architecture review; WI-4 after WI-2.
+2. WI-2 design can start once WI-0 is accepted and does not need #832, but it edits the same Runtime/protocol files as #1494 and must renumber around its types 48/49, so it **lands after #1494 or is explicitly coordinated with its owner**.
+3. WI-4 after WI-2. WI-3 only after its ADR-017 amendment is accepted; it is optional for V1.
 4. WI-5 after #1494 merges and WI-2/4 land.
 5. WI-6 after WI-1 is accepted; WI-7 and WI-9 after WI-5.
 6. WI-8 after #832 is accepted; WI-10 last.
@@ -353,7 +359,7 @@ Read-only inspection of the latest heads (2026-11-19):
 
 | PR | Head | Overlap with this design | Rule |
 |---|---|---|---|
-| #1494 (@anulalbs, workspace containment) | `febf77ee` | Changes `crates/seyal-client/src/shell/inventory.rs`, `local/provisioning_wire.rs`, `local/poll.rs`, `app/*` and the FFI header: the client side that WI-5 must later modify | This PR touches none of it. **WI-5 must merge after #1494.** WI-2/WI-3/WI-4 (protocol and Runtime crates) are independent of it. |
+| #1494 (@anulalbs, workspace containment) | `febf77ee` | **Protocol/Runtime:** adds `BindWorkspaceRootRequest/Result = 48/49` in `message.rs`; edits `framing/execution.rs`, `runtime/local/session.rs`, `provisioning.rs`, `runtime/mod.rs`, `registry.rs`. **Client:** changes `crates/seyal-client/src/shell/inventory.rs`, `local/provisioning_wire.rs`, `local/poll.rs`, `app/*` and the FFI header: the client side that WI-5 must later modify | This PR touches none of it. **WI-2/WI-4 (protocol and Runtime) and WI-5 (client) all overlap #1494's files, so they merge after it or are coordinated with its owner.** Only the docs, WI-0 and WI-1 are independent. |
 | #1513 (@crdileep82, ADR-030) | `255f31d6` | Edits `docs/architecture/README.md` and `.sdlc/graph/context-index.json` | This PR does not edit either index, to avoid a merge conflict; indexing happens in a follow-up or at acceptance. No design overlap. |
 | #1514 (stale-socket diagnostics) | `fb25eeca` | Edits SPEC-009 and the client recovery module | This PR does not edit SPEC-009. WI-6 should rebase on whatever lands there. |
 
@@ -361,8 +367,8 @@ Rules for the amendment:
 
 - SPEC-004 is **not edited** by this PR. The inventory contract is a separate proposal file so that shared SPEC-004 sections are not concurrently modified.
 - When accepted, the amendment lands as its own SPEC PR, rebased on the then-current SPEC-004, and **before** WI-2.
-- Type numbers and capability bits in the proposal are provisional; they are allocated at acceptance against the then-current table (48 and up and bit 14 and up are unclaimed at `1ef183f`).
-- No ADR is created or amended here (`ISSUE-PROTOCOL.md`). The only ADR need is WI-1 and it is a separate PR. The inventory work extends accepted ADR-005/007/017 and SPEC-004 and needs no new ADR except for `TakeControl`, which must be explicitly classified by reviewers as a SPEC-004 §5 change or an ADR-017 amendment.
+- Type numbers and capability bits in the proposal are provisional. On master `1ef183f` types 48+ and bits 14+ are free, but **#1494 claims 48 and 49**, so the proposal starts at 50 and is re-checked at acceptance.
+- No ADR is created or amended here (`ISSUE-PROTOCOL.md`). ADR needs are WI-1 (hosting/Quit) and WI-3 (controller handoff), each its own PR. The inventory work (WI-2, WI-4) extends accepted ADR-005/007/017 and SPEC-004 and needs no new ADR, but reviewers must still classify the tombstone ring as a new bounded memory class (ADR-007 §4).
 
 ## 10. Failure, security and compatibility matrix
 
@@ -370,28 +376,28 @@ Rules for the amendment:
 |---|---|---|
 | GUI window closed | Execution live, detached, listed | AC5 |
 | GUI SIGKILL while controller | Lease released; no input from dead client's queue is replayed (SPEC-009 §11.2) | AC5, AC6 |
-| Intentional Quit, sessions live | Runtime survives unless "End sessions" chosen | AC5 (after WI-6) |
+| Quit or last-window close, sessions live | Runtime survives unless "End sessions" chosen; also tested when the Runtime was spawned by another process | AC5 (after WI-6) |
 | Runtime crash | Live executions lost; clients detect new/missing `RuntimeId`, claim no continuity; persistence reports `Lost` | AC15 |
 | Reboot | Same as crash; metadata only | AC15 |
 | IPC failure / socket missing | Reported `Unknown`, never `Exited` or live | AC8 |
-| Stale controller (connected but hung) | Replaced only by explicit `TakeControl`; never by timeout | AC6 |
-| `TakeControl` race with Controller attach and disconnect | One controller at every instant; stale input fenced by generation | AC6 |
+| Stale controller (connected but hung) | Not replaced by timeout; replaced only if the handoff ADR is accepted (WI-3); otherwise CLI reports `ControllerBusy` | AC6 |
+| Controller handoff race with Controller attach and disconnect (only if WI-3) | One controller lease at every instant; bytes already queued to the PTY before the switch are not recalled | AC6 |
 | Inventory flood by a same-UID client | Per-connection one in flight, per-turn budget; PTY work continues | AC13 |
 | Forged or stale `ExecutionId` | `InvalidExecution`; no side effect | AC9 |
 | Hostile program output | Cannot reach inventory or CLI output | AC14 |
 | Execution exits while detached | Tombstone `Exited{status}`; not attachable; not resurrected | AC8 |
-| Attach to terminating | Observer ok, Controller `InvalidState` | AC9 |
-| Registry cap raised above wire limit | Legacy list fails closed; paged list complete | AC2 |
+| Attach to terminating | Observer ok; Controller ok for terminate/detach only; mutations `InvalidState` | AC9 |
+| Registry cap raised above wire limit | Legacy list returns `CapacityExceeded`; paged list complete | AC2 |
 | Old client, new Runtime | Capability absent: legacy list and attach behave as today; no new message types sent | Compatibility test |
 | New client, old Runtime | No capability: fall back to legacy list, mark workspace association *unknown* (never default) | Compatibility test |
 | Version skew after update with live sessions | Hello negotiation; GUI reattaches or tells the user it cannot (WI-1 ADR) | WI-1 |
-| Mutation between pages | `snapshot_changed`; no duplicates | AC3 |
+| Mutation between pages | Client-detected via `inventory_epoch`; no duplicates | AC3 |
 | Cross-workspace move | Excluded; not enabled by this design | n/a |
 
 ## 11. Open questions and blockers
 
 1. **Blocker (decision):** Runtime hosting and Quit semantics (WI-1). Cannot be settled without a macOS spike; nothing here pre-judges it beyond the recommendation.
-2. **Blocker (review):** `TakeControl` changes a normative SPEC-004 sentence. Maintainers must decide whether it needs an ADR-017 amendment or only a SPEC-004 acceptance.
+2. **Blocker for WI-3 only:** controller handoff is a security-boundary change (§5.6) and needs an ADR-017 amendment with a threat model; V1 can ship without it.
 3. Decision: whether Runtime-owned `label` and `created_at` belong in V1 inventory or wait for #832 (they are optional fields in the proposal so either choice is compatible).
 4. Decision: tombstone ring size (64 is a proposal, not a measurement).
 5. Unverified: effect of Runtime death on background or `nohup` children; `SMAppService` constraints; whether the tmux, Zellij, WezTerm and cmux behaviours match the secondary descriptions summarized in §3.
@@ -401,3 +407,29 @@ Rules for the amendment:
 ## 12. Authority cited
 
 ADR-005 (detach is not terminate; termination ordering), ADR-007 §2/§3/§4 (workspace association, identity lifetimes and no false liveness, P1–P5 separation), ADR-015 (Rust-owned product state), ADR-017 §6.3 (disposition fence), ADR-018 §3.3/§3.3a/§4.0 and its close-last-Window row, ADR-029 (read-only), SPEC-003, SPEC-004 §4/§5/§9/§18/§19, SPEC-009 §5–§8/§11/§12, `M004-V1-PRODUCT-SCOPE.md` (Local session inventory; Session inventory and workspace movement), `SEYAL-RUNTIME-CRASH-LIVE-PTY-RD-001`, `SEYAL-RUNTIME-WORKSPACE-CONTINUITY-RD-001`.
+
+## 13. Review log
+
+An independent read-only review (a fresh agent given only the two files and the repository, not this document's conclusions) was run on head `787a659`. Findings and dispositions:
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | Blocker | Types 48/49 collide with #1494; WI-2/3/4 not independent of it | Verified against `gh pr diff 1494`. Renumbered to 50+; §0/§9/WIs corrected |
+| 2 | Blocker | `ExecutionInventoryRequest` was 28 bytes, not 32 | Fixed (added `u32 reserved`) |
+| 3 | Blocker | Runtime cannot produce `snapshot_changed` | Made client-derived from `inventory_epoch`; AC3 restated |
+| 4 | Blocker | Input fence and generation do not exist | Stated as a new mechanism; guarantee narrowed to one lease |
+| 5 | Blocker | Controller handoff is a security-boundary change | Moved to an ADR-017 amendment; WI-3 blocked and optional |
+| 6 | Blocker | Terminating states could never be disposed of | Controller attach allowed for terminate/detach only; AC9 |
+| 7 | Major | Authority and scope of the Quit kill misstated | Verified: §13 is Proposed, accepted ADR-018 §8.6 and SPEC-009 say otherwise; last-window close and spawner scope added |
+| 8 | Major | Label layout inconsistent, no setter | Label removed from V1 |
+| 9 | Major | Types 52/53 unspecified | Specified (proposal §8); enqueue failure closes the connection |
+| 10 | Major | Draining states and signal encoding | `Draining` added; signal encoded once |
+| 11 | Major | Tombstone ring cannot deliver the guarantee | `tombstones_evicted`, separate scan, guarantee weakened to "no silent loss" |
+| 12 | Major | Dead saturation flag, error code unnamed, request-ID space, subscribe | Removed, `CapacityExceeded` named, separate ID space, unsubscribe added |
+| 13 | Major | "Immutable for life" conflicts with transfer | Reworded to "in this contract version" |
+| 14 | Major | CLI no-Runtime case, connection caps | Added to §5.6 and §5.10 |
+| 15 | Minor | Epoch semantics, ordering, sort buffer, AC1 | Fixed |
+| 16 | Minor | Citation prefixes | Added |
+| 17 | Minor | Unmeasured numbers | Already labelled proposed; unchanged |
+
+A second independent pass on the corrected head is recorded in the PR.
