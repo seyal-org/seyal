@@ -76,14 +76,11 @@ impl RuntimeHarness {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (stop_tx, stop_rx) = mpsc::channel();
         let join = thread::spawn(move || {
-            let mut config = RuntimeConfig::m001().expect("M001 Runtime config");
-            config.singleton_path =
-                std::env::temp_dir().join(format!("s7m-{suffix:x}-{}.lock", process::id()));
-            config.local_ipc = LocalIpcMode::Enabled {
-                runtime_dir_override: Some(
+            let mut config = RuntimeConfig::m001()
+                .expect("M001 Runtime config")
+                .isolated_to(
                     std::env::temp_dir().join(format!("s7md-{suffix:x}-{}", process::id())),
-                ),
-            };
+                );
             config.graceful_termination = Duration::from_millis(50);
             config.forced_reap = Duration::from_millis(250);
             config.final_drain = Duration::from_millis(100);

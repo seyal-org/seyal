@@ -34,7 +34,7 @@ use seyal_runtime::{
         ServerHello, TerminateExecutionRequest, TerminateExecutionResult,
         TerminateExecutionResultCode, CAP_EXECUTION_PROVISIONING, HEADER_LEN,
     },
-    LocalIpcMode, Runtime, RuntimeConfig,
+    Runtime, RuntimeConfig,
 };
 
 const PERFORMANCE_CLAIM: &str = "performance_claim=false";
@@ -87,14 +87,11 @@ impl RuntimeHarness {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (stop_tx, stop_rx) = mpsc::channel();
         let join = thread::spawn(move || {
-            let mut config = RuntimeConfig::m001().expect("M001 Runtime config");
-            config.singleton_path =
-                std::env::temp_dir().join(format!("m1b-{suffix:x}-{}.lock", process::id()));
-            config.local_ipc = LocalIpcMode::Enabled {
-                runtime_dir_override: Some(
+            let mut config = RuntimeConfig::m001()
+                .expect("M001 Runtime config")
+                .isolated_to(
                     std::env::temp_dir().join(format!("m1bd-{suffix:x}-{}", process::id())),
-                ),
-            };
+                );
             config.graceful_termination = Duration::from_millis(50);
             config.forced_reap = Duration::from_millis(250);
             config.final_drain = Duration::from_millis(100);
