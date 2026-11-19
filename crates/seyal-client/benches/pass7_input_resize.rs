@@ -323,14 +323,11 @@ impl RuntimeHarness {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (stop_tx, stop_rx) = mpsc::channel();
         let join = thread::spawn(move || {
-            let mut config = RuntimeConfig::m001().expect("M001 Runtime config");
-            config.singleton_path =
-                std::env::temp_dir().join(format!("s7b-{suffix:x}-{}.lock", process::id()));
             let runtime_dir =
                 std::env::temp_dir().join(format!("s7bd-{suffix:x}-{}", process::id()));
-            config.local_ipc = LocalIpcMode::Enabled {
-                runtime_dir_override: Some(runtime_dir.clone()),
-            };
+            let mut config = RuntimeConfig::m001()
+                .expect("M001 Runtime config")
+                .isolated_to(runtime_dir.clone());
             config.graceful_termination = Duration::from_millis(50);
             config.forced_reap = Duration::from_millis(250);
             config.final_drain = Duration::from_millis(100);
@@ -402,14 +399,11 @@ impl PairedRuntimeHarness {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (stop_tx, stop_rx) = mpsc::channel();
         let join = thread::spawn(move || {
-            let mut config = RuntimeConfig::m001().expect("M001 Runtime config");
-            config.singleton_path =
-                std::env::temp_dir().join(format!("s7bp-{suffix:x}-{}.lock", process::id()));
             let runtime_dir =
                 std::env::temp_dir().join(format!("s7bpd-{suffix:x}-{}", process::id()));
-            config.local_ipc = LocalIpcMode::Enabled {
-                runtime_dir_override: Some(runtime_dir),
-            };
+            let mut config = RuntimeConfig::m001()
+                .expect("M001 Runtime config")
+                .isolated_to(runtime_dir);
             config.graceful_termination = Duration::from_millis(50);
             config.forced_reap = Duration::from_millis(250);
             config.final_drain = Duration::from_millis(100);
