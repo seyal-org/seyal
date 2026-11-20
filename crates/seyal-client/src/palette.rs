@@ -302,7 +302,8 @@ fn build_commands(
 
     if allows_tab_creation {
         entries.push(PaletteEntry {
-            label: "New Tab".to_owned(),
+            // ADR-029 / cmux: product create is a pane-local Surface.
+            label: "New Terminal".to_owned(),
             category: "Navigation",
             address: None,
             command: Some(PaletteCommand::CreateTab),
@@ -337,21 +338,6 @@ fn build_commands(
         });
     }
 
-    for tab in &shell.tabs {
-        if tab.id == shell.active_tab {
-            continue;
-        }
-        entries.push(PaletteEntry {
-            label: format!("Switch to Tab: {}", tab.title),
-            category: "Tab",
-            address: Some(ResourceAddress::Tab {
-                workspace: shell.active_workspace,
-                tab: tab.id,
-            }),
-            command: None,
-        });
-    }
-
     for pane in &shell.panes {
         if pane.id == shell.focused_pane {
             continue;
@@ -361,7 +347,6 @@ fn build_commands(
             category: "Pane",
             address: Some(ResourceAddress::Pane {
                 workspace: shell.active_workspace,
-                tab: shell.active_tab,
                 pane: pane.id,
             }),
             command: None,
@@ -618,7 +603,7 @@ mod tests {
         open_rebuilt(&mut palette, &shell, &chrome, true, true);
         let snap = palette.snapshot();
         assert!(snap.open);
-        assert!(labels(&snap.rows).contains(&"New Tab"));
+        assert!(labels(&snap.rows).contains(&"New Terminal"));
         assert!(
             !labels(&snap.rows)
                 .iter()
@@ -701,25 +686,21 @@ mod tests {
         open_rebuilt(&mut palette, &snap, &chrome, true, true);
         let rows = palette.snapshot().rows;
         let labels = labels(&rows);
-        assert!(labels.contains(&"New Tab"));
+        assert!(labels.contains(&"New Terminal"));
         assert!(labels.contains(&"Split Pane Right"));
         assert!(labels.contains(&"Split Pane Down"));
-        // CreateTab made "Terminal 2" the active tab; only the now-inactive
-        // "Core Terminal" is offered as a switch target.
-        assert!(labels.contains(&"Switch to Tab: Core Terminal"));
+        // ADR-029: outer Tab switch rows are gone. NewTerminal adds a Surface
+        // on the focused pane; Focus Pane still has nothing else to offer.
         assert!(
-            !labels.iter().any(|label| label.contains("Terminal 2")),
-            "the active Tab is not offered as a switch target"
+            !labels
+                .iter()
+                .any(|label| label.starts_with("Switch to Tab:")),
+            "outer Tab switch rows are not palette targets"
         );
         assert!(
             !labels.iter().any(|label| label.starts_with("Focus Pane:")),
-            "single-Pane Tab has no other Pane to focus"
+            "each Tab still has a single Pane; no sibling Focus Pane row"
         );
-        let tab_row = rows
-            .iter()
-            .find(|row| row.label == "Switch to Tab: Core Terminal")
-            .expect("tab row");
-        assert!(matches!(tab_row.address, Some(ResourceAddress::Tab { .. })));
     }
 
     #[test]
@@ -859,7 +840,7 @@ mod tests {
         open_rebuilt(&mut palette, &shell, &chrome, false, false);
         let rows = palette.snapshot().rows;
         let labels = labels(&rows);
-        assert!(!labels.contains(&"New Tab"));
+        assert!(!labels.contains(&"New Terminal"));
         assert!(!labels.contains(&"Split Pane Right"));
         assert!(!labels.contains(&"Split Pane Down"));
         assert!(
@@ -871,38 +852,39 @@ mod tests {
     #[test]
     fn frozen_projection_ignores_live_shell_changes_until_rebuild() {
         let mut shell = seed_shell();
-        shell.apply_product_create_tab().unwrap();
+        let first = shell.snapshot().focused_pane;
+        shell
+            .apply(ShellAction::SplitFocused {
+                axis: crate::shell::SplitAxis::Right,
+                containment_generation: shell.containment_generation(),
+            })
+            .unwrap();
         let snap = shell.snapshot();
         let chrome = ChromeState::new().snapshot(&snap, &[]);
         let mut palette = PaletteState::new();
         open_rebuilt(&mut palette, &snap, &chrome, true, true);
+        let other_title = snap
+            .panes
+            .iter()
+            .find(|pane| pane.id != snap.focused_pane)
+            .map(|pane| pane.title.as_str())
+            .expect("sibling pane");
         palette
-            .apply(PaletteAction::SetQuery("Switch to Tab: Core".into()), 0)
+            .apply(
+                PaletteAction::SetQuery(format!("Focus Pane: {other_title}")),
+                0,
+            )
             .unwrap();
         palette.rebuild(&snap, &chrome, true, true, None, &[]);
         let address = match palette.selected_target() {
             Some(PaletteRunTarget::Navigate(address)) => address,
             other => panic!("expected navigate target, got {other:?}"),
         };
-        // Select the other tab in live shell so a fresh ordinal rebuild would
-        // omit "Core Terminal" and put a different row at index 0.
-        let core = match address {
-            ResourceAddress::Tab { tab, .. } => tab,
-            _ => panic!("expected tab address"),
-        };
-        let other = snap
-            .tabs
-            .iter()
-            .map(|tab| tab.id)
-            .find(|id| *id != core)
-            .expect("other tab");
+        assert!(matches!(address, ResourceAddress::Pane { .. }));
+        // Move live focus so a fresh rebuild would reorder pane rows.
         shell
-            .apply(ShellAction::SelectTab {
-                id: other,
-                containment_generation: shell.containment_generation(),
-            })
-            .expect("select");
-        // Frozen selection still carries the original address.
+            .apply(ShellAction::FocusPane { id: first })
+            .expect("refocus");
         assert_eq!(
             palette.selected_target(),
             Some(PaletteRunTarget::Navigate(address))

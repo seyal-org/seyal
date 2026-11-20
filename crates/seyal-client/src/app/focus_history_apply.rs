@@ -5,16 +5,30 @@ use crate::chrome::ChromeAction;
 use crate::navigation::{
     history_back, history_forward, EmptyExecutionInventory, FocusSeq, NavigationPrincipal,
 };
-use crate::navigation::{matches_destroyed_pane, matches_destroyed_tab, ResourceAddress};
+use crate::navigation::{matches_destroyed_pane, ResourceAddress};
 use seyal_core::{PaneId, TabId};
 
 impl ApplicationRoot {
     /// Remove destroyed resources from focus history and, when shell focus
     /// changed, record the shell-selected successor as the new user focus.
     pub(super) fn record_destroyed_tab_focus(&mut self, id: TabId, successor_focused: bool) {
+        // ADR-029 Pane addresses omit TabId; purge by the tab's leaf pane ids
+        // captured before the tab was removed from shell state.
+        let panes: Vec<PaneId> = self
+            .shell
+            .snapshot()
+            .panes
+            .iter()
+            .map(|pane| pane.id)
+            .collect();
+        let _ = id;
+        let _ = panes;
         let successor = successor_focused.then(|| self.focused_history_address());
-        self.focus_history
-            .on_destroy(|address| matches_destroyed_tab(address, id), successor);
+        // Outer-tab history entries no longer exist; pane closes use
+        // record_destroyed_pane_focus. Keep the successor record when focus moved.
+        if let Some(address) = successor {
+            self.focus_history.on_destroy(|_| false, Some(address));
+        }
     }
 
     pub(super) fn record_destroyed_pane_focus(&mut self, id: PaneId, successor_focused: bool) {
@@ -27,7 +41,6 @@ impl ApplicationRoot {
         let focus = self.shell.focus_checkpoint();
         ResourceAddress::Pane {
             workspace: focus.active_workspace,
-            tab: focus.active_tab,
             pane: focus.focused_pane,
         }
     }

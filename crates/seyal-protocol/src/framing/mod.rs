@@ -35,9 +35,11 @@ pub use envelope::{
 };
 
 pub use execution::{
+    BindWorkspaceRootRequest, BindWorkspaceRootResult, BindWorkspaceRootResultCode,
     CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode, MintWorkspaceRequest,
     MintWorkspaceResult, MintWorkspaceResultCode, TerminateExecutionRequest,
     TerminateExecutionResult, TerminateExecutionResultCode, CAP_EXECUTION_PROVISIONING,
+    MAX_WORKSPACE_SPAWN_ROOT_BYTES,
 };
 
 pub use message::{decode_message, encode_frame, Message, MessageType};

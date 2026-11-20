@@ -24,6 +24,19 @@ pub enum ShellAction {
         workspace: WorkspaceId,
         containment_generation: u64,
     },
+    /// SPEC-032 §3.1: select an already-listed workspace on a named window.
+    /// Rejects when the workspace is absent from that window's open list.
+    SelectWorkspace {
+        window: WindowId,
+        workspace: WorkspaceId,
+        containment_generation: u64,
+    },
+    /// Detach a workspace from this window's sidebar (SPEC-032 §3.4).
+    RemoveWorkspace {
+        window: WindowId,
+        workspace: WorkspaceId,
+        containment_generation: u64,
+    },
     /// Selection actions carry the snapshot generation for complete host action context,
     /// but acceptance is fenced only by live identity (ADR-018 §6).
     SelectWindow {

@@ -565,6 +565,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             action.kind = UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
             action.target_execution_lo = before.last_active_workspace_lo
             action.target_execution_hi = before.last_active_workspace_hi
+            action.target_attachment_lo = before.active_window_lo
+            action.target_attachment_hi = before.active_window_hi
+            action.target_generation = before.containment_generation
             let code = seyal_app_apply(appHandle, &action)
             applyPendingEffectsAndReconcile()
             // Fall back to CreateWindow if ActivateWorkspace did not materialize
@@ -581,6 +584,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         action.kind = UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
         action.target_execution_lo = before.last_active_workspace_lo
         action.target_execution_hi = before.last_active_workspace_hi
+        action.target_attachment_lo = before.active_window_lo
+        action.target_attachment_hi = before.active_window_hi
+        action.target_generation = before.containment_generation
         _ = seyal_app_apply(appHandle, &action)
         applyPendingEffectsAndReconcile()
         // Rust may still list Windows while AppKit realizations were cleared.

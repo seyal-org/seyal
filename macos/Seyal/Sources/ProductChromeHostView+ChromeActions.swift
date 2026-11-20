@@ -10,51 +10,6 @@ extension ProductChromeHostView {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue), reserved: 1)
     }
 
-    /// Thin host confirm for ADR-028 leave offer. Rust owns create/jump; No is dismiss-only.
-    func presentLeaveOfferIfNeeded() {
-        let offer = seyal_app_leave_offer(pane.appHandle)
-        guard offer.kind != UInt16(SEYAL_APP_LEAVE_OFFER_NONE.rawValue) else {
-            presentedLeaveOfferPath = nil
-            return
-        }
-        let path = productChromeCopyUTF8(offer.path, UInt32(offer.path_len)) ?? ""
-        guard !path.isEmpty, presentedLeaveOfferPath != path else { return }
-        presentedLeaveOfferPath = path
-        let isJump = offer.kind == UInt16(SEYAL_APP_LEAVE_OFFER_JUMP.rawValue)
-        let alert = NSAlert()
-        alert.messageText = isJump ? "Open existing workspace?" : "Create workspace?"
-        alert.informativeText = isJump
-            ? "Current directory left this workspace root.\nJump to the workspace for:\n\(path)"
-            : "Current directory left this workspace root.\nCreate a workspace for:\n\(path)"
-        alert.addButton(withTitle: "Yes")
-        alert.addButton(withTitle: "No")
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            applyChromeKind(UInt16(SEYAL_APP_ACTION_CONFIRM_LEAVE_OFFER.rawValue), reserved: 0)
-        } else {
-            applyChromeKind(UInt16(SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER.rawValue), reserved: 0)
-        }
-        presentedLeaveOfferPath = nil
-        reconcileChrome()
-    }
-
-    /// Thin host picker for CreateWorkspace (ADR-028). Path is the only host input;
-    /// Rust owns minting, shell recording, and left-rail projection.
-    @objc func createWorkspace() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Create Workspace"
-        panel.message = "Choose a folder to bind as the workspace root."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        applyPayload(
-            UInt16(SEYAL_APP_ACTION_CREATE_WORKSPACE.rawValue),
-            text: url.path
-        )
-        routeFocus()
-    }
-
     @objc func selectWorkspace(_ sender: NSButton) {
         applyIdentity(UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue), button: sender)
     }
@@ -225,6 +180,72 @@ extension ProductChromeHostView {
         routeFocus()
     }
 
+    func renamePane(paneLo: UInt64, paneHi: UInt64, title: String) {
+        applyIdentityPayload(
+            kind: UInt16(SEYAL_APP_ACTION_RENAME_PANE.rawValue),
+            idLo: paneLo,
+            idHi: paneHi,
+            text: title
+        )
+    }
+
+    func renameWorkspace(idLo: UInt64, idHi: UInt64, name: String) {
+        applyIdentityPayload(
+            kind: UInt16(SEYAL_APP_ACTION_RENAME_WORKSPACE.rawValue),
+            idLo: idLo,
+            idHi: idHi,
+            text: name
+        )
+    }
+
+    @discardableResult
+    func applyIdentityPayload(kind: UInt16, idLo: UInt64, idHi: UInt64, text: String) -> Int32 {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = kind
+        action.target_execution_lo = idLo
+        action.target_execution_hi = idHi
+        let utf8 = Array(text.utf8)
+        var code: Int32 = -1
+        utf8.withUnsafeBufferPointer { buffer in
+            action.payload = buffer.baseAddress
+            action.payload_len = UInt32(buffer.count)
+            code = seyal_app_apply(pane.appHandle, &action)
+        }
+        reconcileChrome()
+        return code
+    }
+
+    @objc func renameWorkspaceFromMenu(_ sender: NSMenuItem) {
+        guard let button = sender.representedObject as? IdentityButton else { return }
+        let current = button.accessibilityTitle()
+            ?? button.accessibilityLabel()?.components(separatedBy: ",").first
+            ?? "Workspace"
+        guard let name = promptRename(
+            message: "Rename Workspace",
+            informative: "Choose a display name for this workspace. This does not change its identity or root.",
+            current: current.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) else { return }
+        renameWorkspace(idLo: button.idLo, idHi: button.idHi, name: name)
+    }
+
+    func promptRename(message: String, informative: String, current: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = informative
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(string: current)
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        field.placeholderString = "Name"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let next = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return next.isEmpty ? nil : next
+    }
+
     @objc func openAttention(_ sender: NSButton) {
         applyPayload(UInt16(SEYAL_APP_ACTION_OPEN_ATTENTION.rawValue), text: sender.identifier?.rawValue ?? "")
     }
@@ -253,8 +274,13 @@ extension ProductChromeHostView {
         action.target_execution_hi = tagged.idHi
         if kind == UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue)
             || kind == UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+            || kind == UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
         {
             action.target_generation = tagged.containmentGeneration
+        }
+        if kind == UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue) {
+            action.target_attachment_lo = tagged.windowLo
+            action.target_attachment_hi = tagged.windowHi
         }
         _ = seyal_app_apply(pane.appHandle, &action)
         reconcileChrome()
@@ -282,6 +308,11 @@ extension ProductChromeHostView {
     }
 
     func applyPayload(_ kind: UInt16, text: String) {
+        _ = applyPayloadReturning(kind, text: text)
+    }
+
+    @discardableResult
+    func applyPayloadReturning(_ kind: UInt16, text: String) -> Int32 {
         let snapshot = seyal_app_snapshot(pane.appHandle)
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -289,22 +320,53 @@ extension ProductChromeHostView {
         action.kind = kind
         action.applySnapshotFence(snapshot)
         let utf8 = Array(text.utf8)
+        var code: Int32 = -1
         utf8.withUnsafeBufferPointer { buffer in
             action.payload = buffer.baseAddress
             action.payload_len = UInt32(buffer.count)
-            _ = seyal_app_apply(pane.appHandle, &action)
+            code = seyal_app_apply(pane.appHandle, &action)
         }
         reconcileChrome()
+        return code
+    }
+
+    /// SetWorkspaceRoot / RenameWorkspace: payload + WorkspaceId target fields.
+    @discardableResult
+    func applyWorkspacePayloadReturning(
+        _ kind: UInt16,
+        text: String,
+        targetLo: UInt64,
+        targetHi: UInt64
+    ) -> Int32 {
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = kind
+        action.applySnapshotFence(snapshot)
+        action.target_execution_lo = targetLo
+        action.target_execution_hi = targetHi
+        let utf8 = Array(text.utf8)
+        var code: Int32 = -1
+        utf8.withUnsafeBufferPointer { buffer in
+            action.payload = buffer.baseAddress
+            action.payload_len = UInt32(buffer.count)
+            code = seyal_app_apply(pane.appHandle, &action)
+        }
+        reconcileChrome()
+        return code
     }
 
     func configureChromeButtons() {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
+        // cmux: leading + creates a workspace (inherits selected root). Folder
+        // creates one with an explicitly picked root.
         createWorkspaceButton.bezelStyle = .inline
         createWorkspaceButton.isBordered = false
         createWorkspaceButton.title = ""
         createWorkspaceButton.image = NSImage(
-            systemSymbolName: "folder.badge.plus",
+            systemSymbolName: "plus",
             accessibilityDescription: "Create Workspace"
         )
         createWorkspaceButton.imagePosition = .imageOnly
@@ -312,20 +374,40 @@ extension ProductChromeHostView {
         createWorkspaceButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
         createWorkspaceButton.setAccessibilityIdentifier("seyal-create-workspace")
         createWorkspaceButton.setAccessibilityLabel("Create Workspace")
-        createWorkspaceButton.toolTip = "Create Workspace"
+        createWorkspaceButton.toolTip =
+            "Create Workspace — new sidebar row using the selected workspace folder (or Home)."
         createWorkspaceButton.target = self
         createWorkspaceButton.action = #selector(createWorkspace)
+
+        createWorkspaceFromFolderButton.bezelStyle = .inline
+        createWorkspaceFromFolderButton.isBordered = false
+        createWorkspaceFromFolderButton.title = ""
+        createWorkspaceFromFolderButton.image = NSImage(
+            systemSymbolName: "folder.badge.plus",
+            accessibilityDescription: "Create Workspace from Folder"
+        )
+        createWorkspaceFromFolderButton.imagePosition = .imageOnly
+        createWorkspaceFromFolderButton.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        createWorkspaceFromFolderButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        createWorkspaceFromFolderButton.setAccessibilityIdentifier("seyal-create-workspace-folder")
+        createWorkspaceFromFolderButton.setAccessibilityLabel("Create Workspace from Folder")
+        createWorkspaceFromFolderButton.toolTip =
+            "Create Workspace from Folder — pick a directory for the new sidebar row."
+        createWorkspaceFromFolderButton.target = self
+        createWorkspaceFromFolderButton.action = #selector(createWorkspaceFromFolder)
+
         newTabButton.title = ""
         newTabButton.image = NSImage(
-            systemSymbolName: "plus.square",
-            accessibilityDescription: "New Tab"
+            systemSymbolName: "terminal",
+            accessibilityDescription: "New Terminal"
         )
         newTabButton.imagePosition = .imageOnly
         newTabButton.setAccessibilityIdentifier("seyal-new-tab")
-        newTabButton.setAccessibilityLabel("New Tab")
-        newTabButton.toolTip = "New Tab"
+        newTabButton.setAccessibilityLabel("New Terminal")
+        newTabButton.toolTip = "New Terminal"
         newTabButton.target = self
-        newTabButton.action = #selector(createTab)
+        // ADR-029: pane-local Surface, not an outer Seyal Tab.
+        newTabButton.action = #selector(createTerminal)
         closeTabButton.title = ""
         closeTabButton.image = NSImage(
             systemSymbolName: "xmark.square",
@@ -542,7 +624,10 @@ extension ProductChromeHostView {
         idLo: UInt64,
         idHi: UInt64,
         paneLo: UInt64 = 0,
-        paneHi: UInt64 = 0
+        paneHi: UInt64 = 0,
+        windowLo: UInt64 = 0,
+        windowHi: UInt64 = 0,
+        containmentGeneration: UInt64 = 0
     ) -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -609,6 +694,9 @@ extension ProductChromeHostView {
         hit.idHi = idHi
         hit.paneLo = paneLo
         hit.paneHi = paneHi
+        hit.windowLo = windowLo
+        hit.windowHi = windowHi
+        hit.containmentGeneration = containmentGeneration
         hit.kind = kind
         hit.bezelStyle = .inline
         hit.isBordered = false
@@ -622,6 +710,20 @@ extension ProductChromeHostView {
         hit.translatesAutoresizingMaskIntoConstraints = false
         hit.setContentHuggingPriority(.defaultLow, for: .horizontal)
         hit.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        if kind == UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue) {
+            let menu = NSMenu()
+            let rename = NSMenuItem(
+                title: "Rename Workspace…",
+                action: #selector(renameWorkspaceFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            rename.target = self
+            rename.representedObject = hit
+            rename.identifier = NSUserInterfaceItemIdentifier("seyal-rename-workspace")
+            menu.addItem(rename)
+            hit.menu = menu
+            row.menu = menu
+        }
 
         row.addSubview(glyph)
         row.addSubview(primaryLabel)

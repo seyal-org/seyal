@@ -91,17 +91,15 @@ fn seed_shell() -> (ShellState, WorkspaceId, WorkspaceId, TabId, PaneId) {
 
 #[test]
 fn navigate_records_history_and_back_forward_apply_without_append() {
-    let (mut shell, w1, w2, t1, p1) = seed_shell();
+    let (mut shell, w1, w2, _t1, p1) = seed_shell();
     let mut history = FocusHistory::new();
     let w2_focus = shell.workspace_focus(w2).expect("w2");
     let p2_addr = ResourceAddress::Pane {
         workspace: w2,
-        tab: w2_focus.active_tab,
         pane: w2_focus.focused_pane,
     };
     let p1_addr = ResourceAddress::Pane {
         workspace: w1,
-        tab: t1,
         pane: p1,
     };
 
@@ -151,13 +149,12 @@ fn navigate_records_history_and_back_forward_apply_without_append() {
 
 #[test]
 fn stale_history_cursor_rejects_without_focus_move() {
-    let (mut shell, w1, w2, t1, p1) = seed_shell();
+    let (mut shell, w1, w2, _t1, p1) = seed_shell();
     let mut history = FocusHistory::new();
     let w2_focus = shell.workspace_focus(w2).expect("w2");
     navigate(
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1,
         },
         &mut shell,
@@ -169,7 +166,6 @@ fn stale_history_cursor_rejects_without_focus_move() {
     navigate(
         ResourceAddress::Pane {
             workspace: w2,
-            tab: w2_focus.active_tab,
             pane: w2_focus.focused_pane,
         },
         &mut shell,
@@ -195,13 +191,12 @@ fn stale_history_cursor_rejects_without_focus_move() {
 #[test]
 fn back_applies_pane_address_without_stored_window() {
     // §12.23b: entries store no window; apply-time placement is the one window.
-    let (mut shell, w1, w2, t1, p1) = seed_shell();
+    let (mut shell, w1, w2, _t1, p1) = seed_shell();
     let mut history = FocusHistory::new();
     let w2_focus = shell.workspace_focus(w2).expect("w2");
     navigate(
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1,
         },
         &mut shell,
@@ -213,7 +208,6 @@ fn back_applies_pane_address_without_stored_window() {
     navigate(
         ResourceAddress::Pane {
             workspace: w2,
-            tab: w2_focus.active_tab,
             pane: w2_focus.focused_pane,
         },
         &mut shell,
@@ -241,17 +235,15 @@ fn back_applies_pane_address_without_stored_window() {
 fn rejected_back_leaves_history_entries_cursor_and_seq_unchanged() {
     // SPEC-022 §12.22a / R6.9: rejection must not mutate history, including
     // the dead history entry. Cursor moves only after successful navigate.
-    let (mut shell, w1, _, t1, p1) = seed_shell();
+    let (mut shell, w1, _, _t1, p1) = seed_shell();
     let mut history = FocusHistory::new();
     history.record_user_commit(ResourceAddress::Pane {
         workspace: w1,
-        tab: t1,
         pane: PaneId::from_bytes([0xcd; 16]),
     });
     navigate(
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1,
         },
         &mut shell,

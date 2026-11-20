@@ -101,8 +101,9 @@ fn split_focused_begins_provisioning_under_production_policy() {
     assert!(root.snapshot().shell.allows_tab_creation);
     assert!(root.snapshot().shell.allows_pane_splitting);
     root.apply(AppAction::CreateTab)
-        .expect("production root allows tab creation");
-    assert_eq!(root.snapshot().shell.tabs.len(), 2);
+        .expect("production root allows New Terminal (cmux Surface)");
+    // CreateTab → NewTerminal: outer Tab count stays 1; surface is pane-local.
+    assert_eq!(root.snapshot().shell.tabs.len(), 1);
     assert!(root
         .provisioning()
         .pending_intent(root.snapshot().shell.focused_pane)
@@ -528,8 +529,8 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
             .palette
             .rows
             .iter()
-            .any(|row| row.label == "New Tab"),
-        "production composition lists New Tab after C2b enablement"
+            .any(|row| row.label == "New Terminal"),
+        "production composition lists New Terminal after C2b enablement"
     );
     let opened = production;
     assert!(
@@ -680,7 +681,6 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
             fence: root.fence(),
             address: ResourceAddress::Pane {
                 workspace: w2,
-                tab: t2,
                 pane: PaneId::from_bytes([0xee; 16]),
             },
         }),
@@ -693,7 +693,6 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w2,
-            tab: t2,
             pane: p2,
         },
     })
@@ -762,22 +761,12 @@ fn palette_run_by_address_not_rebinding_ordinal() {
         fence: root.fence(),
     })
     .unwrap();
-    root.apply(AppAction::SetPaletteQuery {
-        fence: root.fence(),
-        query: "Switch to Tab: Two".into(),
-    })
-    .unwrap();
-    let rows = root.snapshot().palette.rows;
-    assert_eq!(rows.len(), 1);
-    let address = rows[0].address.expect("navigation row carries address");
-    assert_eq!(
-        address,
-        ResourceAddress::Tab {
-            workspace: w1,
-            tab: t2
-        }
-    );
-    // Bypass menu-gated CreateTab (R6.4.1) while palette owns focus.
+    // ADR-029: navigate by Pane address (Tab is not addressable). Store p2
+    // while t1 is focused; CreateTab shifts ordinals but address must win.
+    let address = ResourceAddress::Pane {
+        workspace: w1,
+        pane: p2,
+    };
     root.create_tab().unwrap();
     assert_ne!(root.snapshot().shell.active_tab, t2);
     root.apply(AppAction::RunPalette {
@@ -786,6 +775,7 @@ fn palette_run_by_address_not_rebinding_ordinal() {
     })
     .unwrap();
     assert_eq!(root.snapshot().shell.active_tab, t2);
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
     assert!(!root.snapshot().palette.open);
 }
 

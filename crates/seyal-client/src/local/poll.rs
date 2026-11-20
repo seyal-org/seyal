@@ -255,14 +255,45 @@ impl LocalDisplayClient {
                         let error =
                             seyal_runtime::local_ipc::framing::ErrorMessage::decode(payload)
                                 .map_err(|_| ClientError::Protocol)?;
+                        // CreateWorkspace mint refusals must fail the in-flight
+                        // mint without leaving a stuck Error frame or demoting
+                        // the live Controller (terminal goes unresponsive).
+                        if error.offending_message_type == MessageType::MintWorkspaceRequest as u16
+                            && let Some(request_id) =
+                                self.pending_mint_requests.iter().copied().next()
+                        {
+                            self.pending_mint_requests.clear();
+                            let code = seyal_runtime::local_ipc::framing::ErrorCode::from_u16(
+                                error.error_code,
+                            )
+                            .unwrap_or(
+                                seyal_runtime::local_ipc::framing::ErrorCode::UnknownMessage,
+                            );
+                            self.last_mint_result =
+                                Some(seyal_runtime::local_ipc::framing::MintWorkspaceResult {
+                                    workspace_id: 0,
+                                    request_id,
+                                    result_code:
+                                        seyal_runtime::local_ipc::framing::MintWorkspaceResultCode::Error(
+                                            code,
+                                        ),
+                                });
+                        }
                         // Runtime backpressure is a per-action rejection, not
                         // a broken transport. Consume the error and preserve
                         // the connection so the native surface can expose the
                         // bounded, retryable failure without dropping later
                         // FIFO work. Other Error frames retain their fatal
-                        // protocol/authority semantics.
-                        if let Some(failure) = self.classify_incoming_error(error)? {
-                            self.input_failure = Some(failure);
+                        // protocol/authority semantics — but always advance
+                        // read_offset (below) so a fatal classify cannot leave
+                        // the same Error frame stuck across polls.
+                        match self.classify_incoming_error(error) {
+                            Ok(Some(failure)) => self.input_failure = Some(failure),
+                            Ok(None) => {}
+                            Err(client_error) => {
+                                self.read_offset = frame_end;
+                                return Err(client_error);
+                            }
                         }
                     }
                     MessageType::Lifecycle => {

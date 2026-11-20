@@ -40,22 +40,15 @@ pub fn navigate(
     let target = resolve(address, shell, inventory, principal)?;
     let (workspace, tab, pane) = match target {
         ResolvedTarget::Workspace { workspace } => focus_triple_for_workspace(shell, workspace)?,
-        ResolvedTarget::Tab { workspace, tab } => {
-            let pane = focused_pane_of_tab(shell, workspace, tab)?;
+        ResolvedTarget::Pane { workspace, pane } => {
+            let Some((_, tab)) = shell.location_of_pane(pane) else {
+                return Err(NavigationRejection::UnknownPane);
+            };
             (workspace, tab, pane)
         }
-        ResolvedTarget::Pane {
-            workspace,
-            tab,
-            pane,
-        } => (workspace, tab, pane),
     };
 
-    let pane_address = ResourceAddress::Pane {
-        workspace,
-        tab,
-        pane,
-    };
+    let pane_address = ResourceAddress::Pane { workspace, pane };
     let previous_window = shell.product_window_id().ok();
     let before = shell.focus_checkpoint();
     if before.active_workspace == workspace
@@ -69,7 +62,7 @@ pub fn navigate(
         return Ok(target);
     }
 
-    // Re-validate composition immediately before the write so a Tab/Pane
+    // Re-validate composition immediately before the write so a Pane
     // destroyed after resolve cannot partially apply (R4.2 / §12 item 11).
     if !shell.contains_workspace(workspace) {
         return Err(NavigationRejection::UnknownWorkspace);
@@ -92,7 +85,7 @@ pub fn navigate(
         .commit_focus(workspace, tab, pane)
         .expect("composition re-validated immediately above");
     record_if_needed(history, pane_address);
-    if let Some(window) = shell.window_of_tab(tab)
+    if let Some(window) = shell.product_window_id().ok()
         && previous_window != Some(window)
     {
         shell.push_effect(ShellNativeEffect::WindowActivation { window });
@@ -199,14 +192,4 @@ fn focus_triple_for_workspace(
         .workspace_focus(workspace)
         .ok_or(NavigationRejection::UnknownWorkspace)?;
     Ok((workspace, checkpoint.active_tab, checkpoint.focused_pane))
-}
-
-fn focused_pane_of_tab(
-    shell: &ShellState,
-    workspace: seyal_core::WorkspaceId,
-    tab: seyal_core::TabId,
-) -> Result<seyal_core::PaneId, NavigationRejection> {
-    shell
-        .tab_focused_pane(workspace, tab)
-        .ok_or(NavigationRejection::UnknownTab)
 }

@@ -41,6 +41,12 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_SELECT_AGENT = 16,
     SEYAL_APP_ACTION_OPEN_ATTENTION = 17,
     SEYAL_APP_ACTION_REPLACE_CHROME = 18,
+    /*
+     * SELECT_WORKSPACE (SPEC-032 §3.1 / #1490):
+     * target_execution_lo/hi = WorkspaceId;
+     * target_attachment_lo/hi = WindowId;
+     * target_generation = containment_generation.
+     */
     SEYAL_APP_ACTION_SELECT_WORKSPACE = 19,
     SEYAL_APP_ACTION_SELECT_TAB = 20,
     SEYAL_APP_ACTION_FOCUS_PANE = 21,
@@ -221,7 +227,14 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_CONFIRM_LEAVE_OFFER = 84,
     SEYAL_APP_ACTION_DISMISS_LEAVE_OFFER = 85,
     /** Explicit Running-Block transition to temporary Raw; target pair = BlockId. */
-    SEYAL_APP_ACTION_INTERACT_WITH_RUNNING_BLOCK = 86
+    SEYAL_APP_ACTION_INTERACT_WITH_RUNNING_BLOCK = 86,
+    /*
+     * Display-label rename (ADR-029: labels are not identities).
+     * RENAME_WORKSPACE: target_execution_lo/hi = WorkspaceId; payload = UTF-8 name.
+     * RENAME_PANE: target_execution_lo/hi = PaneId; payload = UTF-8 title.
+     */
+    SEYAL_APP_ACTION_RENAME_WORKSPACE = 87,
+    SEYAL_APP_ACTION_RENAME_PANE = 88
 };
 
 enum SeyalAppLeaveOfferKind {

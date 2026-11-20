@@ -8,6 +8,7 @@ final class PaneTerminalTabStrip: NSView {
     var onNew: (() -> Void)?
     var onSplit: ((PaneLayoutView.SplitDirection) -> Void)?
     var onClosePane: (() -> Void)?
+    var onRenamePane: ((String) -> Void)?
     private let tabs: [PaneLayoutView.TerminalTab]
     private let canClosePane: Bool
     private let focused: Bool
@@ -26,7 +27,6 @@ final class PaneTerminalTabStrip: NSView {
     init(
         paneLo: UInt64,
         paneHi: UInt64,
-        paneTitle: String,
         tabs: [PaneLayoutView.TerminalTab],
         focused: Bool,
         canSplit: Bool,
@@ -75,11 +75,7 @@ final class PaneTerminalTabStrip: NSView {
             content.orientation = .horizontal
             content.alignment = .centerY
             content.spacing = 2
-            let title = Self.terminalTabTitle(
-                paneTitle: paneTitle,
-                index: index,
-                tabCount: tabs.count
-            )
+            let title = tab.title
             let button = NSButton(title: title, target: self, action: #selector(selectTab(_:)))
             button.bezelStyle = .inline
             button.isBordered = false
@@ -188,12 +184,25 @@ final class PaneTerminalTabStrip: NSView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard canClosePane else { return nil }
         let menu = NSMenu()
-        let closePane = NSMenuItem(title: "Close Pane", action: #selector(closePaneRegion), keyEquivalent: "")
-        closePane.target = self
-        closePane.identifier = NSUserInterfaceItemIdentifier("seyal-close-pane")
-        menu.addItem(closePane)
+        let rename = NSMenuItem(
+            title: "Rename Pane…",
+            action: #selector(renamePaneRegion),
+            keyEquivalent: ""
+        )
+        rename.target = self
+        rename.identifier = NSUserInterfaceItemIdentifier("seyal-rename-pane")
+        menu.addItem(rename)
+        if canClosePane {
+            let closePane = NSMenuItem(
+                title: "Close Pane",
+                action: #selector(closePaneRegion),
+                keyEquivalent: ""
+            )
+            closePane.target = self
+            closePane.identifier = NSUserInterfaceItemIdentifier("seyal-close-pane")
+            menu.addItem(closePane)
+        }
         return menu
     }
 
@@ -241,15 +250,6 @@ final class PaneTerminalTabStrip: NSView {
         revealedSelectedTab = true
     }
 
-    /// Distinct per-pane terminal-tab label. Single-tab leaves use the pane
-    /// title alone; additional terminals in the same pane keep an index suffix.
-    static func terminalTabTitle(paneTitle: String, index: Int, tabCount: Int) -> String {
-        let trimmed = paneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = trimmed.isEmpty ? "Terminal \(index + 1)" : trimmed
-        if tabCount <= 1 { return base }
-        return "\(base) · \(index + 1)"
-    }
-
     private static func iconButton(
         symbol: String,
         label: String,
@@ -292,5 +292,26 @@ final class PaneTerminalTabStrip: NSView {
     @objc private func splitDownPane() { onSplit?(.down) }
 
     @objc private func closePaneRegion() { onClosePane?() }
+
+    @objc private func renamePaneRegion() {
+        let current = tabs.first(where: \.selected)?.title
+            ?? tabs.first?.title
+            ?? "Pane"
+        let alert = NSAlert()
+        alert.messageText = "Rename Pane"
+        alert.informativeText =
+            "Choose a display name for the selected terminal in this pane. Other terminals keep their names."
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(string: current)
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        field.placeholderString = "Pane name"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let next = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !next.isEmpty else { return }
+        onRenamePane?(next)
+    }
 }
 

@@ -24,7 +24,14 @@ impl ApplicationRoot {
         };
         match offer.kind {
             LeaveOfferKind::Create => self.create_workspace(offer.path),
-            LeaveOfferKind::Jump { workspace } => self.select_workspace(workspace),
+            LeaveOfferKind::Jump { workspace } => {
+                let window = self
+                    .shell
+                    .product_window_id()
+                    .map_err(|_| AppError::UnknownWindow)?;
+                let generation = self.shell.containment_generation();
+                self.select_workspace(window, workspace, generation)
+            }
         }
     }
 

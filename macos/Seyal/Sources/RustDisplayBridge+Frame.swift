@@ -138,11 +138,26 @@ extension RustDisplayBridge {
     return seyal_bridge_next_composer_request_id()
   }
 
+  /// Pull the Rust focused display handle into the bridge before composer
+  /// status relay. Never falls back to `clientHandle` (create/primary
+  /// Controller) — that would paint another Workspace onto the new leaf.
+  @discardableResult
+  func syncFocusedDisplayHandleFromRust() -> UInt64 {
+    let focused = seyal_bridge_focused_display_handle()
+    if windowFocusedDisplayHandle != focused {
+      windowFocusedDisplayHandle = focused
+      composerStatusRelayTracker.abandonClaim()
+    }
+    return focused
+  }
+
   /// Relay a newer Runtime composer eligibility for the focused display
   /// attachment. Rust owns the status meaning and revision; the host only
   /// scopes deduplication to the attachment that produced it.
   func publishComposerStatus() {
-    guard isConnected, selectPresentedClient() else { return }
+    guard isConnected, syncFocusedDisplayHandleFromRust() != 0, selectPresentedClient() else {
+      return
+    }
     let status = seyal_bridge_composer_status()
     let target = seyal_bridge_composer_target()
     let shouldRelay = composerStatusRelayTracker.shouldRelay(
@@ -177,7 +192,7 @@ extension RustDisplayBridge {
   /// ApplicationRoot target; without this, a quiet DirectInput REPL never
   /// republishes and Metal keys die until the next status revision.
   func republishFocusedComposerStatus() {
-    guard isConnected, windowFocusedDisplayHandle != 0 else { return }
+    guard isConnected else { return }
     composerStatusRelayTracker.abandonClaim()
     publishComposerStatus()
   }

@@ -56,11 +56,13 @@ impl ShellState {
         // Never inherit TUI takeover or the source Pane's Raw selection.
         let inherited_presentation = crate::presentation::PresentationMode::Raw;
         let terminal_id = TerminalTabId::new();
+        let title = format!("Pane {}", pane_count + 1);
         let pane = Pane {
             id: PaneId::new(),
-            title: format!("Pane {}", pane_count + 1),
+            title: title.clone(),
             terminal_tabs: vec![workspace::TerminalTab {
                 id: terminal_id,
+                title,
                 execution: None,
             }],
             selected_terminal_tab: Some(terminal_id),

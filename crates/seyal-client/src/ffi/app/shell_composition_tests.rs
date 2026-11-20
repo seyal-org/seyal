@@ -44,32 +44,29 @@ fn shell_composition_actions_decode_and_hierarchical_close_reaches_zero_windows(
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);
 
+    // Action 23 is product CreateTab → NewTerminal (cmux Surface). Outer tab
+    // count stays 1; creation policy remains advertised.
     assert_eq!(
         unsafe { seyal_app_apply(handle, &identity_fence(23, &snap)) },
         0
     );
     let after_create = seyal_app_shell(handle);
-    assert_eq!(after_create.tab_count, 2);
+    assert_eq!(after_create.tab_count, 1);
     assert_ne!(
         after_create.flags & SHELL_FLAG_ALLOWS_TAB_CREATION,
         0,
-        "production composition advertises tab creation after C2b"
+        "production composition advertises tab/surface creation after C2b"
     );
 
-    let stale_tab = seyal_app_shell_row(handle, 1, 0);
+    let sole_tab = seyal_app_shell_row(handle, 1, 0);
     let observed_generation = after_create.containment_generation;
-    let before_create = seyal_app_snapshot(handle);
-    assert_eq!(
-        unsafe { seyal_app_apply(handle, &identity_fence(23, &before_create)) },
-        0
-    );
     let mut stale_close = identity_fence(24, &seyal_app_snapshot(handle));
-    stale_close.target_execution_lo = stale_tab.id_lo;
-    stale_close.target_execution_hi = stale_tab.id_hi;
-    stale_close.target_generation = observed_generation;
+    stale_close.target_execution_lo = sole_tab.id_lo;
+    stale_close.target_execution_hi = sole_tab.id_hi;
+    stale_close.target_generation = observed_generation.saturating_sub(1);
     assert_eq!(unsafe { seyal_app_apply(handle, &stale_close) }, -4);
     assert_eq!(seyal_app_last_error(handle), 2, "StalePane");
-    assert_eq!(seyal_app_shell(handle).tab_count, 3);
+    assert_eq!(seyal_app_shell(handle).tab_count, 1);
 
     let mut split = identity_fence(25, &seyal_app_snapshot(handle));
     split.reserved = 1;
@@ -90,25 +87,13 @@ fn shell_composition_actions_decode_and_hierarchical_close_reaches_zero_windows(
     assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, 0);
     assert_eq!(seyal_app_shell(handle).pane_count, 1);
 
+    // Closing the last pane removes the sole Tab and its Window.
     let sole_pane = seyal_app_shell_row(handle, 2, 0);
     let mut close_last_pane = identity_fence(26, &seyal_app_snapshot(handle));
     close_last_pane.target_execution_lo = sole_pane.id_lo;
     close_last_pane.target_execution_hi = sole_pane.id_hi;
     close_last_pane.target_generation = seyal_app_shell(handle).containment_generation;
     assert_eq!(unsafe { seyal_app_apply(handle, &close_last_pane) }, 0);
-    assert_eq!(seyal_app_shell(handle).tab_count, 2);
-
-    // Close the other pre-existing Tab, then the last Tab; the final close
-    // removes the Window (hierarchical close).
-    for expected_tabs in [1, 0] {
-        let remaining = seyal_app_shell_row(handle, 1, 0);
-        let mut close_tab = identity_fence(24, &seyal_app_snapshot(handle));
-        close_tab.target_execution_lo = remaining.id_lo;
-        close_tab.target_execution_hi = remaining.id_hi;
-        close_tab.target_generation = seyal_app_shell(handle).containment_generation;
-        assert_eq!(unsafe { seyal_app_apply(handle, &close_tab) }, 0);
-        assert_eq!(seyal_app_shell(handle).tab_count, expected_tabs);
-    }
 
     let shell = seyal_app_shell(handle);
     assert_eq!(shell.window_count, 0);
@@ -217,7 +202,7 @@ fn left_tabs_terminal_tab_rows_project_pane_fence_and_selection() {
         ))
         .unwrap()
     };
-    assert_eq!(title, "Terminal 2");
+    assert_eq!(title, "Pane 2");
     assert_ne!(
         second.flags & 1,
         0,

@@ -40,7 +40,13 @@ fn confirm_jump_activates_existing_workspace() {
     let id = WorkspaceId::from_bytes([0x92; 16]);
     app.create_workspace_with_minted_id_for_test(id, other.to_string_lossy().into_owned())
         .unwrap();
-    app.select_workspace(WorkspaceId::m001_default()).unwrap();
+    let snap = app.snapshot().shell;
+    app.select_workspace(
+        snap.active_window.expect("seed window"),
+        WorkspaceId::m001_default(),
+        snap.containment_generation,
+    )
+    .unwrap();
     app.observe_trusted_foreground_cwd(other.to_string_lossy().into_owned())
         .unwrap();
     assert_eq!(
@@ -66,8 +72,11 @@ fn non_observe_actions_never_raise_leave_offer() {
         root.to_string_lossy().into_owned(),
     )
     .unwrap();
+    let snap = app.snapshot().shell;
     app.apply(AppAction::SelectWorkspace {
+        window: snap.active_window.expect("seed window"),
         id: WorkspaceId::m001_default(),
+        containment_generation: snap.containment_generation,
     })
     .unwrap();
     assert!(app.leave_offer().is_none());

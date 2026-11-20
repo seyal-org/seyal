@@ -140,8 +140,11 @@ pub enum AppAction {
         agents: Vec<crate::chrome::AgentRecord>,
         attention: Vec<crate::chrome::AttentionItem>,
     },
+    /// SPEC-032 §3.1: names the host window and containment generation.
     SelectWorkspace {
+        window: WindowId,
         id: WorkspaceId,
+        containment_generation: u64,
     },
     /// ADR-028: create a Workspace with an explicit root; Runtime mints the id.
     CreateWorkspace {
@@ -151,6 +154,16 @@ pub enum AppAction {
     SetWorkspaceRoot {
         id: WorkspaceId,
         root_path: String,
+    },
+    /// Rename a Workspace display label (ADR-029: label, not identity).
+    RenameWorkspace {
+        id: WorkspaceId,
+        name: String,
+    },
+    /// Rename a Pane display label (ADR-029: label, not identity).
+    RenamePane {
+        id: PaneId,
+        title: String,
     },
     /// ADR-028: trusted foreground cwd observation (never OSC 7).
     ObserveTrustedForegroundCwd {

@@ -2,8 +2,9 @@
 
 use super::envelope::{FrameHeader, FramingError, HEADER_LEN, MAX_FRAME_PAYLOAD};
 use super::execution::{
-    CreateExecutionRequest, CreateExecutionResult, MintWorkspaceRequest, MintWorkspaceResult,
-    TerminateExecutionRequest, TerminateExecutionResult,
+    BindWorkspaceRootRequest, BindWorkspaceRootResult, CreateExecutionRequest,
+    CreateExecutionResult, MintWorkspaceRequest, MintWorkspaceResult, TerminateExecutionRequest,
+    TerminateExecutionResult,
 };
 use super::payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList, HostSearch,
@@ -86,6 +87,10 @@ pub enum MessageType {
     MintWorkspaceRequest = 46,
     /// ADR-028 interim: mint-workspace result.
     MintWorkspaceResult = 47,
+    /// Admit spawn cwd for a minted WorkspaceId (cold/attached control path).
+    BindWorkspaceRootRequest = 48,
+    /// Bind-workspace-root result.
+    BindWorkspaceRootResult = 49,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -136,6 +141,8 @@ impl MessageType {
             45 => Self::ComposerTarget,
             46 => Self::MintWorkspaceRequest,
             47 => Self::MintWorkspaceResult,
+            48 => Self::BindWorkspaceRootRequest,
+            49 => Self::BindWorkspaceRootResult,
             _ => return None,
         })
     }
@@ -189,6 +196,8 @@ pub enum Message<'a> {
     ComposerTarget(ComposerTarget),
     MintWorkspaceRequest(MintWorkspaceRequest),
     MintWorkspaceResult(MintWorkspaceResult),
+    BindWorkspaceRootRequest(BindWorkspaceRootRequest),
+    BindWorkspaceRootResult(BindWorkspaceRootResult),
 }
 
 pub fn decode_message<'a>(
@@ -274,6 +283,12 @@ pub fn decode_message<'a>(
         }
         MessageType::MintWorkspaceResult => {
             Message::MintWorkspaceResult(MintWorkspaceResult::decode(payload)?)
+        }
+        MessageType::BindWorkspaceRootRequest => {
+            Message::BindWorkspaceRootRequest(BindWorkspaceRootRequest::decode(payload)?)
+        }
+        MessageType::BindWorkspaceRootResult => {
+            Message::BindWorkspaceRootResult(BindWorkspaceRootResult::decode(payload)?)
         }
     })
 }

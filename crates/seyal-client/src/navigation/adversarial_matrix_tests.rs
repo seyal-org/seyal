@@ -126,14 +126,13 @@ fn evidence(tag: u8) -> BindingEvidence {
 #[test]
 fn away_and_back_preserves_execution_id_no_replacement_spawn() {
     let execution = ExecutionId::from_bytes([0xe1; 16]);
-    let (mut shell, _win_a, _win_b, tab_a, tab_b, pane_a, pane_b) = matrix_shell(Some(execution));
+    let (mut shell, _win_a, _win_b, _tab_a, _tab_b, pane_a, pane_b) = matrix_shell(Some(execution));
     assert_eq!(shell.pane_execution(pane_a).unwrap(), Some(execution));
     assert_eq!(shell.pane_execution(pane_b).unwrap(), None);
 
     navigate(
         ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
         &mut shell,
@@ -153,7 +152,6 @@ fn away_and_back_preserves_execution_id_no_replacement_spawn() {
     navigate(
         ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
         &mut shell,
@@ -173,7 +171,7 @@ fn away_and_back_preserves_execution_id_no_replacement_spawn() {
 /// ApplicationRoot authority survives away-and-back; re-Bind is refused.
 #[test]
 fn root_away_and_back_keeps_authority_and_refuses_rebind() {
-    let (shell, _win_a, _win_b, tab_a, _tab_b, pane_a, _pane_b) = matrix_shell(None);
+    let (shell, _win_a, _win_b, _tab_a, _tab_b, pane_a, _pane_b) = matrix_shell(None);
     let mut root = ApplicationRoot::with_shell(shell);
     drain_bootstrap(&mut root);
     let bound = evidence(0x11);
@@ -192,7 +190,6 @@ fn root_away_and_back_keeps_authority_and_refuses_rebind() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
     })
@@ -201,7 +198,6 @@ fn root_away_and_back_keeps_authority_and_refuses_rebind() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_b,
         },
     })
@@ -226,7 +222,6 @@ fn root_away_and_back_keeps_authority_and_refuses_rebind() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
     })
@@ -247,7 +242,7 @@ fn root_away_and_back_keeps_authority_and_refuses_rebind() {
 #[test]
 fn destroyed_pane_fails_closed_no_retarget() {
     // Unbound panes only: ClosePane refuses a bound Pane (CannotCloseBoundPane).
-    let (mut shell, _win_a, _win_b, tab_a, _tab_b, pane_a, pane_b) = matrix_shell(None);
+    let (mut shell, _win_a, _win_b, _tab_a, _tab_b, pane_a, pane_b) = matrix_shell(None);
     shell
         .apply(ShellAction::SplitPane {
             id: pane_a,
@@ -275,7 +270,6 @@ fn destroyed_pane_fails_closed_no_retarget() {
         navigate(
             ResourceAddress::Pane {
                 workspace: WorkspaceId::m001_default(),
-                tab: tab_a,
                 pane: pane_a,
             },
             &mut shell,
@@ -343,7 +337,7 @@ fn live_unbound_execution_fails_closed_no_retarget() {
 /// Inactive-window target commits focus; host ActivationFailed does not retarget.
 #[test]
 fn inactive_window_commits_target_activation_failure_does_not_retarget() {
-    let (shell, win_a, win_b, _tab_a, tab_b, _pane_a, pane_b) = matrix_shell(None);
+    let (shell, win_a, win_b, _tab_a, _tab_b, _pane_a, pane_b) = matrix_shell(None);
     let mut root = ApplicationRoot::with_shell(shell);
     drain_bootstrap(&mut root);
     assert_eq!(root.snapshot().shell.active_window, Some(win_a));
@@ -352,7 +346,6 @@ fn inactive_window_commits_target_activation_failure_does_not_retarget() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -380,14 +373,13 @@ fn inactive_window_commits_target_activation_failure_does_not_retarget() {
 /// WindowActivation effects (host retry budget is WINDOW_ACTIVATION_MAX_ATTEMPTS).
 #[test]
 fn repeated_activation_failure_stays_bounded_committed_focus_survives() {
-    let (shell, _win_a, win_b, _tab_a, tab_b, _pane_a, pane_b) = matrix_shell(None);
+    let (shell, _win_a, win_b, _tab_a, _tab_b, _pane_a, pane_b) = matrix_shell(None);
     let mut root = ApplicationRoot::with_shell(shell);
     drain_bootstrap(&mut root);
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -421,7 +413,7 @@ fn repeated_activation_failure_stays_bounded_committed_focus_survives() {
 /// via the destroy path; remaining activation still names the original WindowId.
 #[test]
 fn concurrent_destroy_during_pending_activation_no_retarget() {
-    let (shell, _win_a, win_b, tab_a, tab_b, pane_a, pane_b) = matrix_shell(None);
+    let (shell, _win_a, win_b, _tab_a, _tab_b, pane_a, pane_b) = matrix_shell(None);
     let mut root = ApplicationRoot::with_shell(shell);
     drain_bootstrap(&mut root);
 
@@ -429,7 +421,6 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -453,7 +444,6 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
     })
@@ -465,7 +455,6 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -501,7 +490,7 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
 /// This does not read a displayed history-entry projection.
 #[test]
 fn history_back_forward_restore_published_cursor_and_pane() {
-    let (shell, _win_a, _win_b, tab_a, tab_b, pane_a, pane_b) = matrix_shell(None);
+    let (shell, _win_a, _win_b, _tab_a, _tab_b, pane_a, pane_b) = matrix_shell(None);
     let mut root = ApplicationRoot::with_shell(shell);
     drain_bootstrap(&mut root);
 
@@ -509,7 +498,6 @@ fn history_back_forward_restore_published_cursor_and_pane() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_a,
             pane: pane_a,
         },
     })
@@ -523,7 +511,6 @@ fn history_back_forward_restore_published_cursor_and_pane() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
     })
@@ -564,13 +551,12 @@ fn history_back_forward_restore_published_cursor_and_pane() {
 fn orthogonal_matrix_sample_cells_fail_closed_independently() {
     let live = ExecutionId::from_bytes([0xf1; 16]);
     let exited = ExecutionId::from_bytes([0xf2; 16]);
-    let (mut shell, win_a, win_b, tab_a, tab_b, pane_a, pane_b) = matrix_shell(Some(live));
+    let (mut shell, win_a, win_b, _tab_a, _tab_b, pane_a, pane_b) = matrix_shell(Some(live));
     assert_eq!(shell.snapshot().active_window, Some(win_a));
 
     navigate(
         ResourceAddress::Pane {
             workspace: WorkspaceId::m001_default(),
-            tab: tab_b,
             pane: pane_b,
         },
         &mut shell,
@@ -613,7 +599,6 @@ fn orthogonal_matrix_sample_cells_fail_closed_independently() {
         navigate(
             ResourceAddress::Pane {
                 workspace: WorkspaceId::m001_default(),
-                tab: tab_a,
                 pane: PaneId::from_bytes([0xde; 16]),
             },
             &mut shell,

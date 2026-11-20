@@ -159,10 +159,15 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             attention: Vec::new(),
         }),
         19 => Ok(AppAction::SelectWorkspace {
+            window: WindowId::from_bytes(id16(
+                action.target_attachment_lo,
+                action.target_attachment_hi,
+            )?),
             id: WorkspaceId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         20 => Ok(AppAction::SelectTab {
             id: TabId::from_bytes(id16(
@@ -439,6 +444,21 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         }),
         84 => Ok(AppAction::ConfirmLeaveOffer),
         85 => Ok(AppAction::DismissLeaveOffer),
+        // Display-label rename — target = WorkspaceId / PaneId; payload = UTF-8.
+        87 => Ok(AppAction::RenameWorkspace {
+            id: WorkspaceId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            name: read_payload(action.payload, action.payload_len)?,
+        }),
+        88 => Ok(AppAction::RenamePane {
+            id: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            title: read_payload(action.payload, action.payload_len)?,
+        }),
         // New shell: no `reserved` overload. Absent execution prepares the
         // ended Pane; present target_* binds that exact created ExecutionId.
         80 => {

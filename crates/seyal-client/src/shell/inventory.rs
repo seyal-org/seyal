@@ -34,6 +34,8 @@ pub struct TabNavItem {
     pub attention: bool,
     pub active: bool,
     pub pane_count: usize,
+    /// Focused leaf in this tab's pane tree (ADR-029 goto uses Pane addresses).
+    pub focused_pane: PaneId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,6 +95,7 @@ pub(super) fn build(
                 attention: tab.attention,
                 active: workspace.id == active_workspace && Some(tab.id) == active_tab,
                 pane_count: tab.panes.len(),
+                focused_pane: focused,
             });
             for pane_id in tab.root.pane_ids() {
                 let Some(pane) = tab.panes.get(&pane_id) else {

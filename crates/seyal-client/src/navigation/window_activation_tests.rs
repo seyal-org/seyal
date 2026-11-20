@@ -120,7 +120,6 @@ fn navigate_other_window_emits_one_window_activation_without_reparenting() {
         navigate(
             ResourceAddress::Pane {
                 workspace,
-                tab: t2,
                 pane: p2,
             },
             &mut shell,
@@ -130,7 +129,6 @@ fn navigate_other_window_emits_one_window_activation_without_reparenting() {
         ),
         Ok(ResolvedTarget::Pane {
             workspace,
-            tab: t2,
             pane: p2
         })
     );
@@ -223,7 +221,6 @@ fn navigate_same_window_emits_no_window_activation() {
     navigate(
         ResourceAddress::Pane {
             workspace,
-            tab: t2,
             pane: p2,
         },
         &mut shell,
@@ -253,7 +250,6 @@ fn reported_activation_failure_keeps_committed_focus() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace,
-            tab: t2,
             pane: p2,
         },
     })
@@ -293,18 +289,12 @@ fn resource_address_and_recency_history_omit_window_id() {
     // N3 FocusHistory is a separate PR; this branch's recency store is PaneId.
     let address = ResourceAddress::Pane {
         workspace: WorkspaceId::m001_default(),
-        tab: TabId::new(),
         pane: PaneId::new(),
     };
     match address {
         ResourceAddress::Workspace { workspace: _ }
-        | ResourceAddress::Tab {
-            workspace: _,
-            tab: _,
-        }
         | ResourceAddress::Pane {
             workspace: _,
-            tab: _,
             pane: _,
         }
         | ResourceAddress::Execution { execution: _ } => {}

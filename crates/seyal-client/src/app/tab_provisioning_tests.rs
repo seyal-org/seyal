@@ -1,6 +1,6 @@
 //! Issue #1149 / M003 C2 — headed tab creation on the C1 provisioning route.
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, WindowId};
 use seyal_protocol::framing::ErrorCode;
 use seyal_runtime::local_ipc::framing::{
     CreateExecutionResult, CreateExecutionResultCode, MessageType, TerminateExecutionResult,
@@ -111,9 +111,18 @@ fn drive_unpresented_dispose_to_result(
         .expect("terminate result present");
 }
 
-/// CreateTab → admitted type-36 on the wire client → create result → attach → bind.
+/// Drive a new pane leaf through create→attach→bind.
+///
+/// Product `AppAction::CreateTab` is cmux Surface (`NewTerminal`) and stays on
+/// one Pane. Multi-pane provisioning isolation still needs a distinct PaneId
+/// while intents are pane-keyed, so this helper uses the shell outer-tab path.
 fn drive_create_tab_to_bound(root: &mut ApplicationRoot, execution: ExecutionId) {
-    root.apply(AppAction::CreateTab).expect("create tab");
+    root.shell
+        .apply_product_create_tab()
+        .expect("create outer tab leaf for pane-isolated provisioning");
+    root.drain_shell_effects();
+    root.begin_provisioning_for_focused_unbound_terminal()
+        .expect("begin provisioning");
     let pane = root.snapshot().shell.focused_pane;
     let intent = root
         .provisioning()
@@ -280,10 +289,16 @@ fn interleaved_outstanding_creates_bind_by_request_id_not_focused_pane() {
     root.install_wire_client(negotiated_provisioning_client())
         .unwrap();
 
-    root.apply(AppAction::CreateTab).unwrap();
+    root.shell.apply_product_create_tab().unwrap();
+    root.drain_shell_effects();
+    root.begin_provisioning_for_focused_unbound_terminal()
+        .unwrap();
     let pane_a = root.snapshot().shell.focused_pane;
     let intent_a = root.provisioning().pending_intent(pane_a).unwrap().clone();
-    root.apply(AppAction::CreateTab).unwrap();
+    root.shell.apply_product_create_tab().unwrap();
+    root.drain_shell_effects();
+    root.begin_provisioning_for_focused_unbound_terminal()
+        .unwrap();
     let pane_b = root.snapshot().shell.focused_pane;
     let intent_b = root.provisioning().pending_intent(pane_b).unwrap().clone();
     assert_ne!(pane_a, pane_b);
@@ -842,7 +857,9 @@ fn capacity_exceeded_create_is_bounded_failure_without_retry_or_bind() {
     );
     assert_eq!(root.provisioning().recorded_execution(pane), None);
     assert_eq!(root.provisioning().automatic_retries(), 0);
-    assert_eq!(root.snapshot().shell.tabs.len(), 2);
+    // Product CreateTab is NewTerminal: capacity reject rolls back the surface,
+    // so the outer Tab inventory stays at the sole workspace tab.
+    assert_eq!(root.snapshot().shell.tabs.len(), 1);
     assert!(root.provisioning().pending_intent(pane).is_none());
 }
 
@@ -877,8 +894,8 @@ fn palette_lists_new_tab_under_production_policy() {
             .palette
             .rows
             .iter()
-            .any(|row| row.label == "New Tab"),
-        "production composition enables CreateTab in the palette"
+            .any(|row| row.label == "New Terminal"),
+        "production composition enables New Terminal (cmux Surface) in the palette"
     );
     root.apply(AppAction::SetPaletteQuery {
         fence: root.fence(),
@@ -1011,8 +1028,13 @@ fn dock_activate_workspace_create_begins_provisioning() {
     })
     .expect("close to zero windows");
     assert!(root.snapshot().shell.windows.is_empty());
-    root.apply(AppAction::SelectWorkspace { id: workspace })
-        .expect("Dock ActivateWorkspace create");
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::SelectWorkspace {
+        window: WindowId::from_bytes([0; 16]),
+        id: workspace,
+        containment_generation: generation,
+    })
+    .expect("Dock ActivateWorkspace create");
     assert_eq!(root.snapshot().shell.windows.len(), 1);
     let pane = root.snapshot().shell.focused_pane;
     assert!(
@@ -1026,9 +1048,14 @@ fn dock_activate_workspace_raise_does_not_reprovision_bound_leaf() {
     let execution = exec(77);
     let (mut root, pane) = bound_root_with_wire_client(execution);
     let workspace = root.snapshot().shell.active_workspace;
+    let snap = root.snapshot().shell;
     assert!(root.provisioning().pending_intent(pane).is_none());
-    root.apply(AppAction::SelectWorkspace { id: workspace })
-        .expect("raise existing workspace");
+    root.apply(AppAction::SelectWorkspace {
+        window: snap.active_window.expect("seed window"),
+        id: workspace,
+        containment_generation: snap.containment_generation,
+    })
+    .expect("raise existing workspace");
     assert!(
         root.provisioning().pending_intent(pane).is_none(),
         "raise must not begin a second create for an already-bound leaf"

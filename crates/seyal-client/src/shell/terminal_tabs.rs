@@ -1,6 +1,6 @@
 //! Pane-local terminal-tab selection and execution bindings.
 
-use seyal_core::{ExecutionId, PaneId, TerminalTabId};
+use seyal_core::{ExecutionId, PaneId, TerminalTabId, WorkspaceId};
 
 use super::{ShellError, ShellState};
 
@@ -22,7 +22,9 @@ impl ShellState {
             .ok_or(ShellError::UnknownTerminalTab)
     }
 
-    pub fn take_released_executions(&mut self) -> Vec<(PaneId, TerminalTabId, ExecutionId)> {
+    pub fn take_released_executions(
+        &mut self,
+    ) -> Vec<(PaneId, TerminalTabId, ExecutionId, WorkspaceId)> {
         std::mem::take(&mut self.last_released_executions)
     }
 
@@ -39,12 +41,14 @@ impl ShellState {
         if !self.allows_tab_creation {
             return Err(ShellError::TabCreationUnavailable);
         }
+        let pane = self.pane_mut(pane_id)?;
+        let title = format!("Pane {}", pane.terminal_tabs.len() + 1);
         let terminal = super::workspace::TerminalTab {
             id: TerminalTabId::new(),
+            title,
             execution: None,
         };
         let id = terminal.id;
-        let pane = self.pane_mut(pane_id)?;
         pane.terminal_tabs.push(terminal);
         pane.selected_terminal_tab = Some(id);
         self.bump_containment_generation();

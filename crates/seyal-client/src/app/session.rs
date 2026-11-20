@@ -248,7 +248,7 @@ impl ApplicationRoot {
         let _ = self.composer.apply(ComposerAction::ApplyPresentation {
             pane,
             mode: PresentationMode::Flow,
-            input_route: InputRoute::Frozen,
+            input_route: InputRoute::Composer,
         });
         Ok(())
     }
@@ -389,11 +389,25 @@ impl ApplicationRoot {
         if display_handle == Some(create_handle) {
             return Ok(());
         }
-        if registry_client_is_gone(create_handle) {
-            self.note_registry_client_loss(create_handle);
-            let _ = crate::ffi::unregister_client(create_handle);
+        match crate::ffi::with_client_mut(create_handle, |client| client.poll_prepare()) {
+            Some(Ok(_)) => Ok(()),
+            Some(Err(error)) if is_terminal_registry_loss(&error) => {
+                let ended = matches!(error, crate::local::ClientError::NoRunningExecution);
+                self.note_terminal_client_loss(create_handle, ended);
+                if !ended {
+                    let _ = crate::ffi::unregister_client(create_handle);
+                }
+                Ok(())
+            }
+            // Transient prepare errors leave the create client registered so a
+            // later readiness turn can still absorb type-37/39.
+            Some(Err(_)) => Ok(()),
+            None => {
+                self.note_registry_client_loss(create_handle);
+                let _ = crate::ffi::unregister_client(create_handle);
+                Ok(())
+            }
         }
-        Ok(())
     }
 
     /// Drain unfocused second-tab Controllers so type-39/control frames do not
@@ -437,11 +451,6 @@ impl ApplicationRoot {
 #[cfg(target_os = "macos")]
 fn is_terminal_registry_loss(error: &crate::local::ClientError) -> bool {
     error.is_terminal_registry_loss()
-}
-
-#[cfg(target_os = "macos")]
-fn registry_client_is_gone(handle: u64) -> bool {
-    registry_client_terminal_loss(handle).is_some()
 }
 
 #[cfg(target_os = "macos")] // Some(true) means shell exit (NoRunningExecution).

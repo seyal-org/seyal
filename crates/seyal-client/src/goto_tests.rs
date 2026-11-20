@@ -88,7 +88,7 @@ fn open_scope(state: &mut GotoState, shell: &ShellState, scope: GotoScope) {
 /// SPEC-022 §12 item 28: identical labels remain independently addressable.
 #[test]
 fn identical_labels_remain_independently_addressable() {
-    let (shell, w1, w2, t1, t2, p1, p2) = twin_shell();
+    let (shell, w1, w2, _t1, _t2, p1, p2) = twin_shell();
     let inventory = shell.navigation_inventory();
     let mut goto = GotoState::new();
 
@@ -115,16 +115,16 @@ fn identical_labels_remain_independently_addressable() {
     assert_ne!(tabs[0].address, tabs[1].address);
     assert_eq!(
         tabs[0].address,
-        ResourceAddress::Tab {
+        ResourceAddress::Pane {
             workspace: w1,
-            tab: t1
+            pane: p1
         }
     );
     assert_eq!(
         tabs[1].address,
-        ResourceAddress::Tab {
+        ResourceAddress::Pane {
             workspace: w2,
-            tab: t2
+            pane: p2
         }
     );
 
@@ -136,7 +136,6 @@ fn identical_labels_remain_independently_addressable() {
         panes[0].address,
         ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1
         }
     );
@@ -144,7 +143,6 @@ fn identical_labels_remain_independently_addressable() {
         panes[1].address,
         ResourceAddress::Pane {
             workspace: w2,
-            tab: t2,
             pane: p2
         }
     );
@@ -283,7 +281,7 @@ fn assert_scope_only_kind(scope: GotoScope, rows: &[crate::goto::GotoRow]) {
     for row in rows {
         match (scope, row.address) {
             (GotoScope::Workspaces, ResourceAddress::Workspace { .. }) => {}
-            (GotoScope::Tabs, ResourceAddress::Tab { .. }) => {}
+            (GotoScope::Tabs, ResourceAddress::Pane { .. }) => {}
             (GotoScope::Panes, ResourceAddress::Pane { .. }) => {}
             (GotoScope::Sessions, ResourceAddress::Execution { .. }) => {}
             _ => panic!("scope {scope:?} produced foreign address {:?}", row.address),

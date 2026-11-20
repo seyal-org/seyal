@@ -39,19 +39,24 @@ impl ShellState {
         previous_product: Option<WindowId>,
         request_native_activation: bool,
     ) -> Result<(), ShellError> {
-        let workspace_id = self
-            .find_window(window)
-            .map(|workspace| workspace.id)
-            .ok_or(ShellError::UnknownWindow)?;
+        let (workspace_id, realized) = {
+            let workspace = self.find_window(window).ok_or(ShellError::UnknownWindow)?;
+            let item = workspace.window(window).ok_or(ShellError::UnknownWindow)?;
+            (workspace.id, item.realized)
+        };
         let workspace = self.workspace_mut(workspace_id)?;
-        if workspace.window(window).is_none() {
-            return Err(ShellError::UnknownWindow);
-        }
         workspace.active_window = Some(window);
         self.last_active_workspace = workspace_id;
-        self.record_window_focus(window)?;
-        if request_native_activation && previous_product != Some(window) {
-            self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+        // Unrealized pane-tree storage is not a native projection host. Keep
+        // sidebar_host on the realized presentation window (#1490).
+        if realized {
+            self.sidebar_host = Some(window);
+            self.record_window_focus(window)?;
+            if request_native_activation && previous_product != Some(window) {
+                self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+            }
+        } else {
+            self.record_window_focus(window)?;
         }
         Ok(())
     }
@@ -131,6 +136,7 @@ impl ShellState {
         let window = self.new_window_record(workspace)?;
         let window_id = window.id;
         self.workspace_mut(workspace)?.push_window(window);
+        self.workspace_mut(workspace)?.presenting_window = Some(window_id);
         self.push_effect(ShellNativeEffect::RealizeWindow { window: window_id });
         self.activate_window(window_id)?;
         self.bump_containment_generation();
@@ -142,6 +148,10 @@ impl ShellState {
         window: WindowId,
         containment_generation: u64,
     ) -> Result<(), ShellError> {
+        // Product CreateTab still mints an outer Tab leaf for the live
+        // create→attach→bind path (C2b). ADR-029 removes Tab from
+        // ResourceAddress; migration (§3.5) collapses multi-tab windows to
+        // one pane tree. Do not reintroduce Tab into user-facing addresses.
         self.require_containment_generation(containment_generation)?;
         if !self.allows_tab_creation {
             return Err(ShellError::TabCreationUnavailable);
@@ -150,7 +160,7 @@ impl ShellState {
             .find_window(window)
             .map(|workspace| workspace.id)
             .ok_or(ShellError::UnknownWindow)?;
-        let tab = self.new_tab_record();
+        let tab = self.new_tab_record(false);
         self.workspace_mut(workspace_id)?
             .push_tab_on_window(window, tab)?;
         self.activate_window(window)?;
@@ -173,6 +183,7 @@ impl ShellState {
         }
         workspace.active_window = Some(id);
         self.last_active_workspace = workspace_id;
+        self.sidebar_host = Some(id);
         self.record_window_focus(id)
     }
 
@@ -218,24 +229,6 @@ impl ShellState {
         };
         let target = window.tabs[next].id;
         self.select_tab_identity(target)
-    }
-
-    pub(super) fn activate_workspace(
-        &mut self,
-        workspace: WorkspaceId,
-        containment_generation: u64,
-    ) -> Result<(), ShellError> {
-        let has_window = {
-            let ws = self.workspace(workspace)?;
-            !ws.windows.is_empty()
-        };
-        if has_window {
-            let target = self
-                .derived_mru_window(workspace)
-                .ok_or(ShellError::UnknownWindow)?;
-            return self.activate_window(target);
-        }
-        self.create_window(workspace, containment_generation)
     }
 
     pub(super) fn move_tab_before(
@@ -342,13 +335,19 @@ impl ShellState {
         Ok(())
     }
 
-    fn new_window_record(&mut self, workspace: WorkspaceId) -> Result<Window, ShellError> {
-        let tab = self.new_tab_record();
+    pub(super) fn new_window_record(
+        &mut self,
+        workspace: WorkspaceId,
+    ) -> Result<Window, ShellError> {
+        // New workspace / NewWindow first pane mirrors M001: allow implicit
+        // bootstrap so CreateWorkspace still gets a live surface if the
+        // explicit provision intent races or fails closed.
+        let tab = self.new_tab_record(true);
         let tab_id = tab.id;
         Window::try_new(WindowId::new(), workspace, vec![tab], tab_id)
     }
 
-    fn new_tab_record(&mut self) -> Tab {
+    fn new_tab_record(&mut self, _allows_implicit_execution_bootstrap: bool) -> Tab {
         let ordinal = self.next_tab_ordinal;
         self.next_tab_ordinal = self.next_tab_ordinal.saturating_add(1);
         let terminal_id = TerminalTabId::new();
@@ -357,10 +356,14 @@ impl ShellState {
             title: "Pane 1".to_owned(),
             terminal_tabs: vec![super::workspace::TerminalTab {
                 id: terminal_id,
+                title: "Pane 1".to_owned(),
                 execution: None,
             }],
             selected_terminal_tab: Some(terminal_id),
+            // New tabs never inherit implicit bootstrap; CreateWorkspace /
+            // CreateWindow seed the first leaf via new_window_record separately.
             allows_implicit_execution_bootstrap: false,
+            // Resting Raw only — never mint Flow routes from tab creation (#1490).
             presentation_mode: crate::presentation::PresentationMode::Raw,
             resting_presentation_mode: crate::presentation::PresentationMode::Raw,
         };
@@ -402,6 +405,16 @@ impl ShellState {
                 workspace,
                 containment_generation,
             } => self.activate_workspace(workspace, containment_generation),
+            ShellAction::SelectWorkspace {
+                window,
+                workspace,
+                containment_generation,
+            } => self.select_workspace_on_window(window, workspace, containment_generation),
+            ShellAction::RemoveWorkspace {
+                window,
+                workspace,
+                containment_generation,
+            } => self.remove_workspace_from_window(window, workspace, containment_generation),
             _ => unreachable!("non-W2a action routed to dispatch_w2a"),
         }
     }

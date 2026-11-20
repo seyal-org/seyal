@@ -319,13 +319,15 @@ fn enumerate(
                 label: workspace_label(item),
             })
             .collect(),
+        // ADR-029: outer Seyal Tabs are not addresses. Goto "Tabs" lists each
+        // composed tab's focused pane under a Pane address.
         GotoScope::Tabs => inventory
             .tabs
             .iter()
             .map(|item| GotoEntry {
-                address: ResourceAddress::Tab {
+                address: ResourceAddress::Pane {
                     workspace: item.workspace,
-                    tab: item.id,
+                    pane: item.focused_pane,
                 },
                 label: tab_label(item),
             })
@@ -336,7 +338,6 @@ fn enumerate(
             .map(|item| GotoEntry {
                 address: ResourceAddress::Pane {
                     workspace: item.workspace,
-                    tab: item.tab,
                     pane: item.id,
                 },
                 label: pane_label(item),

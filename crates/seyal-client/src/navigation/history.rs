@@ -248,11 +248,11 @@ pub fn matches_destroyed_pane(target: &ResourceAddress, pane: PaneId) -> bool {
 }
 
 /// Predicate: entry addresses any Pane of a destroyed Tab.
-pub fn matches_destroyed_tab(target: &ResourceAddress, tab: TabId) -> bool {
-    match target {
-        ResourceAddress::Pane { tab: t, .. } | ResourceAddress::Tab { tab: t, .. } => *t == tab,
-        _ => false,
-    }
+/// Outer Seyal Tabs are retired (ADR-029); retained for close-path purge helpers
+/// that still key internal TabId storage until pane trees live only on Workspace.
+pub fn matches_destroyed_tab(target: &ResourceAddress, _tab: TabId) -> bool {
+    let _ = target;
+    false
 }
 
 /// Predicate: entry addresses any Pane of a destroyed Workspace.
@@ -261,7 +261,6 @@ pub fn matches_destroyed_tab(target: &ResourceAddress, tab: TabId) -> bool {
 fn matches_destroyed_workspace(target: &ResourceAddress, workspace: WorkspaceId) -> bool {
     match target {
         ResourceAddress::Pane { workspace: w, .. }
-        | ResourceAddress::Tab { workspace: w, .. }
         | ResourceAddress::Workspace { workspace: w } => *w == workspace,
         ResourceAddress::Execution { .. } => false,
     }
@@ -275,7 +274,6 @@ mod tests {
     fn pane(n: u8) -> ResourceAddress {
         ResourceAddress::Pane {
             workspace: WorkspaceId::from_bytes([n; 16]),
-            tab: TabId::from_bytes([n.wrapping_add(1); 16]),
             pane: PaneId::from_bytes([n.wrapping_add(2); 16]),
         }
     }
@@ -814,19 +812,19 @@ mod tests {
         let t = TabId::from_bytes([8; 16]);
         let p_a = ResourceAddress::Pane {
             workspace: w,
-            tab: t,
             pane: PaneId::from_bytes([1; 16]),
         };
         let p_b = ResourceAddress::Pane {
             workspace: w,
-            tab: TabId::from_bytes([7; 16]),
             pane: PaneId::from_bytes([2; 16]),
         };
         let p_other = pane(3);
         h.record_user_commit(p_a);
         h.record_user_commit(p_b);
         h.record_user_commit(p_other);
-        h.purge_matching(|addr| matches_destroyed_tab(addr, t));
+        // ADR-029 Pane addresses omit TabId; tab destroy purges by pane id.
+        let _ = t;
+        h.purge_matching(|addr| matches_destroyed_pane(addr, PaneId::from_bytes([1; 16])));
         assert_eq!(targets(&h), vec![p_b, p_other]);
         h.purge_matching(|addr| matches_destroyed_workspace(addr, w));
         assert_eq!(targets(&h), vec![p_other]);

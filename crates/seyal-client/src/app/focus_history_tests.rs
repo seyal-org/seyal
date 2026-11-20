@@ -71,12 +71,11 @@ fn two_pane_root() -> (ApplicationRoot, WorkspaceId, TabId, PaneId, PaneId) {
 
 #[test]
 fn navigate_records_and_back_moves_focus() {
-    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    let (mut root, w1, _t1, p1, p2) = two_pane_root();
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1,
         },
     })
@@ -85,7 +84,6 @@ fn navigate_records_and_back_moves_focus() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p2,
         },
     })
@@ -113,7 +111,7 @@ fn select_tab_and_focus_pane_record_focus_history() {
     .unwrap();
     assert_eq!(root.snapshot().shell.focused_pane, p1);
 
-    root.apply(AppAction::CreateTab).unwrap();
+    root.shell.apply_product_create_tab().unwrap();
     let t_new = root.snapshot().shell.active_tab;
     assert_ne!(t_new, t1);
     root.apply(AppAction::SelectTab { id: t1 }).unwrap();
@@ -125,12 +123,11 @@ fn select_tab_and_focus_pane_record_focus_history() {
 
 #[test]
 fn stale_history_back_rejects_without_focus_move() {
-    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    let (mut root, w1, _t1, p1, p2) = two_pane_root();
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1,
         },
     })
@@ -139,7 +136,6 @@ fn stale_history_back_rejects_without_focus_move() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p2,
         },
     })
@@ -157,12 +153,11 @@ fn stale_history_back_rejects_without_focus_move() {
 
 #[test]
 fn close_focused_pane_purges_then_commits_successor() {
-    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    let (mut root, w1, _t1, p1, p2) = two_pane_root();
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1,
         },
     })
@@ -171,7 +166,6 @@ fn close_focused_pane_purges_then_commits_successor() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p2,
         },
     })
@@ -233,7 +227,6 @@ fn failed_split_rolls_back_its_history_entry_with_destroyed_pane() {
         root.focus_history.cursor_target(),
         Some(ResourceAddress::Pane {
             workspace: focus.active_workspace,
-            tab: focus.active_tab,
             pane: focus.focused_pane,
         })
     );
@@ -241,7 +234,7 @@ fn failed_split_rolls_back_its_history_entry_with_destroyed_pane() {
 
 #[test]
 fn successful_split_records_new_focused_leaf() {
-    let (mut root, workspace, tab, _p1, _p2) = two_pane_root();
+    let (mut root, workspace, _tab, _p1, _p2) = two_pane_root();
     root.apply(AppAction::SplitFocused {
         axis: SplitAxis::Right,
     })
@@ -249,11 +242,7 @@ fn successful_split_records_new_focused_leaf() {
     let pane = root.snapshot().shell.focused_pane;
     assert_eq!(
         root.focus_history.cursor_target(),
-        Some(ResourceAddress::Pane {
-            workspace,
-            tab,
-            pane
-        })
+        Some(ResourceAddress::Pane { workspace, pane })
     );
 }
 
@@ -272,7 +261,6 @@ fn open_attention_reveal_records_exact_target_in_history() {
     item.resource_address = Some(crate::navigation::pack_resource_address(
         ResourceAddress::Pane {
             workspace,
-            tab,
             pane: p2,
         },
     ));
@@ -292,7 +280,6 @@ fn open_attention_reveal_records_exact_target_in_history() {
         root.focus_history.cursor_target(),
         Some(ResourceAddress::Pane {
             workspace,
-            tab,
             pane: p2,
         })
     );
@@ -371,7 +358,6 @@ fn open_attention_cross_window_drains_the_window_raise_effect() {
     item.resource_address = Some(crate::navigation::pack_resource_address(
         ResourceAddress::Pane {
             workspace,
-            tab: target_tab,
             pane: target_pane,
         },
     ));
@@ -511,7 +497,6 @@ fn open_attention_packed_reveal_activates_focused_tab_authority() {
     item.resource_address = Some(crate::navigation::pack_resource_address(
         ResourceAddress::Pane {
             workspace,
-            tab: t2,
             pane: p2,
         },
     ));
@@ -644,7 +629,6 @@ fn history_traverses_unbound_pane_without_mutating_sibling_binding() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w1,
-            tab: t1,
             pane: p1,
         },
     })
@@ -653,7 +637,6 @@ fn history_traverses_unbound_pane_without_mutating_sibling_binding() {
         fence: root.fence(),
         address: ResourceAddress::Pane {
             workspace: w1,
-            tab: t2,
             pane: p2,
         },
     })
@@ -746,7 +729,7 @@ fn focus_pane_onto_unbound_leaf_clears_authority() {
 
 #[test]
 fn zoom_and_directional_focus_commit_focus_and_input_authority() {
-    let (mut root, workspace, tab, p1, p2) = two_pane_root();
+    let (mut root, workspace, _tab, p1, p2) = two_pane_root();
     let bound = root.snapshot().execution;
     assert!(bound.is_some());
 
@@ -761,7 +744,6 @@ fn zoom_and_directional_focus_commit_focus_and_input_authority() {
         root.focus_history.cursor_target(),
         Some(ResourceAddress::Pane {
             workspace,
-            tab,
             pane: p2
         })
     );
@@ -784,7 +766,6 @@ fn zoom_and_directional_focus_commit_focus_and_input_authority() {
         root.focus_history.cursor_target(),
         Some(ResourceAddress::Pane {
             workspace,
-            tab,
             pane: p1
         })
     );

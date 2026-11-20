@@ -59,8 +59,18 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     private var textViewInlineTrailingConstraint: NSLayoutConstraint!
     private var inlineRelayPresentation = false
     private var lastEpoch: UInt64 = 0
+    /// Pane + workspace identity last projected into `textView`. SetDraft does
+    /// not bump epoch, so focus/workspace changes must rehydrate even when
+    /// epoch is unchanged (SEYAL-COMPOSER-COMPONENT-SPEC §10).
+    private var lastProjectedPaneLo: UInt64 = 0
+    private var lastProjectedPaneHi: UInt64 = 0
+    private var lastProjectedWorkspaceLo: UInt64 = 0
+    private var lastProjectedWorkspaceHi: UInt64 = 0
     private var focusEligibilityGeneration: UInt64 = 0
     private var hasReconciledComposerState = false
+    /// True while applying Rust draft into `textView` so textDidChange does not
+    /// push the programmatic update back as a SetDraft.
+    private var applyingRustDraft = false
     private var theme: NativeTheme?
     private var editing = false
 
@@ -260,6 +270,23 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         return seyal_app_composer(appHandle)
     }
 
+    /// Pane + workspace this bridge is currently projecting. Bound bridges
+    /// keep a fixed Pane; the primary dock follows focused Pane + workspace.
+    private func projectedIdentity() -> (
+        paneLo: UInt64, paneHi: UInt64, workspaceLo: UInt64, workspaceHi: UInt64
+    ) {
+        let shell = seyal_app_shell(appHandle)
+        if let lo = boundPaneLo, let hi = boundPaneHi {
+            return (lo, hi, shell.active_workspace_lo, shell.active_workspace_hi)
+        }
+        return (
+            shell.focused_pane_lo,
+            shell.focused_pane_hi,
+            shell.active_workspace_lo,
+            shell.active_workspace_hi
+        )
+    }
+
     /// Focus this Pane when bound and not already the fence authority, then
     /// return a fresh focused snapshot for mutating actions.
     @discardableResult
@@ -316,9 +343,15 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let hidden = direct
             || blockScopedDirectInput
             || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
-        // Presentation/epoch transitions revoke composer IME ownership: cancel
-        // uncommitted marked text without submitting (SPEC-008 / #866).
-        if (direct || hidden || composer.epoch != lastEpoch), hasMarkedText() {
+        let projected = projectedIdentity()
+        let identityChanged = projected.paneLo != lastProjectedPaneLo
+            || projected.paneHi != lastProjectedPaneHi
+            || projected.workspaceLo != lastProjectedWorkspaceLo
+            || projected.workspaceHi != lastProjectedWorkspaceHi
+        let mustRehydrateDraft = composer.epoch != lastEpoch || identityChanged
+        // Presentation/epoch/pane transitions revoke composer IME ownership:
+        // cancel uncommitted marked text without submitting (SPEC-008 / #866).
+        if (direct || hidden || mustRehydrateDraft), hasMarkedText() {
             textView.inputContext?.discardMarkedText()
         }
         isHidden = hidden
@@ -350,12 +383,19 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
                 ? "hidden"
                 : (relay ? "relay" : (available ? "available" : (busy ? "busy" : "hidden")))
         )
-        if composer.epoch != lastEpoch {
+        if mustRehydrateDraft {
             lastEpoch = composer.epoch
+            lastProjectedPaneLo = projected.paneLo
+            lastProjectedPaneHi = projected.paneHi
+            lastProjectedWorkspaceLo = projected.workspaceLo
+            lastProjectedWorkspaceHi = projected.workspaceHi
             // The Rust draft is authoritative in every mode (SPEC-008 §4). A
             // Runtime-published busy state with an empty draft (command
             // accepted, prompt not back yet) must show the placeholder, not
-            // the text that was already submitted.
+            // the text that was already submitted. Pane/workspace focus
+            // changes must also rehydrate: SetDraft does not bump epoch.
+            applyingRustDraft = true
+            defer { applyingRustDraft = false }
             if composer.draft_utf8_len > 0, let bytes = composer.draft_utf8 {
                 textView.string = String(
                     decoding: UnsafeBufferPointer(start: bytes, count: Int(composer.draft_utf8_len)),
@@ -398,7 +438,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         placeholder.isHidden = !textView.string.isEmpty
-        pushDraft()
+        if !applyingRustDraft {
+            pushDraft()
+        }
         let composer = readComposer()
         execute.isEnabled = composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0
         expandToDraft()
@@ -532,7 +574,28 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     }
 
     private func pushDraft() {
+        // Capture before prepareFocusedMutation: a focus-time reconcile must
+        // not wipe the editor and then SetDraft the wrong Pane's text.
+        let edited = textView.string
+        let before = projectedIdentity()
+        if before.paneLo != lastProjectedPaneLo
+            || before.paneHi != lastProjectedPaneHi
+            || before.workspaceLo != lastProjectedWorkspaceLo
+            || before.workspaceHi != lastProjectedWorkspaceHi
+        {
+            reconcile()
+            return
+        }
         let snapshot = prepareFocusedMutation()
+        let after = projectedIdentity()
+        if after.paneLo != lastProjectedPaneLo
+            || after.paneHi != lastProjectedPaneHi
+            || after.workspaceLo != lastProjectedWorkspaceLo
+            || after.workspaceHi != lastProjectedWorkspaceHi
+        {
+            reconcile()
+            return
+        }
         let composer = readComposer()
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -540,7 +603,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         action.applySnapshotFence(snapshot)
         action.target_generation = composer.epoch
-        let utf8 = Array(textView.string.utf8)
+        let utf8 = Array(edited.utf8)
         utf8.withUnsafeBufferPointer { buffer in
             action.payload = buffer.baseAddress
             action.payload_len = UInt32(buffer.count)

@@ -555,7 +555,10 @@ final class RustDisplayBridge {
           // unfocused multipane Flow leaves receive completed Block bodies (#1424/#1426).
           self.publishHistoryRanges(forDisplayHandle: handle)
           self.onRegistryHandlePolled?(handle)
-          if handle == self.windowFocusedDisplayHandle, self.selectPresentedClient() {
+          // Prefer Rust's focused handle over a stale Swift copy that may lag
+          // CreateWorkspace bind until the next pane reconcile.
+          let focusedHandle = seyal_bridge_focused_display_handle()
+          if focusedHandle != 0, handle == focusedHandle, self.selectPresentedClient() {
             self.runtimeBlockMetadata = self.currentBlockMetadata()
             self.publishHistoryRanges(forDisplayHandle: handle)
             self.publishComposerResult()

@@ -1,6 +1,6 @@
 //! Pure resolution of [`ResourceAddress`] against shell and execution inventory.
 
-use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, WorkspaceId};
 
 use crate::shell::ShellState;
 
@@ -27,18 +27,14 @@ pub enum NavigationRejection {
 
 /// Successful resolution target. An [`ResourceAddress::Execution`] with exactly
 /// one bound Pane resolves to that Pane (SPEC-022 R3.3).
+/// ADR-029: Tab is not a user-facing navigation target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResolvedTarget {
     Workspace {
         workspace: WorkspaceId,
     },
-    Tab {
-        workspace: WorkspaceId,
-        tab: TabId,
-    },
     Pane {
         workspace: WorkspaceId,
-        tab: TabId,
         pane: PaneId,
     },
 }
@@ -133,47 +129,19 @@ pub fn resolve(
             // (no spawn, no ActivateWorkspace).
             Ok(ResolvedTarget::Workspace { workspace })
         }
-        ResourceAddress::Tab { workspace, tab } => {
+        ResourceAddress::Pane { workspace, pane } => {
             authorize_workspace(principal, workspace)?;
             if !shell.contains_workspace(workspace) {
                 return Err(NavigationRejection::UnknownWorkspace);
             }
-            let Some(owner) = shell.workspace_of_tab(tab) else {
-                return Err(NavigationRejection::UnknownTab);
-            };
-            if owner != workspace {
-                return Err(NavigationRejection::NotComposed);
-            }
-            Ok(ResolvedTarget::Tab { workspace, tab })
-        }
-        ResourceAddress::Pane {
-            workspace,
-            tab,
-            pane,
-        } => {
-            authorize_workspace(principal, workspace)?;
-            if !shell.contains_workspace(workspace) {
-                return Err(NavigationRejection::UnknownWorkspace);
-            }
-            let Some(tab_owner) = shell.workspace_of_tab(tab) else {
-                return Err(NavigationRejection::UnknownTab);
-            };
             let Some((pane_workspace, pane_tab)) = shell.location_of_pane(pane) else {
                 return Err(NavigationRejection::UnknownPane);
             };
             // Components exist but do not currently compose (R3.2).
-            if tab_owner != workspace
-                || pane_workspace != workspace
-                || pane_tab != tab
-                || !shell.tab_contains_leaf(workspace, tab, pane)
-            {
+            if pane_workspace != workspace || !shell.tab_contains_leaf(workspace, pane_tab, pane) {
                 return Err(NavigationRejection::NotComposed);
             }
-            Ok(ResolvedTarget::Pane {
-                workspace,
-                tab,
-                pane,
-            })
+            Ok(ResolvedTarget::Pane { workspace, pane })
         }
         ResourceAddress::Execution { execution } => {
             if !principal.local_navigation {
@@ -189,15 +157,11 @@ pub fn resolve(
                     None => Err(NavigationRejection::UnknownExecution),
                 },
                 1 => {
-                    let (workspace, tab, pane) = bound[0];
+                    let (workspace, _tab, pane) = bound[0];
                     if !principal.allows_workspace(workspace) {
                         return Err(NavigationRejection::NavigationDenied);
                     }
-                    Ok(ResolvedTarget::Pane {
-                        workspace,
-                        tab,
-                        pane,
-                    })
+                    Ok(ResolvedTarget::Pane { workspace, pane })
                 }
                 _ => {
                     // R3.4 step 2: any unauthorized binding Workspace is

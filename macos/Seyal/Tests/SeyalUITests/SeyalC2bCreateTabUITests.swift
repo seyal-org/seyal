@@ -187,7 +187,9 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         atMost: Int? = nil
     ) {
         showWorkspaces(in: app)
-        let row = app.descendants(matching: .any)["seyal-workspace-0"].firstMatch
+        let row = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier MATCHES %@", #"^seyal-workspace-[0-9]+-[0-9]+$"#)
+        ).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         let deadline = Date().addingTimeInterval(12)
         var last = ""

@@ -20,8 +20,14 @@ impl ApplicationRoot {
     pub(super) fn sync_composer_presentation(&mut self) {
         let pane = self.shell.snapshot().focused_pane;
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
-        let (mode, input_route) = if self.authority.is_none() || self.frozen {
+        let (mode, input_route) = if self.frozen {
             (PresentationMode::Flow, InputRoute::Frozen)
+        } else if self.authority.is_none() {
+            // Unbound Flow must keep the composer visible (Busy / Waiting for
+            // prompt) while CreateWorkspace / New Terminal / Split attach.
+            // InputRoute::Frozen maps to ComposerMode::Hidden and removed the
+            // text area for every new-workspace pane until bind completed.
+            (PresentationMode::Flow, InputRoute::Composer)
         } else {
             let snap = self.presentation.snapshot();
             (snap.mode, snap.input_route)

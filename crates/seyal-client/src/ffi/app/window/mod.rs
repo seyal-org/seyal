@@ -520,7 +520,7 @@ pub(super) fn fill_shell_header_from(
     SeyalAppShell {
         version: APP_ABI_VERSION,
         size: size_of::<SeyalAppShell>() as u16,
-        workspace_count: shell.workspaces.len() as u16,
+        workspace_count: shell.open_workspaces.len() as u16,
         tab_count: shell.tabs.len() as u16,
         pane_count: shell.panes.len() as u16,
         flags,

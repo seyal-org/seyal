@@ -10,6 +10,7 @@ mod accessibility;
 mod action_types;
 mod apply;
 mod chrome_apply;
+mod chrome_workspace_apply;
 mod close_apply;
 mod composer_apply;
 mod errors;
@@ -33,7 +34,6 @@ mod recovery_apply;
 mod session;
 mod terminal_termination;
 mod unpresented_apply;
-
 #[cfg(target_os = "macos")]
 pub(crate) use pane_recovery::PaneRecoveryTarget;
 
@@ -389,7 +389,12 @@ impl Default for ApplicationRoot {
 
 impl ApplicationRoot {
     pub fn new() -> Self {
-        Self::with_shell(ShellState::m001_local("local"))
+        let mut shell = ShellState::m001_local("local");
+        // SPEC-032 §3.5: production startup collapses multi-tab windows once.
+        // Test fixtures that intentionally seed multiple tabs use `with_shell`
+        // and skip this pass.
+        shell.migrate_seyal_tabs_to_sidebar_containment();
+        Self::with_shell(shell)
     }
 
     /// Test-only: force CreateTab policy regardless of production composition.
@@ -405,6 +410,9 @@ impl ApplicationRoot {
         let pane = snap.focused_pane;
         let mut composer = ComposerState::new();
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
+        // Unbound Flow keeps the composer route so the text area is visible
+        // (Busy) before the first Controller bind — same rule as
+        // sync_composer_presentation after CreateWorkspace.
         let _ = composer.apply(ComposerAction::ApplyPresentation {
             pane,
             mode: PresentationMode::Raw,

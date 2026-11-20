@@ -49,6 +49,10 @@ impl Runtime {
             self.handle_mint_workspace_request(token, payload);
             return;
         }
+        if kind == MessageType::BindWorkspaceRootRequest {
+            self.handle_bind_workspace_root_request(token, payload);
+            return;
+        }
         if kind == MessageType::TerminateExecutionRequest {
             self.handle_terminate_execution_request(token, payload);
             return;

@@ -64,11 +64,11 @@ acknowledged_loc = 967
 issue = 1398
 reason = "Portable provisioning reducer remains the cold-path request/result authority after #1381 moves tab-specific binding operations into terminal_bindings.rs; #1379 adds release_dead_binding so New shell can Create+Bind an ended Pane without enqueueing terminate or leaving a binding that blocks a later split leaf; #1398 keeps Close Terminal pending-terminate lookup/take on the terminal_bindings sibling so this reducer stays under the 1,000 LOC production ceiling."
 
-[[exception]]
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-ceiling_loc = 1008
-issue = 1451
-responsibility = "Create/close/terminate/split adapter retains terminal-tab routing (#1381) and ADR-028 active-workspace wire ids (#1413); #1451 adds CreateWindow / zero-window Dock ActivateWorkspace begin-provisioning on the same CreateTab admission path rather than a second provisioning façade."
+acknowledged_loc = 989
+issue = 1490
+reason = "Create/close/terminate/split adapter stays one cold-path façade after #1451 CreateWindow admission; #1490 keeps select_workspace bootstrap rollback on that same admission path without a second provisioning owner. Ratchet from the prior >1000 exception after net reduction under hard_loc."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -78,9 +78,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1065
+ceiling_loc = 1055
 issue = 1440
-responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority."
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 SplitFocused, #1108 effect queue, #1123 bootstrap/probe-detach, #1379 canvas_floor, #1388 BlockScope, and #1440 Raw resting latch / select_resting_presentation matrix stay one ApplicationRoot test authority. Ratchet ceiling to measured tip."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -102,9 +102,9 @@ reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149/#1388/#1440 l
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/display.rs"
-acknowledged_loc = 767
-issue = 1492
-reason = "Display FFI stays a single cold-path C façade; #1492 carries Raw viewport width and pre-clipping page lead counts only through named-controller APIs, leaving the Runtime HistoryRange wire unchanged and clipping/pagination policy in Rust."
+acknowledged_loc = 776
+issue = 1490
+reason = "Display FFI stays a single cold-path C façade; #1492 Raw viewport width remains on named-controller APIs, and #1490 keeps pane-title / workspace chrome projection on the same encode surface without a second display ABI."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
 acknowledged_loc = 944
@@ -239,9 +239,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1154
+ceiling_loc = 1110
 issue = 1122
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads containment_generation through Split/Close, W2a adds Window-aware fixtures, #1117 records history policy and integration tests, and #1123 adds W4a fixture admission coverage."
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads containment_generation through Split/Close, W2a adds Window-aware fixtures, #1117 records history policy and integration tests, and #1123 adds W4a fixture admission coverage. Ratchet ceiling to measured tip."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -251,22 +251,21 @@ reason = "The palette keeps its existing frozen-command projection; #1492 adds a
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 996
-issue = 1413
-reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1413 adds InvalidWorkspaceRoot/DuplicateWorkspace errors for ADR-028 CreateWorkspace while create/bind ops live in workspace_ops.rs."
+acknowledged_loc = 877
+issue = 1490
+reason = "ShellState composition façade after #1490 extracted sidebar_ops, focus_commit, and dispatch; remaining LOC is identity/lookup/seed ownership. Ceiling ratcheted down from the prior >1000 exception."
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1064
-issue = 1467
-responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1467/#1468 add per-pane Block-scoped DirectInput dock retraction and post-REPL Available reclaim on that same host rather than a second chrome authority."
+ceiling_loc = 1029
+issue = 1490
+responsibility = "Thin AppKit chrome host remains one cold-path façade for pane chrome, composer routing, and focus; #1490 keeps identity-keyed workspace rows with WindowId+containment generation on Create Workspace chrome. Ceiling matches measured tip after SPEC-032 SelectWorkspace fields."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/PaneLayoutView.swift"
-acknowledged_loc = 728
-issue = 1467
-reason = "Pane region/divider/host projection stays one AppKit layout adapter; tip already ships 728 LOC on master with no Swift delta in #1467. Ratchet acknowledged_loc to the measured tip so silent headroom cannot hide further growth."
-issue_url = "https://github.com/seyal-org/seyal/issues/1467"
+acknowledged_loc = 772
+issue = 1490
+reason = "Pane region/divider/host projection stays one AppKit layout adapter; #1490 carries per-pane terminal strip titles beside the existing region hosts without a second layout authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/tests.rs"
@@ -310,15 +309,27 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 879
-issue = 1414
-reason = "ABI action decoding remains one versioned match surface; #1414 adds ObserveTrustedForegroundCwd/Confirm/DismissLeaveOffer kinds 83–85 after ADR-026 session kinds and #1413 CreateWorkspace."
+acknowledged_loc = 889
+issue = 1490
+reason = "ABI action decoding remains one versioned match surface; #1490 SelectWorkspace now carries WindowId + containment generation beside RenameWorkspace/RenamePane / leave-offer kinds on the same decode table without a second ABI module."
+
+# shell/actions.rs dropped below review_loc after #1490 extracted sidebar_ops;
+# no cohesion acknowledgement remains.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/session.rs"
-acknowledged_loc = 766
-issue = 1221
-reason = "ApplicationRoot attach/poll session stays one cold-path driver; #1221 polls attach-for-dispose clients that are not the displayed authority so Hidden→Unpresented termination still progresses without inventing a second session loop; #1381 registers exact terminal-tab bindings; #1379 keeps the registry client after shell exit for Flow history drain; #1398 absorbs wire terminate before bailing on NoRunningExecution so Close Terminal can remove the focused Pane terminal tab."
+acknowledged_loc = 775
+issue = 1490
+reason = "ApplicationRoot attach/poll session stays one cold-path driver; #1490 keeps workspace mint/select bootstrap on the existing attach/provision session path without inventing a second session loop."
+
+# chrome_apply.rs dropped below review_loc after #1490 extracted workspace
+# create/mint/root into chrome_workspace_apply.rs; no cohesion ack remains.
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView+ChromeActions.swift"
+acknowledged_loc = 799
+issue = 1490
+reason = "Chrome action selectors remain the AppKit adapter for pane/tab/layout chrome; #1490 extracted CreateWorkspace/Folder/SetWorkspaceRoot/leave-offer into WorkspaceChrome and stamps SelectWorkspace WindowId + containment generation on IdentityButton apply without a second chrome action owner."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"
@@ -328,9 +339,9 @@ reason = "The existing connection writer remains the single owner of bounded con
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MultiWindowHostController.swift"
-acknowledged_loc = 857
-issue = 1470
-reason = "The macOS host stays one AppKit adapter (#1158 CloseWindow/Dock/hierarchical close). #1450/#1451 quit-confirm/Dock reopen remain here; #1470 adds terminal-tab close projection and non-sole empty Pane collapse on the same host rather than a second window controller."
+acknowledged_loc = 863
+issue = 1490
+reason = "The macOS host stays one AppKit adapter for CloseWindow/Dock/hierarchical close; #1490 Dock reopen forwards SelectWorkspace with WindowId + containment generation on the same controller rather than a second window owner."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-runtime/src/runtime/local/ingress.rs"

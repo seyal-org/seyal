@@ -422,7 +422,11 @@ final class SeyalHostComponentTests: XCTestCase {
             accessibilityChild(view, identifier: "seyal-agents-heading"),
             "empty AGENTS chrome must not appear when Rust projects zero agents"
         )
-        let workspaceRow = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-workspace-0") as? NSButton)
+        let workspaceRow = try XCTUnwrap(
+            accessibilityChildren(view) {
+                $0.hasPrefix("seyal-workspace-")
+            }.compactMap { $0 as? NSButton }.first
+        )
         let workspaceLabel = workspaceRow.accessibilityLabel() ?? workspaceRow.accessibilityTitle() ?? ""
         XCTAssertTrue(
             workspaceLabel.localizedCaseInsensitiveContains("Local"),
@@ -511,8 +515,8 @@ final class SeyalHostComponentTests: XCTestCase {
             accessibilityChild(view, identifier: "seyal-terminal-tab-left-1") as? NSButton
         )
         XCTAssertTrue(
-            (second.accessibilityLabel() ?? second.title).contains("Terminal 2")
-                || (second.accessibilityLabel() ?? second.title).contains("Terminal")
+            (second.accessibilityLabel() ?? second.title).contains("Pane 2")
+                || (second.accessibilityLabel() ?? second.title).localizedCaseInsensitiveContains("Pane")
         )
         (second as NSButton).performClick(nil)
         view.reconcileChrome()
@@ -566,6 +570,11 @@ final class SeyalHostComponentTests: XCTestCase {
         let create = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace"))
         XCTAssertFalse(create.isHidden, "Create Workspace stays on the Workspaces left panel")
         XCTAssertEqual(create.accessibilityLabel(), "Create Workspace")
+        let folder = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-create-workspace-folder")
+        )
+        XCTAssertFalse(folder.isHidden, "Create Workspace from Folder stays on the Workspaces rail")
+        XCTAssertEqual(folder.accessibilityLabel(), "Create Workspace from Folder")
 
         var tabs = SeyalAppAction()
         tabs.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -575,9 +584,11 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_apply(handle, &tabs), 0)
         view.reconcileChrome()
         XCTAssertEqual(seyal_app_chrome(handle).left_panel, 1)
-        XCTAssertTrue(
+        // ADR-029 / cmux: Workspaces/Tabs switcher is gone; Create Workspace
+        // stays visible so left_panel Tabs cannot trap the control.
+        XCTAssertFalse(
             try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace")).isHidden,
-            "Create Workspace is hidden while Tabs owns the left panel"
+            "Create Workspace stays visible under ADR-029 workspaces-only rail"
         )
 
         var workspaces = SeyalAppAction()
@@ -590,6 +601,49 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(
             try XCTUnwrap(accessibilityChild(view, identifier: "seyal-create-workspace")).isHidden
         )
+    }
+
+    /// #1490 / ADR-028: SetWorkspaceRoot updates Path on the targeted workspace
+    /// without minting. Folder chrome uses CreateWorkspace (separate path).
+    @MainActor
+    func testSetWorkspaceRootUpdatesSelectedPathWithoutMinting() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+
+        let before = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_WORKSPACE), 0)
+        let beforeDetail = utf8Detail(before)
+        let beforeTitle = utf8(before)
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-1490-set-root-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        XCTAssertEqual(
+            view.commitSetWorkspaceRootOnSelected(root: root.path),
+            0,
+            "SetWorkspaceRoot must apply on the selected workspace"
+        )
+
+        let after = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_WORKSPACE), 0)
+        let afterDetail = utf8Detail(after)
+        XCTAssertNotEqual(
+            afterDetail,
+            beforeDetail,
+            "bound root detail must change away from the prior Home/system path"
+        )
+        XCTAssertTrue(
+            afterDetail.contains(root.lastPathComponent),
+            "sidebar detail should reflect the bound folder; got \(afterDetail)"
+        )
+        XCTAssertEqual(
+            seyal_app_shell(handle).workspace_count,
+            1,
+            "SetWorkspaceRoot must not mint a second workspace"
+        )
+        // Name follows the folder component; prior Local label is not preserved.
+        XCTAssertNotEqual(utf8(after), beforeTitle)
     }
 
     /// #1413 / #1414: SetWorkspaceRoot + ObserveTrustedForegroundCwd leave-offer ABI.
@@ -1142,6 +1196,78 @@ final class SeyalHostComponentTests: XCTestCase {
             "routeFocus must leave the hidden root composer for the visible pane editor"
         )
         XCTAssertFalse(window.firstResponder === hiddenEditor)
+    }
+
+    /// #1490: Raw-stable chrome navigation must reclaim Metal first responder.
+    /// Sidebar / New Terminal clicks leave FR on chrome while eligibility stays
+    /// Raw; reconcile must still call routeFocus so typing keeps working.
+    @MainActor
+    func testReconcileReclaimsMetalFirstResponderWhenRawEligibilityStable() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let handle = view.pane.appHandle
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1515_1515_1515_1515
+        bind.target_attachment_lo = 0x1616_1616_1616_1616
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        snap = seyal_app_snapshot(handle)
+        XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue))
+
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let metal = view.focusedInputSurface()
+        metal.syncInputRoutePresentation()
+        XCTAssertTrue(metal.acceptsFirstResponder)
+        XCTAssertTrue(window.makeFirstResponder(metal))
+        XCTAssertTrue(window.firstResponder === metal)
+
+        // Sidebar / + click: FR moves onto chrome while Raw stays Raw.
+        XCTAssertTrue(window.makeFirstResponder(view.createWorkspaceButton))
+        XCTAssertFalse(window.firstResponder === metal)
+
+        // Generation bump that does not change eligibility (left-panel toggle).
+        var tabs = SeyalAppAction()
+        tabs.version = UInt16(SEYAL_APP_ABI_VERSION)
+        tabs.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        tabs.kind = UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue)
+        tabs.reserved = 1
+        XCTAssertEqual(seyal_app_apply(handle, &tabs), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue),
+            "fixture must keep Raw so only the generation-stable routeFocus path is under test"
+        )
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            window.firstResponder === view.focusedInputSurface(),
+            "reconcile must reclaim Metal FR after Raw-stable chrome navigation"
+        )
     }
 
     @MainActor
@@ -2379,33 +2505,10 @@ final class SeyalHostComponentTests: XCTestCase {
 
     @MainActor
     func testSplitPaneTerminalTabTitlesUseDistinctPaneIdentity() {
-        XCTAssertEqual(
-            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 1", index: 0, tabCount: 1),
-            "Pane 1"
-        )
-        XCTAssertEqual(
-            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 0, tabCount: 1),
-            "Pane 2"
-        )
-        XCTAssertNotEqual(
-            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 1", index: 0, tabCount: 1),
-            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 0, tabCount: 1),
-            "split leaves must not both read as Terminal 1 (#1429)"
-        )
-        XCTAssertEqual(
-            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "Pane 2", index: 1, tabCount: 2),
-            "Pane 2 · 2"
-        )
-        XCTAssertEqual(
-            PaneTerminalTabStrip.terminalTabTitle(paneTitle: "  ", index: 0, tabCount: 1),
-            "Terminal 1"
-        )
-
         let stripA = PaneTerminalTabStrip(
             paneLo: 1,
             paneHi: 0,
-            paneTitle: "Pane 1",
-            tabs: [PaneLayoutView.TerminalTab(lo: 1, hi: 0, selected: true)],
+            tabs: [PaneLayoutView.TerminalTab(lo: 1, hi: 0, selected: true, title: "Pane 1")],
             focused: true,
             canSplit: true,
             canClosePane: true
@@ -2413,9 +2516,19 @@ final class SeyalHostComponentTests: XCTestCase {
         let stripB = PaneTerminalTabStrip(
             paneLo: 2,
             paneHi: 0,
-            paneTitle: "Pane 2",
-            tabs: [PaneLayoutView.TerminalTab(lo: 2, hi: 0, selected: true)],
+            tabs: [PaneLayoutView.TerminalTab(lo: 2, hi: 0, selected: true, title: "Pane 2")],
             focused: false,
+            canSplit: true,
+            canClosePane: true
+        )
+        let multi = PaneTerminalTabStrip(
+            paneLo: 3,
+            paneHi: 0,
+            tabs: [
+                PaneLayoutView.TerminalTab(lo: 30, hi: 0, selected: true, title: "Build"),
+                PaneLayoutView.TerminalTab(lo: 31, hi: 0, selected: false, title: "Pane 2"),
+            ],
+            focused: true,
             canSplit: true,
             canClosePane: true
         )
@@ -2432,7 +2545,12 @@ final class SeyalHostComponentTests: XCTestCase {
         let b = firstPaneButtonTitle(in: stripB)
         XCTAssertEqual(a, "Pane 1")
         XCTAssertEqual(b, "Pane 2")
-        XCTAssertNotEqual(a, b)
+        XCTAssertNotEqual(a, b, "split leaves must not both read as Terminal 1 (#1429)")
+        let selected = accessibilityChild(multi, identifier: "seyal-terminal-tab-0-30") as? NSButton
+        let sibling = accessibilityChild(multi, identifier: "seyal-terminal-tab-0-31") as? NSButton
+        XCTAssertEqual(selected?.title, "Build")
+        XCTAssertEqual(sibling?.title, "Pane 2")
+        XCTAssertNotEqual(selected?.title, sibling?.title, "rename must not rewrite sibling terminal labels")
     }
 
     @MainActor
@@ -2440,10 +2558,9 @@ final class SeyalHostComponentTests: XCTestCase {
         let strip = PaneTerminalTabStrip(
             paneLo: 4,
             paneHi: 0,
-            paneTitle: "Pane 4",
             tabs: [
-                PaneLayoutView.TerminalTab(lo: 10, hi: 0, selected: true),
-                PaneLayoutView.TerminalTab(lo: 11, hi: 0, selected: false),
+                PaneLayoutView.TerminalTab(lo: 10, hi: 0, selected: true, title: "Pane 4"),
+                PaneLayoutView.TerminalTab(lo: 11, hi: 0, selected: false, title: "Pane 2"),
             ],
             focused: true,
             canSplit: true,
@@ -2476,8 +2593,7 @@ final class SeyalHostComponentTests: XCTestCase {
         let unfocused = PaneTerminalTabStrip(
             paneLo: 5,
             paneHi: 0,
-            paneTitle: "Pane 5",
-            tabs: [PaneLayoutView.TerminalTab(lo: 12, hi: 0, selected: true)],
+            tabs: [PaneLayoutView.TerminalTab(lo: 12, hi: 0, selected: true, title: "Pane 5")],
             focused: false,
             canSplit: false,
             canClosePane: true
@@ -4293,6 +4409,88 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(composer.isFocusEligibleForRecovery)
     }
 
+    /// SPEC §10: drafts are pane-local. SetDraft does not bump epoch, so the
+    /// primary dock must rehydrate when focused PaneId / workspace changes —
+    /// not only on epoch change — or sibling/workspace panes leak the draft.
+    @MainActor
+    func testPrimaryComposerRehydratesDraftWhenFocusedPaneChanges() throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 1
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        XCTAssertEqual(seyal_app_shell(handle).pane_count, 2)
+
+        let paneA = seyal_app_pane_region(handle, 0)
+        let paneB = seyal_app_pane_region(handle, 1)
+        var focusA = SeyalAppAction()
+        focusA.version = split.version
+        focusA.size = split.size
+        focusA.kind = UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue)
+        focusA.target_execution_lo = paneA.pane_lo
+        focusA.target_execution_hi = paneA.pane_hi
+        XCTAssertEqual(seyal_app_apply(handle, &focusA), 0)
+
+        let draftBytes = Array("pane-a-only".utf8)
+        var setDraft = SeyalAppAction()
+        setDraft.version = split.version
+        setDraft.size = split.size
+        setDraft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
+        setDraft.applySnapshotFence(seyal_app_snapshot(handle))
+        setDraft.target_generation = seyal_app_composer(handle).epoch
+        draftBytes.withUnsafeBufferPointer { buffer in
+            setDraft.payload = buffer.baseAddress
+            setDraft.payload_len = UInt32(buffer.count)
+            XCTAssertEqual(seyal_app_apply(handle, &setDraft), 0)
+        }
+        let epochAfterDraft = seyal_app_composer(handle).epoch
+
+        let composer = ComposerBridgeView(appHandle: handle)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = composer
+        defer {
+            composer.removeFromSuperview()
+            window.close()
+        }
+        composer.reconcile()
+        let editor = try XCTUnwrap(
+            accessibilityChild(composer, identifier: "seyal-composer-editor") as? NSTextView
+        )
+        XCTAssertEqual(editor.string, "pane-a-only")
+
+        var focusB = SeyalAppAction()
+        focusB.version = split.version
+        focusB.size = split.size
+        focusB.kind = UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue)
+        focusB.target_execution_lo = paneB.pane_lo
+        focusB.target_execution_hi = paneB.pane_hi
+        XCTAssertEqual(seyal_app_apply(handle, &focusB), 0)
+        let epochOnB = seyal_app_composer(handle).epoch
+        // Precondition: both panes can share the same epoch after SetDraft.
+        // Rehydrate must still clear the editor for B's empty draft.
+        XCTAssertEqual(
+            epochOnB,
+            epochAfterDraft,
+            "precondition: SetDraft must not bump epoch (otherwise the bug is masked)"
+        )
+        composer.reconcile()
+        XCTAssertEqual(
+            editor.string,
+            "",
+            "focused Pane B must not show Pane A's draft after focus switch"
+        )
+    }
+
     @MainActor
     func testRecoveryFocusRetryFromPriorGenerationIsDiscarded() async throws {
         let handle = seyal_app_create()
@@ -5910,6 +6108,14 @@ private func reloadUiConfig(path: String) -> Int32 {
 private func utf8(_ row: SeyalAppRow) -> String {
     guard row.title_len > 0, let title = row.title else { return "" }
     return String(decoding: UnsafeBufferPointer(start: title, count: Int(row.title_len)), as: UTF8.self)
+}
+
+private func utf8Detail(_ row: SeyalAppRow) -> String {
+    guard row.detail_len > 0, let detail = row.detail else { return "" }
+    return String(
+        decoding: UnsafeBufferPointer(start: detail, count: Int(row.detail_len)),
+        as: UTF8.self
+    )
 }
 
 @MainActor

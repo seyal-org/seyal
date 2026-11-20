@@ -10,6 +10,17 @@ fn other_workspace() -> WorkspaceId {
     WorkspaceId::from_bytes([0x11; 16])
 }
 
+/// Unrealized pane-tree storage opens in the host; realized homes raise (AC6).
+fn mark_home_unrealized(shell: &mut ShellState, workspace: WorkspaceId) {
+    let item = shell
+        .workspaces
+        .iter_mut()
+        .find(|item| item.id == workspace)
+        .expect("workspace");
+    let window = item.windows.first_mut().expect("home window");
+    window.realized = false;
+}
+
 fn tab_seed(id: TabId, title: &str) -> ShellTabSeed {
     ShellTabSeed {
         id,
@@ -199,19 +210,87 @@ fn activate_workspace_create_path_is_generation_fenced() {
 }
 
 #[test]
-fn activate_workspace_raise_accepts_stale_generation() {
+fn activate_unrealized_workspace_selects_in_place_without_raising() {
+    // Realized solitary homes raise (#1490 AC6). Unrealized storage opens in
+    // the current host without a second native window.
     let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
+    let host = shell.product_window_id().unwrap();
+    let before = shell.snapshot().focused_pane;
     shell.apply_product_create_tab().unwrap();
-    let stale = 0;
-    assert_ne!(shell.containment_generation(), stale);
+    let generation = shell.containment_generation();
+    let _ = shell.take_effects();
     shell
         .apply(ShellAction::ActivateWorkspace {
             workspace: other_workspace(),
-            containment_generation: stale,
+            containment_generation: generation,
         })
-        .expect("raise is identity-fenced");
-    assert_eq!(shell.snapshot().active_workspace, other_workspace());
-    assert_eq!(shell.snapshot().tabs[0].title, "API");
+        .expect("open unrealized workspace in this window");
+    let snapshot = shell.snapshot();
+    assert_eq!(snapshot.active_window, Some(host));
+    assert_eq!(snapshot.active_workspace, other_workspace());
+    assert_eq!(snapshot.selected_workspace, other_workspace());
+    assert_eq!(
+        snapshot.open_workspaces,
+        vec![WorkspaceId::m001_default(), other_workspace()]
+    );
+    assert_eq!(snapshot.tabs[0].title, "API");
+    assert_ne!(snapshot.focused_pane, before);
+    assert_eq!(snapshot.windows.len(), 1);
+    let effects = shell.take_effects();
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, ShellNativeEffect::OrderFrontMakeKey { .. })));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, ShellNativeEffect::RealizeWindow { .. })));
+}
+
+#[test]
+fn activate_solitary_realized_home_raises_presenter() {
+    let mut shell = seed_two_workspaces();
+    let first = shell.product_window_id().unwrap();
+    let other = other_workspace();
+    let other_window = shell
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == other)
+        .and_then(|workspace| workspace.active_window)
+        .expect("other home");
+    let _ = shell.take_effects();
+    shell
+        .apply(ShellAction::ActivateWorkspace {
+            workspace: other,
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("raise solitary realized home");
+    let snapshot = shell.snapshot();
+    assert_eq!(snapshot.active_window, Some(other_window));
+    assert_eq!(snapshot.selected_workspace, other);
+    assert!(!snapshot
+        .windows
+        .iter()
+        .any(|window| { window.id == first && window.open_workspaces.contains(&other) }));
+    assert!(shell.take_effects().iter().any(|effect| {
+        matches!(effect, ShellNativeEffect::OrderFrontMakeKey { window } if *window == other_window)
+    }));
+}
+
+#[test]
+fn opening_another_workspace_rejects_a_stale_generation() {
+    let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
+    shell.apply_product_create_tab().unwrap();
+    let before = shell.snapshot();
+    assert_eq!(
+        shell.apply(ShellAction::ActivateWorkspace {
+            workspace: other_workspace(),
+            containment_generation: 0,
+        }),
+        Err(ShellError::StaleContainment)
+    );
+    assert_eq!(shell.snapshot().open_workspaces, before.open_workspaces);
+    assert_eq!(shell.snapshot().active_workspace, before.active_workspace);
 }
 
 #[test]
@@ -273,8 +352,9 @@ fn selection_does_not_bump_containment_generation() {
 }
 
 #[test]
-fn active_workspace_projects_from_the_most_recent_live_window() {
+fn focus_history_alone_does_not_switch_the_sidebar_workspace() {
     let mut shell = seed_two_workspaces();
+    let host = shell.product_window_id().unwrap();
     let other_pane = shell
         .workspaces
         .iter()
@@ -283,14 +363,12 @@ fn active_workspace_projects_from_the_most_recent_live_window() {
         .map(|tab| tab.focused)
         .expect("other workspace pane");
 
-    // Focus history is the accepted application-wide source for derived
-    // Window recency. The product Workspace must follow its newest live Pane.
     shell.focus_history.record(other_pane);
-    assert_eq!(shell.snapshot().active_workspace, other_workspace());
     assert_eq!(
-        shell.snapshot().active_tab,
-        shell.workspaces[1].active_tab_id().unwrap()
+        shell.snapshot().active_workspace,
+        WorkspaceId::m001_default()
     );
+    assert_eq!(shell.snapshot().active_window, Some(host));
 }
 
 #[test]
@@ -691,6 +769,7 @@ fn bind_rejects_second_leaf_for_same_execution() {
 #[test]
 fn activate_workspace_raise_uses_derived_pane_recency() {
     let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
     let first_window = shell.product_window_id().unwrap();
     shell
         .apply(ShellAction::CreateWindow {
@@ -1148,6 +1227,7 @@ fn close_active_tab_records_successor_before_other_workspace_recency() {
 #[test]
 fn workspace_activation_falls_back_to_retained_active_window_after_history_eviction() {
     let mut shell = seed_two_workspaces();
+    mark_home_unrealized(&mut shell, other_workspace());
     let workspace = WorkspaceId::m001_default();
     shell
         .apply(ShellAction::CreateWindow {
