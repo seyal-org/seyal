@@ -337,7 +337,23 @@ enum SeyalAppRecoveryOutcome {
 enum SeyalAppRecoveryLaunch {
     SEYAL_APP_RECOVERY_LAUNCH_NONE = 0,
     SEYAL_APP_RECOVERY_LAUNCH_STARTED = 1,
-    SEYAL_APP_RECOVERY_LAUNCH_HELPER_MISSING = 2
+    SEYAL_APP_RECOVERY_LAUNCH_HELPER_MISSING = 2,
+    SEYAL_APP_RECOVERY_LAUNCH_HELPER_PATH_INVALID = 3,
+    SEYAL_APP_RECOVERY_LAUNCH_HELPER_TRUST_INVALID = 4,
+    SEYAL_APP_RECOVERY_LAUNCH_DENIED = 5,
+    SEYAL_APP_RECOVERY_LAUNCH_FAILED = 6
+};
+
+/** Stable non-secret recovery diagnostic (SPEC-009 §8.1.1 / #1421). */
+enum SeyalAppRecoveryDiagnostic {
+    SEYAL_APP_RECOVERY_DIAG_NONE = 0,
+    SEYAL_APP_RECOVERY_DIAG_HELPER_MISSING = 1,
+    SEYAL_APP_RECOVERY_DIAG_HELPER_PATH_INVALID = 2,
+    SEYAL_APP_RECOVERY_DIAG_HELPER_TRUST_INVALID = 3,
+    SEYAL_APP_RECOVERY_DIAG_LAUNCH_DENIED = 4,
+    SEYAL_APP_RECOVERY_DIAG_LAUNCH_FAILED = 5,
+    SEYAL_APP_RECOVERY_DIAG_RUNTIME_STARTUP_FAILED = 6,
+    SEYAL_APP_RECOVERY_DIAG_ENDPOINT_REJECTED = 7
 };
 
 enum SeyalAppRecoveryEffect {
@@ -1118,6 +1134,8 @@ uint16_t seyal_app_eligibility_for_pane(
     uint64_t pane_lo,
     uint64_t pane_hi);
 uint64_t seyal_app_recovery_param(uint64_t handle);
+/** Non-secret recovery diagnostic; see SeyalAppRecoveryDiagnostic. */
+uint32_t seyal_app_recovery_diagnostic(uint64_t handle);
 
 /** 1 when New shell has prepared an ended Pane and is waiting for Create+Bind. */
 uint8_t seyal_app_replacement_bootstrap_pending(uint64_t handle);

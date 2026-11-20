@@ -10,6 +10,7 @@ mod loss;
 mod pane_composer;
 pub mod pane_recovery;
 mod pane_region;
+mod recovery_ffi;
 mod shortcut;
 mod visual;
 mod window;
@@ -45,6 +46,7 @@ pub use leave_offer_ffi::seyal_app_leave_offer;
 pub(crate) use loss::{note_application_roots_client_loss, note_application_roots_execution_ended};
 pub use pane_composer::*;
 pub use pane_region::*;
+pub use recovery_ffi::{seyal_app_recovery_diagnostic, seyal_app_recovery_param};
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
     seyal_app_shortcut_enabled, seyal_app_shortcut_item, seyal_app_shortcut_title,
@@ -1077,16 +1079,6 @@ pub extern "C" fn seyal_app_block_span(handle: u64, index: u32) -> SeyalAppBlock
             start_line: block.start_line,
             end_line: block.end_line.unwrap_or(0),
         }
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_recovery_param(handle: u64) -> u64 {
-    APPS.with(|apps| {
-        apps.borrow()
-            .get(&handle)
-            .map(|state| state.root.recovery_open_budget_millis())
-            .unwrap_or(0)
     })
 }
 

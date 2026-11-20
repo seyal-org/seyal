@@ -640,6 +640,10 @@ fn decode_launch(reserved: u32) -> Option<LaunchResult> {
     match (reserved >> 8) & 0xff {
         1 => Some(LaunchResult::Started),
         2 => Some(LaunchResult::HelperMissing),
+        3 => Some(LaunchResult::HelperPathInvalid),
+        4 => Some(LaunchResult::HelperTrustInvalid),
+        5 => Some(LaunchResult::LaunchDenied),
+        6 => Some(LaunchResult::LaunchFailed),
         _ => None,
     }
 }

@@ -317,11 +317,17 @@ not require a new architecture decision.
 
 Helper path, signature and launch failures are reported only as bounded
 structured codes: `helperMissing`, `helperPathInvalid`, `helperTrustInvalid`,
-`launchDenied` or `launchFailed`. `RuntimeMismatch` covers the compatibility
-case. These paths must not log argv, environment names or values, descriptor
-details, terminal cells, input, marked text, history, cwd, credentials, sensitive
-paths, signer certificate contents or unredacted operating-system error text;
-numeric error domain/code and the structured category are sufficient.
+`launchDenied` or `launchFailed`. When a foreground episode exhausts after a
+helper was launched but the canonical endpoint never became usable, the client
+exposes `runtimeStartupFailed`. Fail-closed discovery/security rejections expose
+`endpointRejected`. The portable recovery coordinator owns these diagnostics;
+`seyal_app_recovery_diagnostic` and the recovery chrome surface the same
+non-secret token (never a free-form OS error string). `RuntimeMismatch` covers
+the compatibility case. These paths must not log argv, environment names or
+values, descriptor details, terminal cells, input, marked text, history, cwd,
+credentials, sensitive paths, signer certificate contents or unredacted
+operating-system error text; numeric error domain/code and the structured
+category are sufficient.
 
 Required production evidence includes clean-checkout helper embedding and outer
 bundle sealing, Release nested-signature/designated-requirement verification,

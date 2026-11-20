@@ -84,9 +84,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1136
-issue = 1467
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer extraction (#1424/#1451); #1467 exposes block_scoped_direct_input on the same AppHandle snapshot façade rather than a second ABI module."
+ceiling_loc = 1128
+issue = 1421
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window/leave_offer_ffi/pane_composer/recovery_ffi extraction (#1424/#1451/#1421); #1467 exposes block_scoped_direct_input on the same AppHandle snapshot façade rather than a second ABI module. #1421 moves recovery_param/diagnostic into recovery_ffi and ratchets this ceiling down from 1136."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/mod.rs"

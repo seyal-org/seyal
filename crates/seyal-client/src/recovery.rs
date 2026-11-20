@@ -186,6 +186,45 @@ pub fn classify_open_result(failure_class: u8, retryable: bool) -> AttemptOutcom
 pub enum LaunchResult {
     Started,
     HelperMissing,
+    HelperPathInvalid,
+    HelperTrustInvalid,
+    LaunchDenied,
+    LaunchFailed,
+}
+
+impl LaunchResult {
+    pub fn is_failure(self) -> bool {
+        !matches!(self, Self::Started)
+    }
+
+    pub fn diagnostic(self) -> RecoveryDiagnostic {
+        match self {
+            Self::Started => RecoveryDiagnostic::None,
+            Self::HelperMissing => RecoveryDiagnostic::HelperMissing,
+            Self::HelperPathInvalid => RecoveryDiagnostic::HelperPathInvalid,
+            Self::HelperTrustInvalid => RecoveryDiagnostic::HelperTrustInvalid,
+            Self::LaunchDenied => RecoveryDiagnostic::LaunchDenied,
+            Self::LaunchFailed => RecoveryDiagnostic::LaunchFailed,
+        }
+    }
+}
+
+/// Stable, non-secret recovery failure category for UI/diagnostics (SPEC-009 §8.1.1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RecoveryDiagnostic {
+    #[default]
+    None = 0,
+    HelperMissing = 1,
+    HelperPathInvalid = 2,
+    HelperTrustInvalid = 3,
+    LaunchDenied = 4,
+    LaunchFailed = 5,
+    /// Episode exhausted after a helper was launched but the canonical endpoint
+    /// never became usable within the bounded schedule.
+    RuntimeStartupFailed = 6,
+    /// Fail-closed security/protocol rejection (untrusted endpoint, mismatch).
+    EndpointRejected = 7,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -222,6 +261,7 @@ pub struct RecoveryCoordinator {
     /// Survives host Ack of the effect so `seyal_app_recovery_param` still
     /// returns a non-zero open budget after claim.
     claimed_remaining: Option<Duration>,
+    diagnostic: RecoveryDiagnostic,
 }
 
 impl RecoveryCoordinator {
@@ -245,11 +285,16 @@ impl RecoveryCoordinator {
         self.blocked_launch
     }
 
+    pub fn diagnostic(&self) -> RecoveryDiagnostic {
+        self.diagnostic
+    }
+
     pub fn begin_episode(&mut self, now: Duration) -> Vec<RecoveryEffect> {
         self.replace_generation(RecoveryStage::Discovering);
         self.deadline = Some(now.saturating_add(EPISODE_DEADLINE));
         self.launch_claimed = false;
         self.blocked_launch = false;
+        self.diagnostic = RecoveryDiagnostic::None;
         self.attempt_count = 0;
         self.perform_attempt(self.state.generation, now)
     }
@@ -261,6 +306,7 @@ impl RecoveryCoordinator {
         self.launch_claimed = false;
         self.attempt_outstanding = false;
         self.claimed_remaining = None;
+        self.diagnostic = RecoveryDiagnostic::None;
         self.state.stage = RecoveryStage::Usable;
     }
 
@@ -272,6 +318,7 @@ impl RecoveryCoordinator {
         self.launch_claimed = false;
         self.attempt_outstanding = false;
         self.claimed_remaining = None;
+        self.diagnostic = RecoveryDiagnostic::None;
         self.state.stage = RecoveryStage::ExecutionEnded;
     }
 
@@ -280,6 +327,7 @@ impl RecoveryCoordinator {
         self.deadline = None;
         self.launch_claimed = false;
         self.blocked_launch = false;
+        self.diagnostic = RecoveryDiagnostic::None;
         self.attempt_count = 0;
         self.attempt_outstanding = false;
         self.claimed_remaining = None;
@@ -336,18 +384,16 @@ impl RecoveryCoordinator {
         if !self.attempt_outstanding {
             // Late LaunchHelper failure is reported through CompleteRecovery
             // without a new PerformAttempt (host claimed launch, then helper
-            // missing). That is not a duplicate open; block the episode.
+            // failed trust/spawn). That is not a duplicate open; block the
+            // episode with the concrete launch diagnostic.
             if matches!(outcome, AttemptOutcome::EndpointMissing)
-                && launch == Some(LaunchResult::HelperMissing)
+                && launch.is_some_and(LaunchResult::is_failure)
                 && self.launch_claimed
                 && !self.blocked_launch
                 && self.deadline.is_some()
                 && self.state.stage == RecoveryStage::StartingRuntime
             {
-                self.scheduled = false;
-                self.deadline = None;
-                self.blocked_launch = true;
-                self.state.stage = RecoveryStage::Blocked;
+                self.block_launch_failure(launch.expect("checked is_failure"));
                 return Vec::new();
             }
             // No claimed attempt for this generation: ignore episode
@@ -370,6 +416,7 @@ impl RecoveryCoordinator {
                 if !adopted {
                     self.deadline = None;
                     self.scheduled = false;
+                    self.diagnostic = RecoveryDiagnostic::EndpointRejected;
                     self.state.stage = RecoveryStage::Blocked;
                     vec![RecoveryEffect::DisposeHandle(handle)]
                 } else {
@@ -385,11 +432,8 @@ impl RecoveryCoordinator {
                 }
                 // Hosts may report the failed launch after executing the
                 // claimed LaunchHelper effect; it still blocks the episode.
-                if launch == Some(LaunchResult::HelperMissing) {
-                    self.scheduled = false;
-                    self.deadline = None;
-                    self.blocked_launch = true;
-                    self.state.stage = RecoveryStage::Blocked;
+                if let Some(result) = launch.filter(|result| result.is_failure()) {
+                    self.block_launch_failure(result);
                     return effects;
                 }
                 effects.extend(self.schedule_retry(generation, now));
@@ -406,16 +450,28 @@ impl RecoveryCoordinator {
             AttemptOutcome::Blocked => {
                 self.scheduled = false;
                 self.deadline = None;
+                if self.diagnostic == RecoveryDiagnostic::None {
+                    self.diagnostic = RecoveryDiagnostic::EndpointRejected;
+                }
                 self.state.stage = RecoveryStage::Blocked;
                 Vec::new()
             }
             AttemptOutcome::ExecutionEnded => {
                 self.scheduled = false;
                 self.deadline = None;
+                self.diagnostic = RecoveryDiagnostic::None;
                 self.state.stage = RecoveryStage::ExecutionEnded;
                 Vec::new()
             }
         }
+    }
+
+    fn block_launch_failure(&mut self, launch: LaunchResult) {
+        self.scheduled = false;
+        self.deadline = None;
+        self.blocked_launch = true;
+        self.diagnostic = launch.diagnostic();
+        self.state.stage = RecoveryStage::Blocked;
     }
 
     fn replace_generation(&mut self, stage: RecoveryStage) {
@@ -487,6 +543,9 @@ impl RecoveryCoordinator {
         self.deadline = None;
         self.attempt_outstanding = false;
         self.claimed_remaining = None;
+        if self.launch_claimed && self.diagnostic == RecoveryDiagnostic::None {
+            self.diagnostic = RecoveryDiagnostic::RuntimeStartupFailed;
+        }
         self.state.stage = RecoveryStage::Exhausted;
         Vec::new()
     }
