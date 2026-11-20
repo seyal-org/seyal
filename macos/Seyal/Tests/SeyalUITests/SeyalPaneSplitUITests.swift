@@ -714,6 +714,26 @@ final class SeyalPaneSplitUITests: XCTestCase {
             .completed,
             "refocusing the node pane after split must restore DirectInput"
         )
+        // Headed regression: AX TextArea alone is insufficient — keys + paint
+        // must work after node→split→refocus (#1476 blank Running body).
+        let nodeBlock = anyPaneBlock(in: app, containing: "node")
+        XCTAssertTrue(nodeBlock.waitForExistence(timeout: 8))
+        let nodeBody = nodeBlock.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier ENDSWITH '-body'")
+        ).firstMatch
+        if nodeBody.waitForExistence(timeout: 5) {
+            nodeBody.click()
+        } else {
+            nodeTerminal.click()
+        }
+        let evaluatedOutput = "seyalnodesplit-ok"
+        app.typeText("console.log('seyalnodesplit'+'-ok')")
+        app.typeKey("\r", modifierFlags: [])
+        let renderedText = try waitForRenderedText(evaluatedOutput, in: nodeTerminal)
+        XCTAssertTrue(
+            renderedText.contains(evaluatedOutput),
+            "node must accept keys after split→refocus; OCR=\(renderedText)"
+        )
     }
 
     func testSecondPaneNodeReceivesInputWithoutSessionSetupPopup() throws {

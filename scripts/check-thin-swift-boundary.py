@@ -38,6 +38,13 @@ PRODUCT_AUTHORITY = (
     # Dead remnant deleted in #1020/E7; keep scanning so a non-allowlisted host
     # file cannot reintroduce the portable composer-correlation product type.
     "ComposerRequestCorrelation",
+    # Portable renderer intent is Rust-owned (#1476 / ADR-015).
+    "RendererPresentationPlan.flow(",
+    "RendererPresentationPlan.fullPane(",
+    "setPresentationPlan(.flow(",
+    "setPresentationPlan(.fullPane(",
+    "applyRendererPresentation(.flow(",
+    "applyRendererPresentation(.fullPane(",
 )
 
 # Runtime recovery policy is Rust-owned (#1065, ADR-015). Scanned in every host

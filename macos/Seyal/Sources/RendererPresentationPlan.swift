@@ -1,10 +1,22 @@
 import Foundation
 
-/// Native realization of Rust Flow/Raw/TUI renderer intent. Not a product reducer.
+/// Native applicator mirror of Rust `RendererPlan` (ADR-015 / #1476).
+/// Construct only from `SeyalAppRendererPlan` FFI records — never invent flags.
 enum TerminalPresentationMode: String, Equatable, Sendable {
     case flow
     case raw
     case tui
+
+    init(eligibilityOrMode code: UInt16) {
+        switch code {
+        case UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue):
+            self = .tui
+        case UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue):
+            self = .raw
+        default:
+            self = .flow
+        }
+    }
 }
 
 struct RendererPresentationPlan: Equatable, Sendable {
@@ -13,22 +25,42 @@ struct RendererPresentationPlan: Equatable, Sendable {
     var drawsLiveGrid: Bool
     var drawsCursorOutsideBlockRegions: Bool
 
-    static func flow() -> RendererPresentationPlan {
+    /// Apply Rust-authored plan flags. Fail closed on version/size mismatch.
+    init(_ plan: SeyalAppRendererPlan) {
+        let compatible = plan.version == UInt16(SEYAL_APP_RENDERER_PLAN_ABI_VERSION)
+            && plan.size == UInt16(MemoryLayout<SeyalAppRendererPlan>.size)
+        if compatible {
+            mode = TerminalPresentationMode(eligibilityOrMode: plan.mode)
+            drawsFullGridBackground =
+                (plan.flags & UInt16(SEYAL_APP_RENDERER_PLAN_FULL_GRID_BACKGROUND)) != 0
+            drawsLiveGrid = (plan.flags & UInt16(SEYAL_APP_RENDERER_PLAN_LIVE_GRID)) != 0
+            drawsCursorOutsideBlockRegions =
+                (plan.flags & UInt16(SEYAL_APP_RENDERER_PLAN_CURSOR_OUTSIDE_BLOCKS)) != 0
+        } else {
+            mode = .flow
+            drawsFullGridBackground = false
+            drawsLiveGrid = false
+            drawsCursorOutsideBlockRegions = false
+        }
+    }
+
+    /// Resting plan for the focused application snapshot eligibility.
+    static func fromApp(_ handle: UInt64) -> RendererPresentationPlan {
+        RendererPresentationPlan(seyal_app_renderer_plan(handle))
+    }
+
+    /// Resting plan for a pane-scoped eligibility proxy.
+    static func fromPane(appHandle: UInt64, paneLo: UInt64, paneHi: UInt64)
+        -> RendererPresentationPlan
+    {
         RendererPresentationPlan(
-            mode: .flow,
-            drawsFullGridBackground: false,
-            drawsLiveGrid: false,
-            drawsCursorOutsideBlockRegions: false
+            seyal_app_renderer_plan_for_pane(appHandle, paneLo, paneHi)
         )
     }
 
-    static func fullPane(_ mode: TerminalPresentationMode) -> RendererPresentationPlan {
-        RendererPresentationPlan(
-            mode: mode,
-            drawsFullGridBackground: true,
-            drawsLiveGrid: true,
-            drawsCursorOutsideBlockRegions: true
-        )
+    /// Pure resolve for resting eligibility or Raw scrollback overlay.
+    static func resolve(eligibility: UInt16, variant: UInt16) -> RendererPresentationPlan {
+        RendererPresentationPlan(seyal_app_renderer_plan_resolve(eligibility, variant))
     }
 }
 

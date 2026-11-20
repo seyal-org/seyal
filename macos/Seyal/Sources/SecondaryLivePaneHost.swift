@@ -66,7 +66,24 @@ final class SecondaryLivePaneHost: NSView {
     var isProgrammaticTranscriptScroll = false
     var transcriptFrameRevision: UInt64 = 0
     private var lastTranscriptViewportSize: CGSize = .zero
+    /// Pane-host size last used for DirectInput full-republish gating. Must not
+    /// track transcript document growth from setOutputLines — that falsely
+    /// looked like a resize and re-entered layout→PTY churn while typing.
+    private var lastDirectInputHostSize: CGSize = .zero
+    /// Last host bounds sent to `seyal_app_propose_pane_geometry`. Body-height
+    /// growth from live-tail ratchet must not re-propose and resize the PTY.
+    private var lastProposedHostBounds: CGRect = .null
     private var hasPendingTranscriptViewportSync = false
+    /// Last DirectInput dock mode applied by `applyDirectInputMergedLayout`.
+    /// Full paint republish runs only on dock/size/focus-ownership transitions
+    /// (#1479 flicker vs blank body).
+    private var lastMergedDirectInputLayout: Bool?
+    /// Last `inputOwned` seen by DirectInput layout — refocus must republish
+    /// even when the Busy dock was already retracted (#1479).
+    private var lastMergedInputOwned: Bool?
+    /// Ratchet Running PRIMARY_CLIP body/live-tail row counts so a briefly
+    /// trimmed `reserved1==1` after resize cannot collapse Welcome+`>` (#1479).
+    var runningPrimaryClipRowRatchet: [UInt64: Int] = [:]
     var blockOutputZeroClipRetries = 0
     var lastPublishedTranscriptRegions: [NativeTranscriptRegion] = []
     var lastVisibleHistoryPixelCount = 0
@@ -444,6 +461,9 @@ final class SecondaryLivePaneHost: NSView {
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
             syncBlockSelectionFromProjection()
+            // Clips only. Full republishExisting+layout belongs on DirectInput
+            // dock/size transitions — calling it on every ownership reconcile
+            // resized the PTY per keystroke (#1479 vs #1471 flicker).
             publishLiveTailBlocks()
             publishBlockOutputFrame()
         }
@@ -543,8 +563,17 @@ final class SecondaryLivePaneHost: NSView {
         let direct = panePublishesBlockScopedDirectInput
         surface.panePublishesBlockScopedDirectInput = direct
         guard inputOwned else { return }
-        if surface.bridge == nil, let historyBridge {
+        guard let historyBridge else { return }
+        if surface.bridge == nil {
             surface.bridge = historyBridge
+        }
+        // Key admission requires windowFocusedDisplayHandle == this pane's
+        // transcript handle. FOCUS_PANE can race ahead of chrome wiring; keep
+        // the borrowed bridge's focus selector aligned (#1476).
+        if displayHandle != 0,
+            historyBridge.windowFocusedDisplayHandle != displayHandle
+        {
+            historyBridge.windowFocusedDisplayHandle = displayHandle
         }
     }
 
@@ -553,8 +582,10 @@ final class SecondaryLivePaneHost: NSView {
     /// Unfocused panes still retract the Busy dock while their REPL owns mode 3.
     private func focusBlockScopedDirectInputIfEligible() {
         let direct = panePublishesBlockScopedDirectInput
-        applyDirectInputMergedLayout(direct)
+        // Borrow before layout/publish so DirectInput Metal can prepare frames
+        // and admit keys on the same reclaim turn (#1476 node→split→refocus).
         ensureDirectInputBridgeBorrow()
+        applyDirectInputMergedLayout(direct)
         guard inputOwned else {
             // Never stop the shared Controller bridge; only drop the borrow.
             if surface.bridge === historyBridge {
@@ -574,6 +605,8 @@ final class SecondaryLivePaneHost: NSView {
     /// Warp-like: retract the Busy dock and fill the transcript while DirectInput
     /// owns the Running Block; restore the dock when DirectInput ends.
     private func applyDirectInputMergedLayout(_ directInput: Bool) {
+        let dockChanged = lastMergedDirectInputLayout != directInput
+        let ownershipChanged = lastMergedInputOwned != inputOwned
         if directInput {
             if transcriptBottomToComposer.isActive {
                 transcriptBottomToComposer.isActive = false
@@ -595,7 +628,82 @@ final class SecondaryLivePaneHost: NSView {
         // Focus-switch DirectInput must not leave Metal at a zero frame —
         // XCUI/AppKit then synthesize keys into an empty target.
         layoutSubtreeIfNeeded()
+        // Gate on the pane host size (split/resize), not transcript document
+        // height — body ratchet growth must not look like a geometry change.
+        let hostSize = bounds.size
+        let sizeChanged =
+            abs(hostSize.width - lastDirectInputHostSize.width) > 0.5
+            || abs(hostSize.height - lastDirectInputHostSize.height) > 0.5
+        // Refocus keeps DirectInput dock retracted — still must republish so
+        // cursor-covering clips land after FOCUS_PANE (#1479).
+        let focusReclaim = ownershipChanged && inputOwned && directInput
+        guard dockChanged || sizeChanged || focusReclaim else {
+            // Same dock + size + ownership: clips only, no PTY churn.
+            publishLiveTailBlocks()
+            publishBlockOutputFrame()
+            return
+        }
+        lastMergedDirectInputLayout = directInput
+        lastMergedInputOwned = inputOwned
+        lastDirectInputHostSize = hostSize
+        lastTranscriptViewportSize = transcript.bounds.size
+        republishFlowBlockPaintAfterLayout()
+        // Borrowing the shared bridge can propose geometry and resize the PTY
+        // on the same dock/focus/size transition. Republish once after the
+        // runloop turn so projection + clips match the new grid — never on
+        // every key. Include sizeChanged (even while unfocused): node→split
+        // resizes the Running pane as focus moves to the new leaf.
+        if (dockChanged || focusReclaim || sizeChanged), directInput {
+            let restoreKeys = inputOwned
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.republishFlowBlockPaintAfterLayout()
+                // Async layout/paint must not leave keys on a non-Metal FR after
+                // node→split→refocus (#1479).
+                guard restoreKeys,
+                    self.inputOwned,
+                    self.panePublishesBlockScopedDirectInput
+                else { return }
+                self.surface.syncInputRoutePresentation()
+                self.window?.makeFirstResponder(self.surface)
+            }
+        }
+    }
+
+    /// Prepare Candidate-D, sync pane Block projections, then refresh Flow
+    /// live-tail / history clips into the current AppKit body geometry.
+    private func republishFlowBlockPaintAfterLayout() {
+        let eligibility = seyal_app_eligibility_for_pane(appHandle, paneLo, paneHi)
+        let rawOrTui = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+            || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        guard !rawOrTui else {
+            publishFrame()
+            return
+        }
+        // Prepare before projection/expand so reserved1 + cursor_row match the
+        // post-resize grid (node→split measured cursor at row 5 with reserved1=1).
+        if displayHandle != 0 {
+            _ = seyal_bridge_ensure_prepared_for(displayHandle)
+        }
+        _ = seyal_app_sync_pane_runtime_blocks(appHandle, paneLo, paneHi)
+        // Keep Running body line counts in sync with the (possibly resized)
+        // PRIMARY_CLIP window before publishing clips.
+        republishExistingBlockProjections()
+        // Transition-only: cover prepared cursor when Rust briefly publishes
+        // reserved1=1 after PTY resize (never on the per-key light path).
+        expandRunningPrimaryClipsThroughCursor()
+        layoutSubtreeIfNeeded()
+        // Install clips + body geometry before Candidate-D prepare so
+        // refreshLiveTailAfterPrepare cannot fail-closed into an empty
+        // region map on the focus-reclaim resize (#1476).
+        publishLiveTailBlocks()
+        publishBlockOutputFrame()
         publishFrame()
+        // Consume may advance cursor/clip evidence — cover once more without
+        // scheduling another geometry loop.
+        expandRunningPrimaryClipsThroughCursor()
+        publishLiveTailBlocks()
+        publishBlockOutputFrame()
     }
 
     private func retagArrangedBlockAccessibilityIdentifiers() {
@@ -638,6 +746,7 @@ final class SecondaryLivePaneHost: NSView {
             "rows=\(frame.rows) columns=\(frame.columns) execution=\(execution) "
                 + "flow-paint=\(paint.accessibilityToken) "
                 + "history-instances=\(paint.historyInstanceCount) "
+                + "live-tail-instances=\(paint.liveTailInstanceCount) "
                 + "history-regions-painted=\(paint.paintedHistoryRegionCount) "
                 + "history-clips=\(paint.historyClipsDistinct ? "ok" : "collapse") "
                 + "history-visible-pixels=\(lastVisibleHistoryPixelCount) "
@@ -689,14 +798,16 @@ final class SecondaryLivePaneHost: NSView {
         let direct = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         transcript.isHidden = direct
+        // Plan from the same eligibility as `direct` (no fromPane race; #1476).
+        let plan = RendererPresentationPlan.resolve(
+            eligibility: eligibility,
+            variant: UInt16(SEYAL_APP_RENDERER_PLAN_VARIANT_DEFAULT))
         if direct {
             activateDirectSurfaceConstraints()
-            let mode: TerminalPresentationMode =
-                eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
-            if mode == .tui {
+            if eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) {
                 surface.clearRawScrollbackFollowTail()
             }
-            surface.applyRendererPresentation(.fullPane(mode))
+            surface.applyRendererPresentation(plan)
             surface.setLiveTailBlocks([:])
             surface.removeTranscriptRegions(except: [])
             // Wiping Metal/history caches must also clear the settled request
@@ -712,11 +823,16 @@ final class SecondaryLivePaneHost: NSView {
             // Same as primary: Raw scrollback must not survive into Flow Metal.
             surface.clearRawScrollbackFollowTail()
             activateFlowConstraintsIfSized()
-            surface.applyRendererPresentation(.flow())
+            surface.applyRendererPresentation(plan)
             // Composer visibility still follows pane-scoped reconcile().
             composer.reconcile()
             refreshInputOwnershipChrome()
             focusBlockScopedDirectInputIfEligible()
+            // Refill Candidate-D + Block clips after Flow plan apply so a new
+            // multipane host (or Raw→Flow return) does not keep a blank body.
+            publishFrame()
+            publishLiveTailBlocks()
+            publishBlockOutputFrame()
         }
         needsLayout = true
     }
@@ -829,17 +945,27 @@ final class SecondaryLivePaneHost: NSView {
         let rounded = bounds.integral
         let cell = surface.terminalPresentationCellSize()
         guard cell.width > 0, cell.height > 0 else { return }
-        _ = seyal_app_propose_pane_geometry(
-            appHandle,
-            paneLo,
-            paneHi,
-            Double(rounded.width),
-            Double(rounded.height),
-            0,
-            0,
-            Double(cell.width),
-            Double(cell.height)
-        )
+        // Transcript document / Block body growth triggers layout without a
+        // pane-size change. Re-proposing the same host bounds resized the PTY
+        // (rows 44↔46) and clipped typed echo past reserved1 (#1479).
+        let hostSizeChanged =
+            lastProposedHostBounds.isNull
+            || abs(rounded.width - lastProposedHostBounds.width) > 0.5
+            || abs(rounded.height - lastProposedHostBounds.height) > 0.5
+        if hostSizeChanged {
+            lastProposedHostBounds = rounded
+            _ = seyal_app_propose_pane_geometry(
+                appHandle,
+                paneLo,
+                paneHi,
+                Double(rounded.width),
+                Double(rounded.height),
+                0,
+                0,
+                Double(cell.width),
+                Double(cell.height)
+            )
+        }
         // Pick up the resized prepared frame for AX/PTY convergence after
         // window or divider geometry changes (#1424).
         publishFrame()
