@@ -187,7 +187,7 @@ When accepted scope is complete and required pre-publication evidence passes, `i
 
 If a draft pull request already exists, leave it a draft until accepted scope is complete, then mark that same pull request ready for review. Do not open a second pull request. Only `implement-issue` may open the pull request or change it from draft to ready for review.
 
-`CLOSED_UNMERGED` stays the candidate. Reopen or rebase that head. Do not start a new plan or a second pull request. Review findings on `IN_REVIEW` or `CLOSED_UNMERGED` are fixed on that same pull request through `address-pr-review`, then reviewed under the pinned AI-SDLC canonical convergence policy: focused intermediate rechecks where safe, broader review when impact is high-risk or unknown, final whole-candidate exact-head/base approval. A clean initial review can be final. A decision blocker names the other pull request and keeps this one.
+`CLOSED_UNMERGED` stays the candidate. Reopen or rebase that head. Do not start a new plan or a second pull request. Review findings on `IN_REVIEW` or `CLOSED_UNMERGED` are fixed on that same pull request through `address-pr-review`, then reviewed under the self-contained `docs/engineering/SEYAL-AGENT-WORKFLOW.md` convergence policy: focused intermediate rechecks where safe, broader review when impact is high-risk or unknown, final whole-candidate exact-head/base approval. A clean initial review can be final. A decision blocker names the other pull request and keeps this one.
 
 `REJECTED` is not resumed.
 

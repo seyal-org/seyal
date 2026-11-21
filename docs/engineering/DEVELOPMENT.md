@@ -17,7 +17,7 @@ Issues and PRs cannot override higher authority. If implementation evidence cont
 
 For M002+ engineering expectations (ownership, unsafe/FFI, concurrency, hot-path, Metal, testing/fuzz, security, CI evidence classes, OSS↛commercial), start from the thin index `docs/engineering/ENGINEERING-QUALITY-BASELINE.md`. It points at existing authorities and records M001 carry-forward honesty rules; it does not replace this workflow or the Constitution.
 
-The `.sdlc` context layer is deliberately **not** inserted into the authority chain. It is a compact navigation/provenance layer that helps agents find the relevant authoritative artifacts without rereading the repository.
+A context search is navigation only, never an authority tier; source architecture, ADRs, specs and tests must be read directly when relevant.
 
 ## Unit of work
 
@@ -39,7 +39,7 @@ The Issue has exactly one **human owner**. The sole assignee is the preferred ow
 
 ## Mandatory flow
 
-1. When project context beyond the Issue links is needed, use `project-context` to retrieve the smallest relevant node/relationship set, validate the derived index, and read the returned authoritative sources. A stale/no-match index routes to targeted source search; it never authorizes guessing.
+1. When project context beyond Issue links is needed, use native `project-context` for targeted source discovery. Read only governing architecture, ADR, spec, milestone, code and test sources; do not trust stale summaries.
 2. Refine the Issue using `.agents/skills/issue-refinement/SKILL.md`. The same pass publishes the contributor queue: `help wanted` when the Ready checklist passes, `needs-refinement` while the plan is still open, or `blocked` when a named dependency remains.
 3. Leave a Ready issue unassigned and labeled `help wanted` until a developer claims it. Project status **Ready** follows that same checklist in `ISSUE-PROTOCOL.md`.
 4. Any request to implement/fix/finish/code a specific GitHub Issue must enter `.agents/skills/implement-issue/SKILL.md`. Resolve the authenticated **human GitHub owner** and fresh-read assignee/owner-claim state before planning or production work. Prefer sole assignment when GitHub permits it. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor comments `Owner: @login` and continues. Follow the active-claim and conflict rules in `ISSUE-PROTOCOL.md`. A Cursor/Codex/Claude/Copilot/bot identity is never the work owner. Assigned-to-other, multiple-assignee, bot-owned, or identity-unavailable cases stop as `BLOCKED`.
@@ -116,7 +116,7 @@ Optional developer-agent/MCP provisioning is deliberately separate:
 make bootstrap-agents
 ```
 
-That explicit opt-in command uses `scripts/bootstrap-dev.sh`, materializes the exact reviewed AI-SDLC developer-framework pin under ignored `.sdlc/framework/`, and may provision the other pinned developer tools documented in `docs/engineering/AGENT-TOOLING.md`. It is not part of product build/test/CI bootstrap and must not become a terminal/runtime dependency.
+That explicit opt-in command uses `scripts/bootstrap-dev.sh` to validate the in-repository skills and provision approved optional MCP tools in `docs/engineering/AGENT-TOOLING.md`. It downloads no external engineering framework. It is not part of product build/test/CI bootstrap or terminal/runtime operation.
 
 ## Canonical task interface
 
@@ -233,7 +233,7 @@ For coding-agent/project-context tooling, explicitly opt in:
 
 ```sh
 make bootstrap-agents
-python3 .sdlc/framework/tools/project_context.py --root . validate
+git grep -n 'TerminalExecution' -- docs/architecture docs/specs
 ```
 
 To preview the documentation locally (Node.js 22.12+):

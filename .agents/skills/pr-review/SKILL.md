@@ -7,7 +7,6 @@ Read `docs/engineering/SEYAL-AGENT-WORKFLOW.md` for the complete self-contained 
 
 # Pull request review
 
-Follow the canonical local merge-readiness procedure in `.sdlc/framework/skills/pr-review/SKILL.md`. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
 Use the portable coordination lane: source review is read-only; publishing feedback or changing PR state requires authorized reviewer scope and fresh head/base checks. Do not edit the implementer's source or take over their candidate.
 
@@ -15,7 +14,7 @@ This is Seyal's single user-facing PR review and re-review entrypoint. The Seyal
 
 ## Review convergence
 
-Follow `.sdlc/framework/docs/WORKING-LOOP.md#review-convergence-and-evidence-reuse` as the canonical rule: focused intermediate rechecks when safe, broader review for high-risk/unknown impact, final whole-candidate exact-head/base review. A clean first independent full review is final; no separate review invocation. Consolidate blockers and respect the cumulative remediation cap and early escalation. Core/high-risk work still requires independent human review. The implementer does not self-approve.
+Use `docs/engineering/SEYAL-AGENT-WORKFLOW.md` as the sole convergence policy. Consolidate all blockers in one review; a clean initial independent whole-candidate exact-head/base review is final. Following one root-cause remediation batch, recheck invalidated evidence and obtain an independent final whole-candidate exact-head/base verdict. No delta-only approval or redundant review cycles.
 
 ## Mandatory cross-platform UI ownership gate
 

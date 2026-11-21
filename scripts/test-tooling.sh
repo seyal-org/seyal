@@ -21,18 +21,18 @@ done
 [[ -f scripts/bootstrap-dev.sh ]] || fail "agent bootstrap script is missing"
 [[ -f docs/engineering/AGENT-TOOLING.md ]] || fail "agent tooling policy is missing"
 grep -q 'XCODEBUILD_MCP_VERSION=' scripts/bootstrap-dev.sh || fail "XcodeBuildMCP is not pinned"
-grep -q 'AI_SDLC_REPO=' scripts/bootstrap-dev.sh || fail "AI-SDLC repository is not declared"
-grep -Eq 'AI_SDLC_COMMIT="[0-9a-f]{40}"' scripts/bootstrap-dev.sh || fail "AI-SDLC must be pinned by full commit SHA"
-grep -q 'AI_SDLC_COMMIT="77158462473a4244d63329a55907d0c5ccc47757"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must match the approved portable workflow candidate"
-grep -q '^AI_SDLC_SKILLS=(' scripts/bootstrap-dev.sh || fail "AI-SDLC skill manifest is missing"
-grep -q '^ensure_ai_sdlc()' scripts/bootstrap-dev.sh || fail "AI-SDLC materialization is missing"
-for generic_skill in project-context create-issue implement-issue verification pr-review process-review pr-merge; do
-  grep -q "  ${generic_skill}$" scripts/bootstrap-dev.sh || fail "AI-SDLC generic skill is not pinned: ${generic_skill}"
-done
-for tool in project_context.py; do
-  grep -Fq "${tool}" scripts/bootstrap-dev.sh || fail "AI-SDLC required tool missing from bootstrap validation: ${tool}"
-done
-grep -q 'project_context.py.*--root.*validate' scripts/bootstrap-dev.sh || fail "agent bootstrap must validate the derived context index"
+# Native bootstrapping must not download or preflight any external SDLC repository.
+if grep -Eq 'AI_SDLC_(REPO|COMMIT|SKILLS)|ensure_ai_sdlc|framework_checkout|check_framework|framework-only' scripts/bootstrap-dev.sh; then
+  fail "bootstrap still depends on the retired external framework"
+fi
+bash scripts/bootstrap-dev.sh --check-skills || fail "native Seyal skill discovery failed"
+bash scripts/bootstrap-dev.sh --help | grep -Fq -- '--check-skills' || fail "native bootstrap usage missing"
+if bash scripts/bootstrap-dev.sh --check-framework >/dev/null 2>&1; then
+  fail "retired framework-check mode is still accepted"
+fi
+if bash scripts/bootstrap-dev.sh --framework-only >/dev/null 2>&1; then
+  fail "retired framework-refresh mode is still accepted"
+fi
 grep -q 'github-mcp-server' scripts/bootstrap-dev.sh || fail "GitHub MCP bootstrap is missing"
 grep -q 'mcpbridge' scripts/bootstrap-dev.sh || fail "official Xcode MCP bootstrap is missing"
 grep -q 'xcodebuildmcp@${XCODEBUILD_MCP_VERSION}' scripts/bootstrap-dev.sh || fail "XcodeBuildMCP configuration is missing"
@@ -44,45 +44,37 @@ grep -q 'servers\["xcode"\]' scripts/bootstrap-dev.sh || fail "Cursor Xcode MCP 
 grep -q 'servers\["xcodebuild"\]' scripts/bootstrap-dev.sh || fail "Cursor XcodeBuildMCP setup is missing"
 grep -q 'if has claude || has codex || has cursor; then' scripts/bootstrap-dev.sh || fail "external GitHub MCP should only be provisioned for clients that need it"
 
-for adapter in project-context implementation-planning development-readiness verification address-pr-review; do
-  [[ -f ".agents/skills/${adapter}/SKILL.md" ]] || fail "Seyal ${adapter} adapter is missing"
-  [[ -f ".claude/skills/${adapter}/SKILL.md" ]] || fail "Claude ${adapter} adapter is missing"
+# Canonical local skills must be directly usable without a framework checkout.
+for skill in project-context issue-refinement implementation-planning development-readiness implement-issue pr-review address-pr-review verification milestone-validation; do
+  [[ -f ".agents/skills/$skill/SKILL.md" ]] || fail "missing Seyal-native $skill"
+  [[ -f ".claude/skills/$skill/SKILL.md" ]] || fail "missing Claude discovery adapter $skill"
 done
-
-[[ -f .agents/skills/pr-review/SKILL.md ]] || fail "Seyal pr-review facade is missing"
-[[ -f .claude/skills/pr-review/SKILL.md ]] || fail "Claude pr-review adapter is missing"
-[[ ! -e .agents/skills/code-review/SKILL.md ]] || fail "obsolete Seyal code-review adapter must be removed"
-[[ ! -e .claude/skills/code-review/SKILL.md ]] || fail "obsolete Claude code-review adapter must be removed"
-
-grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/issue-refinement/SKILL.md || fail "issue-refinement must delegate to AI-SDLC create-issue"
-grep -q '.sdlc/framework/skills/create-issue/SKILL.md' .agents/skills/implementation-planning/SKILL.md || fail "planning must use the issue-owned canonical plan"
-grep -q '.sdlc/framework/skills/implement-issue/SKILL.md' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must delegate to current generic implement-issue"
-grep -q '.sdlc/framework/skills/process-review/SKILL.md' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must delegate to generic process-review"
-# Developer coordination is human GitHub ownership; legacy session locks must not return.
+[[ ! -e .agents/skills/code-review/SKILL.md && ! -e .claude/skills/code-review/SKILL.md ]] || fail "duplicate code-review discovery must stay retired"
+[[ -f docs/engineering/SEYAL-AGENT-WORKFLOW.md ]] || fail "native process is missing"
+[[ -f docs/engineering/TERMINAL-AGENT-GATES.md ]] || fail "terminal/architecture specialist rules are missing"
+# Preserve the retired local agent-claim removal and never touch private old state.
 for retired in scripts/seyal-ai-sdlc-claim.py scripts/test-seyal-ai-sdlc-claim.py .cursor/hooks/claim-gate.py scripts/test-cursor-claim-hook.py; do
-  [[ ! -e "$retired" ]] || fail "retired local agent claim component returned: $retired"
+  [[ ! -e "$retired" ]] || fail "retired local claim component returned: $retired"
 done
 if [[ -f .cursor/hooks.json ]] && grep -Eq 'claim-gate\\.py|seyal-ai-sdlc-claim\\.py' .cursor/hooks.json; then
   fail "retired local agent claim hook remains configured"
 fi
-bash scripts/test-framework-pin.sh || fail "framework pin freshness/refresh regression"
-for adapter in project-context issue-refinement implementation-planning development-readiness implement-issue pr-review address-pr-review verification milestone-validation; do
-  grep -Fq 'scripts/bootstrap-dev.sh --check-framework' ".agents/skills/$adapter/SKILL.md" || fail "missing exact-pin preflight: $adapter"
-done
-active_workflow=(AGENTS.md docs/engineering/AGENT-TOOLING.md docs/engineering/AI-SDLC-REFERENCE-CONSUMER.md .agents/skills/implement-issue/SKILL.md .agents/skills/pr-review/SKILL.md .agents/skills/address-pr-review/SKILL.md scripts/bootstrap-dev.sh)
-if grep -Eq 'AI_SDLC_WORKER_ID|seyal-ai-sdlc-claim\.py|workflow_claims\.py|claim-gate\.py' "${active_workflow[@]}"; then
-  fail "local agent claim requirement remains in active workflow"
+# Active instruction/skill/bootstrap docs must not delegate to remote framework paths.
+active_workflow=(AGENTS.md docs/engineering/AGENT-TOOLING.md docs/engineering/SEYAL-AGENT-WORKFLOW.md docs/engineering/DEVELOPMENT.md docs/engineering/ISSUE-PROTOCOL.md)
+for skill in .agents/skills/*/SKILL.md .claude/skills/*/SKILL.md; do active_workflow+=("$skill"); done
+if grep -nE '\.sdlc/framework/|bootstrap-dev.sh --check-framework|bootstrap-dev.sh --framework-only|pinned AI-SDLC|canonical AI-SDLC' "${active_workflow[@]}"; then
+  fail "active developer instructions still delegate to an external framework"
 fi
-grep -Fq 'review-convergence-and-evidence-reuse' .agents/skills/pr-review/SKILL.md || fail "PR review must use canonical bounded convergence"
-grep -Fq 'A clean first independent full review is final' .agents/skills/pr-review/SKILL.md || fail "clean initial review must not require redundant final pass"
-grep -Fq 'final whole-candidate exact-head/base review' .agents/skills/pr-review/SKILL.md || fail "final independent review must not be delta-only"
-grep -q '.sdlc/framework/skills/pr-review/SKILL.md' .agents/skills/pr-review/SKILL.md || fail "pr-review must delegate to AI-SDLC pr-review"
-if grep -q '.sdlc/framework/skills/code-review/SKILL.md' .agents/skills/pr-review/SKILL.md; then
-  fail "pr-review must not reference removed generic code-review authority"
-fi
-grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/milestone-validation/SKILL.md || fail "milestone-validation must build on AI-SDLC verification"
-grep -q '.sdlc/framework/docs/WORKING-LOOP.md' .agents/skills/development-readiness/SKILL.md || fail "readiness must use current canonical issue DoR"
-grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/verification/SKILL.md || fail "verification adapter must delegate to AI-SDLC"
+[[ ! -e .sdlc/context/_meta.yaml && ! -e .sdlc/graph/context-index.json ]] || fail "stale framework-specific index/metadata tracked"
+[[ ! -e scripts/test-framework-pin.sh ]] || fail "retired framework-pin regression still present"
+grep -Fq 'plan before complex implementation' docs/engineering/SEYAL-AGENT-WORKFLOW.md || fail "plan gate missing"
+grep -Fq 'one consolidated remediation batch' docs/engineering/SEYAL-AGENT-WORKFLOW.md || fail "consolidated remediation missing"
+grep -Fq 'independent' docs/engineering/SEYAL-AGENT-WORKFLOW.md || fail "independent review missing"
+grep -Fq 'No automatic merge' docs/engineering/SEYAL-AGENT-WORKFLOW.md || fail "explicit merge authorization missing"
+grep -Fq 'full candidate' .agents/skills/pr-review/SKILL.md || fail "review must inspect whole PR"
+grep -Fq 'exact-head' .agents/skills/verification/SKILL.md || fail "verification must be exact-head"
+grep -Fq 'ISSUE-PROTOCOL.md' .agents/skills/implement-issue/SKILL.md || fail "human ownership authority missing"
+python3 scripts/measure-agent-instructions.py --assert-lean || fail "always-loaded instruction budget exceeded"
 
 # Parallel-development safety: implementation pickup must be an exclusive,
 # verified GitHub owner before any production branch/worktree/edit path.
@@ -183,63 +175,9 @@ if grep -Fq 'must not replace the human assignee' AGENTS.md; then
 fi
 grep -Fq 'must not replace the human owner record' AGENTS.md || fail "AGENTS.md must preserve the human owner-record authority"
 
-[[ -f .sdlc/context/_meta.yaml ]] || fail "Seyal SDLC context metadata is missing"
-[[ -f .sdlc/graph/context-index.json ]] || fail "Seyal derived context index is missing"
-python3 -m json.tool .sdlc/graph/context-index.json >/dev/null || fail "Seyal context index is not valid JSON"
-python3 <<'PY' || fail "Seyal context index source fingerprints are stale"
-import hashlib
-import json
-from pathlib import Path
-
-root = Path('.')
-with (root / '.sdlc/graph/context-index.json').open(encoding='utf-8') as handle:
-    index = json.load(handle)
-
-errors = []
-for node in index.get('nodes', []):
-    node_id = node.get('id', '<unknown>')
-    for source in node.get('sources', []):
-        rel = source.get('path')
-        fingerprint = source.get('fingerprint')
-        if isinstance(fingerprint, dict):
-            expected = fingerprint.get('value')
-        else:
-            expected = fingerprint
-        if not isinstance(rel, str) or not isinstance(expected, str):
-            errors.append(f'{node_id}: malformed source fingerprint')
-            continue
-        path = root / rel
-        if not path.is_file():
-            errors.append(f'{node_id}: missing source {rel}')
-            continue
-        data = path.read_bytes()
-        header = f'blob {len(data)}\0'.encode('utf-8')
-        actual = hashlib.sha1(header + data).hexdigest()
-        if actual != expected:
-            errors.append(
-                f'{node_id}: stale source {rel}: index={expected} current={actual}'
-            )
-
-if errors:
-    for error in errors:
-        print(f'[seyal tooling test] {error}')
-    raise SystemExit(1)
-PY
-[[ ! -e scripts/project_context.py ]] || fail "generic project-context implementation must not be duplicated in Seyal"
-grep -q '^/.sdlc/framework/' .gitignore || fail "materialized AI-SDLC framework must remain untracked"
-
-ai_sdlc_commit="$(sed -n 's/^AI_SDLC_COMMIT="\([0-9a-f]\{40\}\)"$/\1/p' scripts/bootstrap-dev.sh)"
-[[ -n "$ai_sdlc_commit" ]] || fail "could not read AI-SDLC pin"
-grep -q "pinned_revision: \"${ai_sdlc_commit}\"" .sdlc/context/_meta.yaml || fail "SDLC metadata pin does not match bootstrap pin"
-python3 - "$ai_sdlc_commit" <<'PY' || fail "context index pin does not match bootstrap pin"
-import json
-import sys
-
-with open('.sdlc/graph/context-index.json', encoding='utf-8') as handle:
-    value = json.load(handle)
-if value.get('framework', {}).get('pinned_revision') != sys.argv[1]:
-    raise SystemExit(1)
-PY
+# Targeted context search uses authoritative source, without stale generated graph.
+[[ -f .agents/skills/project-context/SKILL.md ]] || fail "native context discovery missing"
+grep -Fq 'rg' .agents/skills/project-context/SKILL.md || fail "native project-context must use targeted source discovery"
 
 # Copilot project skills are loaded natively from .agents/skills; do not create a
 # second Copilot-specific project skill tree that can diverge from canonical skills.

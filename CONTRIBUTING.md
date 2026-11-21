@@ -31,7 +31,7 @@ Initialize the repository toolchain (and on macOS, native Xcode/Metal tooling wh
 make bootstrap
 ```
 
-Optional coding-agent / MCP / pinned AI-SDLC framework setup is separate and never required for terminal/runtime operation:
+Optional coding-agent MCP setup is separate and never required for terminal/runtime operation (Seyal skills and workflow are built in):
 
 ```sh
 make bootstrap-agents
@@ -48,6 +48,8 @@ make check
 Use the applicable specialist checks for terminal conformance, security, accessibility, performance, fuzzing, documentation, or UI work. The canonical testing strategy is [`docs/engineering/TESTING.md`](docs/engineering/TESTING.md).
 
 Pull requests must report commands run, evidence obtained, and any skipped manual, external, credentialed, E2E, or performance gates.
+
+For the self-contained, plan-first and evidence-based contribution process, see [`SEYAL-AGENT-WORKFLOW.md`](docs/engineering/SEYAL-AGENT-WORKFLOW.md). A clean independent review does not require redundant rounds; merging requires explicit authorization.
 
 ## Scope and architecture
 

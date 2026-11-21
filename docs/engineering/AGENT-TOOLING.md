@@ -54,7 +54,7 @@ The agent bootstrap configures the approved project-required MCPs for each suppo
 
 The agent bootstrap may provision only the approved project-required tooling above and may mutate supported coding-agent configuration. It must not be required for `make build`, `make test`, `make check`, `make bench`, CI, or terminal/runtime operation. It must not write credentials to the repository.
 
-When `seyal-commercial` invokes the pinned OSS `bootstrap-agents` target from its own bootstrap, the same minimal tooling policy applies.
+When `seyal-commercial` invokes the OSS `bootstrap-agents` target from its own bootstrap, the same minimal tooling policy applies.
 
 ## Project-context use
 

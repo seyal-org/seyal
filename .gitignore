@@ -16,7 +16,7 @@ node_modules/
 dist/
 .cache/
 
-# AI-SDLC developer framework (materialized by make bootstrap-agents)
+# Ignore any legacy local framework checkout; Seyal no longer installs or reads it
 /.sdlc/framework/
 
 # Coverage / test output
