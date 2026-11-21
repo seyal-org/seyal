@@ -307,12 +307,6 @@ acknowledged_loc = 725
 issue = 1263
 reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional focus, and #1263 pane-equalize binding proofs stay one keybinding table-load test module beside the builtins they assert; keep under one authority rather than inventing partN splits."
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 889
-issue = 1490
-reason = "ABI action decoding remains one versioned match surface; #1490 SelectWorkspace now carries WindowId + containment generation beside RenameWorkspace/RenamePane / leave-offer kinds on the same decode table without a second ABI module."
-
 # shell/actions.rs dropped below review_loc after #1490 extracted sidebar_ops;
 # no cohesion acknowledgement remains.
 
