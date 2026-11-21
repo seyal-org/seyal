@@ -1,7 +1,7 @@
 # Developer workflow decoupling — Issue #1522
 
 Source revision before: `fe018bb75217a7a6853f53d037a23aade47873a0` (`master` at pickup).
-Candidate source revision: `263f6b6b5fa4dbc35d0a0dc30bb96257f969a5ba` (intermediate; final head must be rechecked).
+Candidate source revision: `0118c19f8279f12e596a70b2ab888b8e630bcdf1` (pre-CI fix; final head must be rechecked).
 
 ## Duplicate instruction map
 
@@ -23,8 +23,8 @@ Sizes are the Git object blob sizes at the recorded revisions, **not measured mo
 | Instruction path | Before | After | Reduction |
 | --- | ---: | ---: | ---: |
 | Always-on `AGENTS.md` | 17,350 B | 3,492 B | 79.9% |
-| Implement Issue path | 33,175 B | 18,942 B | 42.9% |
-| PR Review path | 29,925 B | 16,731 B | 44.1% |
+| Implement Issue path | 33,175 B | 19,045 B | 42.6% |
+| PR Review path | 29,925 B | 16,953 B | 43.3% |
 | External `docs/WORKING-LOOP.md` alone | 32,373 B | 0 B required | Dependency removed |
 
 Recompute after every edit via `python3 scripts/measure-agent-instructions.py`. If source size changes, update this table to match the exact PR head.
