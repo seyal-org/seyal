@@ -9,6 +9,10 @@ For Seyal, a readiness verdict is necessary but not sufficient. Enforce every Re
 
 Do not mark the Issue Ready unless its body states the goal, scope, acceptance criteria, tests, and dependencies, and every other Ready checkbox in `ISSUE-PROTOCOL.md` passes. A chat outline is not the plan. A separate plan comment is not required.
 
+## Readiness completeness (on demand)
+
+In the same pass as `ISSUE-PROTOCOL.md` Ready checks, verify all applicable outcomes: **problem and affected user/system**, current versus expected behavior plus material **negative cases**, bounded in/out scope, measurable acceptance and named verification commands/evidence, closed design/trust-boundary decisions (no unaccepted architecture), congruence with accepted state ownership, ordered dependencies, **duplicate-search** across existing Issues/PRs/branches, **self-contained Issue body** with governing source links (not private chat), proportionate implementation plan and permanent production owner, and explicit security/secrets/privacy/failure assessment (with justified N/A where safe). Mark material gaps `FAIL` or `UNKNOWN` and do not label Ready. Keep this risk-proportionate: do not demand duplicate plan documents or ceremonial approvals.
+
 Run this check in the same pass that finishes refinement. Publish one result:
 
 - Ready checklist passes: mark the issue **Ready**, add `help wanted`, remove `needs-refinement`, and leave it unassigned so a developer can claim it.

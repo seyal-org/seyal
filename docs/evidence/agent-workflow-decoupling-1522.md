@@ -27,6 +27,8 @@ Sizes are the Git object blob sizes at the recorded revisions, **not measured mo
 | PR Review path | 29,925 B | 16,953 B | 43.3% |
 | External `docs/WORKING-LOOP.md` alone | 32,373 B | 0 B required | Dependency removed |
 
+The added on-demand readiness completeness rule preserves the retired generic checklist's duplicate, negative-case, design-congruence, verification and security criteria without reloading them for unrelated tasks.
+
 Recompute after every edit via `python3 scripts/measure-agent-instructions.py`. If source size changes, update this table to match the exact PR head.
 
 ## Execution overhead
@@ -47,6 +49,13 @@ Recompute after every edit via `python3 scripts/measure-agent-instructions.py`. 
 - Even with a clean independent review: **no merge without explicit human authorization**.
 
 These are policy/fixture expectations until executed agent trials or independently reviewed PR evidence confirm actual client behavior.
+
+## Observed CI evidence on candidate `688e4776` (before readiness wording update)
+
+- **PASS:** on PR CI, native skills bootstrap check and complete `scripts/test-tooling.sh` passed. Docs `npm run check` passed; native-macos-compile passed.
+- **FAILED (pre-existing, unchanged source):** `make check` fails at duplicate Xcode object IDs `C100...18` at project.pbxproj lines 62/67 and `C200...18` at lines 151/170. Same signatures are in pre-PR master CI logs.
+- **FAILED (pre-existing, unchanged source):** repository policy runs its direct structural-debt gate and fails `crates/seyal-client/src/ffi/app/decode.rs` at 893 LOC against acknowledged 889. Neither the production file nor its debt baseline changed in this PR.
+- **NOT_RUN / pending:** physical/local agent trials, local `make docs-build`, complete `make check` past pre-existing blockers, independent human review. No weakening/waiver of existing gates is authorized.
 
 ## Required verification and blockers
 

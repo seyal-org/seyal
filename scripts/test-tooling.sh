@@ -68,6 +68,9 @@ fi
 [[ ! -e .sdlc/context/_meta.yaml && ! -e .sdlc/graph/context-index.json ]] || fail "stale framework-specific index/metadata tracked"
 [[ ! -e scripts/test-framework-pin.sh ]] || fail "retired framework-pin regression still present"
 grep -Fq 'plan before complex implementation' docs/engineering/SEYAL-AGENT-WORKFLOW.md || fail "plan gate missing"
+for required in 'negative cases' 'duplicate-search' 'self-contained Issue body' 'security/secrets/privacy/failure' 'closed design/trust-boundary decisions'; do
+  grep -Fq "$required" .agents/skills/development-readiness/SKILL.md || fail "readiness evidence requirement missing: $required"
+done
 grep -Fq 'one consolidated remediation batch' docs/engineering/SEYAL-AGENT-WORKFLOW.md || fail "consolidated remediation missing"
 grep -Fq 'independent' docs/engineering/SEYAL-AGENT-WORKFLOW.md || fail "independent review missing"
 grep -Fq 'No automatic merge' docs/engineering/SEYAL-AGENT-WORKFLOW.md || fail "explicit merge authorization missing"
