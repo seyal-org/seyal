@@ -155,9 +155,7 @@ fn commit_reconstruction_derives_facts_from_clients_and_ignores_reserved_bits() 
         observer_attachment,
     );
     assert_eq!(
-        unsafe {
-            seyal_app_apply(app, &commit_action(runtime, execution, observer_pin, 1 | 2))
-        },
+        unsafe { seyal_app_apply(app, &commit_action(runtime, execution, observer_pin, 1 | 2)) },
         -4
     );
     drop(_observer);
