@@ -8,6 +8,8 @@ Follow `AGENTS.md` and the existing authority chain. For GitHub Issues, `docs/en
 
 ## 1. Plan before complex implementation
 
+Agents must plan before complex implementation; use the Issue body rather than a chat-only agreement.
+
 For every Ready Issue, **the Issue body is the plan** and must state the desired outcome, in/out scope, authority, dependencies, permanent production path/owner, acceptance and applicable tests. For complex changes, record a bounded 3–7-step implementation sequence and a criterion-to-evidence map in the Issue before editing. Refine the Issue if any are missing; do not use a chat-only plan. Small fixes still require scope, tests and ownership. Do not invent a second plan/approval artifact.
 
 Before any production edit: read the *full fresh* human owner records (sole assignee or active uncontested external `Owner: @login` claim, including competing comments), verify Ready/dependencies and parent/child overlap, and find all active/draft/closed-unmerged candidates. Fail closed on ambiguity, competing claims, another human owner, unready architecture or multiple candidates. Claim only if unowned; re-read. Use exactly `<human-login>/issue/<number>` with one isolated worktree and scoped PR; resume the authorized existing candidate instead of replacing it. Recheck the owner and candidate before edit, push and PR publication. Human owner coordinates their coding agents; bots are not owners or human reviewers.

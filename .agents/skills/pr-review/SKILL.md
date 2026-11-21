@@ -10,7 +10,7 @@ Read `docs/engineering/SEYAL-AGENT-WORKFLOW.md` for the complete self-contained 
 
 Use the portable coordination lane: source review is read-only; publishing feedback or changing PR state requires authorized reviewer scope and fresh head/base checks. Do not edit the implementer's source or take over their candidate.
 
-This is Seyal's single user-facing PR review and re-review entrypoint. The Seyal workflow reviews implementation correctness and merge readiness over the full current candidate, consumes exact-revision `verification`, and invokes only specialist reviews required by risk and project policy. There is no separate generic or Seyal `code-review` discovery surface.
+This is Seyal's single user-facing PR review and re-review entrypoint. The reviewer must inspect the full candidate and its complete accepted-scope evidence, not only the most recent delta. The Seyal workflow reviews implementation correctness and merge readiness over the full current candidate, consumes exact-revision `verification`, and invokes only specialist reviews required by risk and project policy. There is no separate generic or Seyal `code-review` discovery surface.
 
 ## Review convergence
 
