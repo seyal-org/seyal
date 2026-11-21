@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426; Blocks-default for supported shells accepted 2026-11-06 under #1426; **Accepted** Block-scoped direct-input amendment under #1466 (product-owner acceptance 2026-11-08; normative on merge of architecture-only PR #1469); **Proposed** Raw-only production presentation amendment under #1493 (not normative before separate architecture-PR acceptance)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426); Blocks-default 2026-11-06 (#1426); Block-scoped direct-input Accepted 2026-11-08 (#1466 / PR #1469); proposed Raw-only amendment 2026-11-15 (#1493)
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR); composed ClientHello fallback amendment accepted on merge of its PR under #1355; 2026-10-29 ADR-026 cross-amendment pointer under #1384; Raw-choice amendment under #1404 recorded 2026-11-01 and superseded by the grid-first resting-presentation amendment under #1438; split-created Flow amendment accepted by the product owner on 2026-11-05 under #1426; Blocks-default for supported shells accepted 2026-11-06 under #1426; **Accepted** Block-scoped direct-input amendment under #1466 (product-owner acceptance 2026-11-08; normative on merge of architecture-only PR #1469); **Proposed** Raw-only production presentation amendment under #1493 (not normative before separate architecture-PR acceptance); **Proposed** Raw editor-cursor pointer under #1498 (ADR-031; not normative)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24; composed ClientHello fallback amendment 2026-10-18 (#1355); ADR-026 cross-amendment pointer 2026-10-29 (#1384); Raw-choice amendment 2026-11-01 (#1404); grid-first resting-presentation amendment 2026-11-04 (#1438); split-created Flow 2026-11-05 (#1426); Blocks-default 2026-11-06 (#1426); Block-scoped direct-input Accepted 2026-11-08 (#1466 / PR #1469); proposed Raw-only amendment 2026-11-15 (#1493); proposed Raw editor-cursor pointer 2026-11-21 (#1498)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -1893,4 +1893,16 @@ packaged-candidate evidence demonstrates:
 An architecture-only PR accepting this amendment authorizes downstream
 specification reconciliation and implementation planning. It does not claim
 that Raw acceptance criteria, M002/M003, or the M004 release gates are complete.
+
+## Proposed 2026-11-21 pointer — Raw editor cursor (#1498)
+
+**Status:** Proposed. Not normative. ADR-009's accepted Zsh-only local
+integration table above remains in force.
+
+[ADR-031](ADR-031-RAW-EDITOR-CURSOR-CONTRACT.md) is the proposed contract for
+moving a local shell line editor's cursor from a Raw click. It is separate
+from Blocks, the composer, and ADR-026 remote bootstrap. Acceptance of ADR-031
+is what may later authorize a Zsh `CURSOR` widget on the existing `ZDOTDIR`
+bootstrap. It does not authorize Bash or Fish integration, arrow-key cursor
+transport, or a production change inside this amendment.
 
