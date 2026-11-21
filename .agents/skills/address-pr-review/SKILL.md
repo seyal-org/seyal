@@ -1,17 +1,18 @@
 ---
 name: address-pr-review
-description: Seyal adapter for AI-SDLC review-stage remediation, adding GitHub PR, terminal architecture, repository-check, and human-ownership gates.
+description: One-batch remediation of all known PR blockers on the same human-owned candidate.
 ---
+
+Read `docs/engineering/SEYAL-AGENT-WORKFLOW.md` for the complete self-contained plan → implement → verify → independent review → explicit merge-authorization lifecycle. `docs/engineering/ISSUE-PROTOCOL.md` remains the sole authority on GitHub owner records and candidates. No cloned framework is needed.
 
 # Address PR review
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/process-review/SKILL.md`. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
 Confirm the owning human's authorization, the current candidate and no conflicting edits before remediation or publication. Use portable coordination; do not require a local worker lock.
 
 Use this for an existing Seyal PR whose candidate lifecycle stage is `IN_REVIEW` or `CLOSED_UNMERGED`. Reopen or rebase a closed unmerged head on that same pull request. Unfinished accepted-scope implementation remains under `implement-issue`. A decision blocker keeps this pull request and names the other one.
 
-Apply only these Seyal-specific deltas:
+Apply these same-candidate remediation gates:
 
 1. Map `merge_candidate_id` to the exact GitHub PR, current head SHA, owning Issue, deterministic human-owned branch, and modification authority. Read `candidate_lifecycle_stage` from `docs/engineering/ISSUE-PROTOCOL.md`: a draft PR is `IMPLEMENTATION_IN_PROGRESS`; a ready-for-review PR is `IN_REVIEW`; a closed unmerged PR that was not architecture-rejected is `CLOSED_UNMERGED`. Do not change the draft flag. Do not open a replacement PR.
 2. Fetch the **complete** unresolved review/comment set plus all required failing checks. Never fix only the newest comment.
@@ -19,6 +20,6 @@ Apply only these Seyal-specific deltas:
 4. Preserve Seyal architecture and hot-path invariants. A remediation that requires a new product/architecture/security authority decision stops and routes to that authority instead of being improvised in code.
 5. Re-run the narrow affected checks and then all invalidated repository/domain evidence, including `make check` and any applicable conformance/fuzz/performance/security/native/docs gates.
 6. Re-fetch comments, checks and exact head before handoff. Known material findings must be resolved or explicitly blocked with evidence.
-7. Confirm that the full recorded root-cause set is addressed, re-fetch exact head/reviews/CI, then hand off the **same PR** for the canonical AI-SDLC focused recheck or wider review as warranted, with final whole-candidate exact-head/base approval via `pr-review`. Review is independent, not a self-approval. If the stage is `IMPLEMENTATION_IN_PROGRESS`, return to `implement-issue`. If `UNKNOWN`, stop and reconcile.
+7. Confirm that the full recorded root-cause set is addressed, re-fetch exact head/reviews/CI, then hand off the **same PR** for the Seyal-native focused recheck or wider review as warranted, with final whole-candidate exact-head/base approval via `pr-review`. Review is independent, not a self-approval. If the stage is `IMPLEMENTATION_IN_PROGRESS`, return to `implement-issue`. If `UNKNOWN`, stop and reconcile.
 
 Human Issue ownership remains authoritative throughout remediation. Coding agents may assist but never become Seyal work owners or independent human reviewers.

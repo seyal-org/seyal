@@ -1,11 +1,13 @@
 ---
 name: implement-issue
-description: Seyal adapter for AI-SDLC implementation, with human GitHub ownership, Issue-body plan and terminal-specific gates.
+description: Seyal-native implementation: human-owned Issue and candidate, production architecture and exact-head evidence.
 ---
+
+Read `docs/engineering/SEYAL-AGENT-WORKFLOW.md` for the complete self-contained plan → implement → verify → independent review → explicit merge-authorization lifecycle. `docs/engineering/ISSUE-PROTOCOL.md` remains the sole authority on GitHub owner records and candidates. No cloned framework is needed.
 
 # Implement Issue
 
-This is the mandatory entrypoint for production implementation of a Seyal GitHub Issue. Follow the canonical generic procedure in `.sdlc/framework/skills/implement-issue/SKILL.md`. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions. Use the portable coordination lane, not a local agent claim store.
+This is the mandatory entrypoint for production implementation of a Seyal GitHub Issue.
 
 ## GitHub ownership and candidate
 
@@ -18,7 +20,7 @@ Use `docs/engineering/ISSUE-PROTOCOL.md` as the sole detailed authority for Read
 - Resume the same authorized branch/worktree and candidate, not a duplicate. `IMPLEMENTATION_IN_PROGRESS`: continue existing draft/branch; `IN_REVIEW`: route remediation to `address-pr-review`; `CLOSED_UNMERGED`: reopen/rebase the same non-rejected candidate; `UNKNOWN`, another owner, multiple candidates or rejected architecture: stop. Do not open a pull request while accepted scope is incomplete. A user-authorized draft for PR-only validation of a complete implementation with evidence pending is allowed, never ready until required evidence passes.
 - The human owner coordinates agents, serializes edits to shared files/candidates, and may delegate non-overlapping work. No extra worker identity or machine-local lock is required. For abandonment, explicitly clear or transfer the human owner record only after the owner stops and the branch disposition is known. Report the current human owner record and branch state if stale; never take over automatically.
 
-Then apply only these Seyal-specific rules on top of the generic procedure:
+Then apply only these Seyal-specific rules on top of the Seyal workflow:
 
 1. The GitHub Issue must already be **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. The Issue body is the plan. If scope, authority, dependencies, acceptance, or governing architecture changed materially, route through `issue-refinement` and `development-readiness` before further production edits.
 2. Use one Issue → one sole **human GitHub owner** → one isolated worktree → deterministic `<human-login>/issue/<number>` → one scoped PR. Prefer sole assignment when assignable; otherwise use the active external-owner claim. Coding agents may act on behalf of that human and may be credited as co-authors/tooling provenance; they never become the ownership identity. When the work is a GitHub sub-issue slice, claim and branch that sub-issue only after the parent/slice overlap check above passes; do not duplicate ownership of the same implementation slice. If the user asked for a parent end-to-end outcome that still has multiple sub-issues, implement the claimed slice Issue only and keep other slices on their own Issues/PRs.
@@ -33,9 +35,9 @@ Then apply only these Seyal-specific rules on top of the generic procedure:
 11. Every mergeable PR must name exactly one **owning Issue** in the PR's `## Issue` section. Use `Closes #N`, `Fixes #N`, or `Resolves #N` only when this PR, once merged, satisfies that owning Issue's acceptance criteria and Definition of Done. If the PR is refinement, evidence, a partial implementation, a prerequisite, or otherwise does not make the Issue Done, use a non-closing reference such as `Refs #N` or `Part of #N`. Never use a closing keyword merely because the PR works on the Issue.
 12. Before opening the PR, compare the final diff/evidence against the owning Issue. If acceptance criteria changed during implementation, update/refine the Issue first; do not make the PR description silently redefine Done.
 13. Open the PR with `.github/pull_request_template.md`, preserve the exact owning-Issue reference, and provide reproducible evidence. The implementation handoff is **implemented for review**, never final verification.
-14. Do not self-approve core/high-risk work. When accepted-scope implementation is complete, hand off to `pr-review`. Follow the canonical AI-SDLC review convergence and evidence reuse policy; a clean initial independent review can be final, focused intermediate rechecks are permitted, and final approval is whole-candidate exact-head/base. No extra review invocation solely for ceremony.
+14. Do not self-approve core/high-risk work. When accepted-scope implementation is complete, hand off to `pr-review`. Follow the Seyal-native convergence and evidence-reuse rules; a clean initial independent review can be final, focused intermediate rechecks are permitted, and final approval is whole-candidate exact-head/base. No extra review invocation solely for ceremony.
 15. At final verification/merge handoff, explicitly verify the owning Issue's state: a closing PR may close it only if all Done gates are evidenced; a non-closing PR must leave it open. Also correct stale Issue status/checklist text when it would contradict the verified state.
 
 ## Handoff
 
-Follow `docs/engineering/ISSUE-PROTOCOL.md` for human ownership transfer, abandonment and resume. Do not clear an existing owner or delete another contributor's branch. Generic workflow defects belong upstream in AI-SDLC; this adapter contains only Seyal-specific requirements.
+Follow `docs/engineering/ISSUE-PROTOCOL.md` for human ownership transfer, abandonment and resume. Do not clear an existing owner or delete another contributor's branch. The shared process is Seyal-owned; keep workflow fixes in this repository.

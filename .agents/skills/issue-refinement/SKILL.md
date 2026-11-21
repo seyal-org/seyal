@@ -1,13 +1,14 @@
 ---
 name: issue-refinement
-description: Seyal facade for AI-SDLC work-item design, adding GitHub Issue, terminal-engine, documentation, and repository-specific readiness rules.
+description: Seyal Issue scope, accepted architecture, dependencies and Ready evidence.
 ---
+
+Read `docs/engineering/SEYAL-AGENT-WORKFLOW.md` for the complete self-contained plan → implement → verify → independent review → explicit merge-authorization lifecycle. `docs/engineering/ISSUE-PROTOCOL.md` remains the sole authority on GitHub owner records and candidates. No cloned framework is needed.
 
 # Issue refinement
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/create-issue/SKILL.md`. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
-Apply only these Seyal-specific rules on top of the generic procedure:
+Apply only these Seyal-specific rules on top of the Seyal workflow:
 
 1. GitHub Issues + Projects are Seyal's execution system; use native dependencies/sub-issues and the required fields in `docs/engineering/ISSUE-PROTOCOL.md`. If a parent Issue contains multiple independently reviewable slices, recommend GitHub sub-issues (one per slice). A planning parent is not an exclusive ownership lock for independent children. Each Ready implementation child gets its own sole **human GitHub owner** when picked up (assignee when assignable, active external-owner claim otherwise); parent and child must not represent the same implementation slice concurrently.
 2. Link exact accepted architecture/ADR/spec/milestone authority. Existing code and `.sdlc` summaries are never architectural authority.
@@ -21,5 +22,3 @@ Apply only these Seyal-specific rules on top of the generic procedure:
    - The plan is still open: keep `needs-refinement` and leave it unassigned.
    - A named issue, pull request, or unaccepted ADR still owns the dependency: set **Blocked on #N**, remove `needs-refinement` and `help wanted`, and add `blocked`.
    Do not leave a finished plan in Refinement for a later readiness pass.
-
-If generic AI-SDLC behavior is insufficient, record the reusable defect in `ai-sdlc`; do not permanently fork the generic procedure here.

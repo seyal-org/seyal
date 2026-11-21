@@ -1,19 +1,20 @@
 ---
 name: pr-review
-description: Seyal facade for generic AI-SDLC PR merge-readiness review, adding terminal architecture, hot-path, repository, and specialist evidence requirements.
+description: Independent Seyal PR review of whole candidate, authority, terminal invariants and exact-head evidence.
 ---
+
+Read `docs/engineering/SEYAL-AGENT-WORKFLOW.md` for the complete self-contained plan → implement → verify → independent review → explicit merge-authorization lifecycle. `docs/engineering/ISSUE-PROTOCOL.md` remains the sole authority on GitHub owner records and candidates. No cloned framework is needed.
 
 # Pull request review
 
-Follow the canonical generic merge-readiness procedure in `.sdlc/framework/skills/pr-review/SKILL.md`. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
 Use the portable coordination lane: source review is read-only; publishing feedback or changing PR state requires authorized reviewer scope and fresh head/base checks. Do not edit the implementer's source or take over their candidate.
 
-This is Seyal's single user-facing PR review and re-review entrypoint. The generic procedure reviews implementation correctness and merge readiness over the full current candidate, consumes exact-revision `verification`, and invokes only specialist reviews required by risk and project policy. There is no separate generic or Seyal `code-review` discovery surface.
+This is Seyal's single user-facing PR review and re-review entrypoint. The reviewer must inspect the full candidate and its complete accepted-scope evidence, not only the most recent delta. The Seyal workflow reviews implementation correctness and merge readiness over the full current candidate, consumes exact-revision `verification`, and invokes only specialist reviews required by risk and project policy. There is no separate generic or Seyal `code-review` discovery surface.
 
 ## Review convergence
 
-Follow `.sdlc/framework/docs/WORKING-LOOP.md#review-convergence-and-evidence-reuse` as the canonical rule: focused intermediate rechecks when safe, broader review for high-risk/unknown impact, final whole-candidate exact-head/base review. A clean first independent full review is final; no separate review invocation. Consolidate blockers and respect the cumulative remediation cap and early escalation. Core/high-risk work still requires independent human review. The implementer does not self-approve.
+Use `docs/engineering/SEYAL-AGENT-WORKFLOW.md` as the sole convergence policy. Consolidate all blockers in one review; a clean initial independent whole-candidate exact-head/base review is final. Following one root-cause remediation batch, recheck invalidated evidence and obtain an independent final whole-candidate exact-head/base verdict. No delta-only approval or redundant review cycles.
 
 ## Mandatory cross-platform UI ownership gate
 
@@ -32,7 +33,7 @@ Legitimate Swift responsibilities include AppKit window/application lifecycle, n
 
 **If a PR introduces, preserves, or moves portable Seyal product behavior/state into Swift without explicit accepted architecture authority, return `CHANGES_REQUIRED`.** Existing Swift implementation, passing UI tests, local convenience, or macOS-first delivery are not justification. If ownership is ambiguous or the Rust authority cannot be traced, return `INCONCLUSIVE` or `CHANGES_REQUIRED`; never infer portability from green CI.
 
-Apply only these Seyal-specific rules on top of the generic procedure:
+Apply only these Seyal-specific rules on top of the Seyal workflow:
 
 1. Review the owning GitHub Issue, `AGENTS.md`, and every governing architecture/ADR/spec/milestone source before accepting implementation rationale or completion claims.
 2. Enforce the Issue's in/out scope and Seyal's single-authoritative-state rules. Duplicate PTY/VT/grid/runtime ownership, temporary production paths, hidden alternate render/input/state engines, or architecture-by-precedent are merge blockers. Reject implementation PRs that create, amend, reopen, or supersede any ADR (`docs/architecture/ADR-*.md`) with `CHANGES_REQUIRED`: ADR amendments require a separate Architecture/R&D PR and must land before implementation resumes.
@@ -47,5 +48,3 @@ Apply only these Seyal-specific rules on top of the generic procedure:
 11. Core/high-risk work must retain the independent-review requirement in `docs/engineering/ISSUE-PROTOCOL.md`; implementers do not self-approve.
 12. OSS must remain independent of commercial code. Inspect `seyal-commercial` only when needed to validate the edition boundary; never make it an OSS authority.
 13. Prove that every claimed production capability has a reviewable permanent implementation in the changed or explicitly depended-on production path. Trace mandatory acceptance criteria to concrete production entrypoints and behavior tests; specifications, ADRs, interfaces, mocks, benchmarks, calibration harnesses, documentation, or POC/spike code alone do not satisfy the implementation gate. If the required production path is absent or cannot be inspected, return `CHANGES_REQUIRED` or `INCONCLUSIVE` rather than accepting the PR.
-
-If a reusable PR-review rule defect is found, fix it in `ai-sdlc` rather than duplicating generic orchestration here.

@@ -1,13 +1,14 @@
 ---
 name: implementation-planning
-description: Seyal adapter for AI-SDLC implementation planning, adding terminal architecture, evidence, and repository-specific planning gates; not for claiming, coding, or accepting the plan.
+description: Optional 3–7-step Issue-body plan for complex Seyal implementation.
 ---
+
+Read `docs/engineering/SEYAL-AGENT-WORKFLOW.md` for the complete self-contained plan → implement → verify → independent review → explicit merge-authorization lifecycle. `docs/engineering/ISSUE-PROTOCOL.md` remains the sole authority on GitHub owner records and candidates. No cloned framework is needed.
 
 # Implementation planning
 
-Use the issue-owned 3–7-step implementation plan from `.sdlc/framework/skills/create-issue/SKILL.md`. This is a **supporting Seyal planning adapter**, not a separate generic approval or execution skill. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
 
-For Seyal, apply only these project-specific deltas:
+Plan in the Issue body using these requirements:
 
 1. The `work_item_id` is the authoritative GitHub Issue. Load its accepted outcome/scope/acceptance plus governing ADR/spec/milestone authority; existing code or `.sdlc` summaries never override accepted architecture.
 2. Do **not** assign/claim the Issue, create a branch/worktree, generate implementation files, or edit production code during planning.
@@ -16,5 +17,3 @@ For Seyal, apply only these project-specific deltas:
 5. If the plan exposes an unresolved product/architecture/trust-boundary decision, route to the owning authority/`architecture-change`. If feasibility is unknown, route to an isolated non-mergeable spike.
 6. Use this skill only when the Issue body does not yet state the permanent production path. Put that path into the Issue through refinement. Do not post a separate plan comment. Do not mark the Issue Ready.
 7. Handoff to `development-readiness`. The Issue body is the plan.
-
-If generic planning behavior is insufficient, fix the reusable rule in `ai-sdlc`; do not duplicate the generic planner here.

@@ -1,92 +1,28 @@
 # Agent development tooling
 
-Seyal's agent tooling is developer infrastructure only. No skill, MCP server, agent or external documentation service may become a dependency of terminal input/output, VT state, rendering, persistence, local execution or the OSS runtime.
+Seyal's developer tools do not participate in terminal input/output, canonical VT state, rendering, persistence, local execution or OSS runtime. Do not add tools unrelated to Seyal's actual engineering requirements.
 
-The tooling set is intentionally minimal: do not add generic developer tools merely because they may be useful in other projects. Every external tool must have a concrete Seyal use case that is not adequately covered by the existing native toolchain.
+## Self-contained skills
 
-## Canonical skills
+`.agents/skills/` is the **sole canonical Seyal skill tree** used by Codex and Copilot CLI; `.claude/skills/` contains only tiny discovery adapters, not duplicate procedures. No external skill checkout, exact framework pin, generic workflow delegation, worker lock, or agent/vendor-specific replacement is required. `AGENTS.md` stays deliberately brief.
 
-`.agents/skills/` is the single source of truth for Seyal-owned workflows and thin discovery adapters/facades. `.claude/skills/` contains thin Claude-specific adapters only.
+The shared Seyal procedure is `docs/engineering/SEYAL-AGENT-WORKFLOW.md`. Load a domain skill only when its work actually applies.
 
-Codex and GitHub Copilot CLI both discover project skills directly from `.agents/skills/`; do not create duplicate Codex or Copilot skill trees.
-
-| Capability | Canonical Seyal skill / authority |
+| Task | On-demand Seyal skill |
 | --- | --- |
-| Seyal architecture | `AGENTS.md` + `architecture-change` |
-| Project-context retrieval | thin `project-context` adapter → pinned AI-SDLC `project-context` |
-| Issue decomposition | `issue-refinement` facade → pinned AI-SDLC `create-issue` + GitHub/Seyal deltas |
-| Implementation planning | thin `implementation-planning` adapter → pinned AI-SDLC `create-issue` (issue-owned plan) + Seyal architecture/evidence planning gates |
-| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC 12-point DoR (`docs/WORKING-LOOP.md`) + Issue-body plan + Seyal Ready gate |
-| Implementation | `implement-issue` facade → pinned AI-SDLC `implement-issue` + Seyal human-owner/branch/test/docs/candidate gates |
-| PR review/re-review | `pr-review` facade → pinned AI-SDLC `pr-review` + Seyal architecture/terminal/evidence merge gates |
-| Review remediation | thin `address-pr-review` adapter → pinned AI-SDLC `process-review` + Seyal one-PR/root-cause/check gates |
-| Change verification | thin `verification` adapter → pinned AI-SDLC `verification` + Seyal evidence gates |
-| Milestone validation | `milestone-validation` facade → pinned AI-SDLC `verification` + Seyal aggregate milestone rules |
-| Native macOS design | `macos-native-design` |
-| Native macOS UI testing | `macos-ui-testing` |
-| macOS accessibility | `macos-accessibility` |
-| Visual regression | `visual-regression` |
-| Screenshot/mockup to native implementation | `image-to-code` |
-| VT TDD | `vt-tdd` |
-| Terminal conformance | `terminal-conformance` |
-| Terminal performance | `performance-gate` |
-| Metal rendering | `metal-renderer` |
-| Rust/parser fuzzing | `rust-fuzzing` |
-| Security review | `security-review` |
-| Current Apple platform docs/HIG | `apple-platform-docs` |
+| Issue scope/readiness | `issue-refinement`, `implementation-planning` (only when needed), `development-readiness` |
+| Ready production work | `implement-issue` |
+| Acceptance evidence | `verification`, `milestone-validation` (aggregate only) |
+| Independent PR review / remediation | `pr-review` / `address-pr-review` |
+| Architecture changes | `architecture-change` (separate ADR PR) |
+| Targeted source discovery | `project-context` (narrow searches of authoritative files; no framework index) |
+| VT, performance, security, rendering, native UI, accessibility, fuzz | `vt-tdd`, `terminal-conformance`, `performance-gate`, `security-review`, `metal-renderer`, applicable macOS skills, `rust-fuzzing` |
 
-Agent Backend presence / enforcement-class types (SY-006, ADR-012 §12): see
-`docs/engineering/AGENT-PRESENCE-ENFORCEMENT.md`.
+Project-specific authority stays in `docs/architecture/`, `docs/specs/`, `docs/milestones/` and `docs/engineering/`, not a generic agent framework. `ISSUE-PROTOCOL.md` owns fresh human GitHub ownership, worktree, candidate state, Done and explicit review requirements. A clean first independent whole-candidate review is final; remediation happens in one scoped batch on the same PR, followed by affected checks and exact-head signoff. Do not add duplicate `code-review`/implementation aliases.
 
-Equivalent existing skills are intentionally reused rather than creating duplicate aliases with competing instructions. Seyal does not install generic external design skills; native AppKit/Metal work is governed by the project skills above and current Apple platform evidence.
+## Retired local coordination
 
-## AI-SDLC generic capability boundary
-
-Generic software-engineering procedures that are useful across unrelated products belong in the public `ai-sdlc` project rather than being independently reimplemented in Seyal. Seyal is a reference consumer, not the authority for those generic procedures.
-
-The consumed generic layer is:
-
-```text
-ai-sdlc
-  project-context
-  create-issue
-  implement-issue
-  verification
-  pr-review
-  process-review
-  pr-merge
-        ↓ exact reviewed pin materialized by make bootstrap-agents
-Seyal/.sdlc/framework/
-        ↓
-Seyal thin adapters/facades in .agents/skills/
-        ↓
-Seyal-owned GitHub workflow + ADR/spec/milestone + terminal-domain gates
-```
-
-Seyal owns project knowledge and project/domain policy. AI-SDLC owns the reusable SDLC mechanism.
-
-The integration forms are deliberate:
-
-- **direct adapters** keep the generic capability name when Seyal adds a narrow local gate (`project-context`, `implementation-planning`, `development-readiness`, `verification`, `address-pr-review`);
-- **Seyal facades** preserve an established project workflow entrypoint or add a larger project-domain acceptance layer while delegating the reusable procedure (`issue-refinement` → `create-issue`, `implement-issue` → `implement-issue`, `pr-review` → `pr-review`, `milestone-validation` → `verification`). Planning and review-remediation keep their generic names because their routing boundaries are explicit.
-
-`pr-review` is the single review/re-review discovery surface. Use the pinned AI-SDLC canonical review-convergence and evidence-reuse policy. `address-pr-review` fixes the consolidated blockers on the same candidate; `implement-issue` owns unfinished scope. Apply specialist gates only when required by risk or the governing specification. No delta-only final approval or unnecessary duplicate full reviews.
-
-The Issue body is the plan, and the draft/ready candidate stage is defined, in `docs/engineering/ISSUE-PROTOCOL.md`.
-
-The sole **human GitHub owner** is the contributor coordination record; use `ISSUE-PROTOCOL.md` for fresh assignment/comment verification, collisions, branches and transfers. The owner coordinates their own agents and prevents overlapping writes. Seyal selects the portable AI-SDLC coordination lane; no worker identity, local claim store, per-tool hook, or local token lifecycle is required. This is not atomic distributed exclusion. Existing GitHub permissions and merge protections remain independent.
-
-Do not also add local `work-item-design` or `implementation` aliases merely to mirror AI-SDLC. That would create overlapping discovery surfaces with the established Seyal facades. The generic source remains under `.sdlc/framework/` and the project facade/adapter contains only the Seyal-specific delta.
-
-Terminal-specific skills such as `vt-tdd`, `terminal-conformance`, `metal-renderer`, native macOS rules, performance/security specialist gates, and Seyal architecture invariants remain in this repository. The generic AI-SDLC `pr-review` must remain product/domain agnostic; Seyal's facade supplies terminal-specific acceptance rules.
-
-Do not migrate skills mechanically. A procedure belongs in AI-SDLC only when it is genuinely product-agnostic, has a stable generic contract/evaluation, and Seyal can retain required domain constraints through context or a thin adapter without weakening quality gates.
-
-AI-SDLC is pinned by exact commit in `scripts/bootstrap-dev.sh`; `.sdlc/framework/` is local generated developer state and is not committed. Updating the pin requires a normal Seyal Issue/PR. Generic delegation must run the lightweight `bash scripts/bootstrap-dev.sh --check-framework` preflight from the current worktree before reading pinned instructions. On a missing/stale clean checkout, run `bash scripts/bootstrap-dev.sh --framework-only` then recheck. This does not provision MCP tools or modify agent settings. Dirty, wrong-origin or non-repository paths fail without deletion; resolve those explicitly. After a pin change, stop old sessions and reload instructions in the current worktree; an existing framework file is not proof of freshness. Existing users can refresh with the framework-only command before starting a new agent session. The generic framework is never a product/runtime dependency.
-
-### Retired local agent claim machinery
-
-The old Seyal-specific local claim wrapper and Cursor pre-tool hook are removed. Do not migrate, delete, release, or recover existing private records automatically; they are no longer consulted. Preserve existing Issue assignments, branches and PRs. Owners must stop overlapping old sessions before resuming work and use the same authorized candidate. The pinned framework may still offer optional atomic coordination for other consumers; Seyal does not activate it.
+Seyal does not use a local claim wrapper, Cursor pre-tool hooks, worker tokens, or agent-session locks. Their historic private files are never touched or deleted by bootstrap. GitHub human ownership coordinates delegated coding agents; overlapping edits remain prohibited, and a GitHub record is not an atomic lock.
 
 ## Approved MCP/tool matrix
 
@@ -108,30 +44,21 @@ First run the deterministic repository/toolchain bootstrap required for build/te
 make bootstrap
 ```
 
-Then, when local coding-agent/MCP provisioning is wanted, run:
+Then, when optional coding-agent/MCP provisioning is wanted, run:
 
 ```sh
 make bootstrap-agents
 ```
 
-The agent bootstrap materializes the reviewed AI-SDLC pin and configures the approved project-required MCPs for each supported coding-agent CLI that is already installed. Cursor entries are written to its user-level `~/.cursor/mcp.json`. It does not install Claude Code, Codex, GitHub Copilot CLI or Cursor themselves.
+The agent bootstrap configures the approved project-required MCPs for each supported coding-agent CLI that is already installed. Cursor entries are written to its user-level `~/.cursor/mcp.json`. It does not install Claude Code, Codex, GitHub Copilot CLI or Cursor themselves.
 
 The agent bootstrap may provision only the approved project-required tooling above and may mutate supported coding-agent configuration. It must not be required for `make build`, `make test`, `make check`, `make bench`, CI, or terminal/runtime operation. It must not write credentials to the repository.
 
-When `seyal-commercial` invokes the pinned OSS `bootstrap-agents` target from its own bootstrap, the same minimal tooling policy applies.
+When `seyal-commercial` invokes the OSS `bootstrap-agents` target from its own bootstrap, the same minimal tooling policy applies.
 
 ## Project-context use
 
-Seyal's tracked `.sdlc/graph/context-index.json` is a compact derived navigation index. It never overrides accepted architecture, ADRs, specifications, milestone contracts, code, tests, or approved decisions.
-
-After `make bootstrap-agents`, validate/query it with the pinned generic tool:
-
-```sh
-python3 .sdlc/framework/tools/project_context.py --root . validate
-python3 .sdlc/framework/tools/project_context.py --root . query TerminalExecution Blocks
-```
-
-A stale/missing source or dangling graph relationship makes the derived index untrustworthy. Agents must fall back to the authoritative source and refresh the index rather than guessing from cached summaries.
+Use targeted repository searches and authoritative source files. A cached navigation summary never outranks source evidence.
 
 ## Screenshot-to-native work
 

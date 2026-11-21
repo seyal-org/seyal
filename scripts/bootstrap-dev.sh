@@ -4,21 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BIN_DIR="${HOME}/.local/bin"
 GITHUB_WRAPPER="${BIN_DIR}/seyal-github-mcp"
-AI_SDLC_DIR="${ROOT}/.sdlc/framework"
 
 # Reviewed/pinned developer-tool inputs. Update only through a normal Seyal PR.
 XCODEBUILD_MCP_VERSION="2.7.0"
-AI_SDLC_REPO="https://github.com/mahboobmonnamd/ai-sdlc.git"
-AI_SDLC_COMMIT="77158462473a4244d63329a55907d0c5ccc47757"
-AI_SDLC_SKILLS=(
-  project-context
-  create-issue
-  implement-issue
-  verification
-  pr-review
-  process-review
-  pr-merge
-)
 
 info() { printf '[seyal bootstrap] %s\n' "$*"; }
 warn() { printf '[seyal bootstrap] WARN: %s\n' "$*" >&2; }
@@ -29,67 +17,6 @@ ensure_submodules() {
     info "initializing pinned git submodules"
     git -C "${ROOT}" submodule update --init --recursive
   fi
-}
-
-framework_checkout() {
-  [[ -d "${AI_SDLC_DIR}/.git" && ! -L "${AI_SDLC_DIR}" ]] &&
-    [[ "$(git -C "${AI_SDLC_DIR}" rev-parse --show-toplevel)" == "${AI_SDLC_DIR}" ]] &&
-    [[ "$(git -C "${AI_SDLC_DIR}" remote get-url origin)" == "${AI_SDLC_REPO}" ]]
-}
-
-framework_clean() {
-  local changes
-  changes="$(git -C "${AI_SDLC_DIR}" status --porcelain)" || return 1
-  [[ -z "${changes}" ]]
-}
-
-check_framework() {
-  if ! framework_checkout || ! framework_clean ||
-     [[ "$(git -C "${AI_SDLC_DIR}" rev-parse HEAD)" != "${AI_SDLC_COMMIT}" ]]; then
-    warn "AI-SDLC missing, stale or not a clean expected checkout; run bash scripts/bootstrap-dev.sh --framework-only"
-    return 1
-  fi
-  local skill required_tool
-  for skill in "${AI_SDLC_SKILLS[@]}"; do
-    [[ -f "${AI_SDLC_DIR}/skills/${skill}/SKILL.md" ]] || {
-      warn "pinned AI-SDLC revision is missing skills/${skill}/SKILL.md"
-      return 1
-    }
-  done
-  for required_tool in project_context.py; do
-    [[ -f "${AI_SDLC_DIR}/tools/${required_tool}" ]] || {
-      warn "pinned AI-SDLC revision is missing tools/${required_tool}"
-      return 1
-    }
-  done
-}
-
-ensure_ai_sdlc() {
-  if ! check_framework; then
-    if [[ -e "${AI_SDLC_DIR}" || -L "${AI_SDLC_DIR}" ]]; then
-      if ! framework_checkout || ! framework_clean; then
-        warn "refusing to overwrite dirty or unexpected AI-SDLC checkout: ${AI_SDLC_DIR}"
-        return 1
-      fi
-    else
-      mkdir -p "${ROOT}/.sdlc"
-      info "cloning AI-SDLC developer framework"
-      git clone --filter=blob:none --no-checkout "${AI_SDLC_REPO}" "${AI_SDLC_DIR}"
-    fi
-
-    info "materializing pinned AI-SDLC ${AI_SDLC_COMMIT}"
-    git -C "${AI_SDLC_DIR}" fetch --depth 1 origin "${AI_SDLC_COMMIT}"
-    local fetched
-    fetched="$(git -C "${AI_SDLC_DIR}" rev-parse FETCH_HEAD)"
-    if [[ "${fetched}" != "${AI_SDLC_COMMIT}" ]]; then
-      warn "AI-SDLC pin mismatch: expected ${AI_SDLC_COMMIT}, fetched ${fetched}"
-      return 1
-    fi
-    git -C "${AI_SDLC_DIR}" checkout --detach "${AI_SDLC_COMMIT}"
-  fi
-  check_framework || return 1
-  info "validating Seyal derived project context"
-  python3 "${AI_SDLC_DIR}/tools/project_context.py" --root "${ROOT}" validate
 }
 
 ensure_github_mcp_binary() {
@@ -264,7 +191,6 @@ verify_repo_skills() {
 main() {
   verify_repo_skills
   ensure_submodules
-  ensure_ai_sdlc
 
   # Claude Code and Codex need Seyal's local GitHub MCP wrapper. Copilot CLI
   # already provides GitHub MCP, so do not install a duplicate solely for it.
@@ -280,24 +206,24 @@ main() {
   configure_cursor
 
   info "complete"
-  info "Seyal-specific skills stay in-repo; generic project-context and core development loop are pinned from AI-SDLC; no credentials were written"
+  info "Seyal skills and workflow stay in-repo; no credentials were written"
 }
 
 case "${1:-}" in
-  --check-framework)
+  --check-skills)
     [[ "$#" -eq 1 ]] || exit 2
-    check_framework
+    verify_repo_skills
+    info "Seyal native skills present"
     ;;
-  --framework-only)
-    [[ "$#" -eq 1 ]] || exit 2
-    ensure_ai_sdlc
+  --help)
+    echo "usage: $0 [--check-skills|--help]"
     ;;
   "")
     [[ "$#" -eq 0 ]] || exit 2
     main
     ;;
   *)
-    echo "usage: $0 [--check-framework|--framework-only]" >&2
+    echo "usage: $0 [--check-skills|--help]" >&2
     exit 2
     ;;
 esac
