@@ -275,7 +275,7 @@ Block reconciliation. In Flow mode also assert full-width, aligned Blocks and
 `flow-paint=ok`; the right-edge black strip is a separate Block/Metal clipping
 failure, not evidence that Return itself was dropped.
 
-There are no required private repositories, `seyal-commercial` dependencies, shell-profile assumptions, Homebrew assumptions or hidden environment variables for this canonical product flow. AI-SDLC is an optional public developer-framework dependency materialized by `make bootstrap-agents` or the framework-only refresh command.
+There are no required private repositories, `seyal-commercial` dependencies, shell-profile assumptions, Homebrew assumptions or hidden environment variables for this canonical product flow. Seyal's self-contained agent workflow and skills are tracked here; optional MCP provisioning does not clone an external framework or alter terminal/runtime behavior.
 
 ## Generated and fixture data
 
