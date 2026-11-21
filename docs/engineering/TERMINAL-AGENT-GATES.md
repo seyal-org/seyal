@@ -1,6 +1,6 @@
 # Seyal terminal and production invariants
 
-This file holds specialist rules moved out of always-loaded §AGENTS.md§. Read when changing terminal/runtime/renderer, native UI ownership, hot paths, concurrency or related production code; §implement-issue§ and §pr-review§ must load it for such changes. Accepted architecture and ADRs remain higher authority.
+This file holds specialist rules moved out of always-loaded `AGENTS.md`. Read when changing terminal/runtime/renderer, native UI ownership, hot paths, concurrency or related production code; `implement-issue` and `pr-review` must load it for such changes. Accepted architecture and ADRs remain higher authority.
 
 ## Non-negotiable architecture invariants
 
