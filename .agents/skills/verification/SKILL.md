@@ -1,9 +1,9 @@
 ---
 name: verification
-description: Seyal adapter for AI-SDLC outcome verification with repository, terminal, documentation, and specialist evidence gates.
+description: Criterion-level exact-head evidence for Seyal implementation and change acceptance.
 ---
 
-Follow the canonical generic procedure in `.sdlc/framework/skills/verification/SKILL.md`. Before reading or invoking the generic skill, run `bash scripts/bootstrap-dev.sh --check-framework` from the current Seyal worktree. If missing or stale, run `bash scripts/bootstrap-dev.sh --framework-only`, then recheck; if it fails, stop and report the reason. Reuse the successful check during the same task/worktree/revision; refresh after switching revisions.
+Read `docs/engineering/SEYAL-AGENT-WORKFLOW.md` for the complete self-contained plan → implement → verify → independent review → explicit merge-authorization lifecycle. `docs/engineering/ISSUE-PROTOCOL.md` remains the sole authority on GitHub owner records and candidates. No cloned framework is needed.
 
 For Seyal, map each Issue acceptance criterion to evidence required by `docs/engineering/ISSUE-PROTOCOL.md`. Include `make check`/CI and any applicable conformance, fuzz, PTY/integration, renderer, failure, benchmark, security, macOS UI/accessibility, documentation, or reproducible demo evidence required by the Issue and risk profile.
 
